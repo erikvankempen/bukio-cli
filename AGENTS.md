@@ -307,4 +307,4 @@ bukio audit --by agent:hermes --json
 
 Available: company init, journal entries (add/post/reverse/list/show), accounts (add/list/show/deactivate/reactivate/CSV import), reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation, ignore), optional VAT module (enable, `vat book` with `@CODE` expansion, OB readout 1a–5d + mark-filed), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 
-**Not yet available:** invoicing, jaarrekening, ICP readout, MCP server, NL query, AI categorization, Ponto live feeds, Peppol. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.
+**Not yet available:** invoicing, recurring entries (depreciation/accrual templates), jaarrekening, ICP readout, MCP server, NL query, AI categorization, Ponto live feeds, Peppol. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.
