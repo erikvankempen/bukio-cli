@@ -42,7 +42,10 @@ export function parsePostingSpecs(raw) {
 
 /**
  * Resolve posting specs against the DB: verifies accounts exist & are active,
- * amounts are non-zero integers, and returns [{ accountId, code, amountCents }].
+ * amounts are non-zero integers, and returns
+ * [{ accountId, code, amountCents, vatCodeId, vatAmountCents }].
+ * Optional VAT fields are persisted as-is (nullable, inert when the VAT
+ * module is off); if a vatCode is given it must exist in vat_codes.
  * Throws on any violation. Pure validation — no writes.
  */
 export function resolvePostings(db, postings) {
@@ -53,7 +56,28 @@ export function resolvePostings(db, postings) {
     const account = getAccountByCode(db, p.code);
     if (!account) throw entryError('ACCOUNT_NOT_FOUND', `account ${p.code} does not exist`);
     if (!account.active) throw entryError('ACCOUNT_INACTIVE', `account ${p.code} is inactive`);
-    return { accountId: account.id, code: account.code, amountCents: p.amountCents };
+
+    let vatCodeId = null;
+    let vatAmountCents = null;
+    if (p.vatCode != null) {
+      const vatRow = db.prepare('SELECT id FROM vat_codes WHERE code = ?').get(p.vatCode);
+      if (!vatRow) throw entryError('VAT_CODE_NOT_FOUND', `vat code '${p.vatCode}' does not exist`);
+      vatCodeId = vatRow.id;
+    }
+    if (p.vatAmountCents != null) {
+      if (!Number.isInteger(p.vatAmountCents)) {
+        throw entryError('INVALID_VAT_AMOUNT', 'vat amounts must be integers (cents)');
+      }
+      vatAmountCents = p.vatAmountCents;
+    }
+
+    return {
+      accountId: account.id,
+      code: account.code,
+      amountCents: p.amountCents,
+      vatCodeId,
+      vatAmountCents,
+    };
   });
 }
 
@@ -88,13 +112,13 @@ export function createEntry(db, {
     'INSERT INTO journal_entries (date, description, source, source_ref, state, created_by) VALUES (?, ?, ?, ?, ?, ?)',
   );
   const insertPosting = db.prepare(
-    'INSERT INTO postings (entry_id, account_id, amount_cents) VALUES (?, ?, ?)',
+    'INSERT INTO postings (entry_id, account_id, amount_cents, vat_code_id, vat_amount_cents) VALUES (?, ?, ?, ?, ?)',
   );
 
   const tx = db.transaction(() => {
     const info = insertEntry.run(date, String(description).trim(), source, sourceRef, 'draft', actor);
     const entryId = info.lastInsertRowid;
-    for (const p of resolved) insertPosting.run(entryId, p.accountId, p.amountCents);
+    for (const p of resolved) insertPosting.run(entryId, p.accountId, p.amountCents, p.vatCodeId, p.vatAmountCents);
     record(db, {
       actor, action: 'entry.create', command: 'entry add',
       args: { date, description, postings: resolved.map((p) => `${p.code}:${p.amountCents}`), source, sourceRef },
@@ -198,7 +222,8 @@ export function getEntry(db, id) {
   const entry = db.prepare('SELECT * FROM journal_entries WHERE id = ?').get(id);
   if (!entry) return null;
   entry.postings = db.prepare(
-    `SELECT p.id, p.account_id, p.amount_cents, p.document_id, a.code AS account_code, a.name AS account_name, a.type AS account_type
+    `SELECT p.id, p.account_id, p.amount_cents, p.document_id, p.vat_code_id, p.vat_amount_cents,
+            a.code AS account_code, a.name AS account_name, a.type AS account_type
      FROM postings p JOIN accounts a ON a.id = p.account_id
      WHERE p.entry_id = ? ORDER BY p.id`,
   ).all(id);

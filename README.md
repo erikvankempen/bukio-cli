@@ -32,7 +32,7 @@
 
 ## Status
 
-**Phase 1 — Chart & reports (current).** Phase 0 (ledger, posting engine, audit log, trial balance) and Phase 1 (accounts CRUD + CSV import, RGS-mapped chart, balans + W&V, CSV/XLSX export, backup/restore) are complete. See [Roadmap](#roadmap) for what comes next.
+**Phase 2 — Bank & VAT module (current).** Phases 0–1 (ledger, accounts, reports, backup) plus Phase 2 (bank import + matching, optional VAT module with OB readout) are complete. See [Roadmap](#roadmap) for what comes next.
 
 ---
 
@@ -299,6 +299,50 @@ bukio account import --file assets/chart-nl.csv --dry-run   # validate first
 bukio account import --file assets/chart-nl.csv
 ```
 
+### `bukio bank`
+
+Bank accounts, import and matching.
+
+| Command | Purpose |
+|---------|---------|
+| `bank add --iban <IBAN> [--name] [--account-code 1100]` | Register a bank account (links to a ledger account) |
+| `bank list` | Accounts with balance, transaction and unmatched counts |
+| `bank import --file <path> --iban <IBAN> [--format camt\|csv\|auto] [--dry-run]` | Import transactions — **CAMT.053 XML** or bank CSV (Rabo/ING/ABN column aliases, Dutch `1.234,56` amounts, Af/Bij sign). Idempotent via SHA-256 hash. |
+| `bank transactions [--iban] [--state unmatched\|matched\|ignored] [--limit]` | List transactions |
+| `bank match auto [--window-days 5] [--dry-run]` | Auto-match unmatched transactions to posted entries (exact ≤ 2 days, fuzzy ≤ window) |
+| `bank match suggest` | Unmatched transactions with a proposed posting (income → 8000, expense → 4300) |
+| `bank match link --tx <id> --entry <id> [--method]` | Link a transaction to an existing posted entry |
+| `bank match post --tx <id> --account <code> [--dry-run]` | Post a new entry from an unmatched transaction (bank leg + counter leg), reconciled automatically |
+| `bank ignore --tx <id>` / `bank unignore --tx <id>` | Ignore/re-open a transaction (e.g. transfers between own accounts) |
+
+The **bank balance vs ledger balance check** is the reconciliation test: after matching everything, `bank list` balance should equal the ledger account balance in the trial balance.
+
+### `bukio vat`
+
+Optional VAT module (per company; KOR companies cannot enable it).
+
+| Command | Purpose |
+|---------|---------|
+| `vat enable [--dry-run]` | Enable the module: accounts 1500 (te vorderen) + 2500 (te betalen), 8 VAT codes |
+| `vat codes` | List VAT codes (21, 9, 0, V vrijgesteld, R/RE verlegd, M marge, P privé) |
+| `vat book --date --desc --postings "1100:121.00,8000:-100.00@21" [--post] [--dry-run]` | Book a VAT-aware entry. `@CODE` tags a posting as net; the VAT amount and the VAT ledger leg (2500/1500) are computed automatically. |
+| `vat readout --period 2026-Q2 [--mark-filed]` | **OB-aangifte manual-filing readout** — fields 1a–5d for the period (quarter `YYYY-Qn` or month `YYYY-MM`). bukio never files; you enter these amounts in Mijn Belastingdienst Zakelijk. `--mark-filed` records the filing. |
+
+```bash
+# sale: 121.00 incl 21% -> omzet 100 + te betalen btw 21
+bukio vat book --date 2026-06-01 --desc "Factuur 2026-001" \
+  --postings "1100:121.00,8000:-100.00@21" --post
+
+# purchase: 60.50 incl 21% -> kosten 50 + te vorderen btw 10.50
+bukio vat book --date 2026-06-05 --desc "Kantoorartikelen" \
+  --postings "4300:50.00@21,1100:-60.50" --post
+
+# quarterly manual filing aid
+bukio vat readout --period 2026-Q2
+```
+
+**OB field mapping:** 1a/1b/1c omzet (21%/9%/0%/vrijgesteld), 1d privégebruik, 3a/3b/3c inkopen, 4a/4b verlegde btw (binnenland/EU, netted via 5b), 5a verschuldigde btw, 5b voorbelasting, 5d te betalen/te ontvangen. Fields 2a/2b (exports) and 5c are not tracked in Phase 2 (shown as 0).
+
 ### `bukio backup` / `bukio restore`
 
 | Command | Purpose |
@@ -482,6 +526,17 @@ The suite covers: money parsing, posting engine invariants, reversal semantics, 
 | `INVALID_BACKUP` | File is not a valid bukio database |
 | `RESTORE_EXISTS` | Target already has a company — pass `--force` |
 | `SAME_FILE` | Restore source and target are the same file |
+| `INVALID_IBAN` | IBAN is malformed |
+| `INVALID_CAMT` / `EMPTY_STATEMENT` | CAMT.053 XML invalid or empty |
+| `INVALID_CSV_HEADER` / `EMPTY_CSV` | Bank/chart CSV missing required columns or empty |
+| `INVALID_FORMAT` | Unknown `--format` for bank import |
+| `NOT_FOUND` (bank) | Bank transaction does not exist |
+| `ALREADY_MATCHED` | Bank transaction already matched/ignored |
+| `VAT_MODULE_OFF` | VAT module not enabled for this company (`vat enable` first) |
+| `KOR_ACTIVE` | KOR company cannot enable the VAT module |
+| `VAT_CODE_NOT_FOUND` | `@CODE` references an unknown VAT code |
+| `VAT_MARGIN_NOT_SUPPORTED` | Margeregeling cannot be split automatically |
+| `INVALID_PERIOD` | Period must be `YYYY-Qn` or `YYYY-MM` |
 | `SQLITE_CONSTRAINT_TRIGGER` | A database trigger aborted the operation (e.g. editing a posted entry, rewriting the audit log) |
 
 ---
@@ -525,6 +580,24 @@ bukio report balans --as-of 2026-12-31 --format csv --out ~/exports/balans-2026.
 bukio report pnl --year 2026 --format xlsx --out ~/exports/pnl-2026.xlsx
 ```
 
+**Month-end close with bank + VAT (the real workflow)**
+```bash
+# 1. import the bank statement (idempotent — safe to re-run)
+bukio bank import --file ~/exports/rabo-2026-06.camt.xml --iban NL91ABNA0417164300
+# 2. dry-run the auto-match, then apply
+bukio bank match auto --dry-run
+bukio bank match auto
+# 3. handle the leftovers: suggest -> post or link
+bukio bank match suggest
+bukio bank match post --tx 17 --account 4300
+# 4. the balance check: bank balance must equal the ledger balance
+bukio bank list
+bukio report trial-balance --json          # must be balanced: true
+# 5. VAT quarter: read the OB fields, file manually in Mijn Belastingdienst
+bukio vat readout --period 2026-Q2
+bukio vat readout --period 2026-Q2 --mark-filed
+```
+
 **Protect the books**
 ```bash
 bukio backup                              # ~/.bukio/backups/bukio-<ts>.db
@@ -556,8 +629,8 @@ bukio init --name "Mijn ZZP" --kor
 |-------|-------|--------|
 | 0 | Foundation: ledger, posting engine, audit, trial balance, `--json`/`--dry-run` | ✅ done |
 | 1 | Accounts CRUD + CSV import, RGS-mapped chart, balans + W&V, CSV/XLSX export, backup/restore | ✅ done |
-| 2 | Bank import (CAMT.053/CSV), matching; optional VAT module (codes, OB readout, KOR) | next |
-| 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes | planned |
+| 2 | Bank import (CAMT.053/CSV), matching; optional VAT module (codes, OB readout, KOR) | ✅ done |
+| 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes | next |
 | 4 | Jaarrekening micro/klein models, closing entries, KVK package, ICP readout | planned |
 | 5 | Agent layer: MCP server, permissions, NL query, AI categorization suggestions, compliance calendar | planned |
 | 6 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |

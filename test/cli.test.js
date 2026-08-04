@@ -44,12 +44,12 @@ test('init --dry-run: shows plan, creates nothing', () => {
   assert.equal(existsSync(dbPath), false);
 });
 
-test('init: creates company + 28-account chart', () => {
+test('init: creates company + 30-account chart with VAT on', () => {
   const dbPath = tmpDb();
   const { out } = run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
   assert.equal(out.ok, true);
-  assert.equal(out.data.chart.accounts, 28);
-  assert.equal(out.data.chart.created, 28);
+  assert.equal(out.data.chart.accounts, 30); // 28 default + 2 VAT accounts
+  assert.equal(out.data.chart.created, 30);
 
   const db = openDb(dbPath);
   const company = db.prepare('SELECT * FROM company').get();
@@ -287,4 +287,127 @@ test('backup + restore roundtrip', () => {
   assert.equal(bad2.out.error.code, 'INVALID_BACKUP');
   const same = run(dbPath, ['restore', '--from', backupPath, '--to', backupPath, '--json'], { expectFail: true });
   assert.equal(same.out.error.code, 'SAME_FILE');
+});
+
+const CAMT_FIXTURE = (iban) => `<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt><Stmt>
+    <Acct><Id><IBAN>${iban}</IBAN></Id></Acct>
+    <Ntry>
+      <Amt>100.00</Amt><CdtDbtInd>CRDT</CdtDbtInd><BookgDt><Dt>2026-06-01</Dt></BookgDt>
+      <NtryDtls><TxDtls><RltdPties><Dbtr><Nm>ACME B.V.</Nm></Dbtr></RltdPties>
+      <RmtInf><Ustrd>Factuur 2026-001</Ustrd></RmtInf></TxDtls></NtryDtls>
+    </Ntry>
+    <Ntry>
+      <Amt>25.50</Amt><CdtDbtInd>DBIT</CdtDbtInd><BookgDt><Dt>2026-06-02</Dt></BookgDt>
+      <NtryDtls><TxDtls><RltdPties><Cdtr><Nm>Kantoorwinkel BV</Nm></Cdtr></RltdPties>
+      <RmtInf><Ustrd>Kantoorartikelen</Ustrd></RmtInf></TxDtls></NtryDtls>
+    </Ntry>
+  </Stmt></BkToCstmrStmt>
+</Document>`;
+
+const RABO_CSV_FIXTURE = (iban) => [
+  'Datum;Naam / Omschrijving;Rekening;Tegenrekening;Code;Af Bij;Bedrag (EUR);MutatieSoort;Mededelingen',
+  `2026-06-01;ACME B.V.;${iban};NL00RABO0123456789;GT;Bij;100,00;Overschrijving;Factuur 2026-001`,
+  `2026-06-02;Kantoorwinkel BV;${iban};NL00RABO9876543210;GT;Af;25,50;Overschrijving;Kantoorartikelen`,
+].join('\n');
+
+const IBAN = 'NL91ABNA0417164300';
+
+test('bank import (CAMT + CSV), idempotency, match --post, ignore', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'A', '--json']);
+  const dir = path.dirname(dbPath);
+
+  const camtPath = path.join(dir, 'stmt.xml');
+  writeFileSync(camtPath, CAMT_FIXTURE(IBAN));
+  const imp = run(dbPath, ['bank', 'import', '--file', camtPath, '--iban', IBAN, '--json']).out.data;
+  assert.equal(imp.imported, 2);
+
+  // idempotent re-import
+  const again = run(dbPath, ['bank', 'import', '--file', camtPath, '--iban', IBAN, '--json']).out.data;
+  assert.equal(again.imported, 0);
+  assert.equal(again.duplicates, 2);
+
+  // dry-run preview
+  const dry = run(dbPath, ['bank', 'import', '--file', camtPath, '--iban', IBAN, '--dry-run', '--json']).out.data;
+  assert.equal(dry.imported, 0);
+  assert.equal(dry.duplicates, 2);
+
+  // CSV import with Dutch amounts
+  const csvPath = path.join(dir, 'rabo.csv');
+  writeFileSync(csvPath, RABO_CSV_FIXTURE(IBAN));
+  const csvImp = run(dbPath, ['bank', 'import', '--file', csvPath, '--iban', IBAN, '--json']).out.data;
+  assert.equal(csvImp.imported, 0); // same transactions, hashes match
+
+  const txs = run(dbPath, ['bank', 'transactions', '--state', 'unmatched', '--json']).out.data.transactions;
+  assert.equal(txs.length, 2);
+  const income = txs.find((t) => t.amount_cents > 0);
+
+  const posted = run(dbPath, ['bank', 'match', 'post', '--tx', String(income.id), '--account', '8000', '--json']).out.data;
+  assert.equal(posted.entry_id, 1);
+  assert.equal(posted.state, 'posted');
+
+  const accounts = run(dbPath, ['bank', 'list', '--json']).out.data.accounts;
+  assert.equal(accounts[0].balance, '74.50');
+  assert.equal(accounts[0].unmatched_count, 1);
+
+  const remaining = run(dbPath, ['bank', 'transactions', '--state', 'unmatched', '--json']).out.data.transactions[0];
+  run(dbPath, ['bank', 'ignore', '--tx', String(remaining.id), '--json']);
+  assert.equal(run(dbPath, ['bank', 'transactions', '--state', 'unmatched', '--json']).out.data.transactions.length, 0);
+
+  const tb = run(dbPath, ['report', 'trial-balance', '--json']).out.data;
+  assert.equal(tb.balanced, true);
+});
+
+test('bank match --auto links posted entries (exact)', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'A', '--json']);
+  run(dbPath, ['entry', 'add', '--date', '2026-06-01', '--desc', 'Factuur 2026-001', '--postings', '1100:100.00,8000:-100.00', '--post', '--json']);
+  const camtPath = path.join(path.dirname(dbPath), 'stmt.xml');
+  writeFileSync(camtPath, CAMT_FIXTURE(IBAN));
+  run(dbPath, ['bank', 'import', '--file', camtPath, '--iban', IBAN, '--json']);
+
+  const dry = run(dbPath, ['bank', 'match', 'auto', '--dry-run', '--json']).out.data;
+  assert.equal(dry.matched.length, 1);
+  assert.equal(dry.matched[0].method, 'exact');
+  assert.equal(dry.matched[0].entry_id, 1);
+
+  const real = run(dbPath, ['bank', 'match', 'auto', '--json']).out.data;
+  assert.equal(real.matched.length, 1);
+  assert.equal(run(dbPath, ['bank', 'transactions', '--state', 'matched', '--json']).out.data.transactions.length, 1);
+});
+
+test('vat enable/book/readout/mark-filed end-to-end', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'A', '--vat', 'on', '--json']);
+
+  const codes = run(dbPath, ['vat', 'codes', '--json']).out.data.codes;
+  assert.equal(codes.length, 8);
+
+  run(dbPath, ['vat', 'book', '--date', '2026-04-10', '--desc', 'Factuur 2026-001', '--postings', '1100:121.00,8000:-100.00@21', '--post', '--json']);
+  run(dbPath, ['vat', 'book', '--date', '2026-05-15', '--desc', 'Kantoorartikelen', '--postings', '4300:50.00@21,1100:-60.50', '--post', '--json']);
+
+  const r = run(dbPath, ['vat', 'readout', '--period', '2026-Q2', '--json']).out.data;
+  assert.equal(r.fields['1a'].amount, '100.00');
+  assert.equal(r.fields['5a'].amount, '21.00');
+  assert.equal(r.fields['5b'].amount, '10.50');
+  assert.equal(r.to_pay, '10.50');
+
+  run(dbPath, ['vat', 'readout', '--period', '2026-Q2', '--mark-filed', '--json']);
+
+  const tb = run(dbPath, ['report', 'trial-balance', '--json']).out.data;
+  assert.equal(tb.balanced, true);
+});
+
+test('vat: module off blocks book, enable works on existing company', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'B', '--json']); // vat off
+
+  const err = run(dbPath, ['vat', 'book', '--date', '2026-04-10', '--desc', 'x', '--postings', '1100:121.00,8000:-100.00@21', '--json'], { expectFail: true });
+  assert.equal(err.out.error.code, 'VAT_MODULE_OFF');
+
+  run(dbPath, ['vat', 'enable', '--json']);
+  assert.equal(run(dbPath, ['vat', 'codes', '--json']).out.data.codes.length, 8);
+  run(dbPath, ['vat', 'book', '--date', '2026-04-10', '--desc', 'x', '--postings', '1100:121.00,8000:-100.00@21', '--post', '--json']);
 });

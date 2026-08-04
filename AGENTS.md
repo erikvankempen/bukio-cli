@@ -45,6 +45,12 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio report pnl [--year YYYY]` | P&L: revenue, costs, result. |
 | `bukio report journal [--year YYYY]` | Journal export (one row per posting). |
 | `bukio report <cmd> --format csv\|xlsx [--out PATH]` | Export any report; xlsx requires `--out`. |
+| `bukio bank import --file F --iban IBAN [--dry-run]` | Import CAMT.053 XML or bank CSV (idempotent by hash). |
+| `bukio bank match auto [--dry-run]` / `suggest` / `link --tx --entry` / `post --tx --account` | Reconcile: auto-match to entries, or post new entries from unmatched transactions. |
+| `bukio bank list` / `transactions [--state]` / `ignore --tx` | Account balances, transaction states, ignore (own transfers). |
+| `bukio vat enable` | Enable the VAT module (accounts 1500/2500 + codes). |
+| `bukio vat book --postings "1100:121.00,8000:-100.00@21" [--post]` | Book VAT-aware entries — `@CODE` computes the VAT leg automatically. |
+| `bukio vat readout --period 2026-Q2 [--mark-filed]` | OB-aangifte fields 1a–5d for manual filing. Never auto-files. |
 | `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. |
 | `bukio audit [--by agent:hermes] [--since ISO] [--limit N]` | Read the append-only audit log (newest first). |
 
@@ -161,7 +167,9 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 
 `rgs_code` is the RGS hoofdgroep (niveau 2) reference — balans and P&L group by it. Accounts you add with an unknown/empty `rgs_code` land in an "Overig" section (still counted — never silently dropped).
 
-There are **no VAT accounts** in the core chart — VAT is an optional module (Phase 2). When the module is on, VAT accounts and codes are added; until then, book amounts exclusive of VAT or use `2100` for balances payable (see worked example 6.6 for the shape of a VAT-style 3-leg entry, which works today).
+When the **VAT module is enabled**, two accounts are added: **1500 Te vorderen omzetbelasting** (asset, BVOR.11) and **2500 Te betalen omzetbelasting** (liability, BSCH.12), plus 8 VAT codes (21, 9, 0, V vrijgesteld, R/RE verlegd, M marge, P privé). Use `vat book` with `@CODE` tags — never construct VAT entries by hand; the module computes the VAT leg and validates it.
+
+There are **no VAT accounts** in the core chart — VAT is an optional module. When the module is on, VAT accounts and codes are added; until then, book amounts exclusive of VAT or use `2100` for balances payable (see worked example 6.5 for the shape of a VAT-style 3-leg entry, which works today).
 
 ---
 
@@ -208,28 +216,54 @@ bukio entry add --desc "Factuur met btw 21%" \
   --postings "1100:121.00,8000:-100.00,2100:-21.00" --post --dry-run
 ```
 
-### 6.6 Month-end verification + export (the standard closing loop)
+### 6.6 Month-end close: bank import -> match -> VAT readout (the standard loop)
 
 ```bash
-# 1. books must reconcile
+# 1. books must reconcile (before touching the bank)
 bukio report trial-balance --json          # data.balanced === true
-bukio report balans --as-of 2026-06-30 --json   # data.balanced === true
-# 2. P&L for the period
-bukio report pnl --from 2026-06-01 --to 2026-06-30 --json
-# 3. export for the boekhouder
+# 2. import the bank statement — CAMT.053 from your bank, or the bank CSV export
+bukio bank import --file ~/exports/rabo-2026-06.xml --iban NL91ABNA0417164300 --dry-run
+bukio bank import --file ~/exports/rabo-2026-06.xml --iban NL91ABNA0417164300
+# 3. auto-match against already-booked entries (dry-run first!)
+bukio bank match auto --dry-run --json
+bukio bank match auto --json
+# 4. handle leftovers: suggestions -> post (creates + reconciles the entry) or link
+bukio bank match suggest --json
+bukio bank match post --tx 17 --account 4300 --dry-run
+bukio bank match post --tx 17 --account 4300
+# 5. verification: bank balance == ledger bank balance, books balanced
+bukio bank list --json
+bukio report trial-balance --json          # data.balanced === true
+# 6. VAT quarter (module on): read the OB fields, human files manually
+bukio vat readout --period 2026-Q2 --json
+bukio vat readout --period 2026-Q2 --mark-filed
+# 7. export for the boekhouder + backup
 bukio report journal --year 2026 --format xlsx --out ~/exports/journal-2026.xlsx
-# 4. protect the data
 bukio backup --json
 ```
 
-### 6.7 Extend the chart
+### 6.7 Book a VAT-aware sale and purchase
+
+```bash
+# sale 121.00 incl 21%: omzet 100 + te betalen btw 21 (auto-computed)
+bukio vat book --date 2026-06-01 --desc "Factuur 2026-001" \
+  --postings "1100:121.00,8000:-100.00@21" --post --dry-run
+# purchase 60.50 incl 21%: kosten 50 + te vorderen btw 10.50
+bukio vat book --date 2026-06-05 --desc "Kantoorartikelen" \
+  --postings "4300:50.00@21,1100:-60.50" --post
+# reverse charge: net 100, VAT due 21 (auto), claim 21 back on 1500
+bukio vat book --date 2026-06-06 --desc "Inkoop verlegd" \
+  --postings "4300:100.00@R,1100:-100.00,1500:-21.00" --post
+```
+
+### 6.8 Extend the chart
 
 ```bash
 bukio account add --code 4350 --name "Reiskosten" --type expense --normal-balance debit --rgs-code WBED.42 --dry-run
 bukio account import --file assets/chart-nl.csv --dry-run   # validate; then import without --dry-run
 ```
 
-### 6.8 Report on what an agent did
+### 6.9 Report on what an agent did
 
 ```bash
 bukio audit --by agent:hermes --json
@@ -269,8 +303,8 @@ bukio audit --by agent:hermes --json
 
 ---
 
-## 9. Capability boundaries (Phase 1)
+## 9. Capability boundaries (Phase 2)
 
-Available: company init, journal entries (add/post/reverse/list/show), accounts (add/list/show/deactivate/reactivate/CSV import), reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
+Available: company init, journal entries (add/post/reverse/list/show), accounts (add/list/show/deactivate/reactivate/CSV import), reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation, ignore), optional VAT module (enable, `vat book` with `@CODE` expansion, OB readout 1a–5d + mark-filed), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 
-**Not yet available:** bank import, VAT module, invoicing, jaarrekening, MCP server, NL query, AI categorization. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.
+**Not yet available:** invoicing, jaarrekening, ICP readout, MCP server, NL query, AI categorization, Ponto live feeds, Peppol. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.

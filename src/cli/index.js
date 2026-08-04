@@ -8,13 +8,15 @@ import { make as accountCmd } from './account.js';
 import { make as reportCmd } from './report.js';
 import { make as auditCmd } from './audit.js';
 import { make as backupCmd } from './backup.js';
+import { make as bankCmd } from './bank.js';
+import { make as vatCmd } from './vat.js';
 
 export async function runCli(argv) {
   const program = new Command();
   program
     .name('bukio')
     .description('Agent-first bookkeeping for Dutch SMEs — SQLite, VAT-optional')
-    .version('0.2.0')
+    .version('0.3.0')
     .option('--json', 'machine-readable JSON output')
     .option('--db <path>', 'database file', process.env.BUKIO_DB || path.join(os.homedir(), '.bukio', 'bukio.db'))
     .option('--actor <who>', 'acting entity (human or agent:<name>)', process.env.BUKIO_ACTOR || 'human')
@@ -26,6 +28,8 @@ export async function runCli(argv) {
   reportCmd(program);
   auditCmd(program);
   backupCmd(program);
+  bankCmd(program);
+  vatCmd(program);
 
   await program.parseAsync(argv);
 }

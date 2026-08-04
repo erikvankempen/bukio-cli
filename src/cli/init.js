@@ -4,6 +4,7 @@ import { openDb } from '../core/db.js';
 import { DEFAULT_CHART } from '../core/chart.js';
 import { listAccounts, seedDefaultChart } from '../core/accounts.js';
 import { record } from '../audit/index.js';
+import { enableVatModule } from '../vat/index.js';
 import { dbError, ensureDb, makeCtx, output, fail } from './util.js';
 
 const LEGAL_FORMS = ['eenmanszaak', 'vof', 'bv', 'nv', 'stichting', 'vereniging'];
@@ -59,6 +60,7 @@ function renderInit(data) {
   console.log(`db:       ${data.db}`);
   console.log(`chart:    ${data.chart.accounts} accounts (default chart)`);
   if (data.chart.created != null) console.log(`seeded:   ${data.chart.created} new`);
+  if (data.company.vat_module) console.log('vat:      module enabled (incl. 1500/2500)');
   console.log(data.dryRun ? '(dry run — nothing written)' : 'initialised.');
 }
 
@@ -71,7 +73,7 @@ function initAction(ctx, opts) {
       company,
       db: ctx.dbPath,
       db_exists: existsSync(ctx.dbPath),
-      chart: { accounts: DEFAULT_CHART.length },
+      chart: { accounts: DEFAULT_CHART.length + (company.vat_module ? 2 : 0) },
       dryRun: true,
     }, renderInit);
     return;
@@ -92,6 +94,11 @@ function initAction(ctx, opts) {
     ).run(company.name, company.kvk, company.legal_form, company.btw_id, company.iban,
       company.vat_module, company.kor_flag, company.fiscal_year_end);
     const created = seedDefaultChart(db);
+    let vatCreated = 0;
+    if (company.vat_module) {
+      const vatResult = enableVatModule(db, { actor: ctx.actor });
+      vatCreated = vatResult.accounts.length;
+    }
     record(db, {
       actor: ctx.actor, action: 'company.init', command: 'init',
       args: company, outcome: 'ok',
@@ -99,7 +106,7 @@ function initAction(ctx, opts) {
     output(ctx, {
       company,
       db: ctx.dbPath,
-      chart: { accounts: listAccounts(db).length, created },
+      chart: { accounts: listAccounts(db).length, created: created + vatCreated },
       dryRun: false,
     }, renderInit);
   } finally {

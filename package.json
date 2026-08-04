@@ -1,6 +1,6 @@
 {
   "name": "bukio-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Agent-first double-entry bookkeeping CLI for Dutch SMEs. SQLite backend, VAT-optional, --json/--dry-run native.",
   "type": "module",
   "bin": {
@@ -27,6 +27,7 @@
   "dependencies": {
     "better-sqlite3": "^11.10.0",
     "commander": "^13.1.0",
-    "exceljs": "^4.4.0"
+    "exceljs": "^4.4.0",
+    "fast-xml-parser": "^5.10.1"
   }
 }
