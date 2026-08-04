@@ -32,13 +32,20 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 
 | Command | Purpose |
 |---------|---------|
-| `bukio init --name X [--kvk ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + 14-account chart. Fails `ALREADY_INITIALISED` if done. |
+| `bukio init --name X [--kvk ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + 28-account RGS-mapped chart. Fails `ALREADY_INITIALISED` if done. |
 | `bukio entry add --date YYYY-MM-DD --desc ".." --postings "CODE:AMT,CODE:AMT" [--post] [--dry-run]` | Create (and optionally post) a balanced journal entry. |
 | `bukio entry post --id N [--dry-run]` | Post a draft entry. |
 | `bukio entry reverse --id N [--reason ".."] [--dry-run]` | Post a contra-entry that cancels entry N. |
 | `bukio entry list [--state draft\|posted] [--limit N]` | List entries (newest first). |
 | `bukio entry show --id N` | One entry + postings. |
+| `bukio account add/list/show/deactivate/reactivate` | Chart of accounts management. |
+| `bukio account import --file chart.csv [--dry-run]` | Import a chart: `code,name,type,normal_balance[,rgs_code]`. |
 | `bukio report trial-balance [--year YYYY]` | Per-account totals; `data.balanced` tells you the books reconcile. |
+| `bukio report balans [--as-of YYYY-MM-DD]` | Balance sheet; `data.balanced` must be true. |
+| `bukio report pnl [--year YYYY]` | P&L: revenue, costs, result. |
+| `bukio report journal [--year YYYY]` | Journal export (one row per posting). |
+| `bukio report <cmd> --format csv\|xlsx [--out PATH]` | Export any report; xlsx requires `--out`. |
+| `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. |
 | `bukio audit [--by agent:hermes] [--since ISO] [--limit N]` | Read the append-only audit log (newest first). |
 
 **Posting syntax:** `--postings "1100:10000.00,3000:-10000.00"` — comma-separate or repeat the flag. `CODE` is the 4-digit account code. **Positive = debit, negative = credit. Sum must be zero.** Amount format: `1234.56`, max 2 decimals, no thousands separators, no Dutch comma decimals.
@@ -119,26 +126,42 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 
 ---
 
-## 5. Account codes (default chart)
+## 5. Account codes (default chart — 28 accounts, RGS-mapped)
 
-| Code | Name | Type | Normal balance |
-|------|------|------|----------------|
-| 1000 | Kas | asset | debit |
-| 1100 | Bank | asset | debit |
-| 1200 | Debiteuren | asset | debit |
-| 2000 | Crediteuren | liability | credit |
-| 2100 | Overige schulden | liability | credit |
-| 3000 | Eigen vermogen | equity | credit |
-| 4000 | Inkoopwaarde | expense | debit |
-| 4100 | Huisvestingskosten | expense | debit |
-| 4200 | Autokosten | expense | debit |
-| 4300 | Kantoor- en algemene kosten | expense | debit |
-| 4400 | Personeelskosten | expense | debit |
-| 4500 | Financiële baten en lasten | expense | debit |
-| 8000 | Omzet | income | credit |
-| 8100 | Overige opbrengsten | income | credit |
+| Code | Name | Type | RGS |
+|------|------|------|-----|
+| 1000 | Kas | asset | BLIM.10 |
+| 1100 | Bank | asset | BLIM.10 |
+| 1200 | Debiteuren | asset | BVOR.11 |
+| 1400 | Voorraad | asset | BVRD.30 |
+| 1600 | Overige vorderingen | asset | BVOR.11 |
+| 1700 | Vooruitbetaalde kosten | asset | BVOR.11 |
+| 1800 | Materiële vaste activa | asset | BMVA.02 |
+| 1850 | Vervoermiddelen | asset | BMVA.02 |
+| 2000 | Crediteuren | liability | BSCH.12 |
+| 2100 | Overige schulden | liability | BSCH.12 |
+| 2300 | Vooruitontvangen bedragen | liability | BSCH.12 |
+| 2400 | Nog te betalen kosten | liability | BSCH.12 |
+| 2900 | Rekening-courant | liability | BSCH.12 |
+| 3000 | Eigen vermogen | equity | BEIV.05 |
+| 4000 | Inkoopwaarde | expense | WKPR.70 |
+| 4100 | Huisvestingskosten | expense | WBED.42 |
+| 4200 | Autokosten | expense | WBED.42 |
+| 4300 | Kantoor- en algemene kosten | expense | WBED.42 |
+| 4310 | Accountants- en administratiekosten | expense | WBED.42 |
+| 4320 | Verzekeringen | expense | WBED.42 |
+| 4330 | Telecommunicatie | expense | WBED.42 |
+| 4340 | Software en internetdiensten | expense | WBED.42 |
+| 4400 | Personeelskosten | expense | WPER.40 |
+| 4500 | Financiële baten en lasten | expense | WFBE.84 |
+| 4600 | Afschrijvingen | expense | WAFS.41 |
+| 4700 | Overige bedrijfskosten | expense | WBED.42 |
+| 8000 | Omzet | income | WOMZ.80 |
+| 8100 | Overige opbrengsten | income | WOVB.82 |
 
-There are **no VAT accounts** in the core chart — VAT is an optional module (Phase 2). When the module is on, VAT accounts and codes are added; until then, book amounts exclusive of VAT or use `2100` for balances payable (see worked example 6.5 for the shape of a VAT-style 3-leg entry, which works today).
+`rgs_code` is the RGS hoofdgroep (niveau 2) reference — balans and P&L group by it. Accounts you add with an unknown/empty `rgs_code` land in an "Overig" section (still counted — never silently dropped).
+
+There are **no VAT accounts** in the core chart — VAT is an optional module (Phase 2). When the module is on, VAT accounts and codes are added; until then, book amounts exclusive of VAT or use `2100` for balances payable (see worked example 6.6 for the shape of a VAT-style 3-leg entry, which works today).
 
 ---
 
@@ -185,7 +208,28 @@ bukio entry add --desc "Factuur met btw 21%" \
   --postings "1100:121.00,8000:-100.00,2100:-21.00" --post --dry-run
 ```
 
-### 6.6 Report on what an agent did
+### 6.6 Month-end verification + export (the standard closing loop)
+
+```bash
+# 1. books must reconcile
+bukio report trial-balance --json          # data.balanced === true
+bukio report balans --as-of 2026-06-30 --json   # data.balanced === true
+# 2. P&L for the period
+bukio report pnl --from 2026-06-01 --to 2026-06-30 --json
+# 3. export for the boekhouder
+bukio report journal --year 2026 --format xlsx --out ~/exports/journal-2026.xlsx
+# 4. protect the data
+bukio backup --json
+```
+
+### 6.7 Extend the chart
+
+```bash
+bukio account add --code 4350 --name "Reiskosten" --type expense --normal-balance debit --rgs-code WBED.42 --dry-run
+bukio account import --file assets/chart-nl.csv --dry-run   # validate; then import without --dry-run
+```
+
+### 6.8 Report on what an agent did
 
 ```bash
 bukio audit --by agent:hermes --json
@@ -225,8 +269,8 @@ bukio audit --by agent:hermes --json
 
 ---
 
-## 9. Capability boundaries (Phase 0)
+## 9. Capability boundaries (Phase 1)
 
-Available: company init, journal entries (add/post/reverse/list/show), trial balance, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
+Available: company init, journal entries (add/post/reverse/list/show), accounts (add/list/show/deactivate/reactivate/CSV import), reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 
-**Not yet available:** accounts CRUD (chart is fixed at 14 accounts for now), bank import, VAT, invoicing, jaarrekening, MCP server, NL query, AI categorization. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.
+**Not yet available:** bank import, VAT module, invoicing, jaarrekening, MCP server, NL query, AI categorization. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.

@@ -14,11 +14,12 @@ beforeEach(() => {
   seedDefaultChart(db);
 });
 
-test('default chart is seeded with 14 VAT-free accounts', () => {
+test('default chart is seeded with 28 VAT-free accounts', () => {
   const accounts = listAccounts(db);
-  assert.equal(accounts.length, 14);
+  assert.equal(accounts.length, 28);
   assert.equal(accounts.some((a) => a.code === '1100' && a.type === 'asset'), true);
   assert.equal(accounts.some((a) => a.code === '8000' && a.type === 'income'), true);
+  assert.equal(accounts.every((a) => a.rgs_code), true); // all RGS-mapped
   // VAT-agnostic: no btw accounts in the core chart
   assert.equal(accounts.some((a) => /btw|omzetbelasting/i.test(a.name)), false);
 });

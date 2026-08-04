@@ -32,7 +32,7 @@
 
 ## Status
 
-**Phase 0 — Foundation (current).** Core ledger, posting engine, audit log, trial balance. See [Roadmap](#roadmap) for what comes next.
+**Phase 1 — Chart & reports (current).** Phase 0 (ledger, posting engine, audit log, trial balance) and Phase 1 (accounts CRUD + CSV import, RGS-mapped chart, balans + W&V, CSV/XLSX export, backup/restore) are complete. See [Roadmap](#roadmap) for what comes next.
 
 ---
 
@@ -236,6 +236,82 @@ Per-account debit/credit/net totals from **posted** entries, with a final BALANC
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--year <yyyy>` | all years | Filter by year |
+| `--format <format>` | human (json with `--json`) | `json` \| `csv` \| `xlsx` \| `human` |
+| `--out <path>` | stdout | Output file (required for xlsx) |
+
+### `bukio report balans`
+
+Balance sheet as of a date, grouped by RGS hoofdgroep (Materiële vaste activa, Voorraden, Vorderingen, Liquide middelen / Eigen vermogen, Kortlopende schulden, …). Includes the computed **Nog te verdelen resultaat** (net result of income/expense accounts). Invariant: **total assets = total liabilities + equity + result** — the report says `BALANCED` or `UNBALANCED!`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--as-of <yyyy-mm-dd>` | today | Balance date (inclusive) |
+| `--format <format>` | human (json with `--json`) | `json` \| `csv` \| `xlsx` \| `human` |
+| `--out <path>` | stdout | Output file (required for xlsx) |
+
+### `bukio report pnl`
+
+Winst-en-verliesrekening for a period, grouped by RGS hoofdgroep (Omzet, Inkoopwaarde van de omzet, Personeelskosten, Afschrijvingen, Overige bedrijfskosten, Financiële baten en lasten, …). Reports revenue, costs and **Netto resultaat**.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--year <yyyy>` | current year | Fiscal year (sets from/to) |
+| `--from <yyyy-mm-dd>` | year start | Period start (inclusive) |
+| `--to <yyyy-mm-dd>` | year end | Period end (inclusive) |
+| `--format <format>` | human (json with `--json`) | `json` \| `csv` \| `xlsx` \| `human` |
+| `--out <path>` | stdout | Output file (required for xlsx) |
+
+### `bukio report journal`
+
+Journal export — one row per posting with account info, for a period. Ideal for handing to your boekhouder.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--year <yyyy>` | current year | Fiscal year (sets from/to) |
+| `--from <yyyy-mm-dd>` | year start | Period start (inclusive) |
+| `--to <yyyy-mm-dd>` | year end | Period end (inclusive) |
+| `--format <format>` | human (json with `--json`) | `json` \| `csv` \| `xlsx` \| `human` |
+| `--out <path>` | stdout | Output file (required for xlsx) |
+
+```bash
+bukio report balans --as-of 2026-12-31
+bukio report pnl --year 2026 --format xlsx --out ~/exports/pnl-2026.xlsx
+bukio report journal --year 2026 --format csv --out ~/exports/journal-2026.csv
+```
+
+### `bukio account`
+
+Chart of accounts management.
+
+| Command | Purpose |
+|---------|---------|
+| `account add --code <c> --name <n> --type <t> --normal-balance <d\|c> [--rgs-code <r>] [--dry-run]` | Add an account |
+| `account list [--type <t>] [--include-inactive]` | List accounts |
+| `account show --code <c>` | Show one account |
+| `account deactivate --code <c>` | Deactivate (blocks new postings; history stays) |
+| `account reactivate --code <c>` | Reactivate |
+| `account import --file <chart.csv> [--dry-run]` | Import a chart from CSV: `code,name,type,normal_balance[,rgs_code]` |
+
+The bundled default chart lives at `assets/chart-nl.csv` — you can import it (or your own) into any database:
+
+```bash
+bukio account import --file assets/chart-nl.csv --dry-run   # validate first
+bukio account import --file assets/chart-nl.csv
+```
+
+### `bukio backup` / `bukio restore`
+
+| Command | Purpose |
+|---------|---------|
+| `backup [--out <path>]` | Consistent SQLite backup (default `~/.bukio/backups/bukio-<ts>.db`) |
+| `restore --from <file> [--to <path>] [--force]` | Restore from a backup file (validated first) |
+
+`restore` refuses to overwrite an existing initialised database unless `--force` is given, and refuses `--from`/`--to` pointing at the same file.
+
+```bash
+bukio backup
+bukio restore --from ~/.bukio/backups/bukio-2026-08-04T12-00-00.db --to ~/.bukio/restored.db
+```
 
 ### `bukio audit`
 
@@ -381,6 +457,9 @@ The suite covers: money parsing, posting engine invariants, reversal semantics, 
 | `ALREADY_INITIALISED` | The database already has a company |
 | `INVALID_LEGAL_FORM` | Unknown legal form for `init` |
 | `INVALID_FISCAL_YEAR_END` | Fiscal year end must be `mm-dd` |
+| `INVALID_RGS_CODE` | RGS code does not match the expected format (e.g. `BMVA.02`) |
+| `INVALID_CSV_HEADER` / `EMPTY_CSV` | Chart CSV missing required columns or empty |
+| `ALREADY_ACTIVE` / `ALREADY_INACTIVE` | Account already in that state |
 | `INVALID_AMOUNT` | Amount string not parseable (see [Money Format](#money-format)) |
 | `INVALID_AMOUNT_CENTS` | Posting amount is not a non-zero integer |
 | `INVALID_POSTING` | Posting spec is not `CODE:AMOUNT` |
@@ -398,6 +477,11 @@ The suite covers: money parsing, posting engine invariants, reversal semantics, 
 | `ALREADY_POSTED` | Entry is already posted |
 | `NOT_POSTED` | Entry must be posted first (reversal) |
 | `ALREADY_REVERSED` | A posted reversal already exists for this entry |
+| `OUT_REQUIRED` | `--out <path>` is required for xlsx output |
+| `FILE_NOT_FOUND` | Backup file does not exist |
+| `INVALID_BACKUP` | File is not a valid bukio database |
+| `RESTORE_EXISTS` | Target already has a company — pass `--force` |
+| `SAME_FILE` | Restore source and target are the same file |
 | `SQLITE_CONSTRAINT_TRIGGER` | A database trigger aborted the operation (e.g. editing a posted entry, rewriting the audit log) |
 
 ---
@@ -429,7 +513,28 @@ bukio entry add --desc "Kantoorartikelen (gecorrigeerd)" --postings "4200:250.00
 **Month-end sanity check**
 ```bash
 bukio report trial-balance --year 2026 --json   # must be balanced: true
+bukio report balans --as-of 2026-12-31          # must say BALANCED
+bukio report pnl --year 2026                    # result = revenue - costs
 bukio audit --since 2026-08-01 --by agent:hermes
+```
+
+**Hand the year to your boekhouder**
+```bash
+bukio report journal --year 2026 --format xlsx --out ~/exports/journal-2026.xlsx
+bukio report balans --as-of 2026-12-31 --format csv --out ~/exports/balans-2026.csv
+bukio report pnl --year 2026 --format xlsx --out ~/exports/pnl-2026.xlsx
+```
+
+**Protect the books**
+```bash
+bukio backup                              # ~/.bukio/backups/bukio-<ts>.db
+bukio restore --from ~/.bukio/backups/bukio-....db --to ~/.bukio/test-restore.db
+```
+
+**Extend the chart of accounts**
+```bash
+bukio account add --code 4350 --name "Reiskosten" --type expense --normal-balance debit --rgs-code WBED.42
+bukio account import --file assets/chart-nl.csv --dry-run
 ```
 
 **Run two companies** — separate databases:
@@ -450,8 +555,8 @@ bukio init --name "Mijn ZZP" --kor
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 0 | Foundation: ledger, posting engine, audit, trial balance, `--json`/`--dry-run` | ✅ done |
-| 1 | RGS chart import, accounts CRUD, balans + W&V, XLSX export, backup/restore | next |
-| 2 | Bank import (CAMT.053/CSV), matching; optional VAT module (codes, OB readout, KOR) | planned |
+| 1 | Accounts CRUD + CSV import, RGS-mapped chart, balans + W&V, CSV/XLSX export, backup/restore | ✅ done |
+| 2 | Bank import (CAMT.053/CSV), matching; optional VAT module (codes, OB readout, KOR) | next |
 | 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes | planned |
 | 4 | Jaarrekening micro/klein models, closing entries, KVK package, ICP readout | planned |
 | 5 | Agent layer: MCP server, permissions, NL query, AI categorization suggestions, compliance calendar | planned |

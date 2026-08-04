@@ -1,0 +1,29 @@
+code,name,type,normal_balance,rgs_code
+1000,Kas,asset,debit,BLIM.10
+1100,Bank,asset,debit,BLIM.10
+1200,Debiteuren,asset,debit,BVOR.11
+1400,Voorraad,asset,debit,BVRD.30
+1600,Overige vorderingen,asset,debit,BVOR.11
+1700,Vooruitbetaalde kosten,asset,debit,BVOR.11
+1800,Materiële vaste activa,asset,debit,BMVA.02
+1850,Vervoermiddelen,asset,debit,BMVA.02
+2000,Crediteuren,liability,credit,BSCH.12
+2100,Overige schulden,liability,credit,BSCH.12
+2300,Vooruitontvangen bedragen,liability,credit,BSCH.12
+2400,Nog te betalen kosten,liability,credit,BSCH.12
+2900,Rekening-courant,liability,credit,BSCH.12
+3000,Eigen vermogen,equity,credit,BEIV.05
+4000,Inkoopwaarde,expense,debit,WKPR.70
+4100,Huisvestingskosten,expense,debit,WBED.42
+4200,Autokosten,expense,debit,WBED.42
+4300,Kantoor- en algemene kosten,expense,debit,WBED.42
+4310,Accountants- en administratiekosten,expense,debit,WBED.42
+4320,Verzekeringen,expense,debit,WBED.42
+4330,Telecommunicatie,expense,debit,WBED.42
+4340,Software en internetdiensten,expense,debit,WBED.42
+4400,Personeelskosten,expense,debit,WPER.40
+4500,Financiële baten en lasten,expense,debit,WFBE.84
+4600,Afschrijvingen,expense,debit,WAFS.41
+4700,Overige bedrijfskosten,expense,debit,WBED.42
+8000,Omzet,income,credit,WOMZ.80
+8100,Overige opbrengsten,income,credit,WOVB.82
