@@ -32,7 +32,7 @@
 
 ## Status
 
-**Phase 3 — Invoicing & recurring (in progress).** Phases 0–2 (ledger, accounts, reports, backup, bank, VAT) plus the **recurring entries engine** (FR3A: depreciation, accruals, scheduled templates) are complete. Sales invoicing (factuurvereisten, PDF, UBL/Peppol) is next. See [Roadmap](#roadmap).
+**Phase 3 — Invoicing & recurring (in progress).** Phases 0–2 (ledger, accounts, reports, backup, bank, VAT), the **recurring entries engine** (FR3A) and **invoicing** (FR3.1–FR3.4, FR3.6: factuurvereisten validation, PDF, UBL/Peppol BIS 3.0, credit notes, payment matching) are complete. Remaining Phase 3: recurring invoices (FR3A.6) and Peppol send (FR3.8). See [Roadmap](#roadmap).
 
 ---
 
@@ -376,6 +376,38 @@ bukio recurring preview --as-of 2026-09-30
 bukio recurring run --as-of 2026-09-30
 ```
 
+### `bukio contact` / `bukio invoice`
+
+Outgoing invoicing (FR3) — compliant with the 12 verplichte factuurvereisten, lifecycle draft → sent → paid (overdue derived), credit notes, PDF + UBL export, bank payment matching.
+
+| Command | Purpose |
+|---------|---------|
+| `contact add --name N [--address] [--postal-code] [--city] [--vat-id] [--kvk] [--email]` | Add a customer (vat-id required when btw verlegd) |
+| `contact list` | List contacts |
+| `invoice create --contact <id> --lines "2x Consultancy @ 150.00 @21,1x Rapportage @ 400.00 @9" --date YYYY-MM-DD [--due-days 30] [--reference] [--dry-run]` | Create a draft invoice (line spec: `[QTYx] DESC @ PRICE [@ VATCODE]`) |
+| `invoice finalize --id N [--dry-run]` | **Assign the sequential number (YYYY-NNNN) and book the entry** (Debiteuren / Omzet / Te betalen btw) |
+| `invoice list [--status] [--type]` / `show --id` | Inspect invoices |
+| `invoice pdf --id N [--out PATH]` | Render a compliant PDF via headless Chromium |
+| `invoice ubl --id N [--out PATH]` | Export **UBL 2.1 / Peppol BIS 3.0 (EN 16931)** XML |
+| `invoice credit --id N [--reason]` | Create a credit note (draft) from a finalized invoice |
+| `invoice pay --id N --date [--amount]` | Record a payment (tracking; the posting comes from the bank flow) |
+
+**Compliance (validated at finalize):** supplier name/KvK/btw-id/address/postal/city (set at `init`), invoice date, sequential number, customer name+address+city, line descriptions/quantities/prices, VAT rate + amount per rate, totals, and the customer's btw-id when a line carries `@R`/`@RE` (btw verlegd). Missing data fails with `SUPPLIER_INCOMPLETE` / `CUSTOMER_INCOMPLETE` / `CUSTOMER_VAT_REQUIRED`.
+
+**Payment matching:** `bank match auto` now recognizes incoming payments against unpaid sales invoices (exact outstanding amount, oldest due first) — it marks the invoice paid, posts Bank/Debiteuren, and reconciles the transaction. The OB readout picks up invoiced sales automatically.
+
+```bash
+bukio invoice create --contact 1 --date 2026-07-10 \
+  --lines "2x Consultancy @ 150.00 @21,1x Rapportage @ 400.00 @9" --reference "PO-2026-88"
+bukio invoice finalize --id 1 --dry-run      # plan: number + postings
+bukio invoice finalize --id 1                # -> 2026-0001, entry posted
+bukio invoice pdf --id 1                     # 2026-0001.pdf
+bukio invoice ubl --id 1                     # 2026-0001.xml (Peppol BIS 3.0)
+# payment arrives -> the bank import matches it automatically
+bukio bank import --file stmt.xml --iban NL91ABNA0417164300
+bukio bank match auto                        # tx -> invoice 2026-0001 (paid)
+```
+
 ### `bukio backup` / `bukio restore`
 
 | Command | Purpose |
@@ -574,6 +606,12 @@ The suite covers: money parsing, posting engine invariants, reversal semantics, 
 | `INVALID_RUNS` / `INVALID_COST` / `INVALID_RESIDUAL` / `INVALID_LIFE` | Depreciation parameters invalid |
 | `ALREADY_COMPLETED` | A completed recurring template cannot be re-activated |
 | `RECURRING_ERROR` | A template failed during `recurring run` (reported per-template, others continue) |
+| `SUPPLIER_INCOMPLETE` / `CUSTOMER_INCOMPLETE` | Invoice missing supplier/customer vereisten — set them at `init` / `contact add` |
+| `CUSTOMER_VAT_REQUIRED` | btw verlegd line needs the customer's btw-id |
+| `INVALID_LINE` / `NO_LINES` / `CONTACT_NOT_FOUND` | Invoice line/contact validation |
+| `ALREADY_FINALIZED` / `NOT_FINALIZED` | Invoice lifecycle violations |
+| `OVERPAYMENT` / `NOT_PAYABLE` / `CREDIT_NOT_PAYABLE` | Payment validation |
+| `PDF_UNAVAILABLE` | Playwright/Chromium could not render the invoice PDF |
 | `SQLITE_CONSTRAINT_TRIGGER` | A database trigger aborted the operation (e.g. editing a posted entry, rewriting the audit log) |
 
 ---
@@ -667,7 +705,7 @@ bukio init --name "Mijn ZZP" --kor
 | 0 | Foundation: ledger, posting engine, audit, trial balance, `--json`/`--dry-run` | ✅ done |
 | 1 | Accounts CRUD + CSV import, RGS-mapped chart, balans + W&V, CSV/XLSX export, backup/restore | ✅ done |
 | 2 | Bank import (CAMT.053/CSV), matching; optional VAT module (codes, OB readout, KOR) | ✅ done |
-| 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes — **recurring entries (depreciation, accruals) ✅ done (v0.4.0)** | in progress |
+| 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes — **✅ recurring (v0.4.0) + invoicing core (v0.5.0)**; recurring invoices + Peppol send left | in progress |
 | 4 | Jaarrekening micro/klein models, closing entries, KVK package, ICP readout | planned |
 | 5 | Agent layer: MCP server, permissions, NL query, AI categorization suggestions, compliance calendar | planned |
 | 6 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |

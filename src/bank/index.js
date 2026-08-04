@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { bankError } from './camt.js';
 import { getAccountByCode } from '../core/accounts.js';
 import { createEntry, getEntry, postEntry } from '../core/entries.js';
+import { paymentFromBank } from '../invoice/index.js';
 import { record } from '../audit/index.js';
 
 function txHash(iban, tx) {
@@ -210,6 +211,7 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
 
   const matches = [];
   for (const txRow of unmatched) {
+    // 1) exact/fuzzy match against already-booked entries on the bank account
     const candidates = db.prepare(`
       SELECT e.id, e.date,
         ABS(julianday(e.date) - julianday(?)) AS day_diff
@@ -225,6 +227,7 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
     const best = candidates[0];
     if (best && best.day_diff <= windowDays) {
       matches.push({
+        kind: 'entry',
         tx_id: txRow.id,
         tx_date: txRow.date,
         amount_cents: txRow.amount_cents,
@@ -236,22 +239,60 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
         method: best.day_diff <= 2 ? 'exact' : 'fuzzy',
         confidence: best.day_diff <= 2 ? 0.99 : 0.8,
       });
+      continue;
+    }
+
+    // 2) incoming money -> unpaid sales invoice with a matching outstanding amount
+    if (txRow.amount_cents > 0) {
+      const invoiceHits = db.prepare(`
+        SELECT i.id, i.invoice_number, i.date, i.due_date, i.contact_id, c.name AS contact_name
+        FROM invoices i
+        LEFT JOIN contacts c ON c.id = i.contact_id
+        WHERE i.invoice_type = 'sales' AND i.status IN ('sent','overdue')
+          AND (SELECT COALESCE(SUM(l.amount_cents + l.vat_amount_cents), 0) FROM invoice_lines l WHERE l.invoice_id = i.id)
+            - (SELECT COALESCE(SUM(p.amount_cents), 0) FROM invoice_payments p WHERE p.invoice_id = i.id)
+            = ?
+        ORDER BY i.due_date IS NULL, i.due_date, i.id
+        LIMIT 1
+      `).all(txRow.amount_cents);
+      const inv = invoiceHits[0];
+      if (inv) {
+        matches.push({
+          kind: 'invoice',
+          tx_id: txRow.id,
+          tx_date: txRow.date,
+          amount_cents: txRow.amount_cents,
+          description: txRow.description,
+          counterparty: txRow.counterparty,
+          invoice_id: inv.id,
+          invoice_number: inv.invoice_number,
+          contact_name: inv.contact_name,
+          method: 'invoice',
+          confidence: 0.95,
+        });
+      }
     }
   }
 
   if (!dryRun) {
     const tx = db.transaction(() => {
       for (const m of matches) {
-        db.prepare(`
-          INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
-          VALUES (?, 'entry', ?, ?, ?, ?)
-        `).run(m.tx_id, m.entry_id, m.method, m.confidence, actor);
-        db.prepare("UPDATE bank_transactions SET state = 'matched' WHERE id = ?").run(m.tx_id);
+        if (m.kind === 'invoice') {
+          // incoming payment: mark the invoice paid, post Bank/Debiteuren,
+          // reconcile the transaction
+          paymentFromBank(db, { invoiceId: m.invoice_id, bankTxId: m.tx_id, actor });
+        } else {
+          db.prepare(`
+            INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
+            VALUES (?, 'entry', ?, ?, ?, ?)
+          `).run(m.tx_id, m.entry_id, m.method, m.confidence, actor);
+          db.prepare("UPDATE bank_transactions SET state = 'matched' WHERE id = ?").run(m.tx_id);
+        }
       }
       record(db, {
         actor, action: 'bank.auto_match', command: 'bank match --auto',
         args: { windowDays, matched: matches.length }, outcome: 'ok',
-        entryIds: matches.map((m) => m.entry_id),
+        entryIds: matches.map((m) => m.entry_id).filter(Boolean),
       });
     });
     tx();

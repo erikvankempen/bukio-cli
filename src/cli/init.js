@@ -19,6 +19,9 @@ export function make(program) {
     .option('--legal-form <form>', `legal form (${LEGAL_FORMS.join('|')})`, 'eenmanszaak')
     .option('--btw-id <id>', 'BTW identification number')
     .option('--iban <iban>', 'bank account (IBAN)')
+    .option('--address <address>', 'street address (for compliant invoices)')
+    .option('--postal-code <code>', 'postal code')
+    .option('--city <city>', 'city')
     .option('--vat <on|off>', 'enable the VAT module (Phase 2)', 'off')
     .option('--kor', 'small business scheme (KOR) — implies --vat off')
     .option('--fiscal-year-end <mm-dd>', 'fiscal year end', '12-31')
@@ -46,6 +49,9 @@ function buildCompany(opts) {
     legal_form: opts.legalForm,
     btw_id: opts.btwId ?? null,
     iban: opts.iban ?? null,
+    address: opts.address ?? null,
+    postal_code: opts.postalCode ?? null,
+    city: opts.city ?? null,
     vat_module: opts.kor ? 0 : opts.vat === 'on' ? 1 : 0,
     kor_flag: opts.kor ? 1 : 0,
     fiscal_year_end: opts.fiscalYearEnd,
@@ -89,9 +95,10 @@ function initAction(ctx, opts) {
   const db = ensureDb(ctx, { create: true });
   try {
     db.prepare(
-      `INSERT INTO company (name, kvk, legal_form, btw_id, iban, vat_module, kor_flag, fiscal_year_end)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module, kor_flag, fiscal_year_end)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(company.name, company.kvk, company.legal_form, company.btw_id, company.iban,
+      company.address, company.postal_code, company.city,
       company.vat_module, company.kor_flag, company.fiscal_year_end);
     const created = seedDefaultChart(db);
     let vatCreated = 0;

@@ -55,6 +55,10 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio recurring run [--as-of DATE] [--template ID] [--dry-run]` | Generate all due entries (backfills, idempotent). |
 | `bukio recurring preview/list/pause/resume` | Schedule inspection and control. |
 | `bukio depreciation add --cost C --life-months M --start DATE` | Depreciation schedule (remainder-adjusted final run). |
+| `bukio contact add --name N [--address] [--vat-id]` / `list` | Invoice counterparties. |
+| `bukio invoice create --contact N --lines "2x DESC @ PRICE @21" --date D` | Draft invoice (12-vereisten validated at finalize). |
+| `bukio invoice finalize --id N [--dry-run]` | Sequential number + booking entry (Debiteuren/Omzet/btw). |
+| `bukio invoice pdf --id N` / `ubl --id N` / `credit --id N` / `pay --id N --date` | PDF (Chromium), Peppol BIS 3.0 XML, credit notes, payments. |
 | `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. |
 | `bukio audit [--by agent:hermes] [--since ISO] [--limit N]` | Read the append-only audit log (newest first). |
 
@@ -273,6 +277,34 @@ bukio account import --file assets/chart-nl.csv --dry-run   # validate; then imp
 bukio audit --by agent:hermes --json
 ```
 
+### 6.11 Invoice a client, get paid, correct a mistake
+
+```bash
+# 1. the supplier must be complete (init) and the customer registered
+bukio contact add --name "ACME B.V." --address "Straat 1" --postal-code "1000 AA" \
+  --city "Amsterdam" --vat-id NL999999999B01
+# 2. draft -> finalize (validates the 12 factuurvereisten, books the entry)
+bukio invoice create --contact 1 --date 2026-07-10 \
+  --lines "2x Consultancy @ 150.00 @21,1x Rapportage @ 400.00 @9" --dry-run
+bukio invoice create --contact 1 --date 2026-07-10 \
+  --lines "2x Consultancy @ 150.00 @21,1x Rapportage @ 400.00 @9"
+bukio invoice finalize --id 1 --dry-run     # plan: 2026-0001 + postings
+bukio invoice finalize --id 1
+# 3. deliverables
+bukio invoice pdf --id 1                     # 2026-0001.pdf (send to the client)
+bukio invoice ubl --id 1                     # 2026-0001.xml (Peppol BIS 3.0)
+# 4. payment arrives -> bank match closes the loop
+bukio bank import --file stmt.xml --iban NL91ABNA0417164300
+bukio bank match auto --json                 # tx -> invoice 2026-0001 (paid)
+# 5. mistake -> credit note (reversal entry), never delete
+bukio invoice credit --id 1 --reason "verkeerd tarief"
+bukio invoice finalize --id 2                # 2026-0002, reverses the booking
+```
+
+Booking rule: finalized invoices auto-post Debiteuren/Omzet/Te betalen btw (per-rate,
+line-exact VAT). Payments post Bank/Debiteuren when matched from the bank. Do not
+hand-construct invoice entries with `entry add` — finalize/credit do it correctly.
+
 ### 6.10 Month-end: run the recurring templates (depreciation, accruals)
 
 ```bash
@@ -331,8 +363,8 @@ individual generated entries with `entry reverse` if one is wrong (the template'
 
 ---
 
-## 9. Capability boundaries (Phase 3, recurring part)
+## 9. Capability boundaries (Phase 3, invoicing part)
 
-Available: company init, journal entries (add/post/reverse/list/show), accounts (add/list/show/deactivate/reactivate/CSV import), reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation, ignore), optional VAT module (enable, `vat book` with `@CODE` expansion, OB readout 1a–5d + mark-filed), **recurring entries** (templates, depreciation helper, accrual auto-reversal, `recurring run` — generated entries are `source='recurring'`, audited, immutable), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
+Available: company init (incl. address for compliant invoices), journal entries, accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. **invoice payments**), optional VAT module (enable, `vat book`, OB readout + mark-filed), recurring entries (templates, depreciation, accrual auto-reversal), **invoicing** (contacts, draft→sent→paid lifecycle, 12-vereisten validation, sequential numbering, booking entries, credit notes, PDF via Chromium, UBL 2.1/Peppol BIS 3.0 export, payment tracking), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 
-**Not yet available:** invoicing, jaarrekening, ICP readout, MCP server, NL query, AI categorization, Ponto live feeds, Peppol. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.
+**Not yet available:** recurring invoices (FR3A.6), Peppol send (FR3.8), jaarrekening, ICP readout, MCP server, NL query, AI categorization, Ponto live feeds. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.

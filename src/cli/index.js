@@ -11,13 +11,14 @@ import { make as backupCmd } from './backup.js';
 import { make as bankCmd } from './bank.js';
 import { make as vatCmd } from './vat.js';
 import { make as recurringCmd } from './recurring.js';
+import { make as invoiceCmd } from './invoice.js';
 
 export async function runCli(argv) {
   const program = new Command();
   program
     .name('bukio')
     .description('Agent-first bookkeeping for Dutch SMEs — SQLite, VAT-optional')
-    .version('0.4.0')
+    .version('0.5.0')
     .option('--json', 'machine-readable JSON output')
     .option('--db <path>', 'database file', process.env.BUKIO_DB || path.join(os.homedir(), '.bukio', 'bukio.db'))
     .option('--actor <who>', 'acting entity (human or agent:<name>)', process.env.BUKIO_ACTOR || 'human')
@@ -32,6 +33,7 @@ export async function runCli(argv) {
   bankCmd(program);
   vatCmd(program);
   recurringCmd(program);
+  invoiceCmd(program);
 
   await program.parseAsync(argv);
 }

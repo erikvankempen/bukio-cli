@@ -192,7 +192,11 @@ export function make(program) {
           output(ctx, data, (d) => {
             console.log(`auto-match: ${d.matched.length} matched, ${d.unmatched_remaining} unmatched remaining${d.dryRun ? ' (dry run)' : ''}`);
             for (const m of d.matched) {
-              console.log(`  tx #${m.tx_id} ${m.tx_date} ${m.amount.padStart(12)} -> entry #${m.entry_id} (${m.method}, ${m.day_diff}d)`);
+              if (m.kind === 'invoice') {
+                console.log(`  tx #${m.tx_id} ${m.tx_date} ${m.amount.padStart(12)} -> invoice ${m.invoice_number} (${m.contact_name ?? ''})`);
+              } else {
+                console.log(`  tx #${m.tx_id} ${m.tx_date} ${m.amount.padStart(12)} -> entry #${m.entry_id} (${m.method}, ${m.day_diff}d)`);
+              }
             }
           });
         } finally {
