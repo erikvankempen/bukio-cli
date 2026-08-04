@@ -32,7 +32,7 @@
 
 ## Status
 
-**Phase 2 — Bank & VAT module (current).** Phases 0–1 (ledger, accounts, reports, backup) plus Phase 2 (bank import + matching, optional VAT module with OB readout) are complete. See [Roadmap](#roadmap) for what comes next.
+**Phase 3 — Invoicing & recurring (in progress).** Phases 0–2 (ledger, accounts, reports, backup, bank, VAT) plus the **recurring entries engine** (FR3A: depreciation, accruals, scheduled templates) are complete. Sales invoicing (factuurvereisten, PDF, UBL/Peppol) is next. See [Roadmap](#roadmap).
 
 ---
 
@@ -343,6 +343,39 @@ bukio vat readout --period 2026-Q2
 
 **OB field mapping:** 1a/1b/1c omzet (21%/9%/0%/vrijgesteld), 1d privégebruik, 3a/3b/3c inkopen, 4a/4b verlegde btw (binnenland/EU, netted via 5b), 5a verschuldigde btw, 5b voorbelasting, 5d te betalen/te ontvangen. Fields 2a/2b (exports) and 5c are not tracked in Phase 2 (shown as 0).
 
+### `bukio recurring` / `bukio depreciation`
+
+Recurring entries & period automation (FR3A) — deterministic, dry-run first, fully audited. Templates are validated at creation; generation just replays them. bukio never generates entries on its own: the agent or a cron job triggers `run --due`.
+
+| Command | Purpose |
+|---------|---------|
+| `recurring add --name N --postings "CODE:AMT,..." --frequency monthly\|quarterly\|yearly --start YYYY-MM-DD [--day 1-28] [--end] [--runs] [--reverse-previous] [--dry-run]` | Create a template (VAT-aware via `@CODE` tags; expanded at creation) |
+| `recurring list [--status active\|paused\|completed\|all]` / `show --id` | Inspect templates |
+| `recurring pause --id` / `resume --id` | Control scheduling |
+| `recurring preview [--as-of DATE] [--template ID]` | What is due (read-only plan) |
+| `recurring run [--as-of DATE] [--template ID] [--dry-run]` | Generate all due entries — **backfills missed periods**, idempotent, one transaction per template (a failing template is reported and skipped, others still run) |
+| `depreciation add --name N --cost C --life-months M --start DATE [--asset 1800] [--expense 4600] [--residual 0] [--dry-run]` | Linear monthly depreciation with a **remainder-adjusted final run** (cents-exact total over the asset life) |
+
+**Semantics:**
+- Generated entries: `source='recurring'`, `source_ref='tpl:<id>'`, `created_by='recurring'` (the trigger actor is in the audit log). Posted, immutable, reversible like any entry.
+- `--reverse-previous` implements the accrual pattern: each run first reverses the previous generated entry (contra-entry dated at the original), then books the new one — monthly estimates replace cleanly, each month carries its own amount.
+- `--runs` / `--end` complete the template (status `completed`); a completed template cannot be re-activated.
+- First run is normalized to `--day` (never backwards); days 29–31 are rejected to avoid month-end clamping.
+
+```bash
+# depreciation: 5370.00 over 36 months -> 149.17/mo, final 149.05 (total exactly 5370.00)
+bukio depreciation add --name "Laptop Dell" --cost 5370.00 --life-months 36 --start 2026-08-01
+# accrual with auto-reversal (nog te betalen kosten, monthly estimates)
+bukio recurring add --name "Nog te betalen kosten admin" \
+  --postings "4310:250.00,2400:-250.00" --frequency monthly --start 2026-08-31 --day 28 --reverse-previous
+# prepaid spreading: annual insurance over 12 months
+bukio recurring add --name "Verzekering 12 mnd" \
+  --postings "4320:100.00,1700:-100.00" --frequency monthly --start 2026-08-01 --runs 12
+# the agent's month-end: preview, then run
+bukio recurring preview --as-of 2026-09-30
+bukio recurring run --as-of 2026-09-30
+```
+
 ### `bukio backup` / `bukio restore`
 
 | Command | Purpose |
@@ -537,6 +570,10 @@ The suite covers: money parsing, posting engine invariants, reversal semantics, 
 | `VAT_CODE_NOT_FOUND` | `@CODE` references an unknown VAT code |
 | `VAT_MARGIN_NOT_SUPPORTED` | Margeregeling cannot be split automatically |
 | `INVALID_PERIOD` | Period must be `YYYY-Qn` or `YYYY-MM` |
+| `INVALID_FREQUENCY` / `INVALID_DATE` / `INVALID_RANGE` | Recurring template schedule invalid |
+| `INVALID_RUNS` / `INVALID_COST` / `INVALID_RESIDUAL` / `INVALID_LIFE` | Depreciation parameters invalid |
+| `ALREADY_COMPLETED` | A completed recurring template cannot be re-activated |
+| `RECURRING_ERROR` | A template failed during `recurring run` (reported per-template, others continue) |
 | `SQLITE_CONSTRAINT_TRIGGER` | A database trigger aborted the operation (e.g. editing a posted entry, rewriting the audit log) |
 
 ---
@@ -630,7 +667,7 @@ bukio init --name "Mijn ZZP" --kor
 | 0 | Foundation: ledger, posting engine, audit, trial balance, `--json`/`--dry-run` | ✅ done |
 | 1 | Accounts CRUD + CSV import, RGS-mapped chart, balans + W&V, CSV/XLSX export, backup/restore | ✅ done |
 | 2 | Bank import (CAMT.053/CSV), matching; optional VAT module (codes, OB readout, KOR) | ✅ done |
-| 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes, recurring entries (depreciation, accruals) | next |
+| 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes — **recurring entries (depreciation, accruals) ✅ done (v0.4.0)** | in progress |
 | 4 | Jaarrekening micro/klein models, closing entries, KVK package, ICP readout | planned |
 | 5 | Agent layer: MCP server, permissions, NL query, AI categorization suggestions, compliance calendar | planned |
 | 6 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |

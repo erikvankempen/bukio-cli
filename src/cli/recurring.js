@@ -1,0 +1,308 @@
+// bukio recurring + depreciation — scheduled entries (FR3A).
+import { formatAmount } from '../core/money.js';
+import {
+  buildDepreciationTemplate, createTemplate, listTemplates, getTemplate,
+  previewDue, runDue, setTemplateStatus,
+} from '../recurring/index.js';
+import { ensureDb, makeCtx, output, fail, table } from './util.js';
+
+const FREQUENCIES = ['monthly', 'quarterly', 'yearly'];
+
+function fmtPostings(postings) {
+  return postings.map((p) => ({
+    code: p.code, amount_cents: p.amountCents, amount: formatAmount(p.amountCents),
+    vat_code: p.vatCode ?? null,
+  }));
+}
+
+function fmtTemplate(t) {
+  return {
+    id: t.id, name: t.name, description: t.description,
+    frequency: t.frequency, day_of_period: t.day_of_period,
+    start_date: t.start_date, end_date: t.end_date, runs: t.runs,
+    status: t.status, next_run_date: t.next_run_date, last_run_date: t.last_run_date,
+    runs_done: t.runs_done, reverse_previous: Boolean(t.reverse_previous),
+    vat_aware: Boolean(t.vat_aware),
+    postings: fmtPostings(t.postings),
+    final_postings: t.final_postings ? fmtPostings(t.final_postings) : null,
+  };
+}
+
+export function make(program) {
+  const recurring = program.command('recurring').description('recurring entries: templates, schedule, generation');
+
+  recurring
+    .command('add')
+    .description('create a recurring entry template')
+    .requiredOption('--name <name>', 'template name (also the entry description prefix)')
+    .requiredOption('--postings <CODE:AMOUNT[@VAT]>', 'posting specs, comma-separated or repeatable')
+    .requiredOption('--frequency <frequency>', `one of ${FREQUENCIES.join(', ')}`)
+    .requiredOption('--start <yyyy-mm-dd>', 'first run date')
+    .option('--day <n>', 'day of period to book on (1-28)', '1')
+    .option('--end <yyyy-mm-dd>', 'last run date')
+    .option('--runs <n>', 'maximum number of runs')
+    .option('--desc <description>', 'template description')
+    .option('--reverse-previous', 'accrual pattern: reverse the previous generated entry on each run')
+    .option('--dry-run', 'validate without writing')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          if (ctx.dryRun) {
+            output(ctx, {
+              action: 'create recurring template',
+              name: opts.name, frequency: opts.frequency, day_of_period: Number(opts.day),
+              start_date: opts.start, end_date: opts.end ?? null, runs: opts.runs ? Number(opts.runs) : null,
+              reverse_previous: Boolean(opts.reversePrevious), dryRun: true,
+            }, (d) => {
+              console.log(`plan: recurring template "${d.name}" (${d.frequency}, day ${d.day_of_period}) from ${d.start_date}`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
+          const tpl = createTemplate(db, {
+            name: opts.name, description: opts.desc ?? null, frequency: opts.frequency,
+            dayOfPeriod: Number(opts.day) || 1, startDate: opts.start, endDate: opts.end ?? null,
+            runs: opts.runs ? Number(opts.runs) : null,
+            postings: [opts.postings], reversePrevious: Boolean(opts.reversePrevious),
+            actor: ctx.actor,
+          });
+          output(ctx, { template: fmtTemplate(tpl), dryRun: false }, (d) => {
+            console.log(`template #${d.template.id} "${d.template.name}" — next run ${d.template.next_run_date} (${d.template.frequency})`);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  recurring
+    .command('list')
+    .description('list recurring templates')
+    .option('--status <status>', 'active|paused|completed|all', 'active')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const rows = listTemplates(db, { status: opts.status }).map(fmtTemplate);
+          output(ctx, { templates: rows }, (d) => {
+            table(d.templates, [
+              { key: 'id', label: '#' },
+              { key: 'name', label: 'name' },
+              { key: 'frequency', label: 'freq' },
+              { key: 'next_run_date', label: 'next' },
+              { key: 'runs_done', label: 'done' },
+              { key: 'status', label: 'status' },
+            ]);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  recurring
+    .command('show')
+    .description('show one template with its postings')
+    .requiredOption('--id <id>', 'template id')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const tpl = getTemplate(db, opts.id);
+          if (!tpl) throw Object.assign(new Error(`recurring template ${opts.id} does not exist`), { code: 'NOT_FOUND' });
+          output(ctx, { template: fmtTemplate(tpl) }, (d) => {
+            console.log(`#${d.template.id} ${d.template.name} [${d.template.status}] — ${d.template.frequency}, day ${d.template.day_of_period}`);
+            console.log(`  start ${d.template.start_date}  next ${d.template.next_run_date}  runs ${d.template.runs_done}/${d.template.runs ?? '∞'}`);
+            for (const p of d.template.postings) console.log(`  ${p.code}  ${p.amount.padStart(12)}${p.vat_code ? ` @${p.vat_code}` : ''}`);
+            if (d.template.final_postings) console.log('  (final run:)');
+            for (const p of d.template.final_postings ?? []) console.log(`  ${p.code}  ${p.amount.padStart(12)}`);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  recurring
+    .command('pause')
+    .description('pause a template')
+    .requiredOption('--id <id>', 'template id')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const tpl = setTemplateStatus(db, { id: opts.id, status: 'paused', actor: ctx.actor });
+          output(ctx, { template: fmtTemplate(tpl) }, (d) => console.log(`paused template #${d.template.id}`));
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  recurring
+    .command('resume')
+    .description('resume a paused template')
+    .requiredOption('--id <id>', 'template id')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const tpl = setTemplateStatus(db, { id: opts.id, status: 'active', actor: ctx.actor });
+          output(ctx, { template: fmtTemplate(tpl) }, (d) => console.log(`resumed template #${d.template.id}`));
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  recurring
+    .command('preview')
+    .description('show what is due (no writes)')
+    .option('--as-of <yyyy-mm-dd>', 'reference date (default today)')
+    .option('--template <id>', 'only this template')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const plan = previewDue(db, { asOf: opts.asOf ?? null, templateId: opts.template ?? null });
+          output(ctx, plan, (d) => {
+            console.log(`due as of ${d.as_of}: ${d.templates.length} template(s) due`);
+            for (const t of d.templates) {
+              for (const run of t.runs) {
+                const kind = run.kind === 'reversal' ? 'REVERSE' : 'BOOK';
+                console.log(`  [${kind}] ${run.entry.date}  ${run.entry.description}`);
+                for (const p of run.entry.postings) console.log(`      ${p.code}  ${formatAmount(p.amountCents).padStart(12)}`);
+              }
+            }
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  recurring
+    .command('run')
+    .description('generate all due entries (idempotent, backfills missed periods)')
+    .option('--as-of <yyyy-mm-dd>', 'reference date (default today)')
+    .option('--template <id>', 'only this template')
+    .option('--dry-run', 'show the plan without writing')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const result = runDue(db, {
+            asOf: opts.asOf ?? null, templateId: opts.template ?? null,
+            actor: ctx.actor, dryRun: ctx.dryRun,
+          });
+          const data = {
+            as_of: result.as_of, dry_run: result.dry_run,
+            templates: result.templates.map((t) => ({
+              template_id: t.template_id, name: t.name, ok: t.ok, error: t.error ?? null,
+              runs: t.runs.map((r) => ({
+                kind: r.kind ?? (r.generated ? undefined : 'entry'),
+                entries: r.generated ? r.generated.map((g) => ({ kind: g.kind, entry_id: g.entry.id, date: g.entry.date, state: g.entry.state })) : [r.entry],
+              })),
+            })),
+          };
+          output(ctx, data, (d) => {
+            const total = d.templates.reduce((s, t) => s + t.runs.length, 0);
+            const failed = d.templates.filter((t) => !t.ok).length;
+            console.log(`recurring run: ${total} period(s) across ${d.templates.length} template(s)${d.dry_run ? ' (dry run)' : ''}`);
+            for (const t of d.templates) {
+              if (!t.ok) { console.log(`  ✗ ${t.name}: ${t.error.code} — ${t.error.message}`); continue; }
+              for (const r of t.runs) {
+                for (const e of r.entries) {
+                  const kind = e.kind === 'reversal' ? 'reversed' : 'booked';
+                  console.log(`  ${e.date}  ${e.kind === 'reversal' ? '→ reversal of' : '→ booked'} entry #${e.entry_id} (${e.state})`);
+                }
+              }
+            }
+            if (failed) console.log(`  ${failed} template(s) failed — their schedules were left untouched`);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  const dep = program.command('depreciation').description('depreciation schedules (linear, remainder-adjusted final run)');
+  dep
+    .command('add')
+    .description('create a monthly depreciation template for an asset')
+    .requiredOption('--name <name>', 'asset name')
+    .requiredOption('--cost <amount>', 'purchase cost (e.g. 5370.00)')
+    .requiredOption('--life-months <n>', 'useful life in months')
+    .requiredOption('--start <yyyy-mm-dd>', 'first depreciation month')
+    .option('--asset <code>', 'asset account', '1800')
+    .option('--expense <code>', 'depreciation expense account', '4600')
+    .option('--residual <amount>', 'residual value at end of life', '0')
+    .option('--desc <description>', 'template description')
+    .option('--dry-run', 'show the computed schedule without writing')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const costCents = Math.round(parseFloat(opts.cost) * 100);
+          const residualCents = Math.round(parseFloat(opts.residual) * 100);
+          const lifeMonths = Number(opts.lifeMonths);
+          if (ctx.dryRun) {
+            const monthly = Math.round((costCents - residualCents) / lifeMonths);
+            const final = (costCents - residualCents) - monthly * (lifeMonths - 1);
+            output(ctx, {
+              action: 'create depreciation template',
+              name: opts.name, asset: opts.asset, expense: opts.expense,
+              cost_cents: costCents, residual_cents: residualCents, life_months: lifeMonths,
+              monthly_cents: monthly, final_cents: final,
+              monthly: formatAmount(monthly), final: formatAmount(final),
+              dryRun: true,
+            }, (d) => {
+              console.log(`plan: depreciate "${d.name}" ${d.monthly}/mo for ${d.life_months} months (final ${d.final})`);
+              console.log(`  ${d.asset} (asset) -${d.monthly}  /  ${d.expense} (expense) +${d.monthly}`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
+          const result = buildDepreciationTemplate(db, {
+            name: opts.name, assetCode: opts.asset, expenseCode: opts.expense,
+            costCents, residualCents, lifeMonths, startDate: opts.start,
+            description: opts.desc ?? null, actor: ctx.actor,
+          });
+          output(ctx, {
+            template: fmtTemplate(result.template),
+            monthly: result.monthly, final: result.final,
+            total: (result.total_cents / 100).toFixed(2),
+          }, (d) => {
+            console.log(`template #${d.template.id} — ${d.template.name}: ${d.monthly}/mo × ${d.template.runs - 1} + final ${d.final} = ${d.total}`);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+}

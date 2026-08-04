@@ -51,6 +51,10 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio vat enable` | Enable the VAT module (accounts 1500/2500 + codes). |
 | `bukio vat book --postings "1100:121.00,8000:-100.00@21" [--post]` | Book VAT-aware entries — `@CODE` computes the VAT leg automatically. |
 | `bukio vat readout --period 2026-Q2 [--mark-filed]` | OB-aangifte fields 1a–5d for manual filing. Never auto-files. |
+| `bukio recurring add --postings "CODE:AMT" --frequency monthly --start DATE [--reverse-previous]` | Create a recurring template. |
+| `bukio recurring run [--as-of DATE] [--template ID] [--dry-run]` | Generate all due entries (backfills, idempotent). |
+| `bukio recurring preview/list/pause/resume` | Schedule inspection and control. |
+| `bukio depreciation add --cost C --life-months M --start DATE` | Depreciation schedule (remainder-adjusted final run). |
 | `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. |
 | `bukio audit [--by agent:hermes] [--since ISO] [--limit N]` | Read the append-only audit log (newest first). |
 
@@ -269,6 +273,30 @@ bukio account import --file assets/chart-nl.csv --dry-run   # validate; then imp
 bukio audit --by agent:hermes --json
 ```
 
+### 6.10 Month-end: run the recurring templates (depreciation, accruals)
+
+```bash
+# 1. what is due (read-only — never guess, always preview first)
+bukio recurring preview --as-of 2026-09-30 --json
+# 2. generate (backfills missed periods; dry-run first)
+bukio recurring run --as-of 2026-09-30 --dry-run --json
+bukio recurring run --as-of 2026-09-30 --json
+# 3. verify the books
+bukio report trial-balance --json          # data.balanced === true
+# 4. depreciation schedules: 5370.00 / 36 mnd -> 149.17/mo, final 149.05
+bukio depreciation add --name "Laptop Dell" --cost 5370.00 --life-months 36 \
+  --start 2026-08-01 --dry-run
+# 5. accrual with auto-reversal (each run reverses the previous estimate)
+bukio recurring add --name "Nog te betalen kosten admin" \
+  --postings "4310:250.00,2400:-250.00" --frequency monthly \
+  --start 2026-08-31 --day 28 --reverse-previous
+```
+
+Generated entries are `source='recurring'`, `created_by='recurring'` — never hand-edit
+them; pause the template (`recurring pause --id`) if a schedule must stop, and reverse
+individual generated entries with `entry reverse` if one is wrong (the template's
+`last_entry_id` then stays pointing at the reversal-safe state).
+
 ---
 
 ## 7. Error codes you will meet
@@ -303,8 +331,8 @@ bukio audit --by agent:hermes --json
 
 ---
 
-## 9. Capability boundaries (Phase 2)
+## 9. Capability boundaries (Phase 3, recurring part)
 
-Available: company init, journal entries (add/post/reverse/list/show), accounts (add/list/show/deactivate/reactivate/CSV import), reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation, ignore), optional VAT module (enable, `vat book` with `@CODE` expansion, OB readout 1a–5d + mark-filed), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
+Available: company init, journal entries (add/post/reverse/list/show), accounts (add/list/show/deactivate/reactivate/CSV import), reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation, ignore), optional VAT module (enable, `vat book` with `@CODE` expansion, OB readout 1a–5d + mark-filed), **recurring entries** (templates, depreciation helper, accrual auto-reversal, `recurring run` — generated entries are `source='recurring'`, audited, immutable), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 
-**Not yet available:** invoicing, recurring entries (depreciation/accrual templates), jaarrekening, ICP readout, MCP server, NL query, AI categorization, Ponto live feeds, Peppol. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.
+**Not yet available:** invoicing, jaarrekening, ICP readout, MCP server, NL query, AI categorization, Ponto live feeds, Peppol. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.

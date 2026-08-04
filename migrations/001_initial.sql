@@ -38,7 +38,7 @@ CREATE TABLE journal_entries (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   date            TEXT NOT NULL,  -- ISO yyyy-mm-dd
   description     TEXT NOT NULL,
-  source          TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual','bank','invoice','agent','reversal')),
+  source          TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual','bank','invoice','agent','reversal','recurring')),
   source_ref      TEXT,
   state           TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft','posted','reversed')),
   reversed_from_id INTEGER REFERENCES journal_entries(id),
