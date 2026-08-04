@@ -1,0 +1,232 @@
+# AGENTS.md — bukio-cli Agent Manual
+
+This file is the **agent's manual** for bukio-cli. Read it before driving the tool. It assumes you have shell access to the machine where bukio-cli is installed and that `bukio` is on PATH (or run `node /path/to/bukio-cli/bin/bukio.js`).
+
+---
+
+## 1. House rules (non-negotiable)
+
+1. **Dry-run before you mutate.** Every mutating command accepts `--dry-run`. Run it, read the plan, then run without `--dry-run`.
+2. **Identify yourself.** Always pass `--actor agent:<your-name>` (e.g. `--actor agent:hermes`). Default is `human`; un-attributed agent work pollutes the audit trail.
+3. **Parse `--json`, never scrape text.** Every command prints one JSON document with `--json`. Exit code 0 = success, 1 = failure.
+4. **Never touch the SQLite file directly.** No sqlite3 CLI, no raw SQL. The engine + triggers exist to protect the books. If you need a capability that doesn't exist, say so instead of hacking the DB.
+5. **Never delete posted entries.** Correct mistakes with `entry reverse` (which posts a contra-entry) and re-book.
+6. **Verify after every mutation.** At minimum: `bukio report trial-balance --json` → `data.balanced` must be `true` (when you've posted anything).
+7. **Money is integer cents.** `amount_cents` in JSON is the truth. `amount` strings are for humans. No floats, ever.
+
+---
+
+## 2. Environment
+
+| What | How |
+|------|-----|
+| Database path | `--db <path>` or env `BUKIO_DB` (default `~/.bukio/bukio.db`) |
+| Actor | `--actor <who>` or env `BUKIO_ACTOR` (default `human`) |
+| JSON output | `--json` (global flag — works before or after the subcommand) |
+
+> **Single company per database.** One company = one database file. To work on company B, point `--db` at its file. Never mix companies in one database.
+
+---
+
+## 3. Command quick reference
+
+| Command | Purpose |
+|---------|---------|
+| `bukio init --name X [--kvk ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + 14-account chart. Fails `ALREADY_INITIALISED` if done. |
+| `bukio entry add --date YYYY-MM-DD --desc ".." --postings "CODE:AMT,CODE:AMT" [--post] [--dry-run]` | Create (and optionally post) a balanced journal entry. |
+| `bukio entry post --id N [--dry-run]` | Post a draft entry. |
+| `bukio entry reverse --id N [--reason ".."] [--dry-run]` | Post a contra-entry that cancels entry N. |
+| `bukio entry list [--state draft\|posted] [--limit N]` | List entries (newest first). |
+| `bukio entry show --id N` | One entry + postings. |
+| `bukio report trial-balance [--year YYYY]` | Per-account totals; `data.balanced` tells you the books reconcile. |
+| `bukio audit [--by agent:hermes] [--since ISO] [--limit N]` | Read the append-only audit log (newest first). |
+
+**Posting syntax:** `--postings "1100:10000.00,3000:-10000.00"` — comma-separate or repeat the flag. `CODE` is the 4-digit account code. **Positive = debit, negative = credit. Sum must be zero.** Amount format: `1234.56`, max 2 decimals, no thousands separators, no Dutch comma decimals.
+
+---
+
+## 4. JSON contracts
+
+### Success
+
+```jsonc
+{ "ok": true, "data": { ... } }
+```
+
+### Failure
+
+```jsonc
+{ "ok": false, "error": { "code": "UNBALANCED", "message": "postings do not sum to zero (sum = 1 cents)" } }
+```
+
+### `entry add` (with `--post`) → `data`
+
+```jsonc
+{
+  "id": 1,
+  "date": "2026-08-04",
+  "description": "Startkapitaal",
+  "source": "manual",
+  "source_ref": null,
+  "state": "posted",            // "draft" if --post omitted
+  "reversed_from_id": null,
+  "created_by": "agent:hermes",
+  "created_at": "2026-08-04T19:09:10.067Z",
+  "posted_at": "2026-08-04T19:09:10.068Z",
+  "reversed_at": null,
+  "postings": [
+    { "id": 1, "account_code": "1100", "account_name": "Bank", "account_type": "asset",
+      "amount_cents": 1000000, "amount": "10000.00" },
+    { "id": 2, "account_code": "3000", "account_name": "Eigen vermogen", "account_type": "equity",
+      "amount_cents": -1000000, "amount": "-10000.00" }
+  ]
+}
+```
+
+### `report trial-balance` → `data`
+
+```jsonc
+{
+  "year": null,
+  "accounts": [
+    { "code": "1100", "name": "Bank", "type": "asset",
+      "debit_cents": 1000000, "credit_cents": 25000, "net_cents": 975000,
+      "debit": "10000.00", "credit": "250.00", "net": "9750.00" }
+  ],
+  "total_debit_cents": 1025000,
+  "total_credit_cents": 1025000,
+  "total_debit": "10250.00",
+  "total_credit": "10250.00",
+  "balanced": true
+}
+```
+
+### `audit` → `data.entries[]`
+
+```jsonc
+{
+  "id": 5,
+  "ts": "2026-08-04T19:09:10.272Z",
+  "actor": "agent:hermes",
+  "action": "entry.post",           // company.init | entry.create | entry.post | entry.reverse
+  "command": "entry post",
+  "args_json": "{\"id\":2}",
+  "args": { "id": 2 },
+  "outcome": "ok",
+  "entry_ids": [2]
+}
+```
+
+---
+
+## 5. Account codes (default chart)
+
+| Code | Name | Type | Normal balance |
+|------|------|------|----------------|
+| 1000 | Kas | asset | debit |
+| 1100 | Bank | asset | debit |
+| 1200 | Debiteuren | asset | debit |
+| 2000 | Crediteuren | liability | credit |
+| 2100 | Overige schulden | liability | credit |
+| 3000 | Eigen vermogen | equity | credit |
+| 4000 | Inkoopwaarde | expense | debit |
+| 4100 | Huisvestingskosten | expense | debit |
+| 4200 | Autokosten | expense | debit |
+| 4300 | Kantoor- en algemene kosten | expense | debit |
+| 4400 | Personeelskosten | expense | debit |
+| 4500 | Financiële baten en lasten | expense | debit |
+| 8000 | Omzet | income | credit |
+| 8100 | Overige opbrengsten | income | credit |
+
+There are **no VAT accounts** in the core chart — VAT is an optional module (Phase 2). When the module is on, VAT accounts and codes are added; until then, book amounts exclusive of VAT or use `2100` for balances payable (see worked example 6.5 for the shape of a VAT-style 3-leg entry, which works today).
+
+---
+
+## 6. Worked examples (copy-paste patterns)
+
+### 6.1 Open the month / company start
+
+```bash
+BUKIO_DB=$HOME/.bukio/demo.db bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on --dry-run
+BUKIO_DB=$HOME/.bukio/demo.db bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on
+BUKIO_DB=$HOME/.bukio/demo.db bukio entry add --desc "Startkapitaal" \
+  --postings "1100:10000.00,3000:-10000.00" --post --actor agent:hermes --json
+```
+
+### 6.2 Book an expense paid from the bank
+
+```bash
+bukio entry add --desc "Kantoorartikelen" --postings "4300:250.00,1100:-250.00" --post
+```
+
+### 6.3 Book sales
+
+```bash
+bukio entry add --desc "Factuur 2026-001" --postings "1100:1210.00,8000:-1210.00" --post
+```
+
+### 6.4 Correct a mistake (reverse + re-book)
+
+```bash
+# 1. always dry-run the reversal first
+bukio entry reverse --id 2 --reason "verkeerde categorie" --dry-run --json
+# 2. apply it (original stays posted; contra-entry cancels it)
+bukio entry reverse --id 2 --reason "verkeerde categorie" --actor agent:hermes --json
+# 3. book the corrected entry
+bukio entry add --desc "Kantoorartikelen (gecorrigeerd)" --postings "4200:250.00,1100:-250.00" --post
+# 4. verify the books
+bukio report trial-balance --json   # balanced: true
+```
+
+### 6.5 3-leg entry (net amount + tax liability split — works today, VAT module later)
+
+```bash
+bukio entry add --desc "Factuur met btw 21%" \
+  --postings "1100:121.00,8000:-100.00,2100:-21.00" --post --dry-run
+```
+
+### 6.6 Report on what an agent did
+
+```bash
+bukio audit --by agent:hermes --json
+```
+
+---
+
+## 7. Error codes you will meet
+
+| Code | What it means | What to do |
+|------|---------------|------------|
+| `NO_DATABASE` | DB file missing | Run `bukio init` first |
+| `ALREADY_INITIALISED` | Company exists | Point `--db` at a fresh file |
+| `INVALID_AMOUNT` | Bad amount string | Use `1234.56`, max 2 decimals, no separators |
+| `INVALID_POSTING` | Spec not `CODE:AMOUNT` | Fix the spec |
+| `TOO_FEW_POSTINGS` | < 2 postings | Add the counter-posting |
+| `UNBALANCED` | Sum != 0 | Debits must equal credits |
+| `ACCOUNT_NOT_FOUND` / `ACCOUNT_INACTIVE` | Bad code | Use codes from §5 |
+| `NOT_FOUND` | Bad entry id | `bukio entry list` to find it |
+| `ALREADY_POSTED` | Entry posted | Nothing to do, or reverse it |
+| `NOT_POSTED` | Entry is draft | `entry post` first, then reverse |
+| `ALREADY_REVERSED` | Reversal exists | Find the contra-entry via `entry list` / `entry show` |
+| `SQLITE_CONSTRAINT_TRIGGER` | You violated an invariant (immutable posted entry, append-only audit) | You bypassed the engine or the operation is illegal — never "fix" this with raw SQL |
+
+---
+
+## 8. Anti-patterns (never do these)
+
+- ❌ Posting without `--dry-run` first.
+- ❌ Omitting `--actor agent:<name>`.
+- ❌ Editing/deleting rows with sqlite3 or raw SQL — the triggers will (rightly) reject it, and the audit log must stay truthful.
+- ❌ "Correcting" a posted entry by editing its postings — postings of non-draft entries are immutable by design. Use `reverse`.
+- ❌ Using floats or human-formatted strings in calculations — always `amount_cents`.
+- ❌ Reusing one database for two companies.
+- ❌ Assuming VAT works — it doesn't yet (Phase 2). The core ledger is deliberately VAT-free.
+- ❌ Ignoring `balanced: false` — investigate before continuing; the books must reconcile.
+
+---
+
+## 9. Capability boundaries (Phase 0)
+
+Available: company init, journal entries (add/post/reverse/list/show), trial balance, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
+
+**Not yet available:** accounts CRUD (chart is fixed at 14 accounts for now), bank import, VAT, invoicing, jaarrekening, MCP server, NL query, AI categorization. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.
