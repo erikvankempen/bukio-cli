@@ -38,7 +38,7 @@ CREATE TABLE journal_entries (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   date            TEXT NOT NULL,  -- ISO yyyy-mm-dd
   description     TEXT NOT NULL,
-  source          TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual','bank','invoice','agent','reversal','recurring')),
+  source          TEXT NOT NULL DEFAULT 'manual' CHECK (source IN ('manual','bank','invoice','agent','reversal','recurring','closing')),
   source_ref      TEXT,
   state           TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft','posted','reversed')),
   reversed_from_id INTEGER REFERENCES journal_entries(id),
@@ -117,6 +117,15 @@ WHEN NEW.state = 'posted'
 BEGIN
   SELECT CASE WHEN OLD.state = 'reversed'
     THEN RAISE(ABORT, 'cannot post a reversed entry') END;
+END;
+
+-- Posted entries are immutable, including their metadata: the engine reverses
+-- by posting a linked contra-entry, never by mutating the original.
+CREATE TRIGGER trg_entries_posted_immutable
+BEFORE UPDATE ON journal_entries
+WHEN OLD.state = 'posted'
+BEGIN
+  SELECT RAISE(ABORT, 'cannot modify a posted entry');
 END;
 
 -- --- Audit log is append-only ----------------------------------------------

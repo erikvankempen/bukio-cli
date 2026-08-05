@@ -100,9 +100,9 @@ export function expandVatPostings(db, specs) {
       if (vat.type === 'margin') {
         throw vatError('VAT_MARGIN_NOT_SUPPORTED', 'margeregeling cannot be split automatically — book it manually');
       }
-      // Reverse charge: the supplier charges 0%, but the VAT due on the
-      // verlegde levering is computed at the standard rate (21%).
-      const effectiveRateBp = vat.type === 'reverse' ? 2100 : vat.rate_bp;
+      // Reverse charge / privégebruik: 0% codes, but the VAT due on the
+      // verlegde levering / private use is computed at the standard rate (21%).
+      const effectiveRateBp = (vat.type === 'reverse' || vat.type === 'private') ? 2100 : vat.rate_bp;
       const vatAmount = Math.round(Math.abs(spec.amountCents * effectiveRateBp / 10000))
         * Math.sign(spec.amountCents);
 
@@ -207,11 +207,18 @@ export function obReadout(db, { period }) {
         if (r.type === 'standard') f['5b'] += r.vat_amount_cents;
       }
     } else if (r.type === 'reverse') {
-      // verlegde btw: base to 3c, VAT due to 4a/4b — and simultaneously
-      // claimed back as voorbelasting (5b), so pure reverse charge nets zero.
-      f['3c'] += r.amount_cents;
-      f[r.eu_reverse ? '4b' : '4a'] += r.vat_amount_cents;
-      f['5b'] += r.vat_amount_cents;
+      if (r.account_type === 'income' && r.eu_reverse) {
+        // uitgaande verlegde EU levering (0%): base naar 2a, geen btw
+        f['2a'] += -r.amount_cents;
+      } else if (r.account_type === 'expense') {
+        // inkoop met verlegde btw: base naar 3a (binnenland) / 3b (EU),
+        // btw verschuldigd naar 4a/4b — and claimed back as voorbelasting
+        // (5b), so pure reverse charge nets zero.
+        f[r.eu_reverse ? '3b' : '3a'] += r.amount_cents;
+        f[r.eu_reverse ? '4b' : '4a'] += r.vat_amount_cents;
+        f['5b'] += r.vat_amount_cents;
+      }
+      // uitgaande verlegde binnenlandse levering (R, zeldzaam): niet gevolgd
     } else if (r.type === 'private') {
       f['1d'] += -r.amount_cents;
       f['5a'] += -r.vat_amount_cents;
@@ -228,7 +235,7 @@ export function obReadout(db, { period }) {
     fields: f,
     to_pay_cents: f['5d'],
     to_pay: String((f['5d'] / 100).toFixed(2)),
-    note: 'Manual filing aid only — bukio never submits. Fields 2a/2b (exports) and 5c are not tracked in Phase 2 and shown as 0.',
+    note: 'Manual filing aid only — bukio never submits. Fields 2b (non-EU exports) and 5c are not tracked and shown as 0.',
   };
 }
 

@@ -32,7 +32,7 @@
 
 ## Status
 
-**Phase 3 — Invoicing & recurring: complete ✅ (v0.6.0).** Recurring entries (FR3A), invoicing (FR3.1–FR3.4, FR3.6: factuurvereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payment matching), recurring invoices (FR3A.6) and Peppol send (FR3.8) are all in. Next: **Phase 4 — jaarrekening**. See [Roadmap](#roadmap).
+**Phase 4 — Jaarrekening: complete ✅ (v0.7.0).** Year-end close (afsluiting boekjaar), statutory annual accounts (micro/klein), the KVK deposit PDF, the ICP listing, and the corrected OB export fields (2a/3a/3b) are all in. Next: **Phase 5 — agent layer** (MCP server, NL query, compliance calendar). See [Roadmap](#roadmap).
 
 ---
 
@@ -415,6 +415,28 @@ bukio bank import --file stmt.xml --iban NL91ABNA0417164300
 bukio bank match auto                        # tx -> invoice 2026-0001 (paid)
 ```
 
+### `bukio year-end` / `bukio jaarrekening` / `bukio icp`
+
+Annual close and statutory reporting (Phase 4).
+
+| Command | Purpose |
+|---------|---------|
+| `year-end status --year YYYY` | Open/closed, the year's result, per-account nets |
+| `year-end close --year YYYY [--dry-run]` | **Close the fiscal year**: reverse income/expense into 9900 (created on demand), then resultaatbestemming into 3000. Both entries `source='closing'`, `source_ref='fy:YYYY'`. Guards: draft entries in the year (`INCOMPLETE_YEAR`), double close (`ALREADY_CLOSED`), no activity (`EMPTY_YEAR`). **The P&L report excludes closing entries** — the year's flow stays visible after closing; the balans then shows equity including the result |
+| `jaarrekening report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx] [--out]` | Statutory annual accounts in the Dutch layout (Titel 9 Boek 2 BW): balans (vaste activa / vlottende activa / eigen vermogen / voorzieningen / lang- en kortlopende schulden) + W&V (klein model). `--format pdf` = the **KVK deposit package**; xlsx for the accountant |
+| `icp readout --period YYYY-Qn` | **ICP listing**: EU btw-verlegde supplies per customer (from RE invoice lines), with their btw-ids. Fails `ICP_VAT_ID_MISSING` if a customer lacks one. Credit notes reduce the customer total |
+
+```bash
+bukio year-end status --year 2026
+bukio year-end close --year 2026 --dry-run     # plan: result 1254.15 + postings
+bukio year-end close --year 2026               # entries #9 #10 posted
+bukio jaarrekening report --year 2026 --model klein        # JSON
+bukio jaarrekening report --year 2026 --model klein --format pdf   # jaarrekening-2026-klein.pdf (KVK)
+bukio icp readout --period 2026-Q3             # EU customers + amounts
+```
+
+**OB readout fields (Phase 4):** 1a/1b/1c omzet (21%/9%/0%-vrijgesteld), 1d privégebruik (21% auto-computed on `@P`), **2a verlegde EU leveringen (RE)**, 3a inkopen binnenland (incl. verlegd `@R`), **3b inkopen EU (RE)**, 3c buiten EU, 4a/4b verlegde btw, 5a verschuldigd, 5b voorbelasting, 5d te betalen/te ontvangen. 2b and 5c are not tracked.
+
 ### `bukio backup` / `bukio restore`
 
 | Command | Purpose |
@@ -621,6 +643,9 @@ The suite covers: money parsing, posting engine invariants, reversal semantics, 
 | `PDF_UNAVAILABLE` | Playwright/Chromium could not render the invoice PDF |
 | `PEPPOL_NOT_CONFIGURED` / `PEPPOL_SEND_FAILED` | Peppol provider missing (env `BUKIO_PEPPOL_ENDPOINT`) or rejected the document |
 | `INVALID_KIND` / `INVALID_REVERSE` | Recurring template kind errors (reverse-previous is entry-only) |
+| `INCOMPLETE_YEAR` / `ALREADY_CLOSED` / `EMPTY_YEAR` / `INVALID_YEAR` | Year-end close guards |
+| `INVALID_MODEL` | jaarrekening model must be micro or klein |
+| `ICP_VAT_ID_MISSING` | EU customer without a btw-id — the ICP listing cannot be completed |
 | `SQLITE_CONSTRAINT_TRIGGER` | A database trigger aborted the operation (e.g. editing a posted entry, rewriting the audit log) |
 
 ---
@@ -715,7 +740,7 @@ bukio init --name "Mijn ZZP" --kor
 | 1 | Accounts CRUD + CSV import, RGS-mapped chart, balans + W&V, CSV/XLSX export, backup/restore | ✅ done |
 | 2 | Bank import (CAMT.053/CSV), matching; optional VAT module (codes, OB readout, KOR) | ✅ done |
 | 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes, payment matching, recurring entries **+ recurring invoices + Peppol send** | Compliant invoice PDF + UBL per invoice; due entries generated & posted on time | ✅ done (v0.6.0) |
-| 4 | Jaarrekening micro/klein models, closing entries, KVK package, ICP readout | planned |
+| 4 | Jaarrekening micro/klein models, closing entries, KVK package, ICP readout | Jaarrekening package for a micro BV — **✅ done (v0.7.0, 178 tests green)** | planned |
 | 5 | Agent layer: MCP server, permissions, NL query, AI categorization suggestions, compliance calendar | planned |
 | 6 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
 

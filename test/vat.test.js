@@ -153,7 +153,7 @@ test('obReadout: period isolation and drafts excluded', () => {
   assert.equal(again.fields['5a'], 3000);
 });
 
-test('obReadout: reverse charge fields 3c/4a/4b (nets out via 5b)', () => {
+test('obReadout: reverse charge fields 3a/4a (nets out via 5b)', () => {
   enableVat();
   bookVatEntry(db, {
     date: '2026-06-01', description: 'Inkoop verlegd',
@@ -161,7 +161,7 @@ test('obReadout: reverse charge fields 3c/4a/4b (nets out via 5b)', () => {
     postings: parseVatPostingSpecs(['4300:100.00@R,1100:-100.00,1500:-21.00']), post: true,
   });
   const r = obReadout(db, { period: '2026-Q2' });
-  assert.equal(r.fields['3c'], 10000);
+  assert.equal(r.fields['3a'], 10000); // binnenlandse verlegde inkoop -> 3a
   assert.equal(r.fields['4a'], 2100); // 21% of 100
   assert.equal(r.fields['5b'], 2100); // claimed back — nets out
   assert.equal(r.fields['5d'], 0);

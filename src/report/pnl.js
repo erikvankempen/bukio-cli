@@ -18,7 +18,7 @@ export function pnl(db, { from, to }) {
       SELECT p.account_id, p.amount_cents
       FROM postings p
       JOIN journal_entries e ON e.id = p.entry_id
-      WHERE e.state = 'posted' AND e.date >= ? AND e.date <= ?
+      WHERE e.state = 'posted' AND e.source != 'closing' AND e.date >= ? AND e.date <= ?
     ) p ON p.account_id = a.id
     WHERE a.type IN ('income','expense')
     GROUP BY a.id

@@ -58,6 +58,7 @@ export function validateInvoiceLines(db, lines) {
   return splitLineSpecs(lines).map((spec) => {
     const p = typeof spec === 'string' ? parseLineSpec(spec) : spec;
     if (!p.description || !p.priceCents) throw invoiceError('INVALID_LINE', `line '${JSON.stringify(spec)}' is not parseable`);
+    if (!Number.isInteger(p.qty) || p.qty < 1) throw invoiceError('INVALID_LINE', `line '${JSON.stringify(spec)}': quantity must be a positive integer`);
     if (p.vatCode) {
       if (!vatOn) throw invoiceError('VAT_MODULE_OFF', 'line has a VAT code but the VAT module is off for this company');
       if (!vatCodes.has(p.vatCode)) throw invoiceError('VAT_CODE_NOT_FOUND', `vat code '${p.vatCode}' does not exist`);
@@ -142,6 +143,7 @@ export function createInvoice(db, {
   const parsedLines = splitLineSpecs(lines).map((spec) => {
     const p = typeof spec === 'string' ? parseLineSpec(spec) : spec;
     if (!p.description || !p.priceCents) throw invoiceError('INVALID_LINE', `line '${JSON.stringify(spec)}' is not parseable`);
+    if (!Number.isInteger(p.qty) || p.qty < 1) throw invoiceError('INVALID_LINE', `line '${JSON.stringify(spec)}': quantity must be a positive integer`);
     if (p.vatCode) {
       if (!vatOn) throw invoiceError('VAT_MODULE_OFF', 'line has a VAT code but the VAT module is off for this company');
       if (!vatCodes.has(p.vatCode)) throw invoiceError('VAT_CODE_NOT_FOUND', `vat code '${p.vatCode}' does not exist`);
@@ -257,8 +259,16 @@ export function buildInvoicePostings(db, invoice) {
           code: '8000', amountCents: sign * g.net,
           vatCode: g.code, vatAmountCents: sign * g.vat,
         });
+      } else if (g.code) {
+        // 0% / vrijgesteld / verlegd (RE/R): no VAT on the books, but tagged
+        // so the OB readout reports the base (1c for 0%/vrijgesteld, 2a for
+        // verlegde EU leveringen) — zero vat amount
+        postings.push({
+          code: '8000', amountCents: sign * g.net,
+          vatCode: g.code, vatAmountCents: 0,
+        });
       } else {
-        // 0% / vrijgesteld / verlegd: no VAT on the books
+        // line without a VAT code: no VAT on the books
         postings.push({ code: '8000', amountCents: sign * g.net });
       }
     }

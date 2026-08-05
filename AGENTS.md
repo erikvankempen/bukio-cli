@@ -61,6 +61,10 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio invoice create --contact N --lines "2x DESC @ PRICE @21" --date D` | Draft invoice (12-vereisten validated at finalize). |
 | `bukio invoice finalize --id N [--dry-run]` | Sequential number + booking entry (Debiteuren/Omzet/btw). |
 | `bukio invoice pdf --id N` / `ubl --id N` / `credit --id N` / `pay --id N --date` | PDF (Chromium), Peppol BIS 3.0 XML, credit notes, payments. |
+| `bukio invoice peppol-send --id N [--endpoint URL] [--dry-run]` | POST the UBL to a Peppol access-point provider (env `BUKIO_PEPPOL_ENDPOINT` + `BUKIO_PEPPOL_TOKEN`). |
+| `bukio year-end status --year YYYY` / `close --year YYYY [--dry-run]` | Annual close: result -> 9900 -> 3000 (source 'closing'; P&L stays visible). |
+| `bukio jaarrekening report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx]` | Statutory annual accounts (KVK deposit package as PDF). |
+| `bukio icp readout --period 2026-Q3` | ICP listing: EU btw-verlegde supplies per customer (manual filing aid). |
 | `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. |
 | `bukio audit [--by agent:hermes] [--since ISO] [--limit N]` | Read the append-only audit log (newest first). |
 
@@ -279,6 +283,27 @@ bukio account import --file assets/chart-nl.csv --dry-run   # validate; then imp
 bukio audit --by agent:hermes --json
 ```
 
+### 6.12 Year-end: close the books, produce the jaarrekening
+
+```bash
+# 1. everything must be posted before closing (drafts block the close)
+bukio year-end status --year 2026
+bukio year-end close --year 2026 --dry-run     # plan: result + postings
+bukio year-end close --year 2026               # result -> 9900 -> 3000
+# 2. statutory accounts + KVK deposit package
+bukio jaarrekening report --year 2026 --model klein --format pdf   # jaarrekening-2026-klein.pdf
+# 3. quarterly EU listing (verlegde EU leveringen)
+bukio icp readout --period 2026-Q3
+# 4. the OB readout now also reports 2a (EU) and 3b (EU inkopen)
+bukio vat readout --period 2026-Q4
+```
+
+Closing rules: `source='closing'` entries are excluded from the P&L (the year's
+flow stays visible) but included in the balans (equity carries the result).
+Undo a close with `entry reverse` on the closing entries — never by deleting
+them. The OB readout tracks 2a (verlegde EU sales), 3a/3b (verlegde inkopen)
+and 1d (privégebruik at 21%); 2b and 5c are not tracked.
+
 ### 6.11 Invoice a client, get paid, correct a mistake
 
 ```bash
@@ -365,8 +390,8 @@ individual generated entries with `entry reverse` if one is wrong (the template'
 
 ---
 
-## 9. Capability boundaries (Phase 3 complete)
+## 9. Capability boundaries (Phase 4 complete)
 
-Available: company init (incl. address for compliant invoices), journal entries, accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. **invoice payments**), optional VAT module (enable, `vat book`, OB readout + mark-filed), recurring entries (templates, depreciation, accrual auto-reversal), **invoicing** (contacts, draft→sent→paid lifecycle, 12-vereisten validation, sequential numbering, booking entries, credit notes, PDF via Chromium, UBL 2.1/Peppol BIS 3.0 export, payment tracking), **recurring invoices** (`--kind invoice` templates → draft invoices), **Peppol send** (`invoice peppol-send`, env creds), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
+Available: company init (incl. address for compliant invoices), journal entries, accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. invoice payments), optional VAT module (enable, `vat book`, OB readout 1a–5d + mark-filed), recurring entries + invoices, invoicing (lifecycle, 12-vereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payments), Peppol send, **jaarrekening** (`year-end close`, micro/klein statutory accounts, KVK deposit PDF, XLSX), **ICP readout**, backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 
-**Not yet available:** jaarrekening, ICP readout, MCP server, NL query, AI categorization, Ponto live feeds, Peppol receive. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.
+**Not yet available:** MCP server, NL query, AI categorization suggestions, compliance calendar, Ponto live feeds, Peppol receive. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.
