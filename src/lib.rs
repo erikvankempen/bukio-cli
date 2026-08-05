@@ -7,6 +7,7 @@
 pub mod audit;
 pub mod core;
 pub mod error;
+pub mod fx;
 pub mod report;
 pub mod vat;
 

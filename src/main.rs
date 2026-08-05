@@ -10,6 +10,7 @@ use bukio_cli::core::chart::DEFAULT_CHART;
 use bukio_cli::core::db;
 use bukio_cli::core::entries::{self, parse_posting_specs};
 use bukio_cli::core::money::format_amount;
+use bukio_cli::fx;
 use bukio_cli::report;
 use bukio_cli::vat;
 use bukio_cli::AppError;
@@ -86,6 +87,11 @@ enum Command {
     Vat {
         #[command(subcommand)]
         cmd: VatCmd,
+    },
+    /// FX rates (vreemde valuta)
+    Fx {
+        #[command(subcommand)]
+        cmd: FxCmd,
     },
     /// reports
     Report {
@@ -246,7 +252,80 @@ enum VatCmd {
     /// enable the VAT module (accounts 1500/2500 + codes)
     Enable,
     /// list VAT codes
-    ListCodes,
+    Codes,
+    /// book a VAT-aware entry (e.g. 8000:-100.00@21)
+    Book(VatBookArgs),
+    /// OB-aangifte manual-filing readout (fields 1a-5d)
+    Readout(VatReadoutArgs),
+}
+
+#[derive(Args)]
+struct VatBookArgs {
+    /// entry date
+    #[arg(long)]
+    date: String,
+    /// description
+    #[arg(long)]
+    desc: String,
+    /// posting specs CODE:AMOUNT[@VATCODE], repeatable or comma-separated
+    #[arg(long, num_args = 1.., required = true)]
+    postings: Vec<String>,
+    /// manual|bank|invoice|agent
+    #[arg(long, default_value = "manual")]
+    source: String,
+    /// source reference
+    #[arg(long)]
+    source_ref: Option<String>,
+    /// postings are in this foreign currency; converted to EUR (needs a rate)
+    #[arg(long)]
+    currency: Option<String>,
+    /// FX rate (1 EUR = n units); auto-looked-up on/before the date when omitted
+    #[arg(long)]
+    rate: Option<String>,
+    /// post the entry immediately
+    #[arg(long)]
+    post: bool,
+}
+
+#[derive(Args)]
+struct VatReadoutArgs {
+    /// YYYY-Qn (quarter) or YYYY-MM (month)
+    #[arg(long)]
+    period: String,
+    /// record that this period was filed manually
+    #[arg(long)]
+    mark_filed: bool,
+}
+
+#[derive(Subcommand)]
+enum FxCmd {
+    /// set an FX rate (1 EUR = n units) for a currency/date
+    Set(FxSetArgs),
+    /// list stored FX rates
+    List(FxListArgs),
+}
+
+#[derive(Args)]
+struct FxSetArgs {
+    /// ISO 4217 currency (3 letters)
+    #[arg(long)]
+    currency: String,
+    /// rate date (yyyy-mm-dd)
+    #[arg(long)]
+    date: String,
+    /// rate, e.g. 1.0875 (1 EUR = n units)
+    #[arg(long)]
+    rate: String,
+}
+
+#[derive(Args)]
+struct FxListArgs {
+    /// filter by currency
+    #[arg(long)]
+    currency: Option<String>,
+    /// max rows
+    #[arg(long, default_value = "50")]
+    limit: String,
 }
 
 #[derive(Subcommand)]
@@ -317,6 +396,7 @@ fn main() {
         Command::Entry { cmd } => cmd_entry(&ctx, cmd),
         Command::Account { cmd } => cmd_account(&ctx, cmd),
         Command::Vat { cmd } => cmd_vat(&ctx, cmd),
+        Command::Fx { cmd } => cmd_fx(&ctx, cmd),
         Command::Report { cmd } => cmd_report(&ctx, cmd),
     };
     if let Err(e) = result {
@@ -636,17 +716,205 @@ fn cmd_vat(ctx: &Ctx, cmd: &VatCmd) -> bukio_cli::Result<()> {
     match cmd {
         VatCmd::Enable => {
             let conn = ensure_db(ctx)?;
+            if ctx.dry_run {
+                emit(
+                    ctx,
+                    json!({
+                        "action": "enable VAT module",
+                        "accounts": ["1500", "2500"],
+                        "codes": ["21", "9", "0", "V", "R", "RE", "M", "P"],
+                        "dryRun": true,
+                    }),
+                    render_vat_enable_plan,
+                );
+                return Ok(());
+            }
             let res = vat::enable_vat_module(&conn, &ctx.actor)?;
             emit(ctx, serde_json::to_value(&res).unwrap(), render_vat_enable);
             Ok(())
         }
-        VatCmd::ListCodes => {
+        VatCmd::Codes => {
             let conn = ensure_db(ctx)?;
             let codes = vat::list_vat_codes(&conn)?;
             emit(ctx, json!({ "codes": serde_json::to_value(&codes).unwrap() }), render_vat_codes);
             Ok(())
         }
+        VatCmd::Book(a) => {
+            let conn = ensure_db(ctx)?;
+            let specs = vat::parse_vat_posting_specs(&a.postings)?;
+            let converted: Vec<vat::VatSpec> = if let Some(currency) = &a.currency {
+                let rate = fx::resolve_rate(&conn, Some(currency), a.rate.as_deref(), &a.date, &ctx.actor)?
+                    .expect("currency given -> rate resolved");
+                let raw: Vec<fx::RawSpec> = specs
+                    .iter()
+                    .map(|s| fx::RawSpec {
+                        code: s.code.clone(),
+                        amount_cents: s.amount_cents,
+                        vat_code: s.vat_code.clone(),
+                        fx_currency: s.fx_currency.clone(),
+                        fx_amount_cents: s.fx_amount_cents,
+                    })
+                    .collect();
+                let converted = fx::to_eur_postings(&raw, currency, rate);
+                converted
+                    .iter()
+                    .map(|p| vat::VatSpec {
+                        code: p.code.clone(),
+                        amount_cents: p.amount_cents,
+                        vat_code: p.vat_code.clone(),
+                        fx_currency: p.fx_currency.clone(),
+                        fx_amount_cents: p.fx_amount_cents,
+                    })
+                    .collect()
+            } else {
+                specs
+            };
+            if ctx.dry_run {
+                let expanded = vat::expand_vat_postings(&conn, &converted)?;
+                let postings: Vec<Value> = expanded
+                    .iter()
+                    .map(|p| {
+                        let mut obj = serde_json::Map::new();
+                        obj.insert("code".into(), json!(p.code));
+                        obj.insert("amount_cents".into(), json!(p.amount_cents));
+                        obj.insert("amount".into(), json!(format_amount(p.amount_cents)));
+                        match &p.vat_code {
+                            Some(vc) => { obj.insert("vat_code".into(), json!(vc)); }
+                            None if !p.vat_leg => { obj.insert("vat_code".into(), Value::Null); }
+                            None => {}
+                        }
+                        obj.insert("vat_amount".into(), json!(p.vat_amount_cents.map(format_amount)));
+                        if let Some(cur) = &p.fx_currency {
+                            obj.insert("fx_currency".into(), json!(cur));
+                            obj.insert("fx_amount_cents".into(), json!(p.fx_amount_cents));
+                        }
+                        Value::Object(obj)
+                    })
+                    .collect();
+                emit(
+                    ctx,
+                    json!({
+                        "action": "book VAT entry (expanded)",
+                        "date": a.date,
+                        "description": a.desc,
+                        "currency": a.currency,
+                        "postings": postings,
+                        "post": a.post,
+                        "dryRun": true,
+                    }),
+                    render_vat_book_plan,
+                );
+                return Ok(());
+            }
+            let (entry, expanded) = vat::book_vat_entry(
+                &conn,
+                &a.date,
+                &a.desc,
+                &converted,
+                &a.source,
+                a.source_ref.as_deref(),
+                &ctx.actor,
+                a.post,
+            )?;
+            emit(
+                ctx,
+                json!({
+                    "entry": vat_fmt_entry(&entry),
+                    "expanded": expanded.iter().map(|p| {
+                        let mut obj = serde_json::Map::new();
+                        obj.insert("code".into(), json!(p.code));
+                        match &p.vat_code {
+                            Some(vc) => { obj.insert("vat_code".into(), json!(vc)); }
+                            None if !p.vat_leg => { obj.insert("vat_code".into(), Value::Null); }
+                            None => {}
+                        }
+                        Value::Object(obj)
+                    }).collect::<Vec<_>>(),
+                }),
+                render_vat_book,
+            );
+            Ok(())
+        }
+        VatCmd::Readout(a) => {
+            let conn = ensure_db(ctx)?;
+            if a.mark_filed {
+                let r = vat::mark_filed(&conn, &a.period, &ctx.actor)?;
+                emit(
+                    ctx,
+                    json!({ "period": r.period, "from": r.from, "to": r.to, "status": r.status, "dryRun": false }),
+                    render_mark_filed,
+                );
+                return Ok(());
+            }
+            let r = vat::ob_readout(&conn, &a.period)?;
+            let fields: Value = r
+                .fields
+                .iter()
+                .map(|(k, v)| (k.clone(), json!({ "cents": v, "amount": format_amount(*v) })))
+                .collect::<serde_json::Map<String, Value>>()
+                .into();
+            emit(
+                ctx,
+                json!({
+                    "period": r.period, "from": r.from, "to": r.to,
+                    "fields": fields,
+                    "to_pay_cents": r.to_pay_cents, "to_pay": r.to_pay,
+                    "note": r.note,
+                }),
+                render_readout,
+            );
+            Ok(())
+        }
     }
+}
+
+fn cmd_fx(ctx: &Ctx, cmd: &FxCmd) -> bukio_cli::Result<()> {
+    match cmd {
+        FxCmd::Set(a) => {
+            let conn = ensure_db(ctx)?;
+            let r = fx::set_fx_rate(&conn, &a.currency, &a.date, Some(&a.rate), "manual", &ctx.actor)?;
+            emit(
+                ctx,
+                json!({ "rate": { "currency": r.currency, "date": r.date, "rate": r.rate, "rate_x10000": r.rate_x10000 } }),
+                render_fx_set,
+            );
+            Ok(())
+        }
+        FxCmd::List(a) => {
+            let conn = ensure_db(ctx)?;
+            let limit: i64 = a.limit.parse().unwrap_or(50);
+            let rates = fx::list_fx_rates(&conn, a.currency.as_deref(), limit)?;
+            emit(ctx, json!({ "rates": serde_json::to_value(&rates).unwrap() }), render_fx_list);
+            Ok(())
+        }
+    }
+}
+
+/// Node vat.js fmtEntry: postings carry vat fields; `vat_code` is null when no
+/// VAT code, omitted when there is one (JSON.stringify drops undefined).
+fn vat_fmt_entry(entry: &entries::Entry) -> Value {
+    json!({
+        "id": entry.meta.id,
+        "date": entry.meta.date,
+        "description": entry.meta.description,
+        "state": entry.meta.state,
+        "postings": entry.postings.iter().map(|p| {
+            let mut obj = serde_json::Map::new();
+            obj.insert("account_code".into(), json!(p.account_code));
+            obj.insert("account_name".into(), json!(p.account_name));
+            obj.insert("amount_cents".into(), json!(p.amount_cents));
+            obj.insert("amount".into(), json!(format_amount(p.amount_cents)));
+            if p.vat_code_id.is_some() {
+                obj.insert("vat_amount_cents".into(), json!(p.vat_amount_cents));
+                obj.insert("vat_amount".into(), json!(p.vat_amount_cents.map(format_amount)));
+            } else {
+                obj.insert("vat_code".into(), Value::Null);
+                obj.insert("vat_amount_cents".into(), Value::Null);
+                obj.insert("vat_amount".into(), Value::Null);
+            }
+            Value::Object(obj)
+        }).collect::<Vec<_>>(),
+    })
 }
 
 // --- report ---------------------------------------------------------------
@@ -1093,6 +1361,108 @@ fn render_import(_ctx: &Ctx, d: &Value) {
 
 fn render_vat_enable(_ctx: &Ctx, d: &Value) {
     println!("VAT module enabled: accounts {} codes {}", d["accounts"], d["codes"]);
+}
+
+fn render_vat_enable_plan(_ctx: &Ctx, d: &Value) {
+    println!("plan: enable VAT module");
+    let accounts: Vec<String> = d["accounts"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+    let codes: Vec<String> = d["codes"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+    println!("  accounts: {}", accounts.join(", "));
+    println!("  codes:    {}", codes.join(", "));
+    println!("(dry run — nothing written)");
+}
+
+fn render_vat_book_plan(_ctx: &Ctx, d: &Value) {
+    let currency = d["currency"].as_str().unwrap_or("");
+    let suffix = if currency.is_empty() { String::new() } else { format!(" ({currency} -> EUR)") };
+    println!(
+        "plan: VAT entry {} \"{}\"{}",
+        d["date"].as_str().unwrap_or(""),
+        d["description"].as_str().unwrap_or(""),
+        suffix
+    );
+    for p in d["postings"].as_array().unwrap_or(&Vec::new()) {
+        let fx = p["fx_currency"].as_str().map(|c| format!("  [{c} ...]")).unwrap_or_default();
+        let vat = p["vat_code"].as_str().map(|c| format!("  @{c} ({})", p["vat_amount"].as_str().unwrap_or(""))).unwrap_or_default();
+        println!("  {}  {}{}{}", p["code"].as_str().unwrap_or(""), p["amount"].as_str().unwrap_or(""), fx, vat);
+    }
+    println!("(dry run — nothing written)");
+}
+
+fn render_vat_book(_ctx: &Ctx, d: &Value) {
+    let e = &d["entry"];
+    println!(
+        "entry #{}  [{}]  {}  {}",
+        e["id"], e["state"], e["date"], e["description"]
+    );
+    for p in e["postings"].as_array().unwrap_or(&Vec::new()) {
+        let name = p["account_name"].as_str().unwrap_or("");
+        let vat = p["vat_amount"].as_str().filter(|s| !s.is_empty()).map(|s| format!("  vat {s}")).unwrap_or_default();
+        println!(
+            "  {}  {}{} {}{}",
+            p["account_code"].as_str().unwrap_or(""),
+            name,
+            " ".repeat(28usize.saturating_sub(name.chars().count())),
+            p["amount"].as_str().unwrap_or(""),
+            vat
+        );
+    }
+}
+
+fn render_readout(_ctx: &Ctx, d: &Value) {
+    let fmt = |k: &str| d["fields"][k]["amount"].as_str().unwrap_or("").to_string();
+    println!(
+        "OB-AANGIFTE {} ({} .. {}) — manual filing aid",
+        d["period"].as_str().unwrap_or(""),
+        d["from"].as_str().unwrap_or(""),
+        d["to"].as_str().unwrap_or("")
+    );
+    println!("  1a  omzet hoog           {}", fmt("1a"));
+    println!("  1b  omzet laag           {}", fmt("1b"));
+    println!("  1c  omzet 0/vrijgesteld  {}", fmt("1c"));
+    println!("  1d  privégebruik         {}", fmt("1d"));
+    println!("  3a  inkopen hoog         {}", fmt("3a"));
+    println!("  3b  inkopen laag         {}", fmt("3b"));
+    println!("  3c  inkopen 0/verlegd    {}", fmt("3c"));
+    println!("  4a  verlegd binnenland   {}", fmt("4a"));
+    println!("  4b  verlegd EU           {}", fmt("4b"));
+    println!("  5a  verschuldigde btw    {}", fmt("5a"));
+    println!("  5b  voorbelasting        {}", fmt("5b"));
+    println!("  5d  te betalen/ontvangen {}", d["to_pay"].as_str().unwrap_or(""));
+    println!("  -> enter these amounts in Mijn Belastingdienst Zakelijk");
+}
+
+fn render_mark_filed(_ctx: &Ctx, d: &Value) {
+    println!("marked {} as filed", d["period"].as_str().unwrap_or(""));
+}
+
+fn render_fx_set(_ctx: &Ctx, d: &Value) {
+    println!(
+        "{} {}: {} ({})",
+        d["currency"].as_str().unwrap_or(""),
+        d["date"].as_str().unwrap_or(""),
+        d["rate"].as_str().unwrap_or(""),
+        d["source"].as_str().unwrap_or("")
+    );
+}
+
+fn render_fx_list(_ctx: &Ctx, d: &Value) {
+    let rows: Vec<Vec<String>> = d["rates"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|r| {
+                    vec![
+                        r["currency"].as_str().unwrap_or("").to_string(),
+                        r["date"].as_str().unwrap_or("").to_string(),
+                        r["rate"].as_str().unwrap_or("").to_string(),
+                        r["source"].as_str().unwrap_or("").to_string(),
+                    ]
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    table(&rows, &hdr(&["currency", "date", "rate", "source"]));
 }
 
 fn render_vat_codes(_ctx: &Ctx, d: &Value) {
