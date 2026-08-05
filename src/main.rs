@@ -5,6 +5,7 @@
 //!   failure -> { "ok": false, "error": { "code", "message" } }  (stdout, exit 1)
 //! With --json only the JSON document is printed; otherwise human text.
 
+use bukio_cli::bank;
 use bukio_cli::core::accounts;
 use bukio_cli::core::chart::DEFAULT_CHART;
 use bukio_cli::core::db;
@@ -33,6 +34,15 @@ fn default_actor() -> String {
 
 fn today_iso() -> String {
     chrono::Utc::now().date_naive().format("%Y-%m-%d").to_string()
+}
+
+/// Node's JSON.stringify renders whole-number floats as integers (0.0 -> 0).
+fn day_diff_json(d: f64) -> Value {
+    if d.fract() == 0.0 {
+        json!(d as i64)
+    } else {
+        json!(d)
+    }
 }
 
 /// Resolved command context: clap gives us Option fields, we resolve the
@@ -92,6 +102,11 @@ enum Command {
     Fx {
         #[command(subcommand)]
         cmd: FxCmd,
+    },
+    /// bank accounts, import and matching
+    Bank {
+        #[command(subcommand)]
+        cmd: BankCmd,
     },
     /// reports
     Report {
@@ -305,6 +320,123 @@ enum FxCmd {
     List(FxListArgs),
 }
 
+// --- bank -------------------------------------------------------------
+
+#[derive(Args)]
+struct BankAddArgs {
+    /// IBAN
+    #[arg(long)]
+    iban: String,
+    /// account name
+    #[arg(long)]
+    name: Option<String>,
+    /// linked ledger account
+    #[arg(long, default_value = "1100")]
+    account_code: String,
+}
+
+#[derive(Args)]
+struct BankImportArgs {
+    /// CAMT.053 XML or CSV file
+    #[arg(long)]
+    file: String,
+    /// IBAN of the bank account
+    #[arg(long)]
+    iban: String,
+    /// camt|csv|auto (auto detects XML vs CSV)
+    #[arg(long, default_value = "auto")]
+    format: String,
+    /// bank account name (if created)
+    #[arg(long)]
+    name: Option<String>,
+    /// linked ledger account
+    #[arg(long, default_value = "1100")]
+    account_code: String,
+}
+
+#[derive(Args)]
+struct BankTxListArgs {
+    /// filter by account
+    #[arg(long)]
+    iban: Option<String>,
+    /// unmatched|matched|ignored
+    #[arg(long)]
+    state: Option<String>,
+    /// max rows
+    #[arg(long, default_value = "200")]
+    limit: String,
+}
+
+#[derive(Args)]
+struct BankMatchAutoArgs {
+    /// max |date difference| in days
+    #[arg(long, default_value = "5")]
+    window_days: String,
+}
+
+#[derive(Args)]
+struct BankMatchLinkArgs {
+    /// bank transaction id
+    #[arg(long)]
+    tx: String,
+    /// entry id
+    #[arg(long)]
+    entry: String,
+    /// exact|fuzzy|rule|manual|agent
+    #[arg(long, default_value = "manual")]
+    method: String,
+}
+
+#[derive(Args)]
+struct BankMatchPostArgs {
+    /// bank transaction id
+    #[arg(long)]
+    tx: String,
+    /// counter account for the posting
+    #[arg(long)]
+    account: String,
+}
+
+#[derive(Args)]
+struct BankTxIdArgs {
+    /// bank transaction id
+    #[arg(long)]
+    tx: String,
+}
+
+#[derive(Subcommand)]
+enum BankMatchCmd {
+    /// auto-match unmatched transactions to posted entries
+    Auto(BankMatchAutoArgs),
+    /// list unmatched transactions with a proposed posting
+    Suggest,
+    /// link a transaction to an existing posted entry
+    Link(BankMatchLinkArgs),
+    /// post a new entry from an unmatched transaction (bank leg + counter leg)
+    Post(BankMatchPostArgs),
+}
+
+#[derive(Subcommand)]
+enum BankCmd {
+    /// register a bank account
+    Add(BankAddArgs),
+    /// list bank accounts with balances and state counts
+    List,
+    /// import bank transactions from CAMT.053 XML or bank CSV (idempotent)
+    Import(BankImportArgs),
+    /// list bank transactions
+    Transactions(BankTxListArgs),
+    /// match transactions to entries
+    Match {
+        #[command(subcommand)]
+        cmd: BankMatchCmd,
+    },
+    /// mark a transaction as ignored
+    Ignore(BankTxIdArgs),
+    /// re-open an ignored transaction
+    Unignore(BankTxIdArgs),
+}
+
 #[derive(Args)]
 struct FxSetArgs {
     /// ISO 4217 currency (3 letters)
@@ -397,6 +529,7 @@ fn main() {
         Command::Account { cmd } => cmd_account(&ctx, cmd),
         Command::Vat { cmd } => cmd_vat(&ctx, cmd),
         Command::Fx { cmd } => cmd_fx(&ctx, cmd),
+        Command::Bank { cmd } => cmd_bank(&ctx, cmd),
         Command::Report { cmd } => cmd_report(&ctx, cmd),
     };
     if let Err(e) = result {
@@ -885,6 +1018,218 @@ fn cmd_fx(ctx: &Ctx, cmd: &FxCmd) -> bukio_cli::Result<()> {
             let limit: i64 = a.limit.parse().unwrap_or(50);
             let rates = fx::list_fx_rates(&conn, a.currency.as_deref(), limit)?;
             emit(ctx, json!({ "rates": serde_json::to_value(&rates).unwrap() }), render_fx_list);
+            Ok(())
+        }
+    }
+}
+
+// --- bank handlers ------------------------------------------------------
+
+fn parse_bank_file(file: &str, format: &str, iban: Option<&str>) -> bukio_cli::Result<Vec<bank::BankTx>> {
+    let content = std::fs::read_to_string(file)
+        .map_err(|e| AppError::new("IO_ERROR", format!("cannot read {file}: {e}")))?;
+    let detected = if content.trim_start().starts_with('<') { "camt" } else { "csv" };
+    let fmt = if format != "auto" { format } else { detected };
+    match fmt {
+        "camt" => bank::parse_camt053(&content),
+        "csv" => bank::csv::parse_bank_csv(&content, iban),
+        other => Err(AppError::new("INVALID_FORMAT", format!("unknown format '{other}' (use camt|csv|auto)"))),
+    }
+}
+
+fn fmt_bank_tx(t: &bank::BankTxRow) -> Value {
+    json!({
+        "id": t.id, "date": t.date, "amount_cents": t.amount_cents, "amount": format_amount(t.amount_cents),
+        "counterparty": t.counterparty, "description": t.description, "iban_counter": t.iban_counter,
+        "iban": t.iban, "account_code": t.account_code, "state": t.state, "hash": t.hash,
+    })
+}
+
+fn cmd_bank(ctx: &Ctx, cmd: &BankCmd) -> bukio_cli::Result<()> {
+    match cmd {
+        BankCmd::Add(a) => {
+            let conn = ensure_db(ctx)?;
+            let account = bank::get_or_create_bank_account(&conn, &a.iban, a.name.as_deref(), &a.account_code)?;
+            emit(
+                ctx,
+                json!({ "bank_account": { "iban": account.iban, "name": account.name, "account_code": account.account_code, "id": account.id } }),
+                render_bank_add,
+            );
+            Ok(())
+        }
+        BankCmd::List => {
+            let conn = ensure_db(ctx)?;
+            let accounts: Vec<Value> = bank::list_bank_accounts(&conn)?
+                .iter()
+                .map(|a| {
+                    json!({
+                        "iban": a.iban, "name": a.name, "account_code": a.account_code,
+                        "transaction_count": a.transaction_count, "unmatched_count": a.unmatched_count,
+                        "balance_cents": a.balance_cents, "balance": format_amount(a.balance_cents),
+                    })
+                })
+                .collect();
+            emit(ctx, json!({ "accounts": accounts }), render_bank_list);
+            Ok(())
+        }
+        BankCmd::Import(a) => {
+            let transactions = parse_bank_file(&a.file, &a.format, Some(&a.iban))?;
+            let mut conn = ensure_db(ctx)?;
+            if ctx.dry_run {
+                let preview = bank::preview_import(&conn, &a.iban, &transactions)?;
+                let shown: Vec<Value> = transactions
+                    .iter()
+                    .take(10)
+                    .map(|t| {
+                        json!({
+                            "date": t.date, "amount_cents": t.amount_cents, "amount": format_amount(t.amount_cents),
+                            "counterparty": t.counterparty, "description": t.description,
+                            "iban_counter": t.iban_counter, "iban": t.iban,
+                        })
+                    })
+                    .collect();
+                emit(
+                    ctx,
+                    json!({
+                        "action": "import bank transactions", "file": a.file,
+                        "transactions": shown,
+                        "iban": preview.iban, "imported": preview.imported,
+                        "duplicates": preview.duplicates, "total": preview.total,
+                        "dryRun": true,
+                    }),
+                    render_bank_import_plan,
+                );
+            } else {
+                let result = bank::import_transactions(&mut conn, &a.iban, &transactions, a.name.as_deref(), &a.account_code, &ctx.actor)?;
+                emit(
+                    ctx,
+                    json!({ "iban": result.iban, "imported": result.imported, "duplicates": result.duplicates, "total": result.total, "dryRun": false }),
+                    render_bank_import,
+                );
+            }
+            Ok(())
+        }
+        BankCmd::Transactions(a) => {
+            let conn = ensure_db(ctx)?;
+            let limit: i64 = a.limit.parse().unwrap_or(200);
+            let rows = bank::list_transactions(&conn, a.state.as_deref(), a.iban.as_deref(), limit)?;
+            let data: Vec<Value> = rows.iter().map(fmt_bank_tx).collect();
+            emit(ctx, json!({ "transactions": data }), render_bank_tx_list);
+            Ok(())
+        }
+        BankCmd::Match { cmd } => cmd_bank_match(ctx, cmd),
+        BankCmd::Ignore(a) => {
+            let conn = ensure_db(ctx)?;
+            let id: i64 = a.tx.parse().map_err(|_| AppError::new("INVALID_ID", format!("tx '{}' is not an id", a.tx)))?;
+            let tx_row = bank::set_transaction_state(&conn, id, "ignored", &ctx.actor)?;
+            emit(ctx, json!({ "transaction": fmt_bank_tx(&tx_row) }), render_bank_ignore);
+            Ok(())
+        }
+        BankCmd::Unignore(a) => {
+            let conn = ensure_db(ctx)?;
+            let id: i64 = a.tx.parse().map_err(|_| AppError::new("INVALID_ID", format!("tx '{}' is not an id", a.tx)))?;
+            let tx_row = bank::set_transaction_state(&conn, id, "unmatched", &ctx.actor)?;
+            emit(ctx, json!({ "transaction": fmt_bank_tx(&tx_row) }), render_bank_unignore);
+            Ok(())
+        }
+    }
+}
+
+fn cmd_bank_match(ctx: &Ctx, cmd: &BankMatchCmd) -> bukio_cli::Result<()> {
+    match cmd {
+        BankMatchCmd::Auto(a) => {
+            let mut conn = ensure_db(ctx)?;
+            let window: i64 = a.window_days.parse().unwrap_or(5);
+            let result = bank::auto_match(&mut conn, window, &ctx.actor, ctx.dry_run)?;
+            let matched: Vec<Value> = result
+                .matched
+                .iter()
+                .map(|m| {
+                    let mut obj = serde_json::Map::new();
+                    obj.insert("kind".into(), json!(m.kind));
+                    obj.insert("tx_id".into(), json!(m.tx_id));
+                    obj.insert("tx_date".into(), json!(m.tx_date));
+                    obj.insert("amount_cents".into(), json!(m.amount_cents));
+                    obj.insert("description".into(), json!(m.description));
+                    obj.insert("counterparty".into(), json!(m.counterparty));
+                    if let Some(i) = m.invoice_id {
+                        obj.insert("invoice_id".into(), json!(i));
+                        obj.insert("invoice_number".into(), json!(m.invoice_number));
+                        obj.insert("contact_name".into(), json!(m.contact_name));
+                    }
+                    if let Some(e) = m.entry_id {
+                        obj.insert("entry_id".into(), json!(e));
+                        obj.insert("entry_date".into(), json!(m.entry_date));
+                        obj.insert("day_diff".into(), json!(m.day_diff.map(day_diff_json)));
+                    }
+                    obj.insert("method".into(), json!(m.method));
+                    obj.insert("confidence".into(), json!(m.confidence));
+                    // Node appends amount last via { ...m, amount }
+                    obj.insert("amount".into(), json!(format_amount(m.amount_cents)));
+                    Value::Object(obj)
+                })
+                .collect();
+            emit(
+                ctx,
+                json!({ "matched": matched, "unmatched_remaining": result.unmatched_remaining, "dryRun": ctx.dry_run }),
+                render_bank_match_auto,
+            );
+            Ok(())
+        }
+        BankMatchCmd::Suggest => {
+            let conn = ensure_db(ctx)?;
+            let rows = bank::suggest_unmatched(&conn)?;
+            let data: Vec<Value> = rows
+                .iter()
+                .map(|(t, suggested)| {
+                    let mut v = fmt_bank_tx(t);
+                    v.as_object_mut().unwrap().insert("suggested_account".into(), json!(suggested));
+                    v
+                })
+                .collect();
+            emit(ctx, json!({ "suggestions": data }), render_bank_suggest);
+            Ok(())
+        }
+        BankMatchCmd::Link(a) => {
+            let conn = ensure_db(ctx)?;
+            let tx_id: i64 = a.tx.parse().map_err(|_| AppError::new("INVALID_ID", format!("tx '{}' is not an id", a.tx)))?;
+            let entry_id: i64 = a.entry.parse().map_err(|_| AppError::new("INVALID_ID", format!("entry '{}' is not an id", a.entry)))?;
+            let tx_row = bank::link_transaction(&conn, tx_id, entry_id, &a.method, None, &ctx.actor)?;
+            emit(
+                ctx,
+                json!({ "transaction": fmt_bank_tx(&tx_row), "entry_id": entry_id }),
+                render_bank_link,
+            );
+            Ok(())
+        }
+        BankMatchCmd::Post(a) => {
+            let conn = ensure_db(ctx)?;
+            let tx_id: i64 = a.tx.parse().map_err(|_| AppError::new("INVALID_ID", format!("tx '{}' is not an id", a.tx)))?;
+            let tx_row = bank::get_transaction(&conn, tx_id)?.ok_or_else(|| {
+                AppError::new("NOT_FOUND", format!("bank transaction {tx_id} does not exist"))
+            })?;
+            if ctx.dry_run {
+                emit(
+                    ctx,
+                    json!({
+                        "action": "post entry from bank transaction",
+                        "tx": fmt_bank_tx(&tx_row),
+                        "postings": [
+                            { "code": tx_row.account_code, "amount_cents": tx_row.amount_cents, "amount": format_amount(tx_row.amount_cents) },
+                            { "code": a.account, "amount_cents": -tx_row.amount_cents, "amount": format_amount(-tx_row.amount_cents) },
+                        ],
+                        "dryRun": true,
+                    }),
+                    render_bank_post_plan,
+                );
+            } else {
+                let (_, entry) = bank::post_from_transaction(&conn, tx_id, &a.account, &ctx.actor, true)?;
+                emit(
+                    ctx,
+                    json!({ "entry_id": entry.meta.id, "state": entry.meta.state }),
+                    render_bank_post,
+                );
+            }
             Ok(())
         }
     }
@@ -1469,4 +1814,147 @@ fn render_vat_codes(_ctx: &Ctx, d: &Value) {
     for c in d["codes"].as_array().unwrap_or(&Vec::new()) {
         println!("{:<4} {}bp  {}", c["code"], c["rate_bp"], c["description"].as_str().unwrap_or(""));
     }
+}
+
+fn render_bank_add(_ctx: &Ctx, d: &Value) {
+    let b = &d["bank_account"];
+    println!(
+        "bank account {} ({}) -> ledger {}",
+        b["iban"].as_str().unwrap_or(""),
+        b["name"].as_str().unwrap_or("-"),
+        b["account_code"].as_str().unwrap_or("")
+    );
+}
+
+fn render_bank_list(_ctx: &Ctx, d: &Value) {
+    let rows: Vec<Vec<String>> = d["accounts"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|a| {
+                    vec![
+                        a["iban"].as_str().unwrap_or("").to_string(),
+                        a["name"].as_str().unwrap_or("").to_string(),
+                        a["account_code"].as_str().unwrap_or("").to_string(),
+                        a["transaction_count"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                        a["unmatched_count"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                        a["balance"].as_str().unwrap_or("").to_string(),
+                    ]
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    table(&rows, &hdr(&["iban", "name", "ledger", "tx", "unmatched", "balance"]));
+}
+
+fn render_bank_import_plan(_ctx: &Ctx, d: &Value) {
+    println!(
+        "plan: import {} transactions to {} — {} new, {} duplicate",
+        d["total"], d["iban"], d["imported"], d["duplicates"]
+    );
+    for t in d["transactions"].as_array().unwrap_or(&Vec::new()) {
+        println!(
+            "  {}  {:>12}  {}  {}",
+            t["date"].as_str().unwrap_or(""),
+            t["amount"].as_str().unwrap_or(""),
+            t["counterparty"].as_str().unwrap_or(""),
+            t["description"].as_str().unwrap_or("")
+        );
+    }
+    println!("(dry run — nothing written)");
+}
+
+fn render_bank_import(_ctx: &Ctx, d: &Value) {
+    println!(
+        "imported {} of {} transactions to {} ({} duplicates skipped)",
+        d["imported"], d["total"], d["iban"], d["duplicates"]
+    );
+}
+
+fn render_bank_tx_list(_ctx: &Ctx, d: &Value) {
+    let rows: Vec<Vec<String>> = d["transactions"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|t| {
+                    vec![
+                        t["id"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                        t["date"].as_str().unwrap_or("").to_string(),
+                        t["amount"].as_str().unwrap_or("").to_string(),
+                        t["state"].as_str().unwrap_or("").to_string(),
+                        t["counterparty"].as_str().unwrap_or("").to_string(),
+                        t["description"].as_str().unwrap_or("").to_string(),
+                    ]
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    table(&rows, &hdr(&["#", "date", "amount", "state", "counterparty", "description"]));
+}
+
+fn render_bank_match_auto(_ctx: &Ctx, d: &Value) {
+    let dry = d["dryRun"].as_bool().unwrap_or(false);
+    println!(
+        "auto-match: {} matched, {} unmatched remaining{}",
+        d["matched"].as_array().map(|a| a.len()).unwrap_or(0),
+        d["unmatched_remaining"],
+        if dry { " (dry run)" } else { "" }
+    );
+    for m in d["matched"].as_array().unwrap_or(&Vec::new()) {
+        if m["kind"].as_str() == Some("invoice") {
+            println!(
+                "  tx #{} {} {:>12} -> invoice {} ({})",
+                m["tx_id"], m["tx_date"], m["amount"], m["invoice_number"], m["contact_name"]
+            );
+        } else {
+            println!(
+                "  tx #{} {} {:>12} -> entry #{} ({}, {}d)",
+                m["tx_id"], m["tx_date"], m["amount"], m["entry_id"], m["method"], m["day_diff"]
+            );
+        }
+    }
+}
+
+fn render_bank_suggest(_ctx: &Ctx, d: &Value) {
+    let rows: Vec<Vec<String>> = d["suggestions"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|t| {
+                    vec![
+                        t["id"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                        t["date"].as_str().unwrap_or("").to_string(),
+                        t["amount"].as_str().unwrap_or("").to_string(),
+                        t["counterparty"].as_str().unwrap_or("").to_string(),
+                        t["suggested_account"].as_str().unwrap_or("").to_string(),
+                    ]
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    table(&rows, &hdr(&["#", "date", "amount", "counterparty", "suggest"]));
+}
+
+fn render_bank_link(_ctx: &Ctx, d: &Value) {
+    println!("linked tx #{} -> entry #{}", d["transaction"]["id"], d["entry_id"]);
+}
+
+fn render_bank_post_plan(_ctx: &Ctx, d: &Value) {
+    println!("plan: post entry from tx #{} ({})", d["tx"]["id"], d["tx"]["date"]);
+    for p in d["postings"].as_array().unwrap_or(&Vec::new()) {
+        println!("  {}  {}", p["code"], p["amount"]);
+    }
+    println!("(dry run — nothing written)");
+}
+
+fn render_bank_post(_ctx: &Ctx, d: &Value) {
+    println!("posted entry #{} from tx ({} state)", d["entry_id"], d["state"]);
+}
+
+fn render_bank_ignore(_ctx: &Ctx, d: &Value) {
+    println!("ignored tx #{}", d["transaction"]["id"]);
+}
+
+fn render_bank_unignore(_ctx: &Ctx, d: &Value) {
+    println!("re-opened tx #{}", d["transaction"]["id"]);
 }

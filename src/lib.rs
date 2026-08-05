@@ -5,9 +5,11 @@
 //! compatible with the Node version. Money is integer cents everywhere.
 
 pub mod audit;
+pub mod bank;
 pub mod core;
 pub mod error;
 pub mod fx;
+pub mod invoice;
 pub mod report;
 pub mod vat;
 

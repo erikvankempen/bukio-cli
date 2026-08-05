@@ -6,9 +6,7 @@
 
 use crate::core::accounts::{create_account_from_seed, get_account_by_code};
 use crate::core::chart::AccountSeed;
-use crate::core::entries::{
-    self, create_entry, parse_posting_specs, post_entry, Entry, PostingSpec,
-};
+use crate::core::entries::{create_entry, post_entry, Entry, PostingSpec};
 use crate::core::money::parse_amount;
 use crate::error::{AppError, Result};
 use regex::Regex;
@@ -71,7 +69,7 @@ pub struct VatEnableResult {
 
 /// Enable the VAT module: flag + VAT accounts + VAT codes. Idempotent.
 pub fn enable_vat_module(conn: &Connection, actor: &str) -> Result<VatEnableResult> {
-    let (vat_module, kor_flag): (i64, i64) = conn.query_row(
+    let (_vat_module, kor_flag): (i64, i64) = conn.query_row(
         "SELECT vat_module, kor_flag FROM company",
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),
@@ -414,7 +412,7 @@ pub fn ob_readout(conn: &Connection, period: &str) -> Result<ObReadout> {
     .into_iter()
     .collect();
 
-    for (amount_cents, vat_amount_cents, vat_code, rate_bp, vat_type, eu_reverse, account_type, _account_code) in rows {
+    for (amount_cents, vat_amount_cents, _vat_code, rate_bp, vat_type, eu_reverse, account_type, _account_code) in rows {
         let vat_amount = vat_amount_cents.unwrap_or(0);
         if vat_type == "standard" || vat_type == "exempt" {
             if account_type == "income" {

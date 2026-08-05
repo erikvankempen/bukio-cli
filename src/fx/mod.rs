@@ -10,7 +10,6 @@ use crate::error::{AppError, Result};
 use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
-use std::io::Read;
 use std::sync::OnceLock;
 
 const ISO4217: &str = r"^[A-Z]{3}$";
