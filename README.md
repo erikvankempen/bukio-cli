@@ -19,6 +19,8 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 
 **Status: Phase 5 complete (v0.8.0)** — ledger → bank/VAT → invoicing & recurring → jaarrekening → agent layer (MCP). Full pipeline in the [Roadmap](#roadmap).
 
+> **Rust port (branch `rust-port`) — IN PROGRESS.** bukio-cli is being reimplemented in Rust (single static binary, same SQLite schema + migrations verbatim, same `--json` output byte-for-byte). Ported and side-by-side parity-verified against the Node reference: core ledger (init/entries/accounts/audit), all four reports (JSON/CSV/XLSX), VAT module, FX/ECB, bank (CAMT.053 + CSV, matching), recurring + depreciation, and the full invoicing surface (create/finalize/credit/pay, UBL, Peppol, PDF via headless Chromium). **Not yet ported:** jaarrekening/year-end close, ICP, Phase 5 (MCP server, compliance calendar), the 199-test parity suite, and the Rust README/AGENTS.md. The Node implementation on `main` remains the source of truth until the port is complete. Build: `cargo build --release`; tests: `cargo test`.
+
 ## Features
 
 - **Agent-native** — every command emits deterministic `--json`; every mutation supports `--dry-run` (plan mode); every action lands in an append-only audit log with actor attribution (`--actor agent:<name>`).

@@ -13,6 +13,7 @@ use bukio_cli::core::db;
 use bukio_cli::core::entries::{self, parse_posting_specs};
 use bukio_cli::core::money::format_amount;
 use bukio_cli::fx;
+use bukio_cli::invoice;
 use bukio_cli::report;
 use bukio_cli::vat;
 use bukio_cli::AppError;
@@ -118,6 +119,16 @@ enum Command {
     Depreciation {
         #[command(subcommand)]
         cmd: DepreciationCmd,
+    },
+    /// contacts (invoice counterparties)
+    Contact {
+        #[command(subcommand)]
+        cmd: ContactCmd,
+    },
+    /// outgoing invoices
+    Invoice {
+        #[command(subcommand)]
+        cmd: InvoiceCmd,
     },
     /// reports
     Report {
@@ -543,6 +554,8 @@ fn main() {
         Command::Bank { cmd } => cmd_bank(&ctx, cmd),
         Command::Recurring { cmd } => cmd_recurring(&ctx, cmd),
         Command::Depreciation { cmd } => cmd_depreciation(&ctx, cmd),
+        Command::Contact { cmd } => cmd_contact(&ctx, cmd),
+        Command::Invoice { cmd } => cmd_invoice(&ctx, cmd),
         Command::Report { cmd } => cmd_report(&ctx, cmd),
     };
     if let Err(e) = result {
@@ -1617,6 +1630,571 @@ fn cmd_depreciation(ctx: &Ctx, cmd: &DepreciationCmd) -> bukio_cli::Result<()> {
             Ok(())
         }
     }
+}
+
+fn cmd_contact(ctx: &Ctx, cmd: &ContactCmd) -> bukio_cli::Result<()> {
+    match cmd {
+        ContactCmd::Add(a) => {
+            let conn = ensure_db(ctx)?;
+            let contact = invoice::create_contact(
+                &conn,
+                &a.name,
+                a.address.as_deref(),
+                a.postal_code.as_deref(),
+                a.city.as_deref(),
+                &a.country,
+                a.email.as_deref(),
+                a.vat_id.as_deref(),
+                a.kvk.as_deref(),
+                &ctx.actor,
+            )?;
+            emit(ctx, json!({ "contact": contact_json(&contact) }), render_contact);
+            Ok(())
+        }
+        ContactCmd::List => {
+            let conn = ensure_db(ctx)?;
+            let contacts = invoice::list_contacts(&conn)?;
+            let data: Vec<Value> = contacts
+                .iter()
+                .map(|c| {
+                    json!({
+                        "id": c.id,
+                        "name": c.name,
+                        "city": c.city,
+                        "vat_id": c.vat_id,
+                        "email": c.email,
+                    })
+                })
+                .collect();
+            emit(ctx, json!({ "contacts": data }), render_contact_list);
+            Ok(())
+        }
+    }
+}
+
+fn fmt_line(l: &invoice::InvoiceLine) -> Value {
+    json!({
+        "line_no": l.line_no,
+        "description": l.description,
+        "quantity": l.quantity,
+        "unit_price_cents": l.unit_price_cents,
+        "unit_price": format_amount(l.unit_price_cents),
+        "vat_code": l.vat_code,
+        "vat_rate_bp": l.vat_rate_bp,
+        "amount_cents": l.amount_cents,
+        "amount": format_amount(l.amount_cents),
+        "vat_amount_cents": l.vat_amount_cents,
+        "vat_amount": format_amount(l.vat_amount_cents),
+    })
+}
+
+fn fmt_invoice(inv: &invoice::Invoice) -> Value {
+    json!({
+        "id": inv.id,
+        "invoice_number": inv.invoice_number,
+        "invoice_type": inv.invoice_type,
+        "contact_id": inv.contact_id,
+        "contact_name": inv.contact.as_ref().map(|c| c.name.clone()),
+        "date": inv.date,
+        "due_date": inv.due_date,
+        "delivery_date": inv.delivery_date,
+        "status": inv.status,
+        "reference": inv.reference,
+        "notes": inv.notes,
+        "entry_id": inv.entry_id,
+        "credit_for_invoice_id": inv.credit_for_invoice_id,
+        "net_cents": inv.net_cents,
+        "vat_cents": inv.vat_cents,
+        "gross_cents": inv.gross_cents,
+        "paid_cents": inv.paid_cents,
+        "outstanding_cents": inv.gross_cents - inv.paid_cents,
+        "net": format_amount(inv.net_cents),
+        "vat": format_amount(inv.vat_cents),
+        "gross": format_amount(inv.gross_cents),
+        "paid": format_amount(inv.paid_cents),
+        "lines": inv.lines.iter().map(fmt_line).collect::<Vec<_>>(),
+        "payments": inv
+            .payments
+            .iter()
+            .map(|p| {
+                json!({
+                    "date": p.date,
+                    "amount": format_amount(p.amount_cents),
+                    "method": p.method,
+                })
+            })
+            .collect::<Vec<_>>(),
+    })
+}
+
+fn contact_json(c: &invoice::Contact) -> Value {
+    json!({
+        "id": c.id,
+        "name": c.name,
+        "address": c.address,
+        "postal_code": c.postal_code,
+        "city": c.city,
+        "country": c.country,
+        "email": c.email,
+        "vat_id": c.vat_id,
+        "kvk": c.kvk,
+        "created_by": c.created_by,
+        "created_at": c.created_at,
+    })
+}
+
+fn cmd_invoice(ctx: &Ctx, cmd: &InvoiceCmd) -> bukio_cli::Result<()> {
+    match cmd {
+        InvoiceCmd::Create(a) => {
+            let conn = ensure_db(ctx)?;
+            let lines = invoice::split_line_specs(&[a.lines.clone()]);
+            let specs: Vec<invoice::InvoiceLineSpec> = invoice::validate_invoice_lines(&conn, &lines)?
+                .into_iter()
+                .map(|p| invoice::InvoiceLineSpec {
+                    qty: p.qty,
+                    description: p.description,
+                    price_cents: p.price_cents,
+                    vat_code: p.vat_code,
+                })
+                .collect();
+            let contact_id: i64 = a.contact.parse().unwrap_or(0);
+            let contact_id = if contact_id == 0 {
+                let found = invoice::list_contacts(&conn)?
+                    .into_iter()
+                    .find(|c| c.name == a.contact)
+                    .ok_or_else(|| {
+                        AppError::new(
+                            "CONTACT_NOT_FOUND",
+                            format!("contact '{}' does not exist", a.contact),
+                        )
+                    })?;
+                found.id
+            } else {
+                contact_id
+            };
+            let inv = invoice::create_invoice(
+                &conn,
+                contact_id,
+                &specs,
+                &a.date,
+                Some(a.due_days.parse().unwrap_or(30)),
+                a.delivery_date.as_deref(),
+                a.description.as_deref(),
+                a.reference.as_deref(),
+                a.notes.as_deref(),
+                &ctx.actor,
+            )?;
+            emit(
+                ctx,
+                json!({ "invoice": fmt_invoice(&inv), "dryRun": false }),
+                render_invoice,
+            );
+            Ok(())
+        }
+        InvoiceCmd::Finalize(a) => {
+            let conn = ensure_db(ctx)?;
+            let id: i64 = a.id.parse().unwrap_or(0);
+            let result = invoice::finalize_invoice(&conn, id, &ctx.actor, ctx.dry_run)?;
+            if result.dry_run {
+                let postings: Vec<Value> = result
+                    .postings
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|p| {
+                        let mut obj = serde_json::Map::new();
+                        obj.insert("code".into(), json!(p.code));
+                        obj.insert("amountCents".into(), json!(p.amount_cents));
+                        if let Some(vc) = &p.vat_code {
+                            obj.insert("vatCode".into(), json!(vc));
+                        }
+                        if let Some(va) = p.vat_amount_cents {
+                            obj.insert("vatAmountCents".into(), json!(va));
+                        }
+                        obj.into()
+                    })
+                    .collect();
+                emit(
+                    ctx,
+                    json!({
+                        "invoice_number": result.invoice_number,
+                        "postings": postings,
+                        "net": result.net_cents,
+                        "vat": result.vat_cents,
+                        "gross": result.gross_cents,
+                        "dryRun": true,
+                    }),
+                    render_finalize_plan,
+                );
+            } else {
+                let inv = result.invoice.as_ref().unwrap();
+                emit(
+                    ctx,
+                    json!({
+                        "invoice": fmt_invoice(inv),
+                        "entry": { "id": result.entry_id, "state": result.entry_state },
+                        "dryRun": false,
+                    }),
+                    render_invoice,
+                );
+            }
+            Ok(())
+        }
+        InvoiceCmd::List(a) => {
+            let conn = ensure_db(ctx)?;
+            let list = invoice::list_invoices(&conn, a.status.as_deref(), a.inv_type.as_deref())?;
+            let data: Vec<Value> = list.iter().map(fmt_invoice).collect();
+            emit(ctx, json!({ "invoices": data }), render_invoice_list);
+            Ok(())
+        }
+        InvoiceCmd::Show(a) => {
+            let conn = ensure_db(ctx)?;
+            let id: i64 = a.id.parse().unwrap_or(0);
+            let inv = invoice::get_invoice(&conn, id)?.ok_or_else(|| {
+                AppError::new("NOT_FOUND", format!("invoice {id} does not exist"))
+            })?;
+            emit(ctx, json!({ "invoice": fmt_invoice(&inv) }), render_invoice);
+            Ok(())
+        }
+        InvoiceCmd::Pdf(a) => {
+            let conn = ensure_db(ctx)?;
+            let id: i64 = a.id.parse().unwrap_or(0);
+            let inv = invoice::get_invoice(&conn, id)?.ok_or_else(|| {
+                AppError::new("NOT_FOUND", format!("invoice {id} does not exist"))
+            })?;
+            let out = a
+                .out
+                .clone()
+                .unwrap_or_else(|| format!("invoice-{}.pdf", inv.invoice_number.as_deref().unwrap_or("draft")));
+            let (bytes, path) = invoice::invoice_to_pdf(&conn, &inv, &out)?;
+            emit(
+                ctx,
+                json!({ "path": path, "bytes": bytes }),
+                |_c, d| println!("wrote {} ({} bytes)", d["path"], d["bytes"]),
+            );
+            Ok(())
+        }
+        InvoiceCmd::Ubl(a) => {
+            let conn = ensure_db(ctx)?;
+            let id: i64 = a.id.parse().unwrap_or(0);
+            let inv = invoice::get_invoice(&conn, id)?.ok_or_else(|| {
+                AppError::new("NOT_FOUND", format!("invoice {id} does not exist"))
+            })?;
+            let xml = invoice::invoice_to_ubl(&conn, &inv)?;
+            if let Some(out) = &a.out {
+                std::fs::write(out, &xml)
+                    .map_err(|e| AppError::new("IO_ERROR", format!("cannot write {out}: {e}")))?;
+                emit(ctx, json!({ "path": out, "bytes": xml.len() }), |_c, d| {
+                    println!("wrote {} ({} bytes)", d["path"], d["bytes"])
+                });
+            } else {
+                emit(ctx, json!({ "ubl": xml }), |_c, d| {
+                    println!("{}", d["ubl"].as_str().unwrap_or(""))
+                });
+            }
+            Ok(())
+        }
+        InvoiceCmd::Credit(a) => {
+            let conn = ensure_db(ctx)?;
+            let id: i64 = a.id.parse().unwrap_or(0);
+            let credit = invoice::credit_invoice(
+                &conn,
+                id,
+                a.date.as_deref(),
+                a.reason.as_deref(),
+                &ctx.actor,
+            )?;
+            emit(
+                ctx,
+                json!({ "invoice": fmt_invoice(&credit), "dryRun": false }),
+                render_invoice,
+            );
+            Ok(())
+        }
+        InvoiceCmd::PeppolSend(a) => {
+            let conn = ensure_db(ctx)?;
+            let id: i64 = a.id.parse().unwrap_or(0);
+            let inv = invoice::get_invoice(&conn, id)?.ok_or_else(|| {
+                AppError::new("NOT_FOUND", format!("invoice {id} does not exist"))
+            })?;
+            let result = invoice::send_peppol_invoice(&conn, &inv, a.endpoint.as_deref(), ctx.dry_run)?;
+            emit(ctx, result, |_c, d| {
+                println!(
+                    "peppol {}: invoice {} -> {}",
+                    if d["dryRun"].as_bool().unwrap_or(false) { "dry-run" } else { "sent" },
+                    d["invoice_number"].as_str().unwrap_or(""),
+                    d["endpoint"].as_str().unwrap_or(""),
+                );
+                if let Some(status) = d["status"].as_u64() {
+                    println!("provider status {status}");
+                }
+                if let Some(body) = d["response"].as_str() {
+                    println!("{body}");
+                }
+            });
+            Ok(())
+        }
+        InvoiceCmd::Pay(a) => {
+            let conn = ensure_db(ctx)?;
+            let id: i64 = a.id.parse().unwrap_or(0);
+            let amount_cents = match &a.amount {
+                Some(amt) => (amt.parse::<f64>().unwrap_or(0.0) * 100.0).round() as i64,
+                None => {
+                    let inv = invoice::get_invoice(&conn, id)?.ok_or_else(|| {
+                        AppError::new("NOT_FOUND", format!("invoice {id} does not exist"))
+                    })?;
+                    inv.gross_cents - inv.paid_cents
+                }
+            };
+            let inv = invoice::mark_paid(
+                &conn,
+                id,
+                &a.date,
+                amount_cents,
+                &a.method,
+                None,
+                &ctx.actor,
+            )?;
+            emit(ctx, json!({ "invoice": fmt_invoice(&inv) }), render_invoice);
+            Ok(())
+        }
+    }
+}
+
+fn render_contact(_ctx: &Ctx, d: &Value) {
+    let c = &d["contact"];
+    println!(
+        "contact #{}  {}  ({})",
+        c["id"], c["name"], c["country"]
+    );
+    println!(
+        "  {}  {}  {}",
+        c["address"].as_str().unwrap_or(""),
+        c["postal_code"].as_str().unwrap_or(""),
+        c["city"].as_str().unwrap_or("")
+    );
+    if let Some(vat) = c["vat_id"].as_str() {
+        println!("  BTW {vat}");
+    }
+}
+
+fn render_contact_list(_ctx: &Ctx, d: &Value) {
+    let rows: Vec<Vec<String>> = d["contacts"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|c| {
+                    vec![
+                        c["id"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                        c["name"].as_str().unwrap_or("").to_string(),
+                        c["city"].as_str().unwrap_or("").to_string(),
+                        c["vat_id"].as_str().unwrap_or("").to_string(),
+                    ]
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    table(&rows, &hdr(&["#", "name", "city", "vat"]));
+}
+
+fn render_invoice(_ctx: &Ctx, d: &Value) {
+    let inv = d["invoice"].as_object().unwrap();
+    println!(
+        "invoice #{}  {}  [{}]  {}  {}",
+        inv["id"].as_i64().unwrap_or(0),
+        inv["invoice_number"].as_str().unwrap_or("concept"),
+        inv["status"].as_str().unwrap_or(""),
+        inv["date"].as_str().unwrap_or(""),
+        inv["gross"].as_str().unwrap_or("")
+    );
+    if let Some(c) = inv["contact"].as_object() {
+        println!("  to: {}", c["name"].as_str().unwrap_or(""));
+    }
+    for l in inv["lines"].as_array().unwrap_or(&Vec::new()) {
+        println!(
+            "  {}x {:<40} {:>10}",
+            l["quantity"].as_i64().unwrap_or(0),
+            l["description"].as_str().unwrap_or(""),
+            l["amount"].as_str().unwrap_or("")
+        );
+    }
+    println!(
+        "  net {}  vat {}  gross {}  paid {}",
+        inv["net"].as_str().unwrap_or(""),
+        inv["vat"].as_str().unwrap_or(""),
+        inv["gross"].as_str().unwrap_or(""),
+        inv["paid"].as_str().unwrap_or("")
+    );
+}
+
+fn render_invoice_list(_ctx: &Ctx, d: &Value) {
+    let rows: Vec<Vec<String>> = d["invoices"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|inv| {
+                    vec![
+                        inv["id"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                        inv["invoice_number"].as_str().unwrap_or("concept").to_string(),
+                        inv["invoice_type"].as_str().unwrap_or("").to_string(),
+                        inv["status"].as_str().unwrap_or("").to_string(),
+                        inv["date"].as_str().unwrap_or("").to_string(),
+                        inv["gross"].as_str().unwrap_or("").to_string(),
+                    ]
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    table(&rows, &hdr(&["#", "number", "type", "status", "date", "gross"]));
+}
+
+fn render_finalize_plan(_ctx: &Ctx, d: &Value) {
+    println!(
+        "plan: finalize invoice as {} (net {} vat {} gross {})",
+        d["invoice_number"].as_str().unwrap_or(""),
+        d["net"].as_str().unwrap_or(""),
+        d["vat"].as_str().unwrap_or(""),
+        d["gross"].as_str().unwrap_or("")
+    );
+    for p in d["postings"].as_array().unwrap_or(&Vec::new()) {
+        println!("  {}  {}", p["code"].as_str().unwrap_or(""), p["amount"].as_str().unwrap_or(""));
+    }
+    println!("(dry run — nothing written)");
+}
+
+#[derive(Subcommand)]
+enum ContactCmd {
+    /// add a contact
+    Add(ContactAddArgs),
+    /// list contacts
+    List,
+}
+
+#[derive(Args)]
+struct ContactAddArgs {
+    #[arg(long)]
+    name: String,
+    #[arg(long)]
+    address: Option<String>,
+    #[arg(long)]
+    postal_code: Option<String>,
+    #[arg(long)]
+    city: Option<String>,
+    #[arg(long, default_value = "NL")]
+    country: String,
+    #[arg(long)]
+    email: Option<String>,
+    #[arg(long)]
+    vat_id: Option<String>,
+    #[arg(long)]
+    kvk: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum InvoiceCmd {
+    /// create a draft invoice (compliance-validated at finalize)
+    Create(InvoiceCreateArgs),
+    /// assign the sequential number and book the entry
+    Finalize(InvoiceFinalizeArgs),
+    /// list invoices
+    List(InvoiceListArgs),
+    /// show one invoice with lines and payments
+    Show(InvoiceShowArgs),
+    /// render the invoice to PDF (headless Chromium)
+    Pdf(InvoicePdfArgs),
+    /// export UBL 2.1 / Peppol BIS 3.0 XML
+    Ubl(InvoiceUblArgs),
+    /// create a credit note (draft) for a finalized sales invoice
+    Credit(InvoiceCreditArgs),
+    /// send the invoice to a Peppol access-point provider
+    PeppolSend(InvoicePeppolArgs),
+    /// record a payment (tracking; the posting comes from the bank flow)
+    Pay(InvoicePayArgs),
+}
+
+#[derive(Args)]
+struct InvoiceCreateArgs {
+    #[arg(long)]
+    contact: String,
+    #[arg(long)]
+    lines: String,
+    #[arg(long)]
+    date: String,
+    #[arg(long, default_value = "30")]
+    due_days: String,
+    #[arg(long)]
+    delivery_date: Option<String>,
+    #[arg(long)]
+    description: Option<String>,
+    #[arg(long)]
+    reference: Option<String>,
+    #[arg(long)]
+    notes: Option<String>,
+}
+
+#[derive(Args)]
+struct InvoiceFinalizeArgs {
+    #[arg(long)]
+    id: String,
+}
+
+#[derive(Args)]
+struct InvoiceListArgs {
+    #[arg(long)]
+    status: Option<String>,
+    #[arg(long)]
+    inv_type: Option<String>,
+}
+
+#[derive(Args)]
+struct InvoiceShowArgs {
+    #[arg(long)]
+    id: String,
+}
+
+#[derive(Args)]
+struct InvoicePdfArgs {
+    #[arg(long)]
+    id: String,
+    #[arg(long)]
+    out: Option<String>,
+}
+
+#[derive(Args)]
+struct InvoiceUblArgs {
+    #[arg(long)]
+    id: String,
+    #[arg(long)]
+    out: Option<String>,
+}
+
+#[derive(Args)]
+struct InvoiceCreditArgs {
+    #[arg(long)]
+    id: String,
+    #[arg(long)]
+    date: Option<String>,
+    #[arg(long)]
+    reason: Option<String>,
+}
+
+#[derive(Args)]
+struct InvoicePeppolArgs {
+    #[arg(long)]
+    id: String,
+    #[arg(long)]
+    endpoint: Option<String>,
+}
+
+#[derive(Args)]
+struct InvoicePayArgs {
+    #[arg(long)]
+    id: String,
+    #[arg(long)]
+    date: String,
+    #[arg(long)]
+    amount: Option<String>,
+    #[arg(long, default_value = "bank")]
+    method: String,
 }
 
 // --- report ---------------------------------------------------------------
