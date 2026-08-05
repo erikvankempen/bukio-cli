@@ -1,21 +1,67 @@
+<div align="center">
+
 # bukio-cli
 
-**Agent-first double-entry bookkeeping for Dutch SMEs.** Runs natively on a VPS, stores everything in a local SQLite database, and is designed so AI agents — not just humans — can operate it safely and auditably.
+**Agent-first double-entry bookkeeping for Dutch SMEs.**
 
-- **Agent-native** — every command emits deterministic `--json`; every mutation supports `--dry-run` (plan mode); every action lands in an append-only audit log.
-- **VAT optional** — the core ledger is VAT-agnostic. A KOR / non-VAT entity never touches VAT concepts. The VAT module (Phase 2) adds codes, returns and a manual-filing readout when enabled.
-- **Single company per database** — a second company = a second database (flag `--db` or env `BUKIO_DB`).
-- **No automated tax filing** — bukio-cli never submits anything to the Belastingdienst. It computes what you need and you file manually.
-- **Local-first** — no cloud dependency, no lock-in. Your 7-year administration stays yours.
+VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
----
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-v0.8.0-2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
+[![Tests](https://img.shields.io/badge/tests-199%20passing-brightgreen)](AGENTS.md)
+[![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
+[![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
+
+</div>
+
+bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a VPS, stores everything in one local SQLite file, and is designed so AI agents — not just humans — can operate it safely and auditably. It is built for the Dutch B2B e-invoicing mandate: every invoice ends as a compliant PDF, a Peppol BIS 3.0 UBL document, and a sendable Peppol message.
+
+**Status: Phase 5 complete (v0.8.0)** — ledger → bank/VAT → invoicing & recurring → jaarrekening → agent layer (MCP). Full pipeline in the [Roadmap](#roadmap).
+
+## Features
+
+- **Agent-native** — every command emits deterministic `--json`; every mutation supports `--dry-run` (plan mode); every action lands in an append-only audit log with actor attribution (`--actor agent:<name>`).
+- **VAT optional** — the core ledger is VAT-agnostic. The optional VAT module adds codes, the OB readout (fields 1a–5d) and KOR support when you need them. Filing always stays manual — bukio never submits anything.
+- **Peppol BIS 3.0 ready** — the 2027 mandate in one loop: `finalize → PDF → UBL → peppol-send`.
+- **FX built in** — book foreign-currency purchase invoices in USD, GBP, …; rates resolve from your rate store or straight from the ECB.
+- **One company per database** — a second company is a second SQLite file (`--db` or `BUKIO_DB`).
+- **Local-first** — no cloud, no lock-in. Your 7-year administration stays yours.
+
+## Quick start
+
+```bash
+# install
+git clone https://github.com/erikvankempen/bukio-cli.git
+cd bukio-cli && npm install && npm link        # exposes `bukio` on PATH
+
+# create a company (dry-run first — it writes nothing)
+bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on --dry-run
+bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on
+
+# post the opening capital, book an expense, check the books
+bukio entry add --date 2026-08-04 --desc "Startkapitaal" \
+  --postings "1100:10000.00,3000:-10000.00" --post
+bukio entry add --date 2026-08-05 --desc "Kantoorartikelen" \
+  --postings "4300:250.00,1100:-250.00" --post
+bukio report trial-balance        # → balanced: true
+```
+
+Or let an agent do it — `bukio mcp` speaks the Model Context Protocol over stdio:
+
+```bash
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"trial_balance","arguments":{}}}' \
+| bukio mcp
+```
 
 ## Table of Contents
 
-1. [Status](#status)
-2. [Requirements & Install](#requirements--install)
-3. [Core Concepts](#core-concepts)
-4. [Quickstart](#quickstart)
+1. [Features](#features)
+2. [Quick start](#quick-start)
+3. [Requirements & Install](#requirements--install)
+4. [Core Concepts](#core-concepts)
 5. [Command Reference](#command-reference)
 6. [Global Flags](#global-flags)
 7. [Money Format](#money-format)
@@ -27,12 +73,6 @@
 13. [Error Codes](#error-codes)
 14. [Common Tasks](#common-tasks)
 15. [Roadmap](#roadmap)
-
----
-
-## Status
-
-**Phase 5 — Agent layer: complete ✅ (v0.8.0).** MCP server (stdio, plan-only by default, `BUKIO_MCP_READONLY`), FX translation for foreign-currency purchase invoices (rates store, auto lookup, auditable conversion), and the compliance calendar (OB/ICP deadlines, jaarrekening deposit). NL query = an agent on top of the MCP tools. See [Roadmap](#roadmap).
 
 ---
 
@@ -96,32 +136,6 @@ An **append-only** log of every mutation: actor, action, command, JSON args, out
 ### Amounts
 
 All money is stored as **integer cents** (`amount_cents`). There are no floats anywhere in financial code paths. See [Money Format](#money-format).
-
----
-
-## Quickstart
-
-```bash
-# 1. Initialise a company (dry-run first — it writes nothing)
-bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on --dry-run
-
-# 2. Actually initialise (creates ~/.bukio/bukio.db + 14-account chart)
-bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on
-
-# 3. Post the opening capital (positive = debit, negative = credit)
-bukio entry add --date 2026-08-04 --desc "Startkapitaal" \
-  --postings "1100:10000.00,3000:-10000.00" --post
-
-# 4. Book an expense
-bukio entry add --date 2026-08-05 --desc "Kantoorartikelen" \
-  --postings "4300:250.00,1100:-250.00" --post
-
-# 5. Check the books balance
-bukio report trial-balance
-
-# 6. See who did what
-bukio audit
-```
 
 ---
 
@@ -778,7 +792,7 @@ bukio init --name "Mijn ZZP" --kor
 | 2 | Bank import (CAMT.053/CSV), matching; optional VAT module (codes, OB readout, KOR) | ✅ done |
 | 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes, payment matching, recurring entries **+ recurring invoices + Peppol send** | Compliant invoice PDF + UBL per invoice; due entries generated & posted on time | ✅ done (v0.6.0) |
 | 4 | Jaarrekening micro/klein models, closing entries, KVK package, ICP readout | Jaarrekening package for a micro BV — **✅ done (v0.7.0, 178 tests green)** | planned |
-| 5 | Agent layer: MCP server, permissions/approval gates, NL query, AI categorization suggestions, compliance calendar, FX translation | Agent closes a month end-to-end with zero unsupervised mutations — **✅ done (v0.8.0, 191 tests green)** | planned |
+| 5 | Agent layer: MCP server, permissions/approval gates, NL query, AI categorization suggestions, compliance calendar, FX translation | Agent closes a month end-to-end with zero unsupervised mutations — **✅ done (v0.8.0, 199 tests green)** | planned |
 | 6 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
