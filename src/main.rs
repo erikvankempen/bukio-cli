@@ -6,6 +6,7 @@
 //! With --json only the JSON document is printed; otherwise human text.
 
 use bukio_cli::bank;
+use bukio_cli::recurring;
 use bukio_cli::core::accounts;
 use bukio_cli::core::chart::DEFAULT_CHART;
 use bukio_cli::core::db;
@@ -107,6 +108,16 @@ enum Command {
     Bank {
         #[command(subcommand)]
         cmd: BankCmd,
+    },
+    /// recurring entries: templates, schedule, generation
+    Recurring {
+        #[command(subcommand)]
+        cmd: RecurringCmd,
+    },
+    /// depreciation schedules (linear, remainder-adjusted final run)
+    Depreciation {
+        #[command(subcommand)]
+        cmd: DepreciationCmd,
     },
     /// reports
     Report {
@@ -530,6 +541,8 @@ fn main() {
         Command::Vat { cmd } => cmd_vat(&ctx, cmd),
         Command::Fx { cmd } => cmd_fx(&ctx, cmd),
         Command::Bank { cmd } => cmd_bank(&ctx, cmd),
+        Command::Recurring { cmd } => cmd_recurring(&ctx, cmd),
+        Command::Depreciation { cmd } => cmd_depreciation(&ctx, cmd),
         Command::Report { cmd } => cmd_report(&ctx, cmd),
     };
     if let Err(e) = result {
@@ -1262,6 +1275,350 @@ fn vat_fmt_entry(entry: &entries::Entry) -> Value {
     })
 }
 
+// --- recurring ------------------------------------------------------------
+
+#[derive(Subcommand)]
+enum RecurringCmd {
+    /// create a recurring template (entry postings or subscription invoices)
+    Add(RecurringAddArgs),
+    /// list recurring templates
+    List(RecurringListArgs),
+    /// show one template with its postings
+    Show(RecurringIdArgs),
+    /// pause a template
+    Pause(RecurringIdArgs),
+    /// resume a paused template
+    Resume(RecurringIdArgs),
+    /// show what is due (no writes)
+    Preview(RecurringRunArgs),
+    /// generate all due entries (idempotent, backfills missed periods)
+    Run(RecurringRunArgs),
+}
+
+#[derive(Args)]
+struct RecurringAddArgs {
+    /// template name (also the entry description prefix)
+    #[arg(long)]
+    name: String,
+    /// template kind
+    #[arg(long, default_value = "entry")]
+    kind: String,
+    /// contact id (required for --kind invoice)
+    #[arg(long)]
+    contact: Option<String>,
+    /// invoice line specs "[QTYx] DESC @ PRICE [@ VATCODE]" (invoice kind)
+    #[arg(long)]
+    lines: Option<String>,
+    /// posting specs, comma-separated (entry kind)
+    #[arg(long)]
+    postings: Option<String>,
+    /// one of monthly, quarterly, yearly
+    #[arg(long)]
+    frequency: String,
+    /// first run date
+    #[arg(long)]
+    start: String,
+    /// day of period to book on (1-28)
+    #[arg(long, default_value = "1")]
+    day: String,
+    /// last run date
+    #[arg(long)]
+    end: Option<String>,
+    /// maximum number of runs
+    #[arg(long)]
+    runs: Option<String>,
+    /// payment term for invoice templates (days)
+    #[arg(long, default_value = "30")]
+    due_days: String,
+    /// template description
+    #[arg(long)]
+    desc: Option<String>,
+    /// accrual pattern: reverse the previous generated entry on each run
+    #[arg(long)]
+    reverse_previous: bool,
+}
+
+#[derive(Args)]
+struct RecurringListArgs {
+    /// active|paused|completed|all
+    #[arg(long, default_value = "active")]
+    status: String,
+}
+
+#[derive(Args)]
+struct RecurringIdArgs {
+    /// template id
+    #[arg(long)]
+    id: String,
+}
+
+#[derive(Args)]
+struct RecurringRunArgs {
+    /// reference date (default today)
+    #[arg(long)]
+    as_of: Option<String>,
+    /// only this template
+    #[arg(long)]
+    template: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum DepreciationCmd {
+    /// create a monthly depreciation template for an asset
+    Add(DepreciationAddArgs),
+}
+
+#[derive(Args)]
+struct DepreciationAddArgs {
+    /// asset name
+    #[arg(long)]
+    name: String,
+    /// purchase cost (e.g. 5370.00)
+    #[arg(long)]
+    cost: String,
+    /// useful life in months
+    #[arg(long)]
+    life_months: String,
+    /// first depreciation month
+    #[arg(long)]
+    start: String,
+    /// asset account
+    #[arg(long, default_value = "1800")]
+    asset: String,
+    /// depreciation expense account
+    #[arg(long, default_value = "4600")]
+    expense: String,
+    /// residual value at end of life
+    #[arg(long, default_value = "0")]
+    residual: String,
+    /// template description
+    #[arg(long)]
+    desc: Option<String>,
+}
+
+// --- recurring handlers ---------------------------------------------------
+
+fn fmt_postings(postings: &[recurring::TemplatePosting]) -> Vec<Value> {
+    postings
+        .iter()
+        .map(|p| {
+            json!({
+                "code": p.code,
+                "amount_cents": p.amount_cents,
+                "amount": format_amount(p.amount_cents),
+                "vat_code": p.vat_code,
+            })
+        })
+        .collect()
+}
+
+fn fmt_template(t: &recurring::Template) -> Value {
+    json!({
+        "id": t.id, "name": t.name, "description": t.description,
+        "kind": t.kind, "contact_id": t.contact_id,
+        "invoice_lines": t.invoice_lines,
+        "frequency": t.frequency, "day_of_period": t.day_of_period,
+        "start_date": t.start_date, "end_date": t.end_date, "runs": t.runs,
+        "status": t.status, "next_run_date": t.next_run_date, "last_run_date": t.last_run_date,
+        "runs_done": t.runs_done, "reverse_previous": t.reverse_previous,
+        "vat_aware": t.vat_aware,
+        "postings": fmt_postings(&t.postings),
+        "final_postings": t.final_postings.as_ref().map(|fp| fmt_postings(fp)),
+    })
+}
+
+fn cmd_recurring(ctx: &Ctx, cmd: &RecurringCmd) -> bukio_cli::Result<()> {
+    match cmd {
+        RecurringCmd::Add(a) => {
+            let conn = ensure_db(ctx)?;
+            let day: i64 = a.day.parse().unwrap_or(1);
+            let runs: Option<i64> = a.runs.as_deref().map(|r| r.parse().unwrap_or(0));
+            let contact: Option<i64> = a.contact.as_deref().map(|c| c.parse().unwrap_or(0));
+            let postings: Vec<String> = a
+                .postings
+                .as_deref()
+                .map(|p| p.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                .unwrap_or_default();
+            let lines: Option<Vec<String>> = a
+                .lines
+                .as_deref()
+                .map(|l| l.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect());
+            if ctx.dry_run {
+                emit(
+                    ctx,
+                    json!({
+                        "action": "create recurring template",
+                        "kind": a.kind, "name": a.name, "frequency": a.frequency,
+                        "day_of_period": day, "start_date": a.start,
+                        "end_date": a.end, "runs": runs,
+                        "reverse_previous": a.reverse_previous,
+                        "contact": contact, "postings": a.postings, "lines": a.lines,
+                        "dryRun": true,
+                    }),
+                    render_recurring_add_plan,
+                );
+                return Ok(());
+            }
+            let tpl = recurring::create_template(
+                &conn,
+                &a.name,
+                a.desc.as_deref(),
+                &a.frequency,
+                day,
+                &a.start,
+                a.end.as_deref(),
+                runs,
+                &postings,
+                a.reverse_previous,
+                &ctx.actor,
+                &a.kind,
+                contact,
+                lines.as_deref(),
+                Some(a.due_days.parse().unwrap_or(30)),
+            )?;
+            emit(ctx, json!({ "template": fmt_template(&tpl), "dryRun": false }), render_recurring_add);
+            Ok(())
+        }
+        RecurringCmd::List(a) => {
+            let conn = ensure_db(ctx)?;
+            let rows = recurring::list_templates(&conn, &a.status)?;
+            let data: Vec<Value> = rows.iter().map(fmt_template).collect();
+            emit(ctx, json!({ "templates": data }), render_recurring_list);
+            Ok(())
+        }
+        RecurringCmd::Show(a) => {
+            let conn = ensure_db(ctx)?;
+            let id: i64 = a.id.parse().map_err(|_| AppError::new("INVALID_ID", format!("id '{}' is not a number", a.id)))?;
+            let tpl = recurring::get_template(&conn, id)?.ok_or_else(|| {
+                AppError::new("NOT_FOUND", format!("recurring template {id} does not exist"))
+            })?;
+            emit(ctx, json!({ "template": fmt_template(&tpl) }), render_recurring_show);
+            Ok(())
+        }
+        RecurringCmd::Pause(a) => {
+            let conn = ensure_db(ctx)?;
+            let id: i64 = a.id.parse().map_err(|_| AppError::new("INVALID_ID", format!("id '{}' is not a number", a.id)))?;
+            let tpl = recurring::set_template_status(&conn, id, "paused", &ctx.actor)?;
+            emit(ctx, json!({ "template": fmt_template(&tpl) }), |_c, d| println!("paused template #{}", d["template"]["id"]));
+            Ok(())
+        }
+        RecurringCmd::Resume(a) => {
+            let conn = ensure_db(ctx)?;
+            let id: i64 = a.id.parse().map_err(|_| AppError::new("INVALID_ID", format!("id '{}' is not a number", a.id)))?;
+            let tpl = recurring::set_template_status(&conn, id, "active", &ctx.actor)?;
+            emit(ctx, json!({ "template": fmt_template(&tpl) }), |_c, d| println!("resumed template #{}", d["template"]["id"]));
+            Ok(())
+        }
+        RecurringCmd::Preview(a) => {
+            let mut conn = ensure_db(ctx)?;
+            let tid: Option<i64> = a.template.as_deref().map(|t| t.parse().unwrap_or(0));
+            let plan = recurring::preview_due(&mut conn, a.as_of.as_deref(), tid)?;
+            emit(ctx, plan, render_recurring_preview);
+            Ok(())
+        }
+        RecurringCmd::Run(a) => {
+            let mut conn = ensure_db(ctx)?;
+            let tid: Option<i64> = a.template.as_deref().map(|t| t.parse().unwrap_or(0));
+            let result = recurring::run_due(&mut conn, a.as_of.as_deref(), tid, &ctx.actor, ctx.dry_run, 120)?;
+            // CLI shape (mirrors Node): {template_id, name, ok, error ?? null,
+            // runs: [{kind, entries}]} — kind omitted for real runs, 'entry'
+            // for dry-run entry sims.
+            let mapped: Vec<Value> = result["templates"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .map(|t| {
+                            let runs: Vec<Value> = t["runs"]
+                                .as_array()
+                                .map(|runs| {
+                                    runs.iter()
+                                        .map(|r| {
+                                            if r.get("entries").is_some() {
+                                                json!({ "entries": r["entries"] })
+                                            } else {
+                                                let kind = if r["kind"] == "invoice" {
+                                                    "invoice"
+                                                } else {
+                                                    "entry"
+                                                };
+                                                json!({ "kind": kind, "entries": [r["entry"]] })
+                                            }
+                                        })
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            json!({
+                                "template_id": t["template_id"],
+                                "name": t["name"],
+                                "ok": t["ok"],
+                                "error": t.get("error").cloned().unwrap_or(Value::Null),
+                                "runs": runs,
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            emit(
+                ctx,
+                json!({ "as_of": result["as_of"], "dry_run": result["dry_run"], "templates": mapped }),
+                render_recurring_run,
+            );
+            Ok(())
+        }
+    }
+}
+
+fn cmd_depreciation(ctx: &Ctx, cmd: &DepreciationCmd) -> bukio_cli::Result<()> {
+    match cmd {
+        DepreciationCmd::Add(a) => {
+            let conn = ensure_db(ctx)?;
+            let cost_cents = (a.cost.parse::<f64>().unwrap_or(0.0) * 100.0).round() as i64;
+            let residual_cents = (a.residual.parse::<f64>().unwrap_or(0.0) * 100.0).round() as i64;
+            let life_months: i64 = a.life_months.parse().unwrap_or(0);
+            if ctx.dry_run {
+                let monthly = ((cost_cents - residual_cents) as f64 / life_months as f64).round() as i64;
+                let final_cents = (cost_cents - residual_cents) - monthly * (life_months - 1);
+                emit(
+                    ctx,
+                    json!({
+                        "action": "create depreciation template",
+                        "name": a.name, "asset": a.asset, "expense": a.expense,
+                        "cost_cents": cost_cents, "residual_cents": residual_cents,
+                        "life_months": life_months,
+                        "monthly_cents": monthly, "final_cents": final_cents,
+                        "monthly": format_amount(monthly), "final": format_amount(final_cents),
+                        "dryRun": true,
+                    }),
+                    render_depreciation_add_plan,
+                );
+                return Ok(());
+            }
+            let result = recurring::build_depreciation_template(
+                &conn,
+                &a.name,
+                &a.asset,
+                &a.expense,
+                cost_cents,
+                residual_cents,
+                life_months,
+                &a.start,
+                a.desc.as_deref(),
+                &ctx.actor,
+            )?;
+            emit(
+                ctx,
+                json!({
+                    "template": fmt_template(&serde_json::from_value::<recurring::Template>(result["template"].clone()).unwrap()),
+                    "monthly": result["monthly"], "final": result["final"],
+                    "total": format_amount(result["total_cents"].as_i64().unwrap_or(0)),
+                }),
+                render_depreciation_add,
+            );
+            Ok(())
+        }
+    }
+}
+
 // --- report ---------------------------------------------------------------
 
 fn current_year() -> String {
@@ -1949,6 +2306,160 @@ fn render_bank_post_plan(_ctx: &Ctx, d: &Value) {
 
 fn render_bank_post(_ctx: &Ctx, d: &Value) {
     println!("posted entry #{} from tx ({} state)", d["entry_id"], d["state"]);
+}
+
+fn render_recurring_add_plan(_ctx: &Ctx, d: &Value) {
+    println!(
+        "plan: {} template \"{}\" ({}, day {}) from {}",
+        d["kind"], d["name"], d["frequency"], d["day_of_period"], d["start_date"]
+    );
+    if d["kind"] == "invoice" {
+        println!("  contact #{}: {}", d["contact"], d["lines"]);
+    } else {
+        println!("  postings: {}", d["postings"]);
+    }
+    println!("(dry run — nothing written)");
+}
+
+fn render_recurring_add(_ctx: &Ctx, d: &Value) {
+    let t = &d["template"];
+    println!(
+        "template #{} \"{}\" [{}] — next run {} ({})",
+        t["id"], t["name"], t["kind"], t["next_run_date"], t["frequency"]
+    );
+    if t["kind"] == "invoice" {
+        let lines = t["invoice_lines"].as_array().cloned().unwrap_or_default();
+        let parts: Vec<String> = lines
+            .iter()
+            .map(|l| format!("{}x {}", l["quantity"], l["description"]))
+            .collect();
+        println!("  contact #{}: {}", t["contact_id"], parts.join(" + "));
+    }
+}
+
+fn render_recurring_list(_ctx: &Ctx, d: &Value) {
+    let rows: Vec<Vec<String>> = d["templates"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|t| {
+                    vec![
+                        t["id"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                        t["name"].as_str().unwrap_or("").to_string(),
+                        t["kind"].as_str().unwrap_or("").to_string(),
+                        t["frequency"].as_str().unwrap_or("").to_string(),
+                        t["next_run_date"].as_str().unwrap_or("").to_string(),
+                        t["runs_done"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                        t["status"].as_str().unwrap_or("").to_string(),
+                    ]
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    table(&rows, &hdr(&["#", "name", "kind", "freq", "next", "done", "status"]));
+}
+
+fn render_recurring_show(_ctx: &Ctx, d: &Value) {
+    let t = &d["template"];
+    println!(
+        "#{} {} [{}] — {}, day {}",
+        t["id"], t["name"], t["status"], t["frequency"], t["day_of_period"]
+    );
+    println!(
+        "  start {}  next {}  runs {}/{}",
+        t["start_date"], t["next_run_date"], t["runs_done"], t["runs"]
+    );
+    for p in t["postings"].as_array().cloned().unwrap_or_default() {
+        let vat = p["vat_code"].as_str().map(|c| format!(" @{c}")).unwrap_or_default();
+        println!("  {}  {:>12}{}", p["code"], p["amount"], vat);
+    }
+    if t["final_postings"].is_array() {
+        println!("  (final run:)");
+        for p in t["final_postings"].as_array().cloned().unwrap_or_default() {
+            println!("  {}  {:>12}", p["code"], p["amount"]);
+        }
+    }
+}
+
+fn render_recurring_preview(_ctx: &Ctx, d: &Value) {
+    println!("due as of {}: {} template(s) due", d["as_of"], d["templates"].as_array().map(|a| a.len()).unwrap_or(0));
+    for t in d["templates"].as_array().cloned().unwrap_or_default() {
+        for run in t["runs"].as_array().cloned().unwrap_or_default() {
+            if run["kind"] == "invoice" {
+                let lines = run["invoice"]["lines"].as_array().cloned().unwrap_or_default();
+                let parts: Vec<String> = lines
+                    .iter()
+                    .map(|l| format!("{}x {}", l["quantity"], l["description"]))
+                    .collect();
+                println!(
+                    "  [INVOICE] {}  {} — {}",
+                    run["invoice"]["date"],
+                    run["invoice"]["contact_name"].as_str().unwrap_or("contact"),
+                    parts.join(" + ")
+                );
+                continue;
+            }
+            let kind = if run["kind"] == "reversal" { "REVERSE" } else { "BOOK" };
+            println!("  [{kind}] {}  {}", run["entry"]["date"], run["entry"]["description"]);
+            for p in run["entry"]["postings"].as_array().cloned().unwrap_or_default() {
+                println!("      {}  {:>12}", p["code"], p["amountCents"]);
+            }
+        }
+    }
+}
+
+fn render_recurring_run(_ctx: &Ctx, d: &Value) {
+    let templates = d["templates"].as_array().cloned().unwrap_or_default();
+    let total: usize = templates.iter().map(|t| t["runs"].as_array().map(|a| a.len()).unwrap_or(0)).sum();
+    let failed = templates.iter().filter(|t| !t["ok"].as_bool().unwrap_or(false)).count();
+    println!(
+        "recurring run: {} period(s) across {} template(s){}",
+        total,
+        templates.len(),
+        if d["dry_run"].as_bool().unwrap_or(false) { " (dry run)" } else { "" }
+    );
+    for t in &templates {
+        if !t["ok"].as_bool().unwrap_or(false) {
+            println!("  ✗ {}: {} — {}", t["name"], t["error"]["code"], t["error"]["message"]);
+            continue;
+        }
+        for run in t["runs"].as_array().cloned().unwrap_or_default() {
+            for e in run["entries"].as_array().cloned().unwrap_or_default() {
+                if e["kind"] == "invoice" {
+                    println!(
+                        "  {}  → draft invoice #{} (finalize to book & number)",
+                        e["date"], e["invoice_id"]
+                    );
+                } else {
+                    let action = if e["kind"] == "reversal" { "→ reversal of" } else { "→ booked" };
+                    println!("  {}  {} entry #{} ({})", e["date"], action, e["entry_id"], e["state"]);
+                }
+            }
+        }
+    }
+    if failed > 0 {
+        println!("  {failed} template(s) failed — their schedules were left untouched");
+    }
+}
+
+fn render_depreciation_add_plan(_ctx: &Ctx, d: &Value) {
+    println!(
+        "plan: depreciate \"{}\" {}/mo for {} months (final {})",
+        d["name"], d["monthly"], d["life_months"], d["final"]
+    );
+    println!(
+        "  {} (asset) -{}  /  {} (expense) +{}",
+        d["asset"], d["monthly"], d["expense"], d["monthly"]
+    );
+    println!("(dry run — nothing written)");
+}
+
+fn render_depreciation_add(_ctx: &Ctx, d: &Value) {
+    println!(
+        "template #{} — {}: {}/mo × {} + final {} = {}",
+        d["template"]["id"], d["template"]["name"], d["monthly"],
+        d["template"]["runs"].as_i64().map(|r| r - 1).unwrap_or(0), d["final"], d["total"]
+    );
 }
 
 fn render_bank_ignore(_ctx: &Ctx, d: &Value) {

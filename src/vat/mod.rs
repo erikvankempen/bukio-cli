@@ -80,7 +80,7 @@ pub fn enable_vat_module(conn: &Connection, actor: &str) -> Result<VatEnableResu
             "this company uses the KOR (kleineondernemersregeling) — the VAT module cannot be enabled",
         ));
     }
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::core::db::SavepointGuard::begin(conn)?;
     tx.execute("UPDATE company SET vat_module = 1 WHERE id = 1", [])?;
     for a in VAT_ACCOUNTS {
         if get_account_by_code(&tx, a.code)?.is_none() {

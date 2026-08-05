@@ -7,6 +7,7 @@
 
 use crate::error::Result;
 use rusqlite::Connection;
+use std::ops::Deref;
 
 pub const MIGRATIONS: &[(u32, &str)] = &[
     (1, include_str!("../../migrations/001_initial.sql")),
@@ -55,6 +56,45 @@ pub fn migrate(conn: &Connection) -> Result<()> {
         tx.commit()?;
     }
     Ok(())
+}
+
+/// A SAVEPOINT guard usable on `&Connection` (rusqlite's own `Savepoint`
+/// requires `&mut`). Mirrors better-sqlite3's nested `db.transaction()`:
+/// savepoints nest inside real transactions, whereas a BEGIN inside a BEGIN
+/// (or inside a savepoint) is an SQLite error. Commit with `commit()`;
+/// anything else rolls back to the savepoint on drop.
+pub struct SavepointGuard<'a> {
+    conn: &'a Connection,
+    active: bool,
+}
+
+impl<'a> SavepointGuard<'a> {
+    pub fn begin(conn: &'a Connection) -> rusqlite::Result<Self> {
+        conn.execute_batch("SAVEPOINT bukio_sp")?;
+        Ok(Self { conn, active: true })
+    }
+
+    pub fn commit(mut self) -> rusqlite::Result<()> {
+        self.conn.execute_batch("RELEASE bukio_sp")?;
+        self.active = false;
+        Ok(())
+    }
+}
+
+impl Deref for SavepointGuard<'_> {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        self.conn
+    }
+}
+
+impl Drop for SavepointGuard<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = self.conn.execute_batch("ROLLBACK TO bukio_sp");
+            let _ = self.conn.execute_batch("RELEASE bukio_sp");
+        }
+    }
 }
 
 #[cfg(test)]

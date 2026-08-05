@@ -1,11 +1,13 @@
-//! Invoice core (subset needed by the bank module).
-//! The full invoice module (create/finalize/credit/UBL/PDF/CLI) is ported in
-//! the invoice milestone; this file covers get_invoice, mark_paid and
-//! payment_from_bank — the functions the bank auto-match engine depends on.
+//! Invoice core — contacts, line parsing/validation, create (draft) and the
+//! payment functions the bank auto-match engine depends on. The full invoice
+//! module (finalize/credit/UBL/PDF/CLI) is ported in the invoice milestone.
 
 use crate::core::entries::{create_entry, post_entry};
 use crate::error::{AppError, Result};
+use crate::vat::{is_vat_enabled, list_vat_codes};
+use regex::Regex;
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::{Deserialize, Serialize};
 
 pub fn invoice_error(code: &'static str, message: impl Into<String>) -> AppError {
     AppError::new(code, message)
@@ -25,7 +27,7 @@ pub struct Contact {
     pub kvk: Option<String>,
 }
 
-fn get_contact(conn: &Connection, id: i64) -> Result<Option<Contact>> {
+pub fn get_contact(conn: &Connection, id: i64) -> Result<Option<Contact>> {
     let row: Option<Contact> = conn
         .query_row(
             "SELECT id, name, address, postal_code, city, country, email, vat_id, kvk FROM contacts WHERE id = ?1",
@@ -250,6 +252,283 @@ pub fn payment_from_bank(conn: &Connection, invoice_id: i64, bank_tx_id: i64, ac
         &[posted.meta.id],
     )?;
     Ok(paid)
+}
+
+// --- line spec parsing ----------------------------------------------------
+
+/// A parsed invoice line ("[QTYx] DESCRIPTION @ PRICE [@ VATCODE]").
+#[derive(Debug, Clone)]
+pub struct ParsedLine {
+    pub qty: i64,
+    pub description: String,
+    pub price_cents: i64,
+    pub vat_code: Option<String>,
+    pub vat_rate_bp: i64,
+}
+
+fn is_vat_like(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+}
+
+/// Parse a line spec, splitting from the right so descriptions may contain '@'.
+pub fn parse_line_spec(spec: &str) -> Result<ParsedLine> {
+    let s = spec.trim();
+    let qty_re = Regex::new(r"^(\d+)\s*x\s+(.+)$").unwrap();
+    let (qty, rest) = match qty_re.captures(s) {
+        Some(c) => (c[1].parse::<i64>().unwrap_or(1), c[2].to_string()),
+        None => (1, s.to_string()),
+    };
+    let parts: Vec<&str> = rest.split('@').map(|p| p.trim()).collect();
+    let mut vat_code = None;
+    let mut price_part = parts.last().copied().unwrap_or("");
+    if parts.len() >= 2 && is_vat_like(price_part) {
+        vat_code = Some(price_part.to_string());
+        price_part = parts[parts.len() - 2];
+    }
+    let keep = parts.len() - if vat_code.is_some() { 2 } else { 1 };
+    let description = parts[..keep].join("@").trim().to_string();
+    let price_cents = crate::bank::csv::parse_bank_amount(price_part);
+    match price_cents {
+        Some(p) if !description.is_empty() && p > 0 => Ok(ParsedLine {
+            qty,
+            description,
+            price_cents: p,
+            vat_code,
+            vat_rate_bp: 0,
+        }),
+        _ => Err(invoice_error(
+            "INVALID_LINE",
+            format!("line '{spec}' must be \"[QTYx] DESCRIPTION @ PRICE [@ VATCODE]\""),
+        )),
+    }
+}
+
+/// Split a (possibly comma-separated) line-spec list into individual specs.
+pub fn split_line_specs(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .flat_map(|spec| spec.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
+        .collect()
+}
+
+/// Validate a line-spec list without inserting anything. Returns the parsed
+/// lines with vat_rate_bp resolved (used by recurring invoice templates).
+pub fn validate_invoice_lines(conn: &Connection, lines: &[String]) -> Result<Vec<ParsedLine>> {
+    let vat_on = is_vat_enabled(conn)?;
+    let vat_codes = list_vat_codes(conn)?;
+    let mut out = Vec::new();
+    for spec in split_line_specs(lines) {
+        let mut p = parse_line_spec(&spec)?;
+        if p.description.is_empty() || p.price_cents <= 0 {
+            return Err(invoice_error(
+                "INVALID_LINE",
+                format!("line '\"{spec}\"' is not parseable"),
+            ));
+        }
+        if p.qty < 1 {
+            return Err(invoice_error(
+                "INVALID_LINE",
+                format!("line '\"{spec}\"': quantity must be a positive integer"),
+            ));
+        }
+        if let Some(vc) = &p.vat_code {
+            if !vat_on {
+                return Err(invoice_error(
+                    "VAT_MODULE_OFF",
+                    "line has a VAT code but the VAT module is off for this company",
+                ));
+            }
+            if !vat_codes.iter().any(|c| &c.code == vc) {
+                return Err(invoice_error(
+                    "VAT_CODE_NOT_FOUND",
+                    format!("vat code '{vc}' does not exist"),
+                ));
+            }
+            p.vat_rate_bp = vat_codes.iter().find(|c| &c.code == vc).map(|c| c.rate_bp).unwrap_or(0);
+        }
+        out.push(p);
+    }
+    Ok(out)
+}
+
+// --- contacts -------------------------------------------------------------
+
+pub fn create_contact(
+    conn: &Connection,
+    name: &str,
+    address: Option<&str>,
+    postal_code: Option<&str>,
+    city: Option<&str>,
+    country: &str,
+    email: Option<&str>,
+    vat_id: Option<&str>,
+    kvk: Option<&str>,
+    actor: &str,
+) -> Result<Contact> {
+    if name.is_empty() {
+        return Err(invoice_error("INVALID_NAME", "contact needs a name"));
+    }
+    conn.execute(
+        "INSERT INTO contacts (name, address, postal_code, city, country, email, vat_id, kvk, created_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![name, address, postal_code, city, country, email, vat_id, kvk, actor],
+    )?;
+    let id = conn.last_insert_rowid();
+    crate::audit::record(
+        conn,
+        actor,
+        "contact.create",
+        Some("contact add"),
+        Some(&serde_json::json!({ "name": name })),
+        "ok",
+        &[],
+    )?;
+    Ok(get_contact(conn, id)?.expect("just inserted"))
+}
+
+pub fn list_contacts(conn: &Connection) -> Result<Vec<Contact>> {
+    let mut stmt = conn.prepare("SELECT id, name, address, postal_code, city, country, email, vat_id, kvk FROM contacts ORDER BY name")?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(Contact {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                address: r.get(2)?,
+                postal_code: r.get(3)?,
+                city: r.get(4)?,
+                country: r.get(5)?,
+                email: r.get(6)?,
+                vat_id: r.get(7)?,
+                kvk: r.get(8)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+// --- create (draft) -------------------------------------------------------
+
+/// A line spec for create_invoice (pre-parsed by the caller).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvoiceLineSpec {
+    pub qty: i64,
+    pub description: String,
+    pub price_cents: i64,
+    pub vat_code: Option<String>,
+}
+
+/// Create a draft invoice. Lines carry a VAT rate snapshot (vat_rate_bp).
+pub fn create_invoice(
+    conn: &Connection,
+    contact_id: i64,
+    lines: &[InvoiceLineSpec],
+    date: &str,
+    due_days: Option<i64>,
+    delivery_date: Option<&str>,
+    description: Option<&str>,
+    reference: Option<&str>,
+    notes: Option<&str>,
+    actor: &str,
+) -> Result<Invoice> {
+    if get_contact(conn, contact_id)?.is_none() {
+        return Err(invoice_error(
+            "CONTACT_NOT_FOUND",
+            format!("contact {contact_id} does not exist"),
+        ));
+    }
+    let iso = Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap();
+    if !iso.is_match(date) {
+        return Err(invoice_error(
+            "INVALID_DATE",
+            format!("date '{date}' must be YYYY-MM-DD"),
+        ));
+    }
+    if lines.is_empty() {
+        return Err(invoice_error("NO_LINES", "an invoice needs at least one line"));
+    }
+
+    let vat_on = is_vat_enabled(conn)?;
+    let vat_codes = list_vat_codes(conn)?;
+    let mut parsed: Vec<(i64, String, i64, Option<String>, i64, i64, i64)> = Vec::new();
+    for l in lines {
+        if l.description.is_empty() || l.price_cents <= 0 {
+            return Err(invoice_error("INVALID_LINE", "line is not parseable"));
+        }
+        if l.qty < 1 {
+            return Err(invoice_error(
+                "INVALID_LINE",
+                "quantity must be a positive integer",
+            ));
+        }
+        if let Some(vc) = &l.vat_code {
+            if !vat_on {
+                return Err(invoice_error(
+                    "VAT_MODULE_OFF",
+                    "line has a VAT code but the VAT module is off for this company",
+                ));
+            }
+            if !vat_codes.iter().any(|c| &c.code == vc) {
+                return Err(invoice_error(
+                    "VAT_CODE_NOT_FOUND",
+                    format!("vat code '{vc}' does not exist"),
+                ));
+            }
+        }
+        let rate_bp = l
+            .vat_code
+            .as_ref()
+            .and_then(|vc| vat_codes.iter().find(|c| &c.code == vc))
+            .map(|c| c.rate_bp)
+            .unwrap_or(0);
+        let amount = l.qty * l.price_cents;
+        let vat = ((amount.abs() * rate_bp) as f64 / 10000.0).round() as i64;
+        parsed.push((l.qty, l.description.clone(), l.price_cents, l.vat_code.clone(), rate_bp, amount, vat));
+    }
+
+    let due_date = due_days.map(|d| {
+        let dt = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap();
+        (dt + chrono::Duration::days(d)).format("%Y-%m-%d").to_string()
+    });
+
+    let tx = crate::core::db::SavepointGuard::begin(conn)?;
+    tx.execute(
+        "INSERT INTO invoices (contact_id, date, due_date, delivery_date, description, reference, notes, created_by)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![contact_id, date, due_date, delivery_date, description, reference, notes, actor],
+    )?;
+    let invoice_id = tx.last_insert_rowid();
+    {
+        let mut stmt = tx.prepare(
+            "INSERT INTO invoice_lines
+               (invoice_id, line_no, description, quantity, unit_price_cents, vat_code, vat_rate_bp, amount_cents, vat_amount_cents)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        )?;
+        for (i, (qty, desc, price, vc, rate, amount, vat)) in parsed.iter().enumerate() {
+            stmt.execute(params![
+                invoice_id,
+                (i + 1) as i64,
+                desc,
+                qty,
+                price,
+                vc,
+                rate,
+                amount,
+                vat
+            ])?;
+        }
+    }
+    let net: i64 = parsed.iter().map(|p| p.5).sum();
+    crate::audit::record(
+        &tx,
+        actor,
+        "invoice.create",
+        Some("invoice create"),
+        Some(&serde_json::json!({ "contactId": contact_id, "date": date, "lines": parsed.len(), "net": net })),
+        "ok",
+        &[],
+    )?;
+    tx.commit()?;
+    Ok(get_invoice(conn, invoice_id)?.expect("just inserted"))
 }
 
 #[cfg(test)]

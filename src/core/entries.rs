@@ -260,7 +260,7 @@ pub fn create_entry(
         return Err(AppError::new("UNBALANCED", format!("postings do not sum to zero (sum = {sum} cents)")));
     }
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::core::db::SavepointGuard::begin(conn)?;
     tx.execute(
         "INSERT INTO journal_entries (date, description, source, source_ref, state, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![date, description.trim(), source, source_ref, "draft", actor],
@@ -296,7 +296,7 @@ pub fn post_entry(conn: &Connection, id: i64, actor: &str) -> Result<Entry> {
         return Err(AppError::new("ALREADY_REVERSED", format!("entry {id} is reversed")));
     }
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::core::db::SavepointGuard::begin(conn)?;
     tx.execute(
         "UPDATE journal_entries SET state = 'posted', posted_at = ?1 WHERE id = ?2",
         params![now_iso(), id],
@@ -336,7 +336,7 @@ pub fn reverse_entry(conn: &Connection, id: i64, actor: &str, reason: Option<&st
         None => format!("Reversal of entry {id}"),
     };
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::core::db::SavepointGuard::begin(conn)?;
     tx.execute(
         "INSERT INTO journal_entries (date, description, source, source_ref, state, reversed_from_id, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![entry.meta.date, description, "reversal", Option::<String>::None, "draft", id, actor],

@@ -10,6 +10,7 @@ pub mod core;
 pub mod error;
 pub mod fx;
 pub mod invoice;
+pub mod recurring;
 pub mod report;
 pub mod vat;
 
