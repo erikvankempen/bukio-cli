@@ -10,6 +10,11 @@ import { fxError } from './index.js';
 const BASE = 'https://data-api.ecb.europa.eu/service/data/EXR';
 const WINDOW_DAYS = 10;
 
+// test seam: override the network fetcher (default: global fetch)
+let fetcherOverride = null;
+export function setEcbFetcher(fn) { fetcherOverride = fn; }
+export function clearEcbFetcher() { fetcherOverride = null; }
+
 function addDays(isoDate, days) {
   const d = new Date(`${isoDate}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
@@ -28,7 +33,7 @@ export async function fetchEcbRate({ currency, date, fetcher = fetch }) {
   const url = `${BASE}/D.${currency}.EUR.SP00.A?startPeriod=${from}&endPeriod=${date}`;
   let res;
   try {
-    res = await fetcher(url);
+    res = await (fetcherOverride ?? fetcher)(url);
   } catch (err) {
     throw fxError('ECB_FETCH_FAILED', `ECB unreachable for ${currency}: ${err.message}`);
   }

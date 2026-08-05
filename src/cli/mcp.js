@@ -19,7 +19,7 @@ import {
 } from '../invoice/index.js';
 import { runDue, previewDue } from '../recurring/index.js';
 import { yearEndClose, yearEndStatus } from '../year-end/index.js';
-import { setFxRate, getFxRate, parseRate, toEurPostings } from '../fx/index.js';
+import { setFxRate, getFxRate, parseRate, toEurPostings, resolveRate } from '../fx/index.js';
 import { icpReadout } from '../icp/index.js';
 import { list as auditList } from '../audit/index.js';
 import { complianceStatus } from '../compliance/index.js';
@@ -140,12 +140,12 @@ tool({
       post: { type: 'boolean' }, actor: { type: 'string' }, mode: { type: 'string' },
     }, required: ['date', 'description', 'postings'],
   },
-  handler: (db, args, ctx) => {
+  handler: async (db, args, ctx) => {
     guardExecute(ctx, args);
     const specs = parsePostingSpecs(args.postings);
     const converted = args.currency ? toEurPostings(specs, {
       currency: args.currency,
-      rateX10000: args.rate != null ? parseRate(args.rate) : getFxRate(db, { currency: args.currency, date: args.date }),
+      rateX10000: await resolveRate(db, { currency: args.currency, rate: args.rate, date: args.date, actor: args.actor ?? ctx.actor }),
     }) : specs;
     const resolved = resolvePostings(db, converted);
     const sum = resolved.reduce((s, p) => s + p.amountCents, 0);
@@ -205,12 +205,12 @@ tool({
       post: { type: 'boolean' }, actor: { type: 'string' }, mode: { type: 'string' },
     }, required: ['date', 'description', 'postings'],
   },
-  handler: (db, args, ctx) => {
+  handler: async (db, args, ctx) => {
     guardExecute(ctx, args);
     const specs = parseVatPostingSpecs(args.postings);
     const converted = args.currency ? toEurPostings(specs, {
       currency: args.currency,
-      rateX10000: args.rate != null ? parseRate(args.rate) : getFxRate(db, { currency: args.currency, date: args.date }),
+      rateX10000: await resolveRate(db, { currency: args.currency, rate: args.rate, date: args.date, actor: args.actor ?? ctx.actor }),
     }) : specs;
     const expanded = expandVatPostings(db, converted);
     const plan = {
@@ -361,18 +361,18 @@ function dispatch(db, ctx, msg) {
   const { id, method, params = {} } = msg;
   switch (method) {
     case 'initialize':
-      return rpcResponse(id, {
+      return Promise.resolve(rpcResponse(id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
         serverInfo: { name: 'bukio-cli', version: '0.8.0' },
-      });
+      }));
     case 'notifications/initialized':
     case 'initialized':
-      return null; // no response
+      return Promise.resolve(null); // no response
     case 'ping':
-      return rpcResponse(id, {});
+      return Promise.resolve(rpcResponse(id, {}));
     case 'tools/list':
-      return rpcResponse(id, {
+      return Promise.resolve(rpcResponse(id, {
         tools: TOOLS.map((t) => ({
           name: t.name,
           description: t.description,
@@ -382,22 +382,20 @@ function dispatch(db, ctx, msg) {
             required: t.inputSchema.required ?? [],
           },
         })),
-      });
+      }));
     case 'tools/call': {
       const t = TOOLS.find((x) => x.name === params.name);
-      if (!t) return rpcError(id, -32602, `unknown tool '${params.name}'`);
-      try {
-        const result = t.handler(db, params.arguments ?? {}, ctx);
-        return rpcResponse(id, { content: json(result), isError: false });
-      } catch (err) {
-        return rpcResponse(id, {
+      if (!t) return Promise.resolve(rpcError(id, -32602, `unknown tool '${params.name}'`));
+      return Promise.resolve()
+        .then(() => t.handler(db, params.arguments ?? {}, ctx))
+        .then((result) => rpcResponse(id, { content: json(result), isError: false }))
+        .catch((err) => rpcResponse(id, {
           content: json({ ok: false, error: { code: err.code ?? 'MCP_ERROR', message: err.message } }),
           isError: true,
-        });
-      }
+        }));
     }
     default:
-      return rpcError(id, -32601, `method not found: ${method}`);
+      return Promise.resolve(rpcError(id, -32601, `method not found: ${method}`));
   }
 }
 
@@ -426,7 +424,7 @@ export function make(program) {
           continue;
         }
         try {
-          send(dispatch(db, ctx, msg));
+          send(await dispatch(db, ctx, msg));
         } catch (err) {
           send(rpcError(msg.id ?? null, -32603, `internal error: ${err.message}`));
         }

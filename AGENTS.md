@@ -66,7 +66,8 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio jaarrekening report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx]` | Statutory annual accounts (KVK deposit package as PDF). |
 | `bukio icp readout --period 2026-Q3` | ICP listing: EU btw-verlegde supplies per customer (manual filing aid). |
 | `bukio fx set --currency USD --date D --rate 1.0875` | FX rate store (upsert, audited). |
-| `bukio entry add / vat book --currency USD [--rate R]` | Foreign-currency purchase invoices -> EUR at booking (auto rate lookup; postings keep fx_currency/fx_amount_cents). |
+| `bukio fx fetch --currency USD [--date D]` | ECB reference rate (free, no key) on/before a date, stored as source=ECB. |
+| `bukio entry add / vat book --currency USD [--rate R]` | Foreign-currency purchase invoices -> EUR at booking. Rate resolves: --rate -> stored -> ECB auto-fetch (BUKIO_FX_NO_FETCH=1 disables). Postings keep fx_currency/fx_amount_cents. |
 | `bukio mcp` | MCP server over stdio (plan-only mutations unless mode=execute; BUKIO_MCP_READONLY=1 blocks them). |
 | `bukio compliance status --year YYYY` / `mark --type ICP\|JAARREKENING --period ...` | Filing deadlines (OB/ICP/jaarrekening) + manual filing registry. |
 | `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. |
@@ -290,23 +291,27 @@ bukio audit --by agent:hermes --json
 ### 6.13 Foreign-currency purchase invoices (FX)
 
 ```bash
-# 1. store the rate once (upsert; audited)
+# 1. store the rate once (upsert; audited) — or let the ECB provide it
 bukio fx set --currency USD --date 2026-07-03 --rate 1.0875
-# 2. book the invoice: amounts in the specs are USD, the ledger stores EUR
-bukio vat book --date 2026-07-03 --desc "Stripe Inc. - INV-8821 (USD)" \
+bukio fx fetch --currency GBP --date 2026-08-03          # ECB, stored as source=ECB
+# 2. book the invoice: amounts in the specs are USD, the ledger stores EUR.
+#    Missing rates are auto-fetched from the ECB (one call ever, then reused)
+bukio vat book --date 2026-08-01 --desc "Stripe Inc. - INV-9102 (USD)" \
   --currency USD --postings "4300:895.00@21,1100:-1082.95" --dry-run
-bukio vat book --date 2026-07-03 --desc "Stripe Inc. - INV-8821 (USD)" \
+bukio vat book --date 2026-08-01 --desc "Stripe Inc. - INV-9102 (USD)" \
   --currency USD --postings "4300:895.00@21,1100:-1082.95" --post --actor agent:hermes
 # 3. koersverschil at payment (the bank shows a different EUR amount): book the
 #    difference on 4700 Koersverschillen (create the account first)
 bukio account add --code 4700 --name "Koersverschillen" --type expense --normal-balance debit
 ```
 
-FX rules: the rate is auto-looked-up on/before the booking date when `--rate` is
-omitted (`FX_RATE_NOT_FOUND` if none); conversion is round-half-up integer math;
-postings carry `fx_currency`/`fx_amount_cents` so the original amount is always
-auditable; reversals negate both; VAT legs are EUR-only. Outgoing invoices stay
-EUR-only. Never hand-build FX entries — always `--currency` or a converted spec.
+FX rules: the rate resolves as `--rate` -> stored rate (exact, else latest
+on/before) -> **ECB reference rate** (auto-fetched, stored as source=ECB for
+reuse; `BUKIO_FX_NO_FETCH=1` disables the network). Conversion is round-half-up
+integer math; postings carry `fx_currency`/`fx_amount_cents` so the original
+amount is always auditable; reversals negate both; VAT legs are EUR-only.
+Outgoing invoices stay EUR-only. Never hand-build FX entries — always
+`--currency` or a converted spec.
 
 ### 6.12 Year-end: close the books, produce the jaarrekening
 

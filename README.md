@@ -445,13 +445,15 @@ The agent layer (Phase 5).
 |---------|---------|
 | `mcp` | **MCP server over stdio** (JSON-RPC 2.0, newline-delimited): `company_info`, `trial_balance`, `balans`, `pnl`, `journal`, `accounts`, `vat_readout`, `icp_readout`, `audit`, `compliance`, `invoices` (read-only) + `entry_add/post/reverse`, `vat_book`, `invoice_create/finalize/credit/pay`, `recurring_run`, `year_end_close`, `fx_set`, `contact_add` (mutations). **Mutations are plan-only unless `mode:"execute"`**; `BUKIO_MCP_READONLY=1` blocks execution entirely. Every execute books with the caller's `actor` and lands in the audit log. NL query = an agent on top of these tools |
 | `fx set --currency USD --date D --rate 1.0875` | Store a rate (1 EUR = N units of foreign currency, 4 decimals max). Upsert; audited |
-| `entry add / vat book --currency USD [--rate R]` | **Foreign-currency purchase invoices**: spec amounts are in the foreign currency, converted to EUR (round-half-up) at booking; the rate is auto-looked-up (exact date, else latest on/before) when `--rate` is omitted. The ledger stores EUR; each posting keeps `fx_currency`/`fx_amount_cents` (the original amount) — reversals negate both. VAT legs are computed on the EUR amounts |
+| `fx fetch --currency USD [--date D]` | **Fetch the ECB reference rate** (free, no key) for a currency on/before a date and store it (source `ECB`). Weekends/holidays fall back to the last business day; unknown currency or pre-1999 → `ECB_RATE_NOT_AVAILABLE` |
+| `entry add / vat book --currency USD [--rate R]` | **Foreign-currency purchase invoices**: spec amounts are in the foreign currency, converted to EUR (round-half-up) at booking; the rate is auto-looked-up (exact date, else latest on/before) when `--rate` is omitted. **Missing rates are fetched live from the ECB** and stored for reuse — one network call ever per currency/date. The ledger stores EUR; each posting keeps `fx_currency`/`fx_amount_cents` (the original amount) — reversals negate both. VAT legs are computed on the EUR amounts. `BUKIO_FX_NO_FETCH=1` disables the network fallback (offline/air-gapped use) |
 | `compliance status --year YYYY` | OB + ICP quarterly deadlines and the jaarrekening deposit (13 months after FY end, art. 2:394 BW) with filed/open/overdue status; `compliance mark --type ICP\|JAARREKENING --period ...` records a filing (OB uses `vat readout --mark-filed`) |
 
 ```bash
 bukio fx set --currency USD --date 2026-07-03 --rate 1.0875
-bukio vat book --date 2026-07-03 --desc "Stripe (USD)" --currency USD \
-  --postings "4300:895.00@21,1100:-1082.95" --post      # 822.99 EUR + 172.83 VAT
+bukio fx fetch --currency GBP --date 2026-08-03          # ECB reference rate, stored
+bukio vat book --date 2026-08-01 --desc "Stripe (USD)" --currency USD \
+  --postings "4300:895.00@21,1100:-1082.95" --post      # 779.28 EUR — rate auto-fetched from the ECB
 # koersverschil at payment: book the difference on 4700 (created on demand)
 bukio account add --code 4700 --name "Koersverschillen" --type expense --normal-balance debit
 printf '%s\n' \
@@ -461,7 +463,12 @@ printf '%s\n' \
 bukio compliance status --year 2026
 ```
 
-**FX booking rules:** amounts in posting specs are foreign currency; `--rate` or the stored rate converts to EUR. The description should note the currency and the original invoice number. Outgoing invoices stay EUR-only (the 12-vereisten and UBL are EUR-based).
+**FX booking rules:** amounts in posting specs are foreign currency; the rate
+resolves as `--rate` → stored rate (exact, else latest on/before) → **ECB
+reference rate** (fetched live, stored as source `ECB` for reuse). `--rate`
+always wins; `BUKIO_FX_NO_FETCH=1` keeps bukio fully offline. The description
+should note the currency and the original invoice number. Outgoing invoices
+stay EUR-only (the 12-vereisten and UBL are EUR-based).
 
 ### `bukio backup` / `bukio restore`
 
@@ -673,6 +680,7 @@ The suite covers: money parsing, posting engine invariants, reversal semantics, 
 | `INVALID_MODEL` | jaarrekening model must be micro or klein |
 | `ICP_VAT_ID_MISSING` | EU customer without a btw-id — the ICP listing cannot be completed |
 | `FX_RATE_NOT_FOUND` / `INVALID_RATE` / `INVALID_CURRENCY` / `INVALID_FX_AMOUNT` / `INVALID_FX_CURRENCY` | FX booking errors (missing rate, malformed rate/currency/amount) |
+| `ECB_FETCH_FAILED` / `ECB_RATE_NOT_AVAILABLE` | ECB unreachable, or no reference rate for the currency/date (unknown currency, pre-1999) |
 | `MCP_READONLY` | A mutation was attempted on a read-only MCP server (BUKIO_MCP_READONLY=1) |
 | `INVALID_TYPE` / `INVALID_PERIOD` | compliance mark errors |
 | `SQLITE_CONSTRAINT_TRIGGER` | A database trigger aborted the operation (e.g. editing a posted entry, rewriting the audit log) |

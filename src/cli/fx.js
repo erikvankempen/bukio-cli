@@ -1,9 +1,35 @@
 // bukio fx — foreign currency rates (Phase 5, FR5.X)
 import { setFxRate, listFxRates } from '../fx/index.js';
+import { fetchEcbRate } from '../fx/ecb.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 
 export function make(program) {
   const fx = program.command('fx').description('foreign exchange rates (vreemde valuta)');
+  fx
+    .command('fetch')
+    .description('fetch the ECB reference rate (1 EUR = N) for a currency on/before a date and store it')
+    .requiredOption('--currency <ISO>', 'ISO 4217 currency (USD, GBP, ...)')
+    .option('--date <yyyy-mm-dd>', 'rate date (default: today; weekends/holidays fall back to the last business day)')
+    .action(async (opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const date = opts.date ?? new Date().toISOString().slice(0, 10);
+          const r = await fetchEcbRate({ currency: opts.currency, date });
+          if (!r) {
+            throw Object.assign(new Error(`no ECB reference rate for ${opts.currency} on/before ${date} (not in the ECB set, or before 1999)`), { code: 'ECB_RATE_NOT_AVAILABLE' });
+          }
+          const stored = setFxRate(db, { currency: opts.currency, date: r.date, rate: r.rateX10000, source: 'ECB', actor: ctx.actor });
+          output(ctx, { rate: stored, fetched_for: date }, (d) =>
+            console.log(`1 EUR = ${d.rate.rate} ${d.rate.currency} on ${d.rate.date} (ECB, fetched for ${d.fetched_for}) — stored`));
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
   fx
     .command('set')
     .description('store/update a rate: 1 EUR = N units of currency on a date')

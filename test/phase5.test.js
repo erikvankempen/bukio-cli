@@ -7,9 +7,26 @@ import { seedDefaultChart } from '../src/core/accounts.js';
 import { createEntry, postEntry, getEntry, reverseEntry } from '../src/core/entries.js';
 import { enableVatModule, bookVatEntry, parseVatPostingSpecs, obReadout } from '../src/vat/index.js';
 import {
-  setFxRate, getFxRate, convertFx, parseRate, toEurPostings, listFxRates,
+  setFxRate, getFxRate, convertFx, parseRate, toEurPostings, listFxRates, resolveRate,
 } from '../src/fx/index.js';
 import { complianceStatus, markFiled, quarterDeadline, jaarrekeningDeadline } from '../src/compliance/index.js';
+import { fetchEcbRate, parseSdmxObservations, setEcbFetcher, clearEcbFetcher } from '../src/fx/ecb.js';
+
+const SDMX_USD = `<?xml version="1.0" encoding="UTF-8"?>
+<message:GenericData xmlns:message="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message" xmlns:generic="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/generic">
+<message:DataSet>
+<generic:Series>
+<generic:SeriesKey><generic:Value id="FREQ" value="D"/><generic:Value id="CURRENCY" value="USD"/></generic:SeriesKey>
+<generic:Obs><generic:ObsDimension value="2026-07-30"/><generic:ObsValue value="1.1476"/></generic:Obs>
+<generic:Obs><generic:ObsDimension value="2026-07-31"/><generic:ObsValue value="1.1485"/></generic:Obs>
+<generic:Obs><generic:ObsDimension value="2026-08-03"/><generic:ObsValue value="1.1515"/></generic:Obs>
+</generic:Series>
+</message:DataSet>
+</message:GenericData>`;
+
+function okStub(xml) {
+  return async () => ({ ok: true, status: 200, text: async () => xml });
+}
 
 let db;
 
@@ -137,6 +154,87 @@ test('fx: invalid currency on a posting is rejected', () => {
     postings: [{ code: '4300', amountCents: 100, fxCurrency: 'USD', fxAmountCents: '100' }, { code: '1100', amountCents: -100 }],
     actor: 'a',
   }), { code: 'INVALID_FX_AMOUNT' });
+});
+
+// --- ECB reference rates ----------------------------------------------------
+
+test('ecb: parses SDMX observations and falls back to the last business day', async () => {
+  const obs = parseSdmxObservations(SDMX_USD, 'USD');
+  assert.equal(obs.length, 3);
+  assert.equal(obs[0].date, '2026-07-30');
+  assert.equal(obs[2].rate, 1.1515);
+
+  setEcbFetcher(okStub(SDMX_USD));
+  try {
+    // Saturday -> Friday rate
+    const sat = await fetchEcbRate({ currency: 'USD', date: '2026-08-01' });
+    assert.deepEqual(sat, { date: '2026-07-31', rateX10000: 11485 });
+    // exact business day
+    const mon = await fetchEcbRate({ currency: 'USD', date: '2026-08-03' });
+    assert.deepEqual(mon, { date: '2026-08-03', rateX10000: 11515 });
+  } finally {
+    clearEcbFetcher();
+  }
+});
+
+test('ecb: 404 (unknown currency) -> null; network failure -> ECB_FETCH_FAILED', async () => {
+  setEcbFetcher(async () => ({ ok: false, status: 404, text: async () => '' }));
+  try {
+    assert.equal(await fetchEcbRate({ currency: 'XYZ', date: '2026-08-04' }), null);
+  } finally {
+    clearEcbFetcher();
+  }
+  setEcbFetcher(async () => { throw new Error('ENOTFOUND'); });
+  try {
+    await assert.rejects(() => fetchEcbRate({ currency: 'USD', date: '2026-08-04' }), { code: 'ECB_FETCH_FAILED' });
+  } finally {
+    clearEcbFetcher();
+  }
+});
+
+test('fx: missing rate auto-fetches from ECB, stores it, and reuses it', async () => {
+  let fetches = 0;
+  setEcbFetcher(async () => { fetches += 1; return { ok: true, status: 200, text: async () => SDMX_USD }; });
+  try {
+    // no stored rate -> ECB fetch -> stored as source=ECB
+    const r = await resolveRate(db, { currency: 'USD', date: '2026-08-01', actor: 'agent:test' });
+    assert.equal(r, 11485);
+    assert.equal(fetches, 1);
+    assert.equal(getFxRate(db, { currency: 'USD', date: '2026-08-01' }), 11485);
+    const row = db.prepare("SELECT * FROM fx_rates WHERE currency='USD' AND date='2026-07-31'").get();
+    assert.equal(row.source, 'ECB');
+    assert.equal(row.created_by, 'agent:test');
+    // second booking: stored rate wins, no network
+    const r2 = await resolveRate(db, { currency: 'USD', date: '2026-08-01', actor: 'agent:test' });
+    assert.equal(r2, 11485);
+    assert.equal(fetches, 1);
+    // explicit --rate always wins
+    const r3 = await resolveRate(db, { currency: 'USD', date: '2026-08-01', rate: '1.09' });
+    assert.equal(r3, 10900);
+    assert.equal(fetches, 1);
+  } finally {
+    clearEcbFetcher();
+  }
+});
+
+test('fx: BUKIO_FX_NO_FETCH blocks the ECB fallback', async () => {
+  const prev = process.env.BUKIO_FX_NO_FETCH;
+  process.env.BUKIO_FX_NO_FETCH = '1';
+  try {
+    await assert.rejects(() => resolveRate(db, { currency: 'USD', date: '2026-08-01' }), { code: 'FX_RATE_NOT_FOUND' });
+  } finally {
+    if (prev === undefined) delete process.env.BUKIO_FX_NO_FETCH;
+    else process.env.BUKIO_FX_NO_FETCH = prev;
+  }
+});
+
+test('fx: ECB has no rate for the currency -> ECB_RATE_NOT_AVAILABLE', async () => {
+  setEcbFetcher(okStub('<?xml version="1.0"?><message:GenericData></message:GenericData>'));
+  try {
+    await assert.rejects(() => resolveRate(db, { currency: 'USD', date: '2026-08-01', actor: 'a' }), { code: 'ECB_RATE_NOT_AVAILABLE' });
+  } finally {
+    clearEcbFetcher();
+  }
 });
 
 // --- compliance -------------------------------------------------------------
