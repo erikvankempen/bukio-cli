@@ -56,23 +56,30 @@ printf '%s\n' \
 | bukio mcp
 ```
 
+## Screenshot
+
+<p align="center">
+  <img src="screenshot.png" alt="bukio-cli demo session" width="720">
+</p>
+
 ## Table of Contents
 
 1. [Features](#features)
 2. [Quick start](#quick-start)
-3. [Requirements & Install](#requirements--install)
-4. [Core Concepts](#core-concepts)
-5. [Command Reference](#command-reference)
-6. [Global Flags](#global-flags)
-7. [Money Format](#money-format)
-8. [Integrity & Safety Model](#integrity--safety-model)
-9. [The Database](#the-database)
-10. [Using Agents](#using-agents)
-11. [Project Layout](#project-layout)
-12. [Development & Testing](#development--testing)
-13. [Error Codes](#error-codes)
-14. [Common Tasks](#common-tasks)
-15. [Roadmap](#roadmap)
+3. [Screenshot](#screenshot)
+4. [Requirements & Install](#requirements--install)
+5. [Core Concepts](#core-concepts)
+6. [Command Reference](#command-reference)
+7. [Global Flags](#global-flags)
+8. [Money Format](#money-format)
+9. [Integrity & Safety Model](#integrity--safety-model)
+10. [The Database](#the-database)
+11. [Using Agents](#using-agents)
+12. [Project Layout](#project-layout)
+13. [Development & Testing](#development--testing)
+14. [Error Codes](#error-codes)
+15. [Common Tasks](#common-tasks)
+16. [Roadmap](#roadmap)
 
 ---
 
