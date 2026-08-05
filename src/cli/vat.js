@@ -6,17 +6,11 @@ import {
 } from '../vat/index.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 
-import { getFxRate, parseRate, toEurPostings } from '../fx/index.js';
+import { getFxRate, parseRate, toEurPostings, resolveRate } from '../fx/index.js';
 
-/** Convert posting specs to EUR when --currency given; auto rate lookup. */
-function applyFxToSpecs(db, specs, { currency, rate, date }) {
-  const rateX10000 = rate != null ? parseRate(rate) : getFxRate(db, { currency, date });
-  if (!rateX10000) {
-    throw Object.assign(
-      new Error(`no FX rate for ${currency} on/before ${date} — set one with 'bukio fx set' or pass --rate`),
-      { code: 'FX_RATE_NOT_FOUND' },
-    );
-  }
+/** Convert posting specs to EUR when --currency given; auto rate lookup + ECB fallback. */
+async function applyFxToSpecs(db, specs, { currency, rate, date, actor }) {
+  const rateX10000 = await resolveRate(db, { currency, rate, date, actor });
   return toEurPostings(specs, { currency, rateX10000 });
 }
 
@@ -113,14 +107,14 @@ export function make(program) {
     .option('--rate <n>', 'FX rate (1 EUR = n units); auto-looked-up on/before the date when omitted')
     .option('--post', 'post the entry immediately')
     .option('--dry-run', 'show the expanded plan without writing')
-    .action((opts, command) => {
+    .action(async (opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
         try {
           const specs = parseVatPostingSpecs(opts.postings);
           const converted = opts.currency
-            ? applyFxToSpecs(db, specs, opts)
+            ? await applyFxToSpecs(db, specs, { ...opts, actor: ctx.actor })
             : specs;
           if (ctx.dryRun) {
             const expanded = expandVatPostings(db, converted);

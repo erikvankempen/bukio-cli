@@ -5,5 +5,7 @@ data/
 *.db-wal
 *.db-shm
 *.log
+*.pdf
+*.xlsx
 .env
 .DS_Store

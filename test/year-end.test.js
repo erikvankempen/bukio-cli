@@ -144,12 +144,47 @@ test('jaarrekening: invalid model rejected', () => {
   assert.throws(() => jaarrekening(db, { year: 2026, model: 'groot' }), { code: 'INVALID_MODEL' });
 });
 
+test('jaarrekening: account-level amounts are numbers, never NaN', () => {
+  entry('2026-03-01', 'Omzet', [{ code: '1100', amountCents: 12100 }, { code: '8000', amountCents: -10000 }, { code: '2500', amountCents: -2100 }]);
+  entry('2026-03-05', 'Laptop', [{ code: '1800', amountCents: 537000 }, { code: '1100', amountCents: -537000 }]);
+  const r = jaarrekening(db, { year: 2026, model: 'klein' });
+  const accounts = [
+    ...r.balans.activa.flatMap((g) => g.sections.flatMap((s) => s.accounts)),
+    ...r.balans.passiva.flatMap((g) => g.sections.flatMap((s) => s.accounts)),
+    ...(r.pnl?.lines.flatMap((l) => l.sections.flatMap((s) => s.accounts)) ?? []),
+  ];
+  assert.ok(accounts.length >= 3, 'expected account detail rows');
+  for (const a of accounts) {
+    assert.equal(typeof a.amount_cents, 'number', `${a.name} amount_cents must be a number`);
+    assert.ok(Number.isFinite(a.amount_cents), `${a.name} amount_cents must not be NaN`);
+  }
+});
+
+test('jaarrekening: PDF html renders account detail without NaN', () => {
+  entry('2026-03-01', 'Omzet', [{ code: '1100', amountCents: 12100 }, { code: '8000', amountCents: -10000 }, { code: '2500', amountCents: -2100 }]);
+  entry('2026-03-05', 'Laptop', [{ code: '1800', amountCents: 537000 }, { code: '1100', amountCents: -537000 }]);
+  const r = jaarrekening(db, { year: 2026, model: 'klein' });
+  const html = jaarrekeningHtml(r);
+  assert.ok(!html.includes('NaN'), 'the HTML template must not contain NaN');
+  assert.ok(html.includes('5370.00'), 'account detail amount rendered');
+});
+
+test('jaarrekening: pnl includes the Afschrijvingen line for WAFS.41', () => {
+  entry('2026-03-01', 'Afschr', [{ code: '1800', amountCents: -10000 }, { code: '4600', amountCents: 10000 }]);
+  const r = jaarrekening(db, { year: 2026, model: 'klein' });
+  const line = r.pnl.lines.find((l) => l.rgs_code === 'WAFS.41');
+  assert.ok(line, 'WAFS.41 must map to an Afschrijvingen line');
+  assert.equal(line.label, 'Afschrijvingen');
+  assert.equal(line.total_cents, 10000);
+});
+
 test('jaarrekening PDF: renders (playwright)', async () => {
   entry('2026-03-01', 'Omzet', [{ code: '1100', amountCents: 12100 }, { code: '8000', amountCents: -10000 }, { code: '2500', amountCents: -2100 }]);
   const r = jaarrekening(db, { year: 2026, model: 'klein' });
   const html = jaarrekeningHtml(r);
   assert.match(html, /Jaarrekening 2026/);
   assert.match(html, /Totaal activa/);
+  assert.ok(!html.includes('NaN'), 'the HTML template must not contain NaN');
   const pdf = await jaarrekeningToPdf(r, { outPath: '/tmp/test-jaarrekening.pdf' });
   assert.ok(pdf.bytes > 5000);
 });

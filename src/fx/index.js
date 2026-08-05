@@ -2,8 +2,11 @@
 // Rates are stored per currency per date as rate_x10000 (1 EUR = N units of
 // foreign currency, scaled by 10000). Conversion is integer math,
 // round-half-up: eur_cents = round(fx_cents * 10000 / rate_x10000).
+// Missing rates fall back to the ECB reference rates (source='ECB');
+// disable the network fallback with BUKIO_FX_NO_FETCH=1.
 import { record } from '../audit/index.js';
 import { parseAmount } from '../core/money.js';
+import { fetchEcbRate } from './ecb.js';
 
 export function fxError(code, message) {
   const e = new Error(message);
@@ -70,6 +73,28 @@ export function listFxRates(db, { currency = null, limit = 50 } = {}) {
     rate: (r.rate_x10000 / 10000).toFixed(4), rate_x10000: r.rate_x10000,
     source: r.source, created_by: r.created_by,
   }));
+}
+
+/**
+ * Resolve the rate for a booking: explicit --rate wins, then the stored rate
+ * (exact date, else latest on/before), then — when allowed — a live ECB fetch
+ * (stored as source='ECB' for reuse). Throws FX_RATE_NOT_FOUND /
+ * ECB_RATE_NOT_AVAILABLE when nothing is available.
+ */
+export async function resolveRate(db, { currency, rate, date, actor = 'human', noFetch = false }) {
+  if (!currency) return null;
+  if (rate != null) return parseRate(rate);
+  const stored = getFxRate(db, { currency, date });
+  if (stored) return stored;
+  if (noFetch || process.env.BUKIO_FX_NO_FETCH === '1') {
+    throw fxError('FX_RATE_NOT_FOUND', `no FX rate for ${currency} on/before ${date} — set one with 'bukio fx set', pass --rate, or allow the ECB fetch`);
+  }
+  const fetched = await fetchEcbRate({ currency, date });
+  if (!fetched) {
+    throw fxError('ECB_RATE_NOT_AVAILABLE', `no ECB reference rate for ${currency} on/before ${date} (not in the ECB set, or before 1999)`);
+  }
+  setFxRate(db, { currency, date: fetched.date, rate: fetched.rateX10000, source: 'ECB', actor });
+  return fetched.rateX10000;
 }
 
 /**

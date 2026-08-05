@@ -41,6 +41,16 @@ const PNL_LINES = [
 
 function groupSections(sections, lines) {
   const known = new Set(lines.map((l) => l.rgs));
+  const normalize = (g) => ({
+    ...g,
+    // stable account shape: amount_cents everywhere (balans sections carry
+    // balance_cents internally — the PDF/XLSX renderers must never see NaN)
+    accounts: (g.accounts ?? []).map((a) => ({
+      code: a.code,
+      name: a.name,
+      amount_cents: Number.isFinite(a.balance_cents) ? a.balance_cents : (a.amount_cents ?? 0),
+    })),
+  });
   const out = [];
   for (const line of lines) {
     const hits = sections.filter((s) => s.rgs_code === line.rgs);
@@ -48,7 +58,7 @@ function groupSections(sections, lines) {
     out.push({
       label: line.label,
       rgs_code: line.rgs,
-      sections: hits,
+      sections: hits.map(normalize),
       total_cents: hits.reduce((s, g) => s + g.total_cents, 0),
     });
   }
@@ -57,7 +67,7 @@ function groupSections(sections, lines) {
     out.push({
       label: 'Overig',
       rgs_code: null,
-      sections: leftover,
+      sections: leftover.map(normalize),
       total_cents: leftover.reduce((s, g) => s + g.total_cents, 0),
     });
   }

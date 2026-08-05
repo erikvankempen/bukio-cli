@@ -7,18 +7,15 @@ import {
   resolvePostings, reverseEntry,
 } from '../core/entries.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
-import { getFxRate, parseRate, toEurPostings } from '../fx/index.js';
+import { resolveRate, toEurPostings } from '../fx/index.js';
 
-/** Convert posting specs to EUR when --currency given; auto rate lookup. */
-function applyFx(db, postings, { currency, rate, date }) {
+/** Convert posting specs to EUR when --currency given; auto rate lookup + ECB fallback. */
+async function applyFx(db, postings, { currency, rate, date, actor }) {
   if (!currency) return postings;
-  const rateX10000 = rate != null ? parseRate(rate) : getFxRate(db, { currency, date });
-  if (!rateX10000) {
-    throw Object.assign(
-      new Error(`no FX rate for ${currency} on/before ${date} — set one with 'bukio fx set' or pass --rate`),
-      { code: 'FX_RATE_NOT_FOUND' },
-    );
+  if (!db && rate == null) {
+    throw Object.assign(new Error(`no database yet — pass --rate or create the company database first`), { code: 'FX_RATE_NOT_FOUND' });
   }
+  const rateX10000 = await resolveRate(db, { currency, rate, date, actor });
   return toEurPostings(postings, { currency, rateX10000 });
 }
 
@@ -65,10 +62,10 @@ export function make(program) {
     .option('--rate <n>', 'FX rate (1 EUR = n units); auto-looked-up on/before the date when omitted')
     .option('--post', 'post the entry immediately (draft -> posted)')
     .option('--dry-run', 'show the plan without writing anything')
-    .action((opts, command) => {
+    .action(async (opts, command) => {
       const ctx = makeCtx(command);
       try {
-        addAction(ctx, opts);
+        await addAction(ctx, opts);
       } catch (err) {
         fail(ctx, err);
       }
@@ -137,14 +134,14 @@ function collect(value, previous) {
   return previous.concat(value);
 }
 
-function addAction(ctx, opts) {
+async function addAction(ctx, opts) {
   const postings = parsePostingSpecs(opts.postings);
 
   if (ctx.dryRun) {
     const db = existsSync(ctx.dbPath) ? openDb(ctx.dbPath) : null;
     let resolved = null;
     try {
-      const converted = db ? applyFx(db, postings, opts) : (opts.currency ? applyFx(null, postings, { ...opts, rate: opts.rate ?? (() => { throw Object.assign(new Error(`no FX rate for ${opts.currency} — pass --rate or create the database first`), { code: 'FX_RATE_NOT_FOUND' }); })() }) : postings);
+      const converted = await applyFx(db, postings, { ...opts, actor: ctx.actor });
       if (db) {
         resolved = resolvePostings(db, converted).map((p) => ({
           code: p.code, amount_cents: p.amountCents, amount: formatAmount(p.amountCents),
@@ -184,7 +181,7 @@ function addAction(ctx, opts) {
 
   const db = ensureDb(ctx);
   try {
-    const converted = applyFx(db, postings, opts);
+    const converted = await applyFx(db, postings, { ...opts, actor: ctx.actor });
     let entry = createEntry(db, {
       date: opts.date,
       description: opts.desc,
