@@ -10,6 +10,7 @@ use bukio_cli::core::chart::DEFAULT_CHART;
 use bukio_cli::core::db;
 use bukio_cli::core::entries::{self, parse_posting_specs};
 use bukio_cli::core::money::format_amount;
+use bukio_cli::report;
 use bukio_cli::vat;
 use bukio_cli::AppError;
 use clap::{Args, Parser, Subcommand};
@@ -85,6 +86,11 @@ enum Command {
     Vat {
         #[command(subcommand)]
         cmd: VatCmd,
+    },
+    /// reports
+    Report {
+        #[command(subcommand)]
+        cmd: ReportCmd,
     },
 }
 
@@ -243,6 +249,61 @@ enum VatCmd {
     ListCodes,
 }
 
+#[derive(Subcommand)]
+enum ReportCmd {
+    /// per-account debit/credit/net from posted entries
+    TrialBalance(TbArgs),
+    /// balance sheet as of a date (assets = liabilities + equity + result)
+    Balans(BalansArgs),
+    /// winst-en-verliesrekening for a period
+    Pnl(PnlArgs),
+    /// journal export (one row per posting) for a period
+    Journal(PnlArgs),
+}
+
+#[derive(Args)]
+struct ReportFmtArgs {
+    /// json|csv|xlsx|human
+    #[arg(long)]
+    format: Option<String>,
+    /// output file (csv/xlsx)
+    #[arg(long)]
+    out: Option<String>,
+}
+
+#[derive(Args)]
+struct TbArgs {
+    /// filter by year
+    #[arg(long)]
+    year: Option<String>,
+    #[command(flatten)]
+    fmt: ReportFmtArgs,
+}
+
+#[derive(Args)]
+struct BalansArgs {
+    /// balance date (yyyy-mm-dd)
+    #[arg(long)]
+    as_of: Option<String>,
+    #[command(flatten)]
+    fmt: ReportFmtArgs,
+}
+
+#[derive(Args)]
+struct PnlArgs {
+    /// fiscal year (overrides --from/--to)
+    #[arg(long)]
+    year: Option<String>,
+    /// period start (inclusive)
+    #[arg(long)]
+    from: Option<String>,
+    /// period end (inclusive)
+    #[arg(long)]
+    to: Option<String>,
+    #[command(flatten)]
+    fmt: ReportFmtArgs,
+}
+
 fn main() {
     let cli = Cli::parse();
     let ctx = Ctx {
@@ -256,6 +317,7 @@ fn main() {
         Command::Entry { cmd } => cmd_entry(&ctx, cmd),
         Command::Account { cmd } => cmd_account(&ctx, cmd),
         Command::Vat { cmd } => cmd_vat(&ctx, cmd),
+        Command::Report { cmd } => cmd_report(&ctx, cmd),
     };
     if let Err(e) = result {
         fail(&ctx, &e);
@@ -585,6 +647,356 @@ fn cmd_vat(ctx: &Ctx, cmd: &VatCmd) -> bukio_cli::Result<()> {
             Ok(())
         }
     }
+}
+
+// --- report ---------------------------------------------------------------
+
+fn current_year() -> String {
+    chrono::Utc::now().format("%Y").to_string()
+}
+
+/// Shared report emit: json | csv | xlsx | human (mirrors Node emitReport).
+fn emit_report(
+    ctx: &Ctx,
+    fmt: &ReportFmtArgs,
+    data: Value,
+    headers: Vec<String>,
+    rows: Vec<Vec<String>>,
+    sheet_name: &str,
+    render: fn(&Ctx, &Value),
+) -> bukio_cli::Result<()> {
+    let format = fmt
+        .format
+        .clone()
+        .unwrap_or_else(|| if ctx.json { "json".to_string() } else { "human".to_string() });
+    match format.as_str() {
+        "json" => {
+            println!("{}", serde_json::to_string_pretty(&json!({ "ok": true, "data": data })).unwrap());
+        }
+        "csv" => {
+            let csv = report::export::to_csv(&rows, &headers);
+            match &fmt.out {
+                Some(out) => {
+                    std::fs::write(out, csv)?;
+                    println!("wrote {out}");
+                }
+                None => {
+                    print!("{csv}");
+                }
+            }
+        }
+        "xlsx" => {
+            let out = fmt
+                .out
+                .clone()
+                .ok_or_else(|| AppError::new("OUT_REQUIRED", "--out <path> is required for xlsx output"))?;
+            if let Some(parent) = Path::new(&out).parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent)?;
+                }
+            }
+            let sheet = report::export::SheetSpec { name: sheet_name.to_string(), headers, rows };
+            report::export::write_xlsx(&out, &[sheet])?;
+            println!("wrote {out}");
+        }
+        _ => render(ctx, &data),
+    }
+    Ok(())
+}
+
+fn hdr(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
+}
+
+fn cmd_report(ctx: &Ctx, cmd: &ReportCmd) -> bukio_cli::Result<()> {
+    match cmd {
+        ReportCmd::TrialBalance(a) => {
+            let conn = ensure_db(ctx)?;
+            let tb = report::trial_balance::trial_balance(&conn, a.year.as_deref())?;
+            let accounts: Vec<Value> = tb
+                .accounts
+                .iter()
+                .map(|acc| {
+                    json!({
+                        "code": acc.code, "name": acc.name, "type": acc.account_type,
+                        "debit_cents": acc.debit_cents, "credit_cents": acc.credit_cents, "net_cents": acc.net_cents,
+                        "debit": format_amount(acc.debit_cents), "credit": format_amount(acc.credit_cents), "net": format_amount(acc.net_cents),
+                    })
+                })
+                .collect();
+            let data = json!({
+                "year": a.year,
+                "accounts": accounts,
+                "total_debit_cents": tb.total_debit_cents,
+                "total_credit_cents": tb.total_credit_cents,
+                "total_debit": format_amount(tb.total_debit_cents),
+                "total_credit": format_amount(tb.total_credit_cents),
+                "balanced": tb.balanced,
+            });
+            let mut rows: Vec<Vec<String>> = tb
+                .accounts
+                .iter()
+                .map(|acc| {
+                    vec![
+                        acc.code.clone(),
+                        acc.name.clone(),
+                        acc.account_type.clone(),
+                        format_amount(acc.debit_cents),
+                        format_amount(acc.credit_cents),
+                        format_amount(acc.net_cents),
+                    ]
+                })
+                .collect();
+            rows.push(vec![
+                String::new(),
+                "TOTAAL".to_string(),
+                String::new(),
+                format_amount(tb.total_debit_cents),
+                format_amount(tb.total_credit_cents),
+                format_amount(tb.total_debit_cents),
+            ]);
+            emit_report(ctx, &a.fmt, data, hdr(&["code", "account", "type", "debit", "credit", "net"]), rows, "Trial balance", render_tb)?;
+            Ok(())
+        }
+        ReportCmd::Balans(a) => {
+            let conn = ensure_db(ctx)?;
+            let as_of = a.as_of.clone().unwrap_or_else(today_iso);
+            let b = report::balans::balans(&conn, &as_of)?;
+            let data = json!({
+                "as_of": b.as_of,
+                "assets": {
+                    "total_cents": b.assets.total_cents,
+                    "total": format_amount(b.assets.total_cents),
+                    "sections": serde_json::to_value(&b.assets.sections).unwrap(),
+                },
+                "liabilities_and_equity": {
+                    "total_cents": b.liabilities_and_equity.total_cents,
+                    "total": format_amount(b.liabilities_and_equity.total_cents),
+                    "sections": serde_json::to_value(&b.liabilities_and_equity.sections).unwrap(),
+                    "result_cents": b.liabilities_and_equity.result_cents,
+                    "result": format_amount(b.liabilities_and_equity.result_cents),
+                },
+                "balanced": b.balanced,
+            });
+            let mut rows: Vec<Vec<String>> = Vec::new();
+            for s in &b.assets.sections {
+                for acc in &s.accounts {
+                    rows.push(vec![
+                        "activa".to_string(),
+                        s.rgs_code.clone().unwrap_or_default(),
+                        s.label.clone(),
+                        acc.code.clone(),
+                        acc.name.clone(),
+                        format_amount(acc.balance_cents),
+                    ]);
+                }
+            }
+            for s in &b.liabilities_and_equity.sections {
+                for acc in &s.accounts {
+                    rows.push(vec![
+                        "passiva".to_string(),
+                        s.rgs_code.clone().unwrap_or_default(),
+                        s.label.clone(),
+                        acc.code.clone(),
+                        acc.name.clone(),
+                        format_amount(acc.balance_cents),
+                    ]);
+                }
+            }
+            rows.push(vec![
+                "passiva".to_string(),
+                String::new(),
+                "Nog te verdelen resultaat".to_string(),
+                String::new(),
+                String::new(),
+                format_amount(b.liabilities_and_equity.result_cents),
+            ]);
+            emit_report(ctx, &a.fmt, data, hdr(&["side", "rgs", "group", "code", "name", "amount"]), rows, "Balans", render_balans)?;
+            Ok(())
+        }
+        ReportCmd::Pnl(a) => {
+            let conn = ensure_db(ctx)?;
+            let year = a.year.clone().unwrap_or_else(current_year);
+            let from = a.from.clone().unwrap_or_else(|| format!("{year}-01-01"));
+            let to = a.to.clone().unwrap_or_else(|| format!("{year}-12-31"));
+            let p = report::pnl::pnl(&conn, &from, &to)?;
+            let data = json!({
+                "from": p.from, "to": p.to,
+                "sections": serde_json::to_value(&p.sections).unwrap(),
+                "revenue_cents": p.revenue_cents, "revenue": format_amount(p.revenue_cents),
+                "costs_cents": p.costs_cents, "costs": format_amount(p.costs_cents),
+                "result_cents": p.result_cents, "result": format_amount(p.result_cents),
+            });
+            let mut rows: Vec<Vec<String>> = Vec::new();
+            for s in &p.sections {
+                for acc in &s.accounts {
+                    rows.push(vec![
+                        s.rgs_code.clone().unwrap_or_default(),
+                        s.label.clone(),
+                        acc.code.clone(),
+                        acc.name.clone(),
+                        format_amount(acc.amount_cents),
+                    ]);
+                }
+            }
+            rows.push(vec![
+                String::new(),
+                "Netto resultaat".to_string(),
+                String::new(),
+                String::new(),
+                format_amount(p.result_cents),
+            ]);
+            emit_report(ctx, &a.fmt, data, hdr(&["rgs", "group", "code", "name", "amount"]), rows, "Winst en verlies", render_pnl)?;
+            Ok(())
+        }
+        ReportCmd::Journal(a) => {
+            let conn = ensure_db(ctx)?;
+            let year = a.year.clone().unwrap_or_else(current_year);
+            let from = a.from.clone().unwrap_or_else(|| format!("{year}-01-01"));
+            let to = a.to.clone().unwrap_or_else(|| format!("{year}-12-31"));
+            let rows = report::journal::journal(&conn, &from, &to)?;
+            let data = json!({
+                "from": from, "to": to,
+                "rows": rows.iter().map(|r| json!({
+                    "entry_id": r.entry_id, "date": r.date, "description": r.description,
+                    "source": r.source, "state": r.state, "created_by": r.created_by,
+                    "amount_cents": r.amount_cents,
+                    "account_code": r.account_code, "account_name": r.account_name, "account_type": r.account_type,
+                    "amount": r.amount_cents.map(format_amount).unwrap_or_default(),
+                })).collect::<Vec<_>>(),
+            });
+            let csv_rows: Vec<Vec<String>> = rows
+                .iter()
+                .map(|r| {
+                    vec![
+                        r.date.clone(),
+                        r.entry_id.to_string(),
+                        r.description.clone(),
+                        r.source.clone(),
+                        r.state.clone(),
+                        r.account_code.clone().unwrap_or_default(),
+                        r.account_name.clone().unwrap_or_default(),
+                        r.amount_cents.map(format_amount).unwrap_or_default(),
+                    ]
+                })
+                .collect();
+            emit_report(ctx, &a.fmt, data, hdr(&["date", "entry", "description", "source", "state", "code", "account", "amount"]), csv_rows, "Journal", render_journal)?;
+            Ok(())
+        }
+    }
+}
+
+/// Simple aligned text table for human output (mirrors util.table).
+fn table(rows: &[Vec<String>], headers: &[String]) {
+    let widths: Vec<usize> = (0..headers.len())
+        .map(|i| {
+            headers[i].chars().count().max(
+                rows.iter()
+                    .map(|r| r.get(i).map(|c| c.chars().count()).unwrap_or(0))
+                    .max()
+                    .unwrap_or(0),
+            )
+        })
+        .collect();
+    let line = |cells: &[String]| {
+        cells
+            .iter()
+            .enumerate()
+            .map(|(i, c)| format!("{}{}", c, " ".repeat(widths[i].saturating_sub(c.chars().count()))))
+            .collect::<Vec<_>>()
+            .join("  ")
+    };
+    println!("{}", line(headers));
+    println!("{}", widths.iter().map(|w| "-".repeat(*w)).collect::<Vec<_>>().join("  "));
+    for r in rows {
+        println!("{}", line(r));
+    }
+}
+
+fn render_tb(_ctx: &Ctx, d: &Value) {
+    let accounts: Vec<Value> = d["accounts"].as_array().cloned().unwrap_or_default();
+    let rows: Vec<Vec<String>> = accounts
+        .iter()
+        .map(|a| {
+            vec![
+                a["code"].as_str().unwrap_or("").to_string(),
+                a["name"].as_str().unwrap_or("").to_string(),
+                a["type"].as_str().unwrap_or("").to_string(),
+                a["debit"].as_str().unwrap_or("").to_string(),
+                a["credit"].as_str().unwrap_or("").to_string(),
+                a["net"].as_str().unwrap_or("").to_string(),
+            ]
+        })
+        .collect();
+    table(&rows, &hdr(&["code", "account", "type", "debit", "credit", "net"]));
+    println!(
+        "totals:  debit {}  credit {}  -> {}",
+        d["total_debit"].as_str().unwrap_or(""),
+        d["total_credit"].as_str().unwrap_or(""),
+        if d["balanced"].as_bool().unwrap_or(false) { "BALANCED" } else { "UNBALANCED!" }
+    );
+}
+
+fn render_balans(_ctx: &Ctx, d: &Value) {
+    let fmt = |c: &Value| c.as_i64().map(format_amount).unwrap_or_default();
+    println!("BALANS as of {}", d["as_of"].as_str().unwrap_or(""));
+    println!("ACTIVA");
+    for s in d["assets"]["sections"].as_array().unwrap_or(&Vec::new()) {
+        println!("  {} ({})", s["label"].as_str().unwrap_or(""), s["rgs_code"].as_str().unwrap_or("null"));
+        for a in s["accounts"].as_array().unwrap_or(&Vec::new()) {
+            println!("    {}  {:<30} {}", a["code"].as_str().unwrap_or(""), a["name"].as_str().unwrap_or(""), fmt(&a["balance_cents"]));
+        }
+        println!("    {:<32} {}", "", fmt(&s["total_cents"]));
+    }
+    println!("  totaal activa: {}", d["assets"]["total"].as_str().unwrap_or(""));
+    println!("PASSIVA");
+    for s in d["liabilities_and_equity"]["sections"].as_array().unwrap_or(&Vec::new()) {
+        println!("  {} ({})", s["label"].as_str().unwrap_or(""), s["rgs_code"].as_str().unwrap_or("null"));
+        for a in s["accounts"].as_array().unwrap_or(&Vec::new()) {
+            println!("    {}  {:<30} {}", a["code"].as_str().unwrap_or(""), a["name"].as_str().unwrap_or(""), fmt(&a["balance_cents"]));
+        }
+        println!("    {:<32} {}", "", fmt(&s["total_cents"]));
+    }
+    println!("  Nog te verdelen resultaat  {}", d["liabilities_and_equity"]["result"].as_str().unwrap_or(""));
+    println!("  totaal passiva: {}", d["liabilities_and_equity"]["total"].as_str().unwrap_or(""));
+    println!("{}", if d["balanced"].as_bool().unwrap_or(false) { "BALANCED" } else { "UNBALANCED!" });
+}
+
+fn render_pnl(_ctx: &Ctx, d: &Value) {
+    let fmt = |c: &Value| c.as_i64().map(format_amount).unwrap_or_default();
+    println!("WINST-EN-VERLIESREKENING {} .. {}", d["from"].as_str().unwrap_or(""), d["to"].as_str().unwrap_or(""));
+    for s in d["sections"].as_array().unwrap_or(&Vec::new()) {
+        println!("  {} ({})", s["label"].as_str().unwrap_or(""), s["rgs_code"].as_str().unwrap_or("null"));
+        for a in s["accounts"].as_array().unwrap_or(&Vec::new()) {
+            println!("    {}  {:<30} {}", a["code"].as_str().unwrap_or(""), a["name"].as_str().unwrap_or(""), fmt(&a["amount_cents"]));
+        }
+        println!("    {:<32} {}", "", fmt(&s["total_cents"]));
+    }
+    println!("  opbrengsten: {}", d["revenue"].as_str().unwrap_or(""));
+    println!("  kosten:      {}", d["costs"].as_str().unwrap_or(""));
+    println!("  resultaat:   {}", d["result"].as_str().unwrap_or(""));
+}
+
+fn render_journal(_ctx: &Ctx, d: &Value) {
+    let rows: Vec<Vec<String>> = d["rows"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|r| {
+                    vec![
+                        r["date"].as_str().unwrap_or("").to_string(),
+                        r["entry_id"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                        r["state"].as_str().unwrap_or("").to_string(),
+                        r["account_code"].as_str().unwrap_or("").to_string(),
+                        r["account_name"].as_str().unwrap_or("").to_string(),
+                        r["amount"].as_str().unwrap_or("").to_string(),
+                        r["description"].as_str().unwrap_or("").to_string(),
+                    ]
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    table(&rows, &hdr(&["date", "#", "state", "code", "account", "amount", "description"]));
 }
 
 // --- human renderers (mirror the Node console output) ---------------------

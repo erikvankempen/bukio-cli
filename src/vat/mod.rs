@@ -44,6 +44,7 @@ pub fn is_vat_enabled(conn: &Connection) -> Result<bool> {
     })
 }
 
+#[allow(dead_code)]
 fn require_vat(conn: &Connection) -> Result<()> {
     if !is_vat_enabled(conn)? {
         return Err(AppError::new(
