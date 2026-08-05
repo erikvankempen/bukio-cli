@@ -7,6 +7,7 @@ import {
 } from '../invoice/index.js';
 import { invoiceToPdf } from '../invoice/pdf.js';
 import { invoiceToUbl } from '../invoice/ubl.js';
+import { sendPeppolInvoice } from '../invoice/peppol.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 
 function fmtLine(l) {
@@ -302,6 +303,37 @@ export function make(program) {
           output(ctx, { invoice: fmtInvoice(credit), dryRun: false }, (d) => {
             console.log(`credit note #${d.invoice.id} [draft] for ${d.invoice.reference} — ${d.invoice.gross}`);
             console.log('finalize it to assign the number and book the reversal');
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  invoice
+    .command('peppol-send')
+    .description('send the invoice to a Peppol access-point provider (env: BUKIO_PEPPOL_ENDPOINT, BUKIO_PEPPOL_TOKEN)')
+    .requiredOption('--id <id>', 'invoice id')
+    .option('--endpoint <url>', 'provider endpoint (overrides BUKIO_PEPPOL_ENDPOINT)')
+    .option('--dry-run', 'validate config + payload without sending')
+    .action(async (opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const inv = getInvoice(db, opts.id);
+          if (!inv) throw Object.assign(new Error(`invoice ${opts.id} does not exist`), { code: 'NOT_FOUND' });
+          if (!inv.invoice_number) throw Object.assign(new Error('finalize the invoice first'), { code: 'NOT_FINALIZED' });
+          const result = await sendPeppolInvoice(db, inv, { endpoint: opts.endpoint ?? null, dryRun: ctx.dryRun });
+          output(ctx, result, (d) => {
+            if (d.dryRun) {
+              console.log(`plan: POST UBL for ${d.invoice_number} (${d.bytes} bytes) to ${d.endpoint}${d.configured ? ' (token set)' : ' (NO TOKEN — add BUKIO_PEPPOL_TOKEN)'}`);
+              console.log('(dry run — nothing sent)');
+            } else {
+              console.log(`sent ${d.invoice_number} to ${d.endpoint} — HTTP ${d.status}${d.response ? `: ${d.response}` : ''}`);
+            }
           });
         } finally {
           db.close();

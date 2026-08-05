@@ -51,10 +51,12 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio vat enable` | Enable the VAT module (accounts 1500/2500 + codes). |
 | `bukio vat book --postings "1100:121.00,8000:-100.00@21" [--post]` | Book VAT-aware entries — `@CODE` computes the VAT leg automatically. |
 | `bukio vat readout --period 2026-Q2 [--mark-filed]` | OB-aangifte fields 1a–5d for manual filing. Never auto-files. |
-| `bukio recurring add --postings "CODE:AMT" --frequency monthly --start DATE [--reverse-previous]` | Create a recurring template. |
-| `bukio recurring run [--as-of DATE] [--template ID] [--dry-run]` | Generate all due entries (backfills, idempotent). |
+| `bukio recurring add --postings "CODE:AMT" --frequency monthly --start DATE [--reverse-previous]` | Create a recurring **entry** template. |
+| `bukio recurring add --kind invoice --contact N --lines "2x DESC @ PRICE @21" --frequency monthly --start DATE [--due-days]` | Create a **subscription invoice** template — `run` generates draft invoices (never auto-finalizes). |
+| `bukio recurring run [--as-of DATE] [--template ID] [--dry-run]` | Generate all due entries/invoice drafts (backfills, idempotent). |
 | `bukio recurring preview/list/pause/resume` | Schedule inspection and control. |
 | `bukio depreciation add --cost C --life-months M --start DATE` | Depreciation schedule (remainder-adjusted final run). |
+| `bukio invoice peppol-send --id N [--endpoint URL] [--dry-run]` | POST the UBL to a Peppol access-point provider (env `BUKIO_PEPPOL_ENDPOINT` + `BUKIO_PEPPOL_TOKEN`). |
 | `bukio contact add --name N [--address] [--vat-id]` / `list` | Invoice counterparties. |
 | `bukio invoice create --contact N --lines "2x DESC @ PRICE @21" --date D` | Draft invoice (12-vereisten validated at finalize). |
 | `bukio invoice finalize --id N [--dry-run]` | Sequential number + booking entry (Debiteuren/Omzet/btw). |
@@ -363,8 +365,8 @@ individual generated entries with `entry reverse` if one is wrong (the template'
 
 ---
 
-## 9. Capability boundaries (Phase 3, invoicing part)
+## 9. Capability boundaries (Phase 3 complete)
 
-Available: company init (incl. address for compliant invoices), journal entries, accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. **invoice payments**), optional VAT module (enable, `vat book`, OB readout + mark-filed), recurring entries (templates, depreciation, accrual auto-reversal), **invoicing** (contacts, draft→sent→paid lifecycle, 12-vereisten validation, sequential numbering, booking entries, credit notes, PDF via Chromium, UBL 2.1/Peppol BIS 3.0 export, payment tracking), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
+Available: company init (incl. address for compliant invoices), journal entries, accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. **invoice payments**), optional VAT module (enable, `vat book`, OB readout + mark-filed), recurring entries (templates, depreciation, accrual auto-reversal), **invoicing** (contacts, draft→sent→paid lifecycle, 12-vereisten validation, sequential numbering, booking entries, credit notes, PDF via Chromium, UBL 2.1/Peppol BIS 3.0 export, payment tracking), **recurring invoices** (`--kind invoice` templates → draft invoices), **Peppol send** (`invoice peppol-send`, env creds), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 
-**Not yet available:** recurring invoices (FR3A.6), Peppol send (FR3.8), jaarrekening, ICP readout, MCP server, NL query, AI categorization, Ponto live feeds. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.
+**Not yet available:** jaarrekening, ICP readout, MCP server, NL query, AI categorization, Ponto live feeds, Peppol receive. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.

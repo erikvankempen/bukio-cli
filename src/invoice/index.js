@@ -48,6 +48,24 @@ export function splitLineSpecs(lines) {
     : [spec]));
 }
 
+/**
+ * Validate a line-spec list without inserting anything (used by recurring
+ * invoice templates at creation). Returns the parsed lines with vat_rate_bp.
+ */
+export function validateInvoiceLines(db, lines) {
+  const vatOn = isVatEnabled(db);
+  const vatCodes = new Map(listVatCodes(db).map((c) => [c.code, c]));
+  return splitLineSpecs(lines).map((spec) => {
+    const p = typeof spec === 'string' ? parseLineSpec(spec) : spec;
+    if (!p.description || !p.priceCents) throw invoiceError('INVALID_LINE', `line '${JSON.stringify(spec)}' is not parseable`);
+    if (p.vatCode) {
+      if (!vatOn) throw invoiceError('VAT_MODULE_OFF', 'line has a VAT code but the VAT module is off for this company');
+      if (!vatCodes.has(p.vatCode)) throw invoiceError('VAT_CODE_NOT_FOUND', `vat code '${p.vatCode}' does not exist`);
+    }
+    return { ...p, vat_rate_bp: p.vatCode ? vatCodes.get(p.vatCode).rate_bp : 0 };
+  });
+}
+
 // --- contacts -------------------------------------------------------------
 
 export function createContact(db, {

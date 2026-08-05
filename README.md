@@ -32,7 +32,7 @@
 
 ## Status
 
-**Phase 3 — Invoicing & recurring (in progress).** Phases 0–2 (ledger, accounts, reports, backup, bank, VAT), the **recurring entries engine** (FR3A) and **invoicing** (FR3.1–FR3.4, FR3.6: factuurvereisten validation, PDF, UBL/Peppol BIS 3.0, credit notes, payment matching) are complete. Remaining Phase 3: recurring invoices (FR3A.6) and Peppol send (FR3.8). See [Roadmap](#roadmap).
+**Phase 3 — Invoicing & recurring: complete ✅ (v0.6.0).** Recurring entries (FR3A), invoicing (FR3.1–FR3.4, FR3.6: factuurvereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payment matching), recurring invoices (FR3A.6) and Peppol send (FR3.8) are all in. Next: **Phase 4 — jaarrekening**. See [Roadmap](#roadmap).
 
 ---
 
@@ -349,11 +349,12 @@ Recurring entries & period automation (FR3A) — deterministic, dry-run first, f
 
 | Command | Purpose |
 |---------|---------|
-| `recurring add --name N --postings "CODE:AMT,..." --frequency monthly\|quarterly\|yearly --start YYYY-MM-DD [--day 1-28] [--end] [--runs] [--reverse-previous] [--dry-run]` | Create a template (VAT-aware via `@CODE` tags; expanded at creation) |
+| `recurring add --name N --postings "CODE:AMT,..." --frequency monthly\|quarterly\|yearly --start YYYY-MM-DD [--day 1-28] [--end] [--runs] [--reverse-previous] [--dry-run]` | Create a recurring **entry** template (VAT-aware via `@CODE` tags; expanded at creation) |
+| `recurring add --name N --kind invoice --contact N --lines "2x DESC @ PRICE @21" --frequency monthly --start YYYY-MM-DD [--due-days 30]` | Create a **subscription invoice** template — each run generates a DRAFT invoice (never auto-finalizes; the agent finalizes) |
 | `recurring list [--status active\|paused\|completed\|all]` / `show --id` | Inspect templates |
 | `recurring pause --id` / `resume --id` | Control scheduling |
 | `recurring preview [--as-of DATE] [--template ID]` | What is due (read-only plan) |
-| `recurring run [--as-of DATE] [--template ID] [--dry-run]` | Generate all due entries — **backfills missed periods**, idempotent, one transaction per template (a failing template is reported and skipped, others still run) |
+| `recurring run [--as-of DATE] [--template ID] [--dry-run]` | Generate all due entries/invoice drafts — **backfills missed periods**, idempotent, one transaction per template (a failing template is reported and skipped, others still run) |
 | `depreciation add --name N --cost C --life-months M --start DATE [--asset 1800] [--expense 4600] [--residual 0] [--dry-run]` | Linear monthly depreciation with a **remainder-adjusted final run** (cents-exact total over the asset life) |
 
 **Semantics:**
@@ -374,6 +375,12 @@ bukio recurring add --name "Verzekering 12 mnd" \
 # the agent's month-end: preview, then run
 bukio recurring preview --as-of 2026-09-30
 bukio recurring run --as-of 2026-09-30
+# subscription invoices: run generates DRAFT invoices, then the agent finalizes
+bukio recurring add --name "SaaS abonnement" --kind invoice --contact 1 \
+  --lines "2x Premium SaaS @ 99.00 @21" --frequency monthly --start 2026-08-01 --due-days 14
+bukio recurring run --as-of 2026-10-31        # -> draft invoices 2026-08/09/10
+bukio invoice finalize --id 1                 # -> 2026-0001, booked
+bukio invoice peppol-send --id 1 --dry-run    # Peppol access-point (env creds)
 ```
 
 ### `bukio contact` / `bukio invoice`
@@ -612,6 +619,8 @@ The suite covers: money parsing, posting engine invariants, reversal semantics, 
 | `ALREADY_FINALIZED` / `NOT_FINALIZED` | Invoice lifecycle violations |
 | `OVERPAYMENT` / `NOT_PAYABLE` / `CREDIT_NOT_PAYABLE` | Payment validation |
 | `PDF_UNAVAILABLE` | Playwright/Chromium could not render the invoice PDF |
+| `PEPPOL_NOT_CONFIGURED` / `PEPPOL_SEND_FAILED` | Peppol provider missing (env `BUKIO_PEPPOL_ENDPOINT`) or rejected the document |
+| `INVALID_KIND` / `INVALID_REVERSE` | Recurring template kind errors (reverse-previous is entry-only) |
 | `SQLITE_CONSTRAINT_TRIGGER` | A database trigger aborted the operation (e.g. editing a posted entry, rewriting the audit log) |
 
 ---
@@ -705,7 +714,7 @@ bukio init --name "Mijn ZZP" --kor
 | 0 | Foundation: ledger, posting engine, audit, trial balance, `--json`/`--dry-run` | ✅ done |
 | 1 | Accounts CRUD + CSV import, RGS-mapped chart, balans + W&V, CSV/XLSX export, backup/restore | ✅ done |
 | 2 | Bank import (CAMT.053/CSV), matching; optional VAT module (codes, OB readout, KOR) | ✅ done |
-| 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes — **✅ recurring (v0.4.0) + invoicing core (v0.5.0)**; recurring invoices + Peppol send left | in progress |
+| 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes, payment matching, recurring entries **+ recurring invoices + Peppol send** | Compliant invoice PDF + UBL per invoice; due entries generated & posted on time | ✅ done (v0.6.0) |
 | 4 | Jaarrekening micro/klein models, closing entries, KVK package, ICP readout | planned |
 | 5 | Agent layer: MCP server, permissions, NL query, AI categorization suggestions, compliance calendar | planned |
 | 6 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |

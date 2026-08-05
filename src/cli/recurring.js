@@ -18,6 +18,8 @@ function fmtPostings(postings) {
 function fmtTemplate(t) {
   return {
     id: t.id, name: t.name, description: t.description,
+    kind: t.kind ?? 'entry', contact_id: t.contact_id ?? null,
+    invoice_lines: t.invoice_lines ?? null,
     frequency: t.frequency, day_of_period: t.day_of_period,
     start_date: t.start_date, end_date: t.end_date, runs: t.runs,
     status: t.status, next_run_date: t.next_run_date, last_run_date: t.last_run_date,
@@ -33,14 +35,18 @@ export function make(program) {
 
   recurring
     .command('add')
-    .description('create a recurring entry template')
+    .description('create a recurring template (entry postings or subscription invoices)')
     .requiredOption('--name <name>', 'template name (also the entry description prefix)')
-    .requiredOption('--postings <CODE:AMOUNT[@VAT]>', 'posting specs, comma-separated or repeatable')
+    .option('--kind <entry|invoice>', 'template kind', 'entry')
+    .option('--contact <id>', 'contact id (required for --kind invoice)')
+    .option('--lines <spec>', 'invoice line specs "[QTYx] DESC @ PRICE [@ VATCODE]" (required for --kind invoice)')
+    .option('--postings <CODE:AMOUNT[@VAT]>', 'posting specs, comma-separated or repeatable (required for --kind entry)')
     .requiredOption('--frequency <frequency>', `one of ${FREQUENCIES.join(', ')}`)
     .requiredOption('--start <yyyy-mm-dd>', 'first run date')
     .option('--day <n>', 'day of period to book on (1-28)', '1')
     .option('--end <yyyy-mm-dd>', 'last run date')
     .option('--runs <n>', 'maximum number of runs')
+    .option('--due-days <n>', 'payment term for invoice templates (days)', '30')
     .option('--desc <description>', 'template description')
     .option('--reverse-previous', 'accrual pattern: reverse the previous generated entry on each run')
     .option('--dry-run', 'validate without writing')
@@ -52,11 +58,16 @@ export function make(program) {
           if (ctx.dryRun) {
             output(ctx, {
               action: 'create recurring template',
-              name: opts.name, frequency: opts.frequency, day_of_period: Number(opts.day),
+              kind: opts.kind, name: opts.name, frequency: opts.frequency, day_of_period: Number(opts.day),
               start_date: opts.start, end_date: opts.end ?? null, runs: opts.runs ? Number(opts.runs) : null,
-              reverse_previous: Boolean(opts.reversePrevious), dryRun: true,
+              reverse_previous: Boolean(opts.reversePrevious),
+              contact: opts.contact ? Number(opts.contact) : null,
+              postings: opts.postings ?? null, lines: opts.lines ?? null,
+              dryRun: true,
             }, (d) => {
-              console.log(`plan: recurring template "${d.name}" (${d.frequency}, day ${d.day_of_period}) from ${d.start_date}`);
+              console.log(`plan: ${d.kind} template "${d.name}" (${d.frequency}, day ${d.day_of_period}) from ${d.start_date}`);
+              if (d.kind === 'invoice') console.log(`  contact #${d.contact}: ${d.lines}`);
+              else console.log(`  postings: ${d.postings}`);
               console.log('(dry run — nothing written)');
             });
             return;
@@ -65,11 +76,19 @@ export function make(program) {
             name: opts.name, description: opts.desc ?? null, frequency: opts.frequency,
             dayOfPeriod: Number(opts.day) || 1, startDate: opts.start, endDate: opts.end ?? null,
             runs: opts.runs ? Number(opts.runs) : null,
-            postings: [opts.postings], reversePrevious: Boolean(opts.reversePrevious),
+            postings: opts.postings ? [opts.postings] : [],
+            reversePrevious: Boolean(opts.reversePrevious),
+            kind: opts.kind, contactId: opts.contact ? Number(opts.contact) : null,
+            invoiceLines: opts.lines ? [opts.lines] : null,
+            dueDays: Number(opts.dueDays) || 30,
             actor: ctx.actor,
           });
           output(ctx, { template: fmtTemplate(tpl), dryRun: false }, (d) => {
-            console.log(`template #${d.template.id} "${d.template.name}" — next run ${d.template.next_run_date} (${d.template.frequency})`);
+            const t = d.template;
+            console.log(`template #${t.id} "${t.name}" [${t.kind}] — next run ${t.next_run_date} (${t.frequency})`);
+            if (t.kind === 'invoice') {
+              console.log(`  contact #${t.contact_id}: ${t.invoice_lines?.map((l) => `${l.quantity}x ${l.description}`).join(' + ')}`);
+            }
           });
         } finally {
           db.close();
@@ -93,6 +112,7 @@ export function make(program) {
             table(d.templates, [
               { key: 'id', label: '#' },
               { key: 'name', label: 'name' },
+              { key: 'kind', label: 'kind' },
               { key: 'frequency', label: 'freq' },
               { key: 'next_run_date', label: 'next' },
               { key: 'runs_done', label: 'done' },
@@ -186,6 +206,10 @@ export function make(program) {
             console.log(`due as of ${d.as_of}: ${d.templates.length} template(s) due`);
             for (const t of d.templates) {
               for (const run of t.runs) {
+                if (run.kind === 'invoice') {
+                  console.log(`  [INVOICE] ${run.invoice.date}  ${run.invoice.contact_name ?? 'contact'} — ${run.invoice.lines?.map((l) => `${l.quantity}x ${l.description}`).join(' + ')}`);
+                  continue;
+                }
                 const kind = run.kind === 'reversal' ? 'REVERSE' : 'BOOK';
                 console.log(`  [${kind}] ${run.entry.date}  ${run.entry.description}`);
                 for (const p of run.entry.postings) console.log(`      ${p.code}  ${formatAmount(p.amountCents).padStart(12)}`);
@@ -221,7 +245,11 @@ export function make(program) {
               template_id: t.template_id, name: t.name, ok: t.ok, error: t.error ?? null,
               runs: t.runs.map((r) => ({
                 kind: r.kind ?? (r.generated ? undefined : 'entry'),
-                entries: r.generated ? r.generated.map((g) => ({ kind: g.kind, entry_id: g.entry.id, date: g.entry.date, state: g.entry.state })) : [r.entry],
+                entries: r.generated ? r.generated.map((g) => (
+                  g.kind === 'invoice'
+                    ? { kind: 'invoice', invoice_id: g.invoice.id, date: g.invoice.date ?? g.entry?.date, state: 'draft' }
+                    : { kind: g.kind, entry_id: g.entry.id, date: g.entry.date, state: g.entry.state }
+                )) : [r.entry],
               })),
             })),
           };
@@ -233,8 +261,11 @@ export function make(program) {
               if (!t.ok) { console.log(`  ✗ ${t.name}: ${t.error.code} — ${t.error.message}`); continue; }
               for (const r of t.runs) {
                 for (const e of r.entries) {
-                  const kind = e.kind === 'reversal' ? 'reversed' : 'booked';
-                  console.log(`  ${e.date}  ${e.kind === 'reversal' ? '→ reversal of' : '→ booked'} entry #${e.entry_id} (${e.state})`);
+                  if (e.kind === 'invoice') {
+                    console.log(`  ${e.date}  → draft invoice #${e.invoice_id} (finalize to book & number)`);
+                  } else {
+                    console.log(`  ${e.date}  ${e.kind === 'reversal' ? '→ reversal of' : '→ booked'} entry #${e.entry_id} (${e.state})`);
+                  }
                 }
               }
             }

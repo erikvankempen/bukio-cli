@@ -6,6 +6,7 @@ import { getAccountByCode } from '../core/accounts.js';
 import { createEntry, parsePostingSpecs, postEntry, reverseEntry } from '../core/entries.js';
 import { record } from '../audit/index.js';
 import { expandVatPostings, parseVatPostingSpecs } from '../vat/index.js';
+import { createInvoice, getContact, validateInvoiceLines } from '../invoice/index.js';
 
 export function recurringError(code, message) {
   const e = new Error(message);
@@ -14,6 +15,7 @@ export function recurringError(code, message) {
 }
 
 export const FREQUENCIES = ['monthly', 'quarterly', 'yearly'];
+const KINDS = ['entry', 'invoice'];
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -29,13 +31,18 @@ function todayIso() {
 }
 
 /** Advance a YYYY-MM-DD date by one frequency period, keeping `day`. */
-export function addPeriod(dateStr, frequency, day) {
+function addDays(dateStr, days) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+
+export function addPeriod(dateStr, frequency, dayOfPeriod) {
   const [y, m] = dateStr.split('-').map(Number);
   const months = frequency === 'monthly' ? 1 : frequency === 'quarterly' ? 3 : 12;
   const total = y * 12 + (m - 1) + months;
   const ny = Math.floor(total / 12);
   const nm = (total % 12) + 1;
-  return `${ny}-${String(nm).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(dayOfPeriod).padStart(2, '0')}`;
 }
 
 /** Validate the resolved posting set: accounts exist/active, non-zero, balanced. */
@@ -65,10 +72,15 @@ export function validatePostings(db, postings) {
 export function createTemplate(db, {
   name, description = null, frequency, dayOfPeriod = 1, startDate,
   endDate = null, runs = null, postings, reversePrevious = false, actor = 'human',
+  kind = 'entry', contactId = null, invoiceLines = null, dueDays = 30,
 }) {
   if (!name || typeof name !== 'string') throw recurringError('INVALID_NAME', 'template needs a name');
   if (!FREQUENCIES.includes(frequency)) {
     throw recurringError('INVALID_FREQUENCY', `frequency must be one of ${FREQUENCIES.join(', ')}`);
+  }
+  if (!KINDS.includes(kind)) throw recurringError('INVALID_KIND', `kind must be one of ${KINDS.join(', ')}`);
+  if (kind === 'invoice' && reversePrevious) {
+    throw recurringError('INVALID_REVERSE', 'reverse-previous only applies to entry templates (accrual pattern)');
   }
   if (!Number.isInteger(dayOfPeriod) || dayOfPeriod < 1 || dayOfPeriod > 28) {
     throw recurringError('INVALID_DATE', 'day of period must be between 1 and 28');
@@ -78,29 +90,47 @@ export function createTemplate(db, {
   if (endDate && endDate < startDate) throw recurringError('INVALID_RANGE', 'end date must be on or after the start date');
   if (runs != null && (!Number.isInteger(runs) || runs < 1)) throw recurringError('INVALID_RUNS', 'runs must be a positive integer');
 
-  // Resolve posting specs (CODE:AMOUNT[@VAT]) and expand VAT legs when tagged.
-  // Strings are parsed; plain objects { code, amountCents } pass through.
-  const raw = postings.flatMap((p) => (typeof p === 'string' ? [p] : [p]));
-  const vatAware = raw.some((p) => typeof p === 'string' && /@/.test(p));
-  let resolved;
-  if (vatAware) {
-    // Expansion through the VAT module validates codes + computes VAT legs.
-    resolved = expandVatPostings(db, parseVatPostingSpecs(raw.filter((p) => typeof p === 'string')));
+  let postingsJson = '[]';
+  let vatAware = false;
+  if (kind === 'invoice') {
+    // invoice templates: validate the line specs at creation (no insert)
+    if (!contactId) throw recurringError('INVALID_KIND', 'invoice templates need --contact');
+    if (!getContact(db, contactId)) throw recurringError('CONTACT_NOT_FOUND', `contact ${contactId} does not exist`);
+    if (!invoiceLines || invoiceLines.length === 0) throw recurringError('INVALID_KIND', 'invoice templates need --lines');
+    const parsed = validateInvoiceLines(db, invoiceLines);
+    vatAware = parsed.some((l) => l.vatCode);
+    postingsJson = JSON.stringify(parsed.map((l) => ({
+      description: l.description, quantity: l.qty, priceCents: l.priceCents, vatCode: l.vatCode,
+    })));
   } else {
-    resolved = raw.flatMap((p) => {
-      if (typeof p === 'string') {
-        // one string may carry several comma-separated postings
-        return parsePostingSpecs([p]).map((s) => ({
-          code: s.code, amountCents: s.amountCents, vatCode: null, vatAmountCents: null,
-        }));
-      }
-      return [{
-        code: p.code, amountCents: p.amountCents,
-        vatCode: p.vatCode ?? null, vatAmountCents: p.vatAmountCents ?? null,
-      }];
-    });
+    // Resolve posting specs (CODE:AMOUNT[@VAT]) and expand VAT legs when tagged.
+    // Strings are parsed; plain objects { code, amountCents } pass through.
+    const raw = postings.flatMap((p) => (typeof p === 'string' ? [p] : [p]));
+    vatAware = raw.some((p) => typeof p === 'string' && /@/.test(p));
+    let resolved;
+    if (vatAware) {
+      // Expansion through the VAT module validates codes + computes VAT legs.
+      resolved = expandVatPostings(db, parseVatPostingSpecs(raw.filter((p) => typeof p === 'string')));
+    } else {
+      resolved = raw.flatMap((p) => {
+        if (typeof p === 'string') {
+          // one string may carry several comma-separated postings
+          return parsePostingSpecs([p]).map((s) => ({
+            code: s.code, amountCents: s.amountCents, vatCode: null, vatAmountCents: null,
+          }));
+        }
+        return [{
+          code: p.code, amountCents: p.amountCents,
+          vatCode: p.vatCode ?? null, vatAmountCents: p.vatAmountCents ?? null,
+        }];
+      });
+    }
+    validatePostings(db, resolved);
+    postingsJson = JSON.stringify(resolved.map((p) => ({
+      code: p.code, amountCents: p.amountCents,
+      vatCode: p.vatCode ?? null, vatAmountCents: p.vatAmountCents ?? null,
+    })));
   }
-  validatePostings(db, resolved);
 
   // Normalize the first run to day_of_period (never backwards).
   let nextRun = startDate;
@@ -118,18 +148,18 @@ export function createTemplate(db, {
   const info = db.prepare(`
     INSERT INTO recurring_templates
       (name, description, frequency, day_of_period, start_date, end_date, runs,
-       postings_json, reverse_previous, next_run_date, vat_aware, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       postings_json, reverse_previous, next_run_date, vat_aware, created_by,
+       kind, contact_id, invoice_lines_json, due_days)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(name, description, frequency, dayOfPeriod, startDate, endDate, runs,
-    JSON.stringify(resolved.map((p) => ({
-      code: p.code, amountCents: p.amountCents,
-      vatCode: p.vatCode ?? null, vatAmountCents: p.vatAmountCents ?? null,
-    }))),
-    reversePrevious ? 1 : 0, nextRun, vatAware ? 1 : 0, actor);
+    postingsJson,
+    reversePrevious ? 1 : 0, nextRun, vatAware ? 1 : 0, actor,
+    kind, kind === 'invoice' ? contactId : null, kind === 'invoice' ? postingsJson : null,
+    kind === 'invoice' ? dueDays : null);
 
   record(db, {
     actor, action: 'recurring.template_add', command: 'recurring add',
-    args: { name, frequency, dayOfPeriod, startDate, endDate, runs, reversePrevious },
+    args: { name, frequency, dayOfPeriod, startDate, endDate, runs, reversePrevious, kind },
     outcome: 'ok',
   });
   return getTemplate(db, info.lastInsertRowid);
@@ -140,13 +170,17 @@ export function getTemplate(db, id) {
   if (!tpl) return null;
   tpl.postings = JSON.parse(tpl.postings_json);
   tpl.final_postings = tpl.final_postings_json ? JSON.parse(tpl.final_postings_json) : null;
+  tpl.invoice_lines = tpl.invoice_lines_json ? JSON.parse(tpl.invoice_lines_json) : null;
   return tpl;
 }
 
 export function listTemplates(db, { status = 'active' } = {}) {
   const where = status && status !== 'all' ? 'WHERE status = ?' : '';
   const rows = db.prepare(`SELECT * FROM recurring_templates ${where} ORDER BY next_run_date, id`).all(...(status && status !== 'all' ? [status] : []));
-  for (const r of rows) r.postings = JSON.parse(r.postings_json);
+  for (const r of rows) {
+    r.postings = JSON.parse(r.postings_json);
+    r.invoice_lines = r.invoice_lines_json ? JSON.parse(r.invoice_lines_json) : null;
+  }
   return rows;
 }
 
@@ -166,37 +200,56 @@ function isFinalRun(tpl) {
 
 function runTemplateOnce(db, tpl, actor) {
   const generated = [];
-  const postings = isFinalRun(tpl) ? tpl.final_postings : tpl.postings;
-  // Entries are machine-generated: created_by is always 'recurring'
+  // Entries/invoices are machine-generated: created_by is always 'recurring'
   // (the trigger actor lives in the audit log of the run itself).
   const entryActor = 'recurring';
 
-  // accrual pattern: reverse the previous generated entry first
-  if (tpl.reverse_previous && tpl.last_entry_id) {
-    try {
-      const reversal = reverseEntry(db, {
-        id: tpl.last_entry_id, actor: entryActor, reason: `recurring template "${tpl.name}" — previous period reversal`,
-      });
-      generated.push({ kind: 'reversal', entry: reversal });
-    } catch (err) {
-      if (err.code === 'ALREADY_REVERSED' || err.code === 'NOT_POSTED') {
-        // the previous accrual was already handled (manually reversed) — fine
-      } else {
-        throw err;
+  let lastEntryId = null;
+  if (tpl.kind === 'invoice') {
+    // subscription invoice: generate a DRAFT invoice dated next_run_date.
+    // Finalizing stays a separate audited action — never auto-finalize.
+    const inv = createInvoice(db, {
+      contactId: tpl.contact_id,
+      lines: tpl.invoice_lines.map((l) => ({
+        qty: l.quantity, description: l.description, priceCents: l.priceCents, vatCode: l.vatCode,
+      })),
+      date: tpl.next_run_date,
+      dueDays: tpl.due_days ?? 30,
+      description: tpl.name,
+      actor: entryActor,
+    });
+    generated.push({ kind: 'invoice', invoice: { id: inv.id, invoice_number: null, status: 'draft', date: inv.date } });
+  } else {
+    const postings = isFinalRun(tpl) ? tpl.final_postings : tpl.postings;
+
+    // accrual pattern: reverse the previous generated entry first
+    if (tpl.reverse_previous && tpl.last_entry_id) {
+      try {
+        const reversal = reverseEntry(db, {
+          id: tpl.last_entry_id, actor: entryActor, reason: `recurring template "${tpl.name}" — previous period reversal`,
+        });
+        generated.push({ kind: 'reversal', entry: reversal });
+      } catch (err) {
+        if (err.code === 'ALREADY_REVERSED' || err.code === 'NOT_POSTED') {
+          // the previous accrual was already handled (manually reversed) — fine
+        } else {
+          throw err;
+        }
       }
     }
-  }
 
-  const entry = createEntry(db, {
-    date: tpl.next_run_date,
-    description: `${tpl.name} ${tpl.next_run_date}`,
-    postings,
-    source: 'recurring',
-    sourceRef: `tpl:${tpl.id}`,
-    actor: entryActor,
-  });
-  const posted = postEntry(db, { id: entry.id, actor: entryActor });
-  generated.push({ kind: 'entry', entry: posted });
+    const entry = createEntry(db, {
+      date: tpl.next_run_date,
+      description: `${tpl.name} ${tpl.next_run_date}`,
+      postings,
+      source: 'recurring',
+      sourceRef: `tpl:${tpl.id}`,
+      actor: entryActor,
+    });
+    const posted = postEntry(db, { id: entry.id, actor: entryActor });
+    lastEntryId = posted.id;
+    generated.push({ kind: 'entry', entry: posted });
+  }
 
   const nextRun = addPeriod(tpl.next_run_date, tpl.frequency, tpl.day_of_period);
   let status = tpl.status;
@@ -208,7 +261,7 @@ function runTemplateOnce(db, tpl, actor) {
     UPDATE recurring_templates
     SET next_run_date = ?, last_run_date = ?, last_entry_id = ?, runs_done = ?, status = ?
     WHERE id = ?
-  `).run(nextRun, tpl.next_run_date, posted.id, runsDone, status, tpl.id);
+  `).run(nextRun, tpl.next_run_date, lastEntryId, runsDone, status, tpl.id);
 
   return { generated, status, runs_done: runsDone };
 }
@@ -232,11 +285,12 @@ export function runDue(db, { asOf = null, templateId = null, actor = 'human', dr
       ORDER BY next_run_date, id
     `).all(date);
   }
-  // normalize: rows from raw SELECTs need their postings parsed
+  // normalize: rows from raw SELECTs need their JSON columns parsed
   for (const t of templates) {
     if (!t.postings) t.postings = JSON.parse(t.postings_json);
     if (t.final_postings_json) t.final_postings = JSON.parse(t.final_postings_json);
     else t.final_postings = null;
+    if (t.invoice_lines_json) t.invoice_lines = JSON.parse(t.invoice_lines_json);
   }
 
   const results = [];
@@ -257,12 +311,25 @@ export function runDue(db, { asOf = null, templateId = null, actor = 'human', dr
         let sim = tpl;
         for (let i = 0; i < maxRunsPerTemplate && sim.next_run_date <= date; i += 1) {
           if (sim.status !== 'active') break;
-          const next = sim.runs && sim.runs_done + 1 >= sim.runs && sim.final_postings
-            ? sim.final_postings : sim.postings;
-          tplResult.runs.push({
-            kind: sim.reverse_previous && sim.last_entry_id ? 'reversal' : null,
-            entry: { date: sim.next_run_date, postings: next, description: `${sim.name} ${sim.next_run_date}` },
-          });
+          if (sim.kind === 'invoice') {
+            const contact = getContact(db, sim.contact_id);
+            tplResult.runs.push({
+              kind: 'invoice',
+              invoice: {
+                date: sim.next_run_date,
+                due_date: sim.due_days ? addDays(sim.next_run_date, sim.due_days) : null,
+                contact_name: contact?.name ?? null,
+                lines: sim.invoice_lines ?? [],
+              },
+            });
+          } else {
+            const next = sim.runs && sim.runs_done + 1 >= sim.runs && sim.final_postings
+              ? sim.final_postings : sim.postings;
+            tplResult.runs.push({
+              kind: sim.reverse_previous && sim.last_entry_id ? 'reversal' : null,
+              entry: { date: sim.next_run_date, postings: next, description: `${sim.name} ${sim.next_run_date}` },
+            });
+          }
           sim = { ...sim, next_run_date: addPeriod(sim.next_run_date, sim.frequency, sim.day_of_period), runs_done: sim.runs_done + 1 };
           if ((sim.runs && sim.runs_done >= sim.runs) || (sim.end_date && sim.next_run_date > sim.end_date)) {
             sim.status = 'completed';
@@ -281,7 +348,7 @@ export function runDue(db, { asOf = null, templateId = null, actor = 'human', dr
     record(db, {
       actor, action: 'recurring.run', command: 'recurring run',
       args: { asOf: date, templates: results.filter((r) => r.ok).length }, outcome: 'ok',
-      entryIds: results.flatMap((r) => r.runs.flatMap((run) => run.generated?.map((g) => g.entry.id) ?? [])),
+      entryIds: results.flatMap((r) => r.runs.flatMap((run) => run.generated?.map((g) => g.entry?.id).filter(Boolean) ?? [])),
     });
   }
   return { as_of: date, dry_run: dryRun, templates: results };
