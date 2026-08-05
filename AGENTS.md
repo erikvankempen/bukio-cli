@@ -65,6 +65,10 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio year-end status --year YYYY` / `close --year YYYY [--dry-run]` | Annual close: result -> 9900 -> 3000 (source 'closing'; P&L stays visible). |
 | `bukio jaarrekening report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx]` | Statutory annual accounts (KVK deposit package as PDF). |
 | `bukio icp readout --period 2026-Q3` | ICP listing: EU btw-verlegde supplies per customer (manual filing aid). |
+| `bukio fx set --currency USD --date D --rate 1.0875` | FX rate store (upsert, audited). |
+| `bukio entry add / vat book --currency USD [--rate R]` | Foreign-currency purchase invoices -> EUR at booking (auto rate lookup; postings keep fx_currency/fx_amount_cents). |
+| `bukio mcp` | MCP server over stdio (plan-only mutations unless mode=execute; BUKIO_MCP_READONLY=1 blocks them). |
+| `bukio compliance status --year YYYY` / `mark --type ICP\|JAARREKENING --period ...` | Filing deadlines (OB/ICP/jaarrekening) + manual filing registry. |
 | `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. |
 | `bukio audit [--by agent:hermes] [--since ISO] [--limit N]` | Read the append-only audit log (newest first). |
 
@@ -283,6 +287,27 @@ bukio account import --file assets/chart-nl.csv --dry-run   # validate; then imp
 bukio audit --by agent:hermes --json
 ```
 
+### 6.13 Foreign-currency purchase invoices (FX)
+
+```bash
+# 1. store the rate once (upsert; audited)
+bukio fx set --currency USD --date 2026-07-03 --rate 1.0875
+# 2. book the invoice: amounts in the specs are USD, the ledger stores EUR
+bukio vat book --date 2026-07-03 --desc "Stripe Inc. - INV-8821 (USD)" \
+  --currency USD --postings "4300:895.00@21,1100:-1082.95" --dry-run
+bukio vat book --date 2026-07-03 --desc "Stripe Inc. - INV-8821 (USD)" \
+  --currency USD --postings "4300:895.00@21,1100:-1082.95" --post --actor agent:hermes
+# 3. koersverschil at payment (the bank shows a different EUR amount): book the
+#    difference on 4700 Koersverschillen (create the account first)
+bukio account add --code 4700 --name "Koersverschillen" --type expense --normal-balance debit
+```
+
+FX rules: the rate is auto-looked-up on/before the booking date when `--rate` is
+omitted (`FX_RATE_NOT_FOUND` if none); conversion is round-half-up integer math;
+postings carry `fx_currency`/`fx_amount_cents` so the original amount is always
+auditable; reversals negate both; VAT legs are EUR-only. Outgoing invoices stay
+EUR-only. Never hand-build FX entries — always `--currency` or a converted spec.
+
 ### 6.12 Year-end: close the books, produce the jaarrekening
 
 ```bash
@@ -390,8 +415,8 @@ individual generated entries with `entry reverse` if one is wrong (the template'
 
 ---
 
-## 9. Capability boundaries (Phase 4 complete)
+## 9. Capability boundaries (Phase 5 complete)
 
-Available: company init (incl. address for compliant invoices), journal entries, accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. invoice payments), optional VAT module (enable, `vat book`, OB readout 1a–5d + mark-filed), recurring entries + invoices, invoicing (lifecycle, 12-vereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payments), Peppol send, **jaarrekening** (`year-end close`, micro/klein statutory accounts, KVK deposit PDF, XLSX), **ICP readout**, backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
+Available: company init (incl. address for compliant invoices), journal entries (incl. **FX conversion**), accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. invoice payments), optional VAT module (enable, `vat book`, OB readout 1a–5d + mark-filed), recurring entries + invoices, invoicing (lifecycle, 12-vereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payments), Peppol send, jaarrekening (`year-end close`, micro/klein statutory accounts, KVK deposit PDF, XLSX), ICP readout, **FX rates + foreign-currency booking** (`fx set`, `--currency/--rate` on entry add + vat book, `fx_currency`/`fx_amount_cents` on postings), **MCP server** (`bukio mcp`, plan-only mutations, READONLY mode), **compliance calendar** (`compliance status`/`mark`), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 
-**Not yet available:** MCP server, NL query, AI categorization suggestions, compliance calendar, Ponto live feeds, Peppol receive. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds.
+**Not yet available:** LLM categorization suggestions, Ponto live feeds, Peppol receive, OCR. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds. NL query is done via the MCP tools — there is no bespoke NL parser.

@@ -7,6 +7,20 @@ import {
   resolvePostings, reverseEntry,
 } from '../core/entries.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { getFxRate, parseRate, toEurPostings } from '../fx/index.js';
+
+/** Convert posting specs to EUR when --currency given; auto rate lookup. */
+function applyFx(db, postings, { currency, rate, date }) {
+  if (!currency) return postings;
+  const rateX10000 = rate != null ? parseRate(rate) : getFxRate(db, { currency, date });
+  if (!rateX10000) {
+    throw Object.assign(
+      new Error(`no FX rate for ${currency} on/before ${date} — set one with 'bukio fx set' or pass --rate`),
+      { code: 'FX_RATE_NOT_FOUND' },
+    );
+  }
+  return toEurPostings(postings, { currency, rateX10000 });
+}
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -47,6 +61,8 @@ export function make(program) {
     .option('--postings <CODE:AMOUNT>', 'posting spec, repeatable or comma-separated (positive=debit, negative=credit)', collect, [])
     .option('--source <source>', 'manual|bank|invoice|agent', 'manual')
     .option('--source-ref <ref>', 'source reference')
+    .option('--currency <ISO>', 'postings are in this foreign currency; converted to EUR (needs a rate)')
+    .option('--rate <n>', 'FX rate (1 EUR = n units); auto-looked-up on/before the date when omitted')
     .option('--post', 'post the entry immediately (draft -> posted)')
     .option('--dry-run', 'show the plan without writing anything')
     .action((opts, command) => {
@@ -127,17 +143,25 @@ function addAction(ctx, opts) {
   if (ctx.dryRun) {
     const db = existsSync(ctx.dbPath) ? openDb(ctx.dbPath) : null;
     let resolved = null;
-    if (db) {
-      resolved = resolvePostings(db, postings).map((p) => ({
-        code: p.code, amount_cents: p.amountCents, amount: formatAmount(p.amountCents),
-      }));
-      db.close();
+    try {
+      const converted = db ? applyFx(db, postings, opts) : (opts.currency ? applyFx(null, postings, { ...opts, rate: opts.rate ?? (() => { throw Object.assign(new Error(`no FX rate for ${opts.currency} — pass --rate or create the database first`), { code: 'FX_RATE_NOT_FOUND' }); })() }) : postings);
+      if (db) {
+        resolved = resolvePostings(db, converted).map((p) => ({
+          code: p.code, amount_cents: p.amountCents, amount: formatAmount(p.amountCents),
+          fx_currency: p.fxCurrency, fx_amount_cents: p.fxAmountCents,
+        }));
+      } else {
+        resolved = null;
+      }
+    } finally {
+      if (db) db.close();
     }
     const sum = postings.reduce((s, p) => s + p.amountCents, 0);
     output(ctx, {
       action: 'create journal entry',
       date: opts.date,
       description: opts.desc,
+      currency: opts.currency ?? null,
       postings: resolved ?? postings.map((p) => ({ code: p.code, amount_cents: p.amountCents, amount: formatAmount(p.amountCents) })),
       sum_cents: sum,
       sum: formatAmount(sum),
@@ -146,8 +170,11 @@ function addAction(ctx, opts) {
       account_validation: resolved ? 'ok' : 'skipped (no database yet)',
       dryRun: true,
     }, (d) => {
-      console.log(`plan: create entry ${d.date} "${d.description}"`);
-      for (const p of d.postings) console.log(`  ${p.code}  ${p.amount}`);
+      console.log(`plan: create entry ${d.date} "${d.description}"${d.currency ? ` (${d.currency} -> EUR)` : ''}`);
+      for (const p of d.postings) {
+        const fx = p.fx_currency ? `  [${p.fx_currency} ${p.fx_amount_cents != null ? (p.fx_amount_cents / 100).toFixed(2) : ''}]` : '';
+        console.log(`  ${p.code}  ${p.amount}${fx}`);
+      }
       console.log(`  sum: ${d.sum}${d.post ? '  -> will post' : ''}`);
       console.log(d.account_validation.startsWith('ok') ? '(accounts validated)' : `(note: ${d.account_validation})`);
       console.log('(dry run — nothing written)');
@@ -157,10 +184,11 @@ function addAction(ctx, opts) {
 
   const db = ensureDb(ctx);
   try {
+    const converted = applyFx(db, postings, opts);
     let entry = createEntry(db, {
       date: opts.date,
       description: opts.desc,
-      postings: postings.map((p) => ({ code: p.code, amountCents: p.amountCents })),
+      postings: converted.map((p) => ({ code: p.code, amountCents: p.amountCents, fxCurrency: p.fxCurrency, fxAmountCents: p.fxAmountCents })),
       source: opts.source,
       sourceRef: opts.sourceRef ?? null,
       actor: ctx.actor,

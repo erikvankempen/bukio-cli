@@ -52,8 +52,8 @@ test('expandVatPostings: adds VAT leg, computes vat amount', () => {
   enableVat();
   const expanded = expandVatPostings(db, parseVatPostingSpecs(['1100:121.00,8000:-100.00@21']));
   assert.deepEqual(expanded, [
-    { code: '1100', amountCents: 12100, vatCode: null, vatAmountCents: null },
-    { code: '8000', amountCents: -10000, vatCode: '21', vatAmountCents: -2100 },
+    { code: '1100', amountCents: 12100, vatCode: null, vatAmountCents: null, fxCurrency: null, fxAmountCents: null },
+    { code: '8000', amountCents: -10000, vatCode: '21', vatAmountCents: -2100, fxCurrency: null, fxAmountCents: null },
     { code: '2500', amountCents: -2100 }, // te betalen btw (credit)
   ]);
   const sum = expanded.reduce((s, p) => s + p.amountCents, 0);

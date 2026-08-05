@@ -32,7 +32,7 @@
 
 ## Status
 
-**Phase 4 — Jaarrekening: complete ✅ (v0.7.0).** Year-end close (afsluiting boekjaar), statutory annual accounts (micro/klein), the KVK deposit PDF, the ICP listing, and the corrected OB export fields (2a/3a/3b) are all in. Next: **Phase 5 — agent layer** (MCP server, NL query, compliance calendar). See [Roadmap](#roadmap).
+**Phase 5 — Agent layer: complete ✅ (v0.8.0).** MCP server (stdio, plan-only by default, `BUKIO_MCP_READONLY`), FX translation for foreign-currency purchase invoices (rates store, auto lookup, auditable conversion), and the compliance calendar (OB/ICP deadlines, jaarrekening deposit). NL query = an agent on top of the MCP tools. See [Roadmap](#roadmap).
 
 ---
 
@@ -437,6 +437,32 @@ bukio icp readout --period 2026-Q3             # EU customers + amounts
 
 **OB readout fields (Phase 4):** 1a/1b/1c omzet (21%/9%/0%-vrijgesteld), 1d privégebruik (21% auto-computed on `@P`), **2a verlegde EU leveringen (RE)**, 3a inkopen binnenland (incl. verlegd `@R`), **3b inkopen EU (RE)**, 3c buiten EU, 4a/4b verlegde btw, 5a verschuldigd, 5b voorbelasting, 5d te betalen/te ontvangen. 2b and 5c are not tracked.
 
+### `bukio mcp` / `bukio fx` / `bukio compliance`
+
+The agent layer (Phase 5).
+
+| Command | Purpose |
+|---------|---------|
+| `mcp` | **MCP server over stdio** (JSON-RPC 2.0, newline-delimited): `company_info`, `trial_balance`, `balans`, `pnl`, `journal`, `accounts`, `vat_readout`, `icp_readout`, `audit`, `compliance`, `invoices` (read-only) + `entry_add/post/reverse`, `vat_book`, `invoice_create/finalize/credit/pay`, `recurring_run`, `year_end_close`, `fx_set`, `contact_add` (mutations). **Mutations are plan-only unless `mode:"execute"`**; `BUKIO_MCP_READONLY=1` blocks execution entirely. Every execute books with the caller's `actor` and lands in the audit log. NL query = an agent on top of these tools |
+| `fx set --currency USD --date D --rate 1.0875` | Store a rate (1 EUR = N units of foreign currency, 4 decimals max). Upsert; audited |
+| `entry add / vat book --currency USD [--rate R]` | **Foreign-currency purchase invoices**: spec amounts are in the foreign currency, converted to EUR (round-half-up) at booking; the rate is auto-looked-up (exact date, else latest on/before) when `--rate` is omitted. The ledger stores EUR; each posting keeps `fx_currency`/`fx_amount_cents` (the original amount) — reversals negate both. VAT legs are computed on the EUR amounts |
+| `compliance status --year YYYY` | OB + ICP quarterly deadlines and the jaarrekening deposit (13 months after FY end, art. 2:394 BW) with filed/open/overdue status; `compliance mark --type ICP\|JAARREKENING --period ...` records a filing (OB uses `vat readout --mark-filed`) |
+
+```bash
+bukio fx set --currency USD --date 2026-07-03 --rate 1.0875
+bukio vat book --date 2026-07-03 --desc "Stripe (USD)" --currency USD \
+  --postings "4300:895.00@21,1100:-1082.95" --post      # 822.99 EUR + 172.83 VAT
+# koersverschil at payment: book the difference on 4700 (created on demand)
+bukio account add --code 4700 --name "Koersverschillen" --type expense --normal-balance debit
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"entry_add","arguments":{"date":"2026-07-31","description":"Huur","postings":["4300:800.00","1100:-800.00"],"mode":"execute","actor":"agent:hermes"}}}' \
+| bukio mcp           # or wire it into an MCP client (Hermes, Claude Code, ...)
+bukio compliance status --year 2026
+```
+
+**FX booking rules:** amounts in posting specs are foreign currency; `--rate` or the stored rate converts to EUR. The description should note the currency and the original invoice number. Outgoing invoices stay EUR-only (the 12-vereisten and UBL are EUR-based).
+
 ### `bukio backup` / `bukio restore`
 
 | Command | Purpose |
@@ -646,6 +672,9 @@ The suite covers: money parsing, posting engine invariants, reversal semantics, 
 | `INCOMPLETE_YEAR` / `ALREADY_CLOSED` / `EMPTY_YEAR` / `INVALID_YEAR` | Year-end close guards |
 | `INVALID_MODEL` | jaarrekening model must be micro or klein |
 | `ICP_VAT_ID_MISSING` | EU customer without a btw-id — the ICP listing cannot be completed |
+| `FX_RATE_NOT_FOUND` / `INVALID_RATE` / `INVALID_CURRENCY` / `INVALID_FX_AMOUNT` / `INVALID_FX_CURRENCY` | FX booking errors (missing rate, malformed rate/currency/amount) |
+| `MCP_READONLY` | A mutation was attempted on a read-only MCP server (BUKIO_MCP_READONLY=1) |
+| `INVALID_TYPE` / `INVALID_PERIOD` | compliance mark errors |
 | `SQLITE_CONSTRAINT_TRIGGER` | A database trigger aborted the operation (e.g. editing a posted entry, rewriting the audit log) |
 
 ---
@@ -741,7 +770,7 @@ bukio init --name "Mijn ZZP" --kor
 | 2 | Bank import (CAMT.053/CSV), matching; optional VAT module (codes, OB readout, KOR) | ✅ done |
 | 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes, payment matching, recurring entries **+ recurring invoices + Peppol send** | Compliant invoice PDF + UBL per invoice; due entries generated & posted on time | ✅ done (v0.6.0) |
 | 4 | Jaarrekening micro/klein models, closing entries, KVK package, ICP readout | Jaarrekening package for a micro BV — **✅ done (v0.7.0, 178 tests green)** | planned |
-| 5 | Agent layer: MCP server, permissions, NL query, AI categorization suggestions, compliance calendar | planned |
+| 5 | Agent layer: MCP server, permissions/approval gates, NL query, AI categorization suggestions, compliance calendar, FX translation | Agent closes a month end-to-end with zero unsupervised mutations — **✅ done (v0.8.0, 191 tests green)** | planned |
 | 6 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.

@@ -71,12 +71,25 @@ export function resolvePostings(db, postings) {
       vatAmountCents = p.vatAmountCents;
     }
 
+    // FX passthrough (Phase 5, FR5.X): the ledger amount is EUR; the original
+    // foreign amount + currency are kept for the audit trail.
+    let fxCurrency = null;
+    let fxAmountCents = null;
+    if (p.fxCurrency != null || p.fxAmountCents != null) {
+      if (!/^[A-Z]{3}$/.test(p.fxCurrency)) throw entryError('INVALID_FX_CURRENCY', `fx currency '${p.fxCurrency}' must be ISO 4217`);
+      if (!Number.isInteger(p.fxAmountCents)) throw entryError('INVALID_FX_AMOUNT', 'fx amounts must be integers (cents)');
+      fxCurrency = p.fxCurrency;
+      fxAmountCents = p.fxAmountCents;
+    }
+
     return {
       accountId: account.id,
       code: account.code,
       amountCents: p.amountCents,
       vatCodeId,
       vatAmountCents,
+      fxCurrency,
+      fxAmountCents,
     };
   });
 }
@@ -112,13 +125,15 @@ export function createEntry(db, {
     'INSERT INTO journal_entries (date, description, source, source_ref, state, created_by) VALUES (?, ?, ?, ?, ?, ?)',
   );
   const insertPosting = db.prepare(
-    'INSERT INTO postings (entry_id, account_id, amount_cents, vat_code_id, vat_amount_cents) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO postings (entry_id, account_id, amount_cents, vat_code_id, vat_amount_cents, fx_currency, fx_amount_cents) VALUES (?, ?, ?, ?, ?, ?, ?)',
   );
 
   const tx = db.transaction(() => {
     const info = insertEntry.run(date, String(description).trim(), source, sourceRef, 'draft', actor);
     const entryId = info.lastInsertRowid;
-    for (const p of resolved) insertPosting.run(entryId, p.accountId, p.amountCents, p.vatCodeId, p.vatAmountCents);
+    for (const p of resolved) {
+      insertPosting.run(entryId, p.accountId, p.amountCents, p.vatCodeId, p.vatAmountCents, p.fxCurrency, p.fxAmountCents);
+    }
     record(db, {
       actor, action: 'entry.create', command: 'entry add',
       args: { date, description, postings: resolved.map((p) => `${p.code}:${p.amountCents}`), source, sourceRef },
@@ -173,7 +188,7 @@ export function reverseEntry(db, { id, actor = 'human', reason = null }) {
     'INSERT INTO journal_entries (date, description, source, source_ref, state, reversed_from_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
   );
   const insertPosting = db.prepare(
-    'INSERT INTO postings (entry_id, account_id, amount_cents) VALUES (?, ?, ?)',
+    'INSERT INTO postings (entry_id, account_id, amount_cents, fx_currency, fx_amount_cents) VALUES (?, ?, ?, ?, ?)',
   );
 
   const tx = db.transaction(() => {
@@ -182,7 +197,7 @@ export function reverseEntry(db, { id, actor = 'human', reason = null }) {
     const info = insertEntry.run(entry.date, description, 'reversal', null, 'draft', id, actor);
     const reversalId = info.lastInsertRowid;
     for (const p of entry.postings) {
-      insertPosting.run(reversalId, p.account_id, -p.amount_cents);
+      insertPosting.run(reversalId, p.account_id, -p.amount_cents, p.fx_currency, p.fx_amount_cents == null ? null : -p.fx_amount_cents);
     }
     db.prepare("UPDATE journal_entries SET state = 'posted', posted_at = ? WHERE id = ?")
       .run(nowIso(), reversalId);
@@ -223,10 +238,15 @@ export function getEntry(db, id) {
   if (!entry) return null;
   entry.postings = db.prepare(
     `SELECT p.id, p.account_id, p.amount_cents, p.document_id, p.vat_code_id, p.vat_amount_cents,
+            p.fx_currency, p.fx_amount_cents,
             a.code AS account_code, a.name AS account_name, a.type AS account_type
      FROM postings p JOIN accounts a ON a.id = p.account_id
      WHERE p.entry_id = ? ORDER BY p.id`,
   ).all(id);
+  // surface EUR amount for FX postings
+  for (const p of entry.postings) {
+    p.fx_amount = p.fx_amount_cents == null ? null : (p.fx_amount_cents / 100).toFixed(2);
+  }
   return entry;
 }
 

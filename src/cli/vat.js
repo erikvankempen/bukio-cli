@@ -6,6 +6,20 @@ import {
 } from '../vat/index.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 
+import { getFxRate, parseRate, toEurPostings } from '../fx/index.js';
+
+/** Convert posting specs to EUR when --currency given; auto rate lookup. */
+function applyFxToSpecs(db, specs, { currency, rate, date }) {
+  const rateX10000 = rate != null ? parseRate(rate) : getFxRate(db, { currency, date });
+  if (!rateX10000) {
+    throw Object.assign(
+      new Error(`no FX rate for ${currency} on/before ${date} — set one with 'bukio fx set' or pass --rate`),
+      { code: 'FX_RATE_NOT_FOUND' },
+    );
+  }
+  return toEurPostings(specs, { currency, rateX10000 });
+}
+
 function fmtEntry(entry) {
   return {
     id: entry.id, date: entry.date, description: entry.description, state: entry.state,
@@ -95,6 +109,8 @@ export function make(program) {
     .requiredOption('--postings <CODE:AMOUNT[@VATCODE]>', 'posting specs, repeatable or comma-separated')
     .option('--source <source>', 'manual|bank|invoice|agent', 'manual')
     .option('--source-ref <ref>', 'source reference')
+    .option('--currency <ISO>', 'postings are in this foreign currency; converted to EUR (needs a rate)')
+    .option('--rate <n>', 'FX rate (1 EUR = n units); auto-looked-up on/before the date when omitted')
     .option('--post', 'post the entry immediately')
     .option('--dry-run', 'show the expanded plan without writing')
     .action((opts, command) => {
@@ -103,27 +119,33 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const specs = parseVatPostingSpecs(opts.postings);
+          const converted = opts.currency
+            ? applyFxToSpecs(db, specs, opts)
+            : specs;
           if (ctx.dryRun) {
-            const expanded = expandVatPostings(db, specs);
+            const expanded = expandVatPostings(db, converted);
             output(ctx, {
               action: 'book VAT entry (expanded)',
               date: opts.date, description: opts.desc,
+              currency: opts.currency ?? null,
               postings: expanded.map((p) => ({
                 code: p.code, amount_cents: p.amountCents, amount: formatAmount(p.amountCents),
                 vat_code: p.vatCode, vat_amount: p.vatAmountCents == null ? null : formatAmount(p.vatAmountCents),
+                fx_currency: p.fxCurrency, fx_amount_cents: p.fxAmountCents,
               })),
               post: Boolean(opts.post), dryRun: true,
             }, (d) => {
-              console.log(`plan: VAT entry ${d.date} "${d.description}"`);
+              console.log(`plan: VAT entry ${d.date} "${d.description}"${d.currency ? ` (${d.currency} -> EUR)` : ''}`);
               for (const p of d.postings) {
-                console.log(`  ${p.code}  ${p.amount.padStart(12)}${p.vat_code ? `  @${p.vat_code} (${p.vat_amount})` : ''}`);
+                const fx = p.fx_currency ? `  [${p.fx_currency} ${p.fx_amount_cents != null ? (p.fx_amount_cents / 100).toFixed(2) : ''}]` : '';
+                console.log(`  ${p.code}  ${p.amount.padStart(12)}${fx}${p.vat_code ? `  @${p.vat_code} (${p.vat_amount})` : ''}`);
               }
               console.log('(dry run — nothing written)');
             });
             return;
           }
           const { entry, expanded } = bookVatEntry(db, {
-            date: opts.date, description: opts.desc, postings: specs,
+            date: opts.date, description: opts.desc, postings: converted,
             source: opts.source, sourceRef: opts.sourceRef ?? null,
             actor: ctx.actor, post: Boolean(opts.post),
           });
@@ -131,7 +153,8 @@ export function make(program) {
             (e) => {
               console.log(`entry #${e.entry.id}  [${e.entry.state}]  ${e.entry.date}  ${e.entry.description}`);
               for (const p of e.entry.postings) {
-                console.log(`  ${p.account_code}  ${p.account_name.padEnd(28)} ${p.amount.padStart(12)}${p.vat_amount ? `  vat ${p.vat_amount}` : ''}`);
+                const fx = p.fx_currency ? `  [${p.fx_currency} ${p.fx_amount_cents != null ? (p.fx_amount_cents / 100).toFixed(2) : ''}]` : '';
+                console.log(`  ${p.account_code}  ${p.account_name.padEnd(28)} ${p.amount.padStart(12)}${fx}${p.vat_amount ? `  vat ${p.vat_amount}` : ''}`);
               }
             });
         } finally {

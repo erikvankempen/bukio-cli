@@ -111,12 +111,16 @@ export function expandVatPostings(db, specs) {
       expanded.push({
         code: spec.code, amountCents: spec.amountCents,
         vatCode: vat.code, vatAmountCents: vatAmount,
+        fxCurrency: spec.fxCurrency ?? null, fxAmountCents: spec.fxAmountCents ?? null,
       });
       // The VAT leg carries the SAME sign as the tagged posting:
       // sales -> credit on 2500 (te betalen), purchases -> debit on 1500 (te vorderen).
       vatLegs.push({ code: vatAccountCode, amountCents: vatAmount });
     } else {
-      expanded.push({ code: spec.code, amountCents: spec.amountCents, vatCode: null, vatAmountCents: null });
+      expanded.push({
+        code: spec.code, amountCents: spec.amountCents, vatCode: null, vatAmountCents: null,
+        fxCurrency: spec.fxCurrency ?? null, fxAmountCents: spec.fxAmountCents ?? null,
+      });
     }
   }
 
@@ -130,6 +134,7 @@ export function bookVatEntry(db, {
   const expanded = expandVatPostings(db, postings);
   const corePostings = expanded.map((p) => ({
     code: p.code, amountCents: p.amountCents, vatCode: p.vatCode, vatAmountCents: p.vatAmountCents,
+    fxCurrency: p.fxCurrency, fxAmountCents: p.fxAmountCents,
   }));
   let entry = createEntry(db, {
     date, description, postings: corePostings, source, sourceRef, actor,
