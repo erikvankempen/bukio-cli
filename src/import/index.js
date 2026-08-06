@@ -488,9 +488,9 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
   }
   const xaf = doc.Xaf ?? doc.XAF;
   if (!xaf && doc.AuditFile) {
-    return importBukioAuditFile(db, { auditFile: doc.AuditFile, actor, dryRun });
+    return importAuditFileLayout(db, { auditFile: doc.AuditFile, actor, dryRun });
   }
-  if (!xaf) throw importError('INVALID_XAF', 'root element must be <Xaf> (Belastingdienst) or <AuditFile> (bukio export)');
+  if (!xaf) throw importError('INVALID_XAF', 'root element must be <Xaf> (Belastingdienst) or <AuditFile> (general-ledger export)');
 
   const header = xaf.XafHeader ?? {};
   const version = String(header.Version ?? '');
@@ -667,9 +667,9 @@ export function readImportFile(filePath) {
   return readFileSync(filePath, 'utf8');
 }
 
-// --- bukio audit file flavor (root <AuditFile>, https://www.bukio.nl/xaf/4.0) --
+// --- XAF 4.0 AuditFile layout (root <AuditFile>) ------------------------------
 //
-// Same audit semantics as the Belastingdienst layout, different element names:
+// The generic audit-file layout used by general-ledger software exports:
 //   Header            (AuditFileVersion, CompanyName, CompanyID, FiscalYear,
 //                      StartDate, EndDate, CurrencyCode, SoftwareDescription)
 //   MasterFiles/GeneralLedgerAccounts/Account   (AccountID, AccountDescription,
@@ -680,7 +680,7 @@ export function readImportFile(filePath) {
 // Each Line is a complete posting on one account (no tegenrekening); the entry
 // is the sum of its lines. Tax codes (e.g. NOVAT) are reported, not booked.
 
-const BUKIO_ACCOUNT_TYPES = {
+const AUDITFILE_ACCOUNT_TYPES = {
   asset: { type: 'asset', normalBalance: 'debit' },
   liability: { type: 'liability', normalBalance: 'credit' },
   equity: { type: 'equity', normalBalance: 'credit' },
@@ -688,7 +688,7 @@ const BUKIO_ACCOUNT_TYPES = {
   expense: { type: 'expense', normalBalance: 'debit' },
 };
 
-function importBukioAuditFile(db, { auditFile, actor, dryRun }) {
+function importAuditFileLayout(db, { auditFile, actor, dryRun }) {
   const header = auditFile.Header ?? {};
   const version = String(header.AuditFileVersion ?? '');
   if (!/^4(\.\d+)?$/.test(version)) {
@@ -726,7 +726,7 @@ function importBukioAuditFile(db, { auditFile, actor, dryRun }) {
     if (!CODE_RE.test(code)) errors.push({ line: 0, error: `INVALID_CODE: account '${code}' must be 1-6 digits` });
     else if (seenCodes.has(code)) errors.push({ line: 0, error: `DUPLICATE_CODE: account ${code} appears twice in the audit file` });
     else seenCodes.add(code);
-    const t = BUKIO_ACCOUNT_TYPES[String(a.AccountType ?? '').toLowerCase().trim()];
+    const t = AUDITFILE_ACCOUNT_TYPES[String(a.AccountType ?? '').toLowerCase().trim()];
     if (t) accountTypeByCode.set(code, t);
   }
 
@@ -850,7 +850,7 @@ function importBukioAuditFile(db, { auditFile, actor, dryRun }) {
 
   record(db, {
     actor, action: 'import.xaf', command: 'import xaf',
-    args: { transactions: parsed.length, imported: imported.length, duplicates, accounts_created: accountsCreated.length, accounts_updated: accountsUpdated.length, flavor: 'bukio' },
+    args: { transactions: parsed.length, imported: imported.length, duplicates, accounts_created: accountsCreated.length, accounts_updated: accountsUpdated.length, layout: 'auditfile' },
     outcome: 'ok', entryIds: imported.map((e) => e.id),
   });
   return {

@@ -72,7 +72,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio compliance status --year YYYY` / `mark --type ICP\|JAARREKENING --period ...` | Filing deadlines (OB/ICP/jaarrekening) + manual filing registry. |
 | `bukio import opening-balances --file F [--date yyyy-mm-dd] [--dry-run]` | Import opening balances as ONE posted Beginbalans entry (CSV `code,amount` or `code,debet,credit`). Sum must be zero. Re-run fails `OPENING_ALREADY_IMPORTED`. |
 | `bukio import journal --file F [--create-missing] [--dry-run]` | SnelStart/Exact-style journal CSV (aliases, `;` delimiter, Dutch amounts). One posted entry per boekstuknummer; idempotent. |
-| `bukio import xaf --file F [--dry-run]` | XML Auditfile Financieel 4.0 import — Belastingdienst OR bukio export layout; file chart upserted (renames colliding codes on an empty ledger, shown in the dry-run); KVK mismatch fails `COMPANY_MISMATCH`. |
+| `bukio import xaf --file F [--dry-run]` | XML Auditfile Financieel 4.0 import — Belastingdienst OR generic AuditFile layout; file chart upserted (renames colliding codes on an empty ledger, shown in the dry-run); KVK mismatch fails `COMPANY_MISMATCH`. |
 | `bukio month-end --period yyyy-mm` | **Read-only** close check: drafts, unmatched bank, OB quarter readout, draft/overdue invoices, due recurring, period totals + profit, `warnings[]`. |
 | `bukio invoice reminders [--within-days N] [--draft-emails]` | Overdue + due-soon invoices (most overdue first) with outstanding amounts; `--draft-emails` adds Dutch email drafts — nothing is sent. |
 | `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. |

@@ -273,9 +273,9 @@ test('xaf: dry-run validates and writes nothing', () => {
   assert.equal(getAccountByCode(db, '1250'), null);
 });
 
-// --- bukio audit file flavor (root <AuditFile>) ----------------------------
+// --- XAF 4.0 AuditFile layout (root <AuditFile>) ----------------------------
 
-const BUKIO_XAF = `<?xml version="1.0" encoding="UTF-8"?>
+const AUDITFILE_XAF = `<?xml version="1.0" encoding="UTF-8"?>
 <AuditFile xmlns="https://www.bukio.nl/xaf/4.0" version="4.0" exportedAt="2026-08-06T08:48:22Z">
   <Header>
     <AuditFileVersion>4.0</AuditFileVersion>
@@ -320,8 +320,8 @@ const BUKIO_XAF = `<?xml version="1.0" encoding="UTF-8"?>
   </GeneralLedgerEntries>
 </AuditFile>`;
 
-test('xaf (bukio flavor): imports transaction, creates + renames chart accounts', () => {
-  const res = importXaf(db, { xmlText: BUKIO_XAF, actor: 'agent:test' });
+test('xaf (AuditFile layout): imports transaction, creates + renames chart accounts', () => {
+  const res = importXaf(db, { xmlText: AUDITFILE_XAF, actor: 'agent:test' });
   assert.equal(res.imported, 1);
   assert.equal(res.header.company_name, 'Demo BV');
   assert.equal(res.header.software, 'Bukio');
@@ -342,17 +342,17 @@ test('xaf (bukio flavor): imports transaction, creates + renames chart accounts'
   assert.deepEqual(sums, { 1100: 12100, 8000: -12100 });
 });
 
-test('xaf (bukio flavor): accounts with postings are NOT renamed', () => {
+test('xaf (AuditFile layout): accounts with postings are NOT renamed', () => {
   postEntry(db, { id: createEntry(db, {
     date: '2026-01-01', description: 'Bestaat al', postings: [{ code: '1100', amountCents: 100 }, { code: '3000', amountCents: -100 }],
   }).id });
-  const res = importXaf(db, { xmlText: BUKIO_XAF });
+  const res = importXaf(db, { xmlText: AUDITFILE_XAF });
   assert.equal(getAccountByCode(db, '1100').name, 'Bank'); // untouched
   assert.ok(res.chart_warnings.some((w) => w.includes('1100')));
 });
 
-test('xaf (bukio flavor): unbalanced transaction fails whole-file validation', () => {
-  const bad = BUKIO_XAF.replace('</Line>\n        <Line>\n          <RecordID>2</RecordID>\n          <AccountID>8000</AccountID>\n          <Description>Factuur 2026-0001</Description>\n          <CreditAmount>121.00</CreditAmount>\n        </Line>', '</Line>');
+test('xaf (AuditFile layout): unbalanced transaction fails whole-file validation', () => {
+  const bad = AUDITFILE_XAF.replace('</Line>\n        <Line>\n          <RecordID>2</RecordID>\n          <AccountID>8000</AccountID>\n          <Description>Factuur 2026-0001</Description>\n          <CreditAmount>121.00</CreditAmount>\n        </Line>', '</Line>');
   assert.throws(
     () => importXaf(db, { xmlText: bad }),
     (err) => {
@@ -364,15 +364,15 @@ test('xaf (bukio flavor): unbalanced transaction fails whole-file validation', (
   assert.equal(listEntries(db).length, 0);
 });
 
-test('xaf (bukio flavor): idempotent per TransactionID', () => {
-  importXaf(db, { xmlText: BUKIO_XAF });
-  const res = importXaf(db, { xmlText: BUKIO_XAF });
+test('xaf (AuditFile layout): idempotent per TransactionID', () => {
+  importXaf(db, { xmlText: AUDITFILE_XAF });
+  const res = importXaf(db, { xmlText: AUDITFILE_XAF });
   assert.equal(res.imported, 0);
   assert.equal(res.duplicates, 1);
 });
 
-test('xaf (bukio flavor): dry-run lists renames and writes nothing', () => {
-  const plan = importXaf(db, { xmlText: BUKIO_XAF, dryRun: true });
+test('xaf (AuditFile layout): dry-run lists renames and writes nothing', () => {
+  const plan = importXaf(db, { xmlText: AUDITFILE_XAF, dryRun: true });
   assert.equal(plan.mutaties, 1);
   assert.equal(plan.accounts_to_create, 2);
   assert.deepEqual(plan.accounts_to_rename.map((r) => r.code), ['1100']);
@@ -380,15 +380,15 @@ test('xaf (bukio flavor): dry-run lists renames and writes nothing', () => {
   assert.equal(getAccountByCode(db, '1100').name, 'Bank');
 });
 
-test('xaf (bukio flavor): 8-digit CompanyID mismatch is an error', () => {
+test('xaf (AuditFile layout): 8-digit CompanyID mismatch is an error', () => {
   assert.throws(
-    () => importXaf(db, { xmlText: BUKIO_XAF.replace('<CompanyID>1</CompanyID>', '<CompanyID>99999999</CompanyID>') }),
+    () => importXaf(db, { xmlText: AUDITFILE_XAF.replace('<CompanyID>1</CompanyID>', '<CompanyID>99999999</CompanyID>') }),
     { code: 'COMPANY_MISMATCH' },
   );
 });
 
-test('xaf (bukio flavor): company name mismatch is only a warning', () => {
-  const res = importXaf(db, { xmlText: BUKIO_XAF.replace('<CompanyName>Demo BV</CompanyName>', '<CompanyName>Demo B.V. Rotterdam</CompanyName>') });
+test('xaf (AuditFile layout): company name mismatch is only a warning', () => {
+  const res = importXaf(db, { xmlText: AUDITFILE_XAF.replace('<CompanyName>Demo BV</CompanyName>', '<CompanyName>Demo B.V. Rotterdam</CompanyName>') });
   assert.equal(res.imported, 1);
   assert.ok(res.company_mismatch.some((w) => w.includes('name differs')));
 });
