@@ -15,7 +15,7 @@ export function makeCtx(command) {
   return {
     json: Boolean(o.json),
     dbPath: o.db,
-    actor: o.actor,
+    actor: o.actor ?? process.env.BUKIO_ACTOR ?? null,
     dryRun: Boolean(o.dryRun),
   };
 }

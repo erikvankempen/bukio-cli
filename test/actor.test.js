@@ -72,3 +72,17 @@ test('CLI: BUKIO_ACTOR env satisfies the requirement', () => {
   const r = runCli(['init', '--name', 'X', '--db', tmpDb()], { BUKIO_ACTOR: 'human:erik' });
   assert.equal(r.status, 0, r.stderr);
 });
+
+test('CLI: BUKIO_ACTOR env is recorded in the audit trail', () => {
+  const db = tmpDb();
+  const r = runCli(['init', '--name', 'X', '--db', db], { BUKIO_ACTOR: 'human:erik' });
+  assert.equal(r.status, 0, r.stderr);
+  const audit = runCli(['audit', '--db', db, '--json'], { BUKIO_ACTOR: 'human:erik' });
+  assert.equal(audit.status, 0, audit.stderr);
+  const rows = JSON.parse(audit.stdout).data.entries;
+  assert.ok(rows.length > 0);
+  // every recorded action must carry the env actor — not 'human' / undefined
+  for (const row of rows) {
+    assert.equal(row.actor, 'human:erik', `audit row ${row.id} actor should come from BUKIO_ACTOR`);
+  }
+});
