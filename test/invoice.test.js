@@ -7,7 +7,7 @@ import { getEntry } from '../src/core/entries.js';
 import { enableVatModule } from '../src/vat/index.js';
 import {
   buildInvoicePostings, createContact, createInvoice, creditInvoice,
-  finalizeInvoice, getInvoice, markPaid, nextInvoiceNumber, parseLineSpec,
+  finalizeInvoice, getInvoice, invoiceReminders, markPaid, nextInvoiceNumber, parseLineSpec,
   validateCompliance,
 } from '../src/invoice/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
@@ -312,4 +312,55 @@ test('buildInvoicePostings: sales vs credit sign flip', () => {
   const credit = { ...inv, invoice_type: 'credit' };
   const reversed = buildInvoicePostings(db, credit);
   assert.equal(reversed.find((p) => p.code === '1200').amountCents, -36300);
+});
+
+// --- reminders --------------------------------------------------------------
+
+function daysFromNow(days) {
+  return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+}
+
+function mkSalesInvoice({ date, dueDays = 14 }) {
+  const inv = createInvoice(db, {
+    contactId: 1, date, lines: ['1x Diensten @ 100.00 @21'], dueDays,
+  });
+  return finalizeInvoice(db, { id: inv.id, actor: 'agent:test' }).invoice;
+}
+
+test('invoiceReminders: overdue + due-soon, excludes paid and far-future', () => {
+  addContact();
+  mkSalesInvoice({ date: daysFromNow(-60), dueDays: 0 });  // overdue
+  mkSalesInvoice({ date: daysFromNow(2), dueDays: 5 });    // due soon (within 7)
+  mkSalesInvoice({ date: daysFromNow(20), dueDays: 14 });  // far future -> excluded
+  const paid = mkSalesInvoice({ date: daysFromNow(-30), dueDays: 0 }); // overdue but paid
+  markPaid(db, { id: paid.id, date: daysFromNow(-1), amountCents: 12100, method: 'bank', actor: 'agent:test' });
+
+  const r = invoiceReminders(db, { withinDays: 7 });
+  assert.equal(r.count, 2);
+  // most overdue first
+  assert.equal(r.reminders[0].remind, 'overdue');
+  assert.equal(r.reminders[0].days_overdue, 60);
+  assert.equal(r.reminders[0].outstanding, '121.00');
+  assert.equal(r.reminders[1].remind, 'due_soon');
+  assert.equal(r.reminders[1].days_overdue, 0);
+  assert.equal(r.reminders[1].contact_name, 'ACME B.V.');
+  assert.ok(r.reminders.every((x) => x.invoice_id > 0));
+});
+
+test('invoiceReminders: within-days controls the due-soon window', () => {
+  addContact();
+  mkSalesInvoice({ date: daysFromNow(2), dueDays: 5 }); // due in 7 days
+  mkSalesInvoice({ date: daysFromNow(-2), dueDays: 30 }); // due in 28 days
+  const narrow = invoiceReminders(db, { withinDays: 7 });
+  assert.equal(narrow.count, 1);
+  const wide = invoiceReminders(db, { withinDays: 30 });
+  assert.equal(wide.count, 2);
+});
+
+test('invoiceReminders: credit notes are not reminder candidates', () => {
+  addContact();
+  const inv = mkSalesInvoice({ date: daysFromNow(-60), dueDays: 0 });
+  creditInvoice(db, { id: inv.id, actor: 'agent:test' });
+  const r = invoiceReminders(db, { withinDays: 7 });
+  assert.equal(r.reminders.filter((x) => x.remind === 'overdue').length, 1);
 });

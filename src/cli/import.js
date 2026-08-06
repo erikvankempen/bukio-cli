@@ -1,0 +1,132 @@
+// bukio import — opening balances, journal CSV, XML Auditfile (XAF) 4.0.
+// All importers validate the ENTIRE file before writing anything; a file with
+// any problem is rejected with IMPORT_VALIDATION_FAILED + per-line details.
+import { formatAmount } from '../core/money.js';
+import {
+  importJournalCsv, importOpeningBalances, importXaf, readImportFile,
+} from '../import/index.js';
+import { ensureDb, makeCtx, output, fail, table } from './util.js';
+
+export function make(program) {
+  const imp = program.command('import').description('import data: opening balances, journal CSV, XAF 4.0 audit file');
+
+  imp
+    .command('opening-balances')
+    .description('import opening balances from CSV (code,amount | code,debet,credit) into one posted Beginbalans entry')
+    .requiredOption('--file <path>', 'CSV file')
+    .option('--date <yyyy-mm-dd>', 'entry date (default: today)')
+    .option('--dry-run', 'validate the whole file and show the plan without writing')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const csvText = readImportFile(opts.file);
+          const result = importOpeningBalances(db, {
+            csvText, date: opts.date ?? null, actor: ctx.actor, dryRun: ctx.dryRun,
+          });
+          if (ctx.dryRun) {
+            output(ctx, result, (d) => {
+              console.log(`plan: import opening balances on ${d.date} — ${d.accounts} accounts`);
+              console.log(`  debet ${formatAmount(d.total_debit_cents)}  =  credit ${formatAmount(d.total_credit_cents)}`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
+          output(ctx, result, (d) => {
+            console.log(`imported opening balances (${d.accounts} accounts) as entry #${d.entry.id} [${d.entry.state}] on ${d.entry.date}`);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  imp
+    .command('journal')
+    .description('import a journal from CSV (SnelStart/Exact-style: datum,boekstuknummer,rekening,tegenrekening,bedrag)')
+    .requiredOption('--file <path>', 'CSV file')
+    .option('--create-missing', 'create unknown accounts (type inferred from the net movement)')
+    .option('--dry-run', 'validate the whole file and show the plan without writing')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const csvText = readImportFile(opts.file);
+          const result = importJournalCsv(db, {
+            csvText, createMissing: Boolean(opts.createMissing), actor: ctx.actor, dryRun: ctx.dryRun,
+          });
+          if (ctx.dryRun) {
+            output(ctx, result, (d) => {
+              console.log(`plan: import journal — ${d.boekstukken} boekstukken / ${d.lines} lines${d.create_missing ? ' (create missing accounts)' : ''}`);
+              for (const e of d.entries.slice(0, 10)) {
+                console.log(`  ${e.date}  ${e.boekstuk}  (${e.lines} line${e.lines === 1 ? '' : 's'})`);
+              }
+              if (d.duplicates) console.log(`  (${d.duplicates} already imported — will skip)`);
+              if (d.ignored_btw_codes.length) console.log(`  note: btw codes ${d.ignored_btw_codes.join(', ')} ignored (net amounts imported)`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
+          output(ctx, result, (d) => {
+            console.log(`imported ${d.imported} boekstukken${d.duplicates ? ` (${d.duplicates} duplicates skipped)` : ''}`);
+            if (d.accounts_created.length) {
+              console.log(`created accounts: ${d.accounts_created.map((a) => `${a.code} (${a.type})`).join(', ')}`);
+            }
+            if (d.ignored_btw_codes.length) {
+              console.log(`note: btw codes ${d.ignored_btw_codes.join(', ')} ignored — verify the booked amounts`);
+            }
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  imp
+    .command('xaf')
+    .description('import an XML Auditfile Financieel 4.0 (Belastingdienst audit format)')
+    .requiredOption('--file <path>', 'XAF 4.0 XML file')
+    .option('--dry-run', 'validate the whole file and show the plan without writing')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const xmlText = readImportFile(opts.file);
+          const result = importXaf(db, { xmlText, actor: ctx.actor, dryRun: ctx.dryRun });
+          if (ctx.dryRun) {
+            output(ctx, result, (d) => {
+              console.log(`plan: import XAF 4.0 — ${d.company.name ?? 'unknown company'} (${d.company.kvk ?? 'no kvk'}) ${d.company.fiscal_year ?? ''}`);
+              console.log(`  ${d.rekeningen} rekeningen / ${d.mutaties} mutaties`);
+              if (d.accounts_to_create) console.log(`  ${d.accounts_to_create} accounts will be created`);
+              if (d.duplicates) console.log(`  (${d.duplicates} already imported — will skip)`);
+              if (d.ignored_btw_codes.length) console.log(`  note: btw codes ${d.ignored_btw_codes.join(', ')} ignored (net amounts imported)`);
+              for (const w of d.company_mismatch) console.log(`  warning: ${w}`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
+          output(ctx, result, (d) => {
+            console.log(`imported XAF: ${d.imported} mutaties${d.duplicates ? ` (${d.duplicates} duplicates skipped)` : ''}`);
+            if (d.accounts_created.length) {
+              console.log(`created accounts: ${d.accounts_created.map((a) => `${a.code} (${a.type})`).join(', ')}`);
+            }
+            if (d.ignored_btw_codes.length) {
+              console.log(`note: btw codes ${d.ignored_btw_codes.join(', ')} ignored — verify the booked amounts`);
+            }
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+        if (err.details) renderErrors({ error: err });
+      }
+    });
+}

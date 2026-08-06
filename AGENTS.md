@@ -70,8 +70,22 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio entry add / vat book --currency USD [--rate R]` | Foreign-currency purchase invoices -> EUR at booking. Rate resolves: --rate -> stored -> ECB auto-fetch (BUKIO_FX_NO_FETCH=1 disables). Postings keep fx_currency/fx_amount_cents. |
 | `bukio mcp` | MCP server over stdio (plan-only mutations unless mode=execute; BUKIO_MCP_READONLY=1 blocks them). |
 | `bukio compliance status --year YYYY` / `mark --type ICP\|JAARREKENING --period ...` | Filing deadlines (OB/ICP/jaarrekening) + manual filing registry. |
+| `bukio import opening-balances --file F [--date yyyy-mm-dd] [--dry-run]` | Import opening balances as ONE posted Beginbalans entry (CSV `code,amount` or `code,debet,credit`). Sum must be zero. Re-run fails `OPENING_ALREADY_IMPORTED`. |
+| `bukio import journal --file F [--create-missing] [--dry-run]` | SnelStart/Exact-style journal CSV (aliases, `;` delimiter, Dutch amounts). One posted entry per boekstuknummer; idempotent. |
+| `bukio import xaf --file F [--dry-run]` | XML Auditfile Financieel 4.0 import: file chart upserted, one posted entry per Mutatie; KVK mismatch fails `COMPANY_MISMATCH`. |
+| `bukio month-end --period yyyy-mm` | **Read-only** close check: drafts, unmatched bank, OB quarter readout, draft/overdue invoices, due recurring, period totals + profit, `warnings[]`. |
+| `bukio invoice reminders [--within-days N] [--draft-emails]` | Overdue + due-soon invoices (most overdue first) with outstanding amounts; `--draft-emails` adds Dutch email drafts — nothing is sent. |
 | `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. |
 | `bukio audit [--by agent:hermes] [--since ISO] [--limit N]` | Read the append-only audit log (newest first). |
+
+**Import contract (all three importers):** the ENTIRE file is validated before
+anything is written. Any problem → `IMPORT_VALIDATION_FAILED` with
+`error.details: [{ line, error }]` and NOTHING is imported. Idempotent:
+re-imports skip already-imported boekstukken (`duplicates` in the result).
+Import amounts accept `1234.56`, `1234,56` and `1.234,56`; `;`-delimited files
+split on `;` only (decimal commas stay intact). Journal/XAF `BtwCode` values
+are reported in `ignored_btw_codes` but NOT booked — the import is net; verify
+the booked amounts.
 
 **Posting syntax:** `--postings "1100:10000.00,3000:-10000.00"` — comma-separate or repeat the flag. `CODE` is the 4-digit account code. **Positive = debit, negative = credit. Sum must be zero.** Amount format: `1234.56`, max 2 decimals, no thousands separators, no Dutch comma decimals.
 
@@ -313,6 +327,29 @@ amount is always auditable; reversals negate both; VAT legs are EUR-only.
 Outgoing invoices stay EUR-only. Never hand-build FX entries — always
 `--currency` or a converted spec.
 
+### 6.14 Migrate from an old package + monthly close check
+
+```bash
+# 1. opening balances first (validates the WHOLE file, then posts ONE entry)
+bukio import opening-balances --file beginbalans.csv --date 2026-01-01 --dry-run
+bukio import opening-balances --file beginbalans.csv --date 2026-01-01
+# 2. journal CSV (SnelStart/Exact-style; unknown accounts with --create-missing)
+bukio import journal --file snelstart-journal.csv --create-missing --dry-run
+bukio import journal --file snelstart-journal.csv --create-missing
+# 3. the Belastingdienst audit format
+bukio import xaf --file audit.xaf --dry-run
+bukio import xaf --file audit.xaf
+# 4. every month, the agent runs the close check and the reminder list
+bukio month-end --period 2026-08 --json
+bukio invoice reminders --within-days 7 --draft-emails --json
+```
+
+Import failures carry per-line details:
+`error.details = [{ line: 2, error: "ACCOUNT_NOT_FOUND: account 9999 …" }]`.
+Fix the file, re-run — already-imported boekstukken are skipped, nothing is
+double-booked. Never "fix" a bad import by reversing parts of it — correct the
+file and re-import; entries are only written for the clean part of the run.
+
 ### 6.12 Year-end: close the books, produce the jaarrekening
 
 ```bash
@@ -420,8 +457,8 @@ individual generated entries with `entry reverse` if one is wrong (the template'
 
 ---
 
-## 9. Capability boundaries (Phase 5 complete)
+## 9. Capability boundaries (Phase 6 complete)
 
-Available: company init (incl. address for compliant invoices), journal entries (incl. **FX conversion**), accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. invoice payments), optional VAT module (enable, `vat book`, OB readout 1a–5d + mark-filed), recurring entries + invoices, invoicing (lifecycle, 12-vereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payments), Peppol send, jaarrekening (`year-end close`, micro/klein statutory accounts, KVK deposit PDF, XLSX), ICP readout, **FX rates + foreign-currency booking** (`fx set`, `--currency/--rate` on entry add + vat book, `fx_currency`/`fx_amount_cents` on postings), **MCP server** (`bukio mcp`, plan-only mutations, READONLY mode), **compliance calendar** (`compliance status`/`mark`), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
+Available: company init (incl. address for compliant invoices), journal entries (incl. **FX conversion**), accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. invoice payments), optional VAT module (enable, `vat book`, OB readout 1a–5d + mark-filed), recurring entries + invoices, invoicing (lifecycle, 12-vereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payments), Peppol send, jaarrekening (`year-end close`, micro/klein statutory accounts, KVK deposit PDF, XLSX), ICP readout, **FX rates + foreign-currency booking** (`fx set`, `--currency/--rate` on entry add + vat book, `fx_currency`/`fx_amount_cents` on postings), **MCP server** (`bukio mcp`, plan-only mutations, READONLY mode), **compliance calendar** (`compliance status`/`mark`), **imports** (`import opening-balances` / `journal` / `xaf` — whole-file validation, idempotent), **month-end close check** (`month-end --period`), **invoice reminders** (`invoice reminders`, draft emails only — never sends), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 
-**Not yet available:** LLM categorization suggestions, Ponto live feeds, Peppol receive, OCR. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds. NL query is done via the MCP tools — there is no bespoke NL parser.
+**Not yet available:** LLM categorization suggestions, Ponto live feeds, Peppol receive, OCR, automated email sending for reminders. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds. NL query is done via the MCP tools — there is no bespoke NL parser.

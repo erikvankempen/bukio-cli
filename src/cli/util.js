@@ -29,13 +29,20 @@ export function output(ctx, data, render) {
   }
 }
 
-/** Emit errors: JSON { ok:false, error:{code,message} } or a stderr line. */
+/** Emit errors: JSON { ok:false, error:{code,message,details?} } or stderr lines. */
 export function fail(ctx, err) {
   const code = err.code || 'ERROR';
   if (ctx.json) {
-    console.log(JSON.stringify({ ok: false, error: { code, message: err.message } }, null, 2));
+    const error = { code, message: err.message };
+    if (err.details) error.details = err.details;
+    console.log(JSON.stringify({ ok: false, error }, null, 2));
   } else {
     console.error(`error [${code}]: ${err.message}`);
+    if (err.details) {
+      for (const d of err.details) {
+        console.error(`  line ${d.line || '-'}: ${d.error}`);
+      }
+    }
   }
   process.exitCode = 1;
 }

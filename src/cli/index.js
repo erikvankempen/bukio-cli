@@ -16,13 +16,15 @@ import { make as yearEndCmd } from './year-end.js';
 import { make as fxCmd } from './fx.js';
 import { make as mcpCmd } from './mcp.js';
 import { make as complianceCmd } from './compliance.js';
+import { make as importCmd } from './import.js';
+import { make as monthEndCmd } from './month-end.js';
 
 export async function runCli(argv) {
   const program = new Command();
   program
     .name('bukio')
     .description('Agent-first bookkeeping for Dutch SMEs — SQLite, VAT-optional')
-    .version('0.8.0')
+    .version('0.9.0')
     .option('--json', 'machine-readable JSON output')
     .option('--db <path>', 'database file', process.env.BUKIO_DB || path.join(os.homedir(), '.bukio', 'bukio.db'))
     .option('--actor <who>', 'acting entity (human or agent:<name>)', process.env.BUKIO_ACTOR || 'human')
@@ -42,6 +44,8 @@ export async function runCli(argv) {
   fxCmd(program);
   mcpCmd(program);
   complianceCmd(program);
+  importCmd(program);
+  monthEndCmd(program);
 
   await program.parseAsync(argv);
 }

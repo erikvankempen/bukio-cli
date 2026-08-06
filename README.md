@@ -17,7 +17,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
 bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a VPS, stores everything in one local SQLite file, and is designed so AI agents — not just humans — can operate it safely and auditably. It is built for the Dutch B2B e-invoicing mandate: every invoice ends as a compliant PDF, a Peppol BIS 3.0 UBL document, and a sendable Peppol message.
 
-**Status: Phase 5 complete (v0.8.0)** — ledger → bank/VAT → invoicing & recurring → jaarrekening → agent layer (MCP). Full pipeline in the [Roadmap](#roadmap).
+**Status: Phase 6 complete (v0.9.0)** — ledger → bank/VAT → invoicing & recurring → jaarrekening → agent layer (MCP) → imports & month-end automation. Full pipeline in the [Roadmap](#roadmap).
 
 ## Features
 
@@ -25,6 +25,8 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 - **VAT optional** — the core ledger is VAT-agnostic. The optional VAT module adds codes, the OB readout (fields 1a–5d) and KOR support when you need them. Filing always stays manual — bukio never submits anything.
 - **Peppol BIS 3.0 ready** — the 2027 mandate in one loop: `finalize → PDF → UBL → peppol-send`.
 - **FX built in** — book foreign-currency purchase invoices in USD, GBP, …; rates resolve from your rate store or straight from the ECB.
+- **Migration-ready** — `import opening-balances`, `import journal` (SnelStart/Exact-style CSV) and `import xaf` (XML Auditfile Financieel 4.0) bring a whole administration in; every importer validates the entire file before writing a single cent.
+- **Runs itself** — `month-end` is the agent's close check (drafts, bank, VAT, invoices, recurring, profit); `invoice reminders` drafts overdue payment reminders.
 - **One company per database** — a second company is a second SQLite file (`--db` or `BUKIO_DB`).
 - **Local-first** — no cloud, no lock-in. Your 7-year administration stays yours.
 
@@ -470,6 +472,40 @@ The agent layer (Phase 5).
 | `entry add / vat book --currency USD [--rate R]` | **Foreign-currency purchase invoices**: spec amounts are in the foreign currency, converted to EUR (round-half-up) at booking; the rate is auto-looked-up (exact date, else latest on/before) when `--rate` is omitted. **Missing rates are fetched live from the ECB** and stored for reuse — one network call ever per currency/date. The ledger stores EUR; each posting keeps `fx_currency`/`fx_amount_cents` (the original amount) — reversals negate both. VAT legs are computed on the EUR amounts. `BUKIO_FX_NO_FETCH=1` disables the network fallback (offline/air-gapped use) |
 | `compliance status --year YYYY` | OB + ICP quarterly deadlines and the jaarrekening deposit (13 months after FY end, art. 2:394 BW) with filed/open/overdue status; `compliance mark --type ICP\|JAARREKENING --period ...` records a filing (OB uses `vat readout --mark-filed`) |
 
+### `bukio import` / `bukio month-end` / `bukio invoice reminders`
+
+Imports & period automation (Phase 6).
+
+**Every importer validates the ENTIRE file before writing anything** — all
+errors are collected and reported with line numbers (`IMPORT_VALIDATION_FAILED`
++ `details`), and the file is rejected as a whole when anything is wrong.
+Imports are idempotent: re-running skips already-imported boekstukken.
+
+| Command | Purpose |
+|---------|---------|
+| `import opening-balances --file <csv> [--date yyyy-mm-dd] [--dry-run]` | Import opening balances as ONE posted `Beginbalans` entry. CSV: `code,amount` (signed; + = debet) or `code,debet,credit` (Dutch layout). Amounts accept `1234.56`, `1234,56` and `1.234,56`. Sum must be zero. Re-import → `OPENING_ALREADY_IMPORTED` |
+| `import journal --file <csv> [--create-missing] [--dry-run]` | Import a journal from SnelStart/Exact-style CSV: header `datum,boekstuknummer,rekening,tegenrekening,bedrag[,omschrijving][,btwcode]` (aliases + `;` delimiter supported). Each row books `+bedrag` on rekening / `−bedrag` on tegenrekening; rows per boekstuknummer become ONE posted entry (`source='import'`, `source_ref='journal:<nr>'`). `--create-missing` creates unknown accounts (type inferred from net movement). BtwCode columns are reported in `ignored_btw_codes` but not booked |
+| `import xaf --file <audit.xaf> [--dry-run]` | Import an **XML Auditfile Financieel 4.0** (Belastingdienst audit format): the file's `Rekeningen` chart is upserted (type from `RekeningSoort` + net movement), each `Mutatie` becomes one posted entry (`source='xaf'`, `source_ref=<boekstuknummer>`). A differing company KVK → `COMPANY_MISMATCH` (name differences are warnings) |
+| `month-end --period yyyy-mm` | **Read-only close check**: draft entries, unmatched bank transactions, the OB readout for the containing quarter, draft + overdue invoices (with outstanding total), due recurring templates, period debit/credit totals (`balanced`), the month's profit, and human-readable `warnings` — the agent's monthly "can I close?" report |
+| `invoice reminders [--within-days N] [--draft-emails]` | Overdue + due-soon sales invoices, sorted most-overdue first, with `outstanding` per invoice. `--draft-emails` adds a Dutch reminder email draft (`to`/`subject`/`body`) per invoice — nothing is ever sent |
+
+```bash
+# switching from your old package in one morning:
+bukio import opening-balances --file beginbalans.csv --date 2026-01-01
+bukio import journal --file snelstart-export.csv --create-missing
+bukio import xaf --file audit.xaf                      # the Belastingdienst format
+# then let an agent run the close every month:
+bukio month-end --period 2026-08
+bukio invoice reminders --within-days 7 --draft-emails
+```
+
+**Import validation notes:** amounts accept the international form (`1234.56`)
+and Dutch bookkeeping notation (`1234,56`, `1.234,56`); `;`-delimited files
+split on `;` (decimal commas stay intact), otherwise on `,`. Journal lines
+without a boekstuknummer, rows on different dates within one boekstuk, unknown
+accounts (without `--create-missing`), and unbalanced opening balances all
+reject the file with per-line `details`.
+
 ```bash
 bukio fx set --currency USD --date 2026-07-03 --rate 1.0875
 bukio fx fetch --currency GBP --date 2026-08-03          # ECB reference rate, stored
@@ -800,7 +836,8 @@ bukio init --name "Mijn ZZP" --kor
 | 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes, payment matching, recurring entries **+ recurring invoices + Peppol send** | Compliant invoice PDF + UBL per invoice; due entries generated & posted on time | ✅ done (v0.6.0) |
 | 4 | Jaarrekening micro/klein models, closing entries, KVK package, ICP readout | Jaarrekening package for a micro BV — **✅ done (v0.7.0, 178 tests green)** | planned |
 | 5 | Agent layer: MCP server, permissions/approval gates, NL query, AI categorization suggestions, compliance calendar, FX translation | Agent closes a month end-to-end with zero unsupervised mutations — **✅ done (v0.8.0, 199 tests green)** | planned |
-| 6 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
+| 6 | Migration & automation: `import opening-balances`, `import journal` (SnelStart/Exact CSV), `import xaf` (XML Auditfile 4.0), `month-end` close check, `invoice reminders` | Switch from an old package in one morning; the agent runs the close check monthly — **✅ done (v0.9.0, 229 tests green)** | planned |
+| 7 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 

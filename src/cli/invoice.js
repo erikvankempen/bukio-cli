@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { formatAmount } from '../core/money.js';
 import {
   createContact, createInvoice, creditInvoice, finalizeInvoice, getInvoice,
-  listContacts, listInvoices, markPaid, parseLineSpec,
+  invoiceReminders, listContacts, listInvoices, markPaid, parseLineSpec,
 } from '../invoice/index.js';
 import { invoiceToPdf } from '../invoice/pdf.js';
 import { invoiceToUbl } from '../invoice/ubl.js';
@@ -363,6 +363,60 @@ export function make(program) {
           const paid = markPaid(db, { id: opts.id, date: opts.date, amountCents, method: opts.method, actor: ctx.actor });
           output(ctx, { invoice: fmtInvoice(paid) }, (d) => {
             console.log(`payment recorded: ${d.invoice.invoice_number} now ${d.invoice.status} (paid ${d.invoice.paid}/${d.invoice.gross})`);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  invoice
+    .command('reminders')
+    .description('list overdue and due-soon invoices; --draft-emails adds a reminder email draft per invoice')
+    .option('--within-days <n>', 'also list sent invoices due within this many days', '7')
+    .option('--draft-emails', 'add a draft reminder email (subject/body) per invoice — nothing is sent')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const result = invoiceReminders(db, { withinDays: Number(opts.withinDays) || 7 });
+          if (opts.draftEmails) {
+            const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
+            result.reminders = result.reminders.map((r) => {
+              const to = r.contact_email;
+              const subject = `Betalingsherinnering factuur ${r.invoice_number}`;
+              const lines = [
+                `Beste ${r.contact_name},`,
+                '',
+                `Voor factuur ${r.invoice_number} staat nog ${r.outstanding} open (vervaldatum ${r.due_date}).`,
+                company?.iban ? `Wilt u dit bedrag overmaken naar IBAN ${company.iban} o.v.v. ${r.invoice_number}?` : `Wilt u het openstaande bedrag overmaken o.v.v. ${r.invoice_number}?`,
+                '',
+                'Met vriendelijke groet,',
+                company?.name ?? ' ',
+              ];
+              return { ...r, draft_email: { to, subject, body: lines.join('\n') } };
+            });
+          }
+          output(ctx, result, (d) => {
+            if (!d.count) { console.log(`no reminders as of ${d.as_of}`); return; }
+            table(d.reminders, [
+              { key: 'invoice_number', label: 'factuur' },
+              { key: 'contact_name', label: 'klant' },
+              { key: 'due_date', label: 'vervaldatum' },
+              { key: 'days_overdue', label: 'dagen' },
+              { key: 'outstanding', label: 'openstaand' },
+              { key: 'remind', label: 'herinnering' },
+            ]);
+            if (opts.draftEmails) {
+              for (const r of d.reminders) {
+                console.log(`\n--- ${r.invoice_number} -> ${r.draft_email.to ?? 'GEEN E-MAILADRES'} ---`);
+                console.log(`subject: ${r.draft_email.subject}`);
+                console.log(r.draft_email.body);
+              }
+            }
           });
         } finally {
           db.close();

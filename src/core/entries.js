@@ -109,7 +109,7 @@ export function createEntry(db, {
   if (!Array.isArray(postings) || postings.length < 2) {
     throw entryError('TOO_FEW_POSTINGS', 'an entry needs at least 2 postings');
   }
-  if (!['manual', 'bank', 'invoice', 'agent', 'reversal', 'recurring', 'closing'].includes(source)) {
+  if (!['manual', 'bank', 'invoice', 'agent', 'reversal', 'recurring', 'closing', 'import', 'xaf'].includes(source)) {
     throw entryError('INVALID_SOURCE', `source '${source}' is not allowed`);
   }
   if (typeof actor !== 'string' || !actor.trim()) {

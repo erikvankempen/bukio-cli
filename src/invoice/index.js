@@ -6,6 +6,7 @@ import { createEntry, postEntry } from '../core/entries.js';
 import { record } from '../audit/index.js';
 import { isVatEnabled, listVatCodes } from '../vat/index.js';
 import { parseBankAmount } from '../bank/csv.js';
+import { formatAmount } from '../core/money.js';
 
 export function invoiceError(code, message) {
   const e = new Error(message);
@@ -122,6 +123,39 @@ export function listInvoices(db, { status = null, type = null } = {}) {
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const rows = db.prepare(`SELECT * FROM invoices ${where} ORDER BY id DESC`).all(...params);
   return rows.map((r) => getInvoice(db, r.id));
+}
+
+/**
+ * Reminder candidates: sales invoices that are overdue or due within
+ * `withinDays` days. Read-only. Returns reminders sorted most-overdue first.
+ * The `--draft-emails` enrichment happens in the CLI (needs company data).
+ */
+export function invoiceReminders(db, { withinDays = 7 } = {}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const dueSoon = new Date(Date.now() + withinDays * 86400000).toISOString().slice(0, 10);
+  const reminders = listInvoices(db)
+    .filter((i) => i.invoice_type === 'sales')
+    .filter((i) => i.status === 'overdue' || (i.status === 'sent' && i.due_date && i.due_date <= dueSoon))
+    .map((i) => {
+      const daysOverdue = i.status === 'overdue' && i.due_date
+        ? Math.max(0, Math.floor((Date.parse(today) - Date.parse(i.due_date)) / 86400000))
+        : 0;
+      return {
+        invoice_id: i.id,
+        invoice_number: i.invoice_number,
+        contact_name: i.contact?.name ?? null,
+        contact_email: i.contact?.email ?? null,
+        due_date: i.due_date,
+        days_overdue: daysOverdue,
+        outstanding_cents: i.gross_cents - i.paid_cents,
+        outstanding: formatAmount(i.gross_cents - i.paid_cents),
+        gross: formatAmount(i.gross_cents),
+        status: i.status,
+        remind: i.status === 'overdue' ? 'overdue' : 'due_soon',
+      };
+    })
+    .sort((a, b) => b.days_overdue - a.days_overdue || a.invoice_id - b.invoice_id);
+  return { as_of: today, within_days: withinDays, count: reminders.length, reminders };
 }
 
 /**
