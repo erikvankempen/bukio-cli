@@ -43,68 +43,55 @@
 <div class="window">
   <div class="titlebar">
     <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-    <span class="title"><b>bukio</b> — demo session · zsh · v0.8.0</span>
+    <span class="title"><b>bukio</b> — demo session · zsh · v0.11.1</span>
   </div>
   <div class="body">
-    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio init --name "Demo BV" --legal-form bv --vat on --dry-run</span></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio init --name "Demo BV" --legal-form bv --vat on</span></div>
     <div class="line">company:  Demo BV (bv)</div>
     <div class="line">kvk:      -</div>
     <div class="line">btw-id:   -</div>
     <div class="line">vat:      on</div>
     <div class="line">db:       ~/.bukio/demo.db</div>
     <div class="line">chart:    30 accounts (default chart)</div>
-    <div class="line">vat:      module enabled (incl. 1500/2500)</div>
-    <div class="line dim">(dry run — nothing written)</div>
-    <div class="spacer"></div>
-    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio init --name "Demo BV" --legal-form bv --vat on</span></div>
-    <div class="line">company:  Demo BV (bv)</div>
-    <div class="line">db:       ~/.bukio/demo.db</div>
-    <div class="line">chart:    30 accounts (default chart)</div>
     <div class="line">seeded:   30 new</div>
     <div class="line">vat:      module enabled (incl. 1500/2500)</div>
     <div class="line"><span class="green">initialised.</span></div>
     <div class="spacer"></div>
-    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio entry add --desc "Startkapitaal" --postings "1100:10000.00,3000:-10000.00" --post --actor agent:hermes</span></div>
-    <div class="line"><span class="green">entry #1  [posted]</span>  2026-08-05  Startkapitaal</div>
-    <div class="line">  1100  Bank                         10000.00</div>
-    <div class="line">  3000  Eigen vermogen               -10000.00</div>
-    <div class="line dim">                                  --------</div>
-    <div class="line dim">                                  0.00  (sum)</div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio import opening-balances --file beginbalans.csv --date 2025-12-31</span></div>
+    <div class="line"><span class="green">imported opening balances (2 accounts) as entry #1 [posted] on 2025-12-31</span></div>
     <div class="spacer"></div>
-    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio vat book --date 2026-08-03 --desc "DeKantoor B.V. - F2026-0489" --postings "4300:895.00@21,1100:-1082.95" --post --actor agent:hermes</span></div>
-    <div class="line"><span class="green">entry #2  [posted]</span>  2026-08-03  DeKantoor B.V. - F2026-0489</div>
-    <div class="line">  4300  Kantoor- en algemene kosten        895.00  <span class="yellow">vat 187.95</span></div>
-    <div class="line">  1100  Bank                             -1082.95</div>
-    <div class="line">  1500  Te vorderen omzetbelasting         187.95</div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio import journal --file journal.csv</span></div>
+    <div class="line"><span class="green">imported 4 boekstukken</span>  <span class="dim"># SnelStart/Exact CSV, idempotent per boekstuk</span></div>
     <div class="spacer"></div>
-    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio fx fetch --currency USD --date 2026-08-03</span></div>
-    <div class="line">1 EUR = <span class="yellow">1.1535 USD</span> on 2026-08-03 <span class="dim">(ECB, fetched for 2026-08-03)</span> — stored</div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio month-end --period 2026-07</span></div>
+    <div class="line">MONTH-END 2026-07 (2026-07-01 .. 2026-07-31)</div>
+    <div class="line">  entries:  0 draft</div>
+    <div class="line">  bank:     0 unmatched</div>
+    <div class="line">  vat:      2026-Q3 → te betalen/ontvangen 0.00</div>
+    <div class="line">  invoices: 0 draft, 0 overdue (0.00)</div>
+    <div class="line">  recurring:0 due by 2026-07-31</div>
+    <div class="line">  totals:   debet 2112.80 / credit 2112.80 <span class="green">BALANCED</span></div>
+    <div class="line">  result:   -1763.80</div>
+    <div class="line">  <span class="yellow">! all clear — the month can be closed</span></div>
     <div class="spacer"></div>
-    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio report trial-balance</span></div>
-    <div class="line">code  account                      type     debit     credit    net      </div>
-    <div class="line dim">----  ---------------------------  -------  --------  --------  ---------</div>
-    <div class="line">1100  Bank                         asset    10000.00  1082.95   8917.05  </div>
-    <div class="line">1500  Te vorderen omzetbelasting   asset    187.95    0.00      187.95   </div>
-    <div class="line">3000  Eigen vermogen               equity   0.00      10000.00  -10000.00</div>
-    <div class="line">4300  Kantoor- en algemene kosten  expense  895.00    0.00      895.00   </div>
-    <div class="line">totals:  debit 11082.95  credit 11082.95  -&gt; <span class="green">BALANCED</span></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio assets register --as-of 2026-07-31</span></div>
+    <div class="line">activastaat 2026-07</div>
+    <div class="line">id  naam            categorie  status  aanschaf    aanschafwaarde  cum. afschr.  boekwaarde</div>
+    <div class="line dim">--  --------------  ---------  ------  ----------  --------------  ------------  ----------</div>
+    <div class="line">1   MacBook Pro 14             active  2026-01-15  2199.00         219.90        1979.10   </div>
+    <div class="line dim">total: 2199.00 / 219.90 / 1979.10</div>
     <div class="spacer"></div>
-    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio report pnl --year 2026</span></div>
-    <div class="line">WINST- EN VERLIESREKENING 2026-01-01 .. 2026-12-31</div>
-    <div class="line">  Overige bedrijfskosten (WBED.42)</div>
-    <div class="line">    4300  Kantoor- en algemene kosten    895.00</div>
-    <div class="line">                                     895.00</div>
-    <div class="line">  opbrengsten: 0.00</div>
-    <div class="line">  kosten:      895.00</div>
-    <div class="line">  resultaat:   -895.00</div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio payments batch export --id 1</span></div>
+    <div class="line">batch #1 exported — 1 lines, <span class="yellow">MsgId BUKIO202608061622551</span>, sha256 248a7b751406…</div>
+    <div class="line dim">(pain.001 001.03 — upload in your bank portal; booking follows on CAMT import)</div>
     <div class="spacer"></div>
     <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio audit --limit 4</span></div>
-    <div class="line">#  timestamp                 actor         action        command     outcome</div>
-    <div class="line dim">-  ------------------------  ------------  ------------  ----------  -------</div>
-    <div class="line">7  <span class="dim">2026-08-05T07:00:28.482Z</span>  human         fx.set        fx set      ok     </div>
-    <div class="line">6  <span class="dim">2026-08-05T07:00:26.031Z</span>  agent:hermes  entry.post    entry post  ok     </div>
-    <div class="line">5  <span class="dim">2026-08-05T07:00:26.025Z</span>  agent:hermes  entry.create  entry add   ok     </div>
-    <div class="line">4  <span class="dim">2026-08-05T07:00:11.286Z</span>  agent:hermes  entry.post    entry post  ok     </div>
+    <div class="line">#   timestamp                 actor         action                 command                outcome</div>
+    <div class="line dim">--  ------------------------  ------------  ---------------------  ---------------------  -------</div>
+    <div class="line">34  <span class="dim">2026-08-06T16:22:55.667Z</span>  agent:hermes  payments.batch.export  payments batch export  ok     </div>
+    <div class="line">33  <span class="dim">2026-08-06T16:22:53.525Z</span>  agent:hermes  payments.batch.create  payments batch create  ok     </div>
+    <div class="line">32  <span class="dim">2026-08-06T16:22:51.491Z</span>  agent:hermes  payables.add           payments payables add  ok     </div>
+    <div class="line">31  <span class="dim">2026-08-06T16:22:48.076Z</span>  agent:hermes  company.update         company update         ok     </div>
     <div class="spacer"></div>
     <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cursor">▊</span></div>
   </div>

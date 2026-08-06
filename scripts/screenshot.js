@@ -1,7 +1,7 @@
 // Regenerate the README screenshot from scripts/screenshot-template.html.
 // The template contains a verbatim capture of a real bukio demo session
-// (init → opening capital → VAT purchase → ECB FX → trial balance → P&L →
-// audit) rendered as a terminal window. Run: node scripts/screenshot.js
+// (init → opening balances → journal import → month-end → activastaat →
+// SEPA payment batch → audit) rendered as a terminal window. Run: node scripts/screenshot.js
 // Requires the pinned playwright-core + cached Chromium (see src/invoice/pdf.js).
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
