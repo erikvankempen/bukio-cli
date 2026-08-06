@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-06 16:05:37 UTC — **✅ 301 passing · 0 failing (301 tests)**
+**Latest run:** 2026-08-06 16:43:45 UTC — **✅ 302 passing · 0 failing (302 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -19,7 +19,7 @@
 
 ### actor.test.js — named-actor enforcement (`<role>:<name>` required)
 
-6 passing · 0 failing
+7 passing · 0 failing
 
     - ✅ isValidActor: role:name formats
     - ✅ actorError: helpful messages for missing and malformed actors
@@ -27,6 +27,7 @@
     - ✅ CLI: bare role without a name is rejected (INVALID_ACTOR)
     - ✅ CLI: named actor works; JSON error shape on --json
     - ✅ CLI: BUKIO_ACTOR env satisfies the requirement
+    - ✅ CLI: BUKIO_ACTOR env is recorded in the audit trail
 
 ### assets.test.js — fixed assets: schemes, mid-life adoption, runs, disposal, activastaat
 
