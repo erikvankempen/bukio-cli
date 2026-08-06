@@ -13,6 +13,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 5. **Never delete posted entries.** Correct mistakes with `entry reverse` (which posts a contra-entry) and re-book.
 6. **Verify after every mutation.** At minimum: `bukio report trial-balance --json` → `data.balanced` must be `true` (when you've posted anything).
 7. **Money is integer cents.** `amount_cents` in JSON is the truth. `amount` strings are for humans. No floats, ever.
+8. **Archive every source document.** When booking an invoice (or any posted document — purchase invoice, credit note, bank proof), copy the original PDF/image/XML to `~/.bukio/invoices/` next to the live DB before finishing, named `YYYY-MM-DD_<vendor-slug>_<invoice-number>.<ext>` (see 6.17). The books then carry their paper trail.
 
 ---
 
@@ -385,6 +386,30 @@ bukio assets dispose --id 1 --date 2026-06-15 --proceeds 450.00 --dry-run
 
 Assets are `source='assets'` with `source_ref='asset:<id>:<YYYY-MM>'`; runs are
 idempotent per asset-month and auto-complete the asset at its residual.
+
+### 6.17 Archive source documents (mandatory after every booking)
+
+```bash
+# every booked invoice's original lives next to the DB, never in git
+mkdir -p ~/.bukio/invoices
+cp <original>.pdf ~/.bukio/invoices/2026-07-10_literal:acme-bv_literal:F2026-123.pdf
+# naming: YYYY-MM-DD_<vendor-slug>_<invoice-number>.<ext>
+#   - date = invoice date (sortable, findable by month)
+#   - vendor-slug = lowercase supplier name, dashes for spaces
+#   - invoice-number = the supplier's reference, verbatim
+#   - extension = original format (.pdf, .jpg, .png, .xml, .eml, ...)
+# other formats welcome — keep whatever arrived, don't convert
+ls -la ~/.bukio/invoices/        # verify it landed
+```
+
+Rules:
+- The archive lives at `~/.bukio/invoices/` (next to the live DB `~/.bukio/bukio.db`),
+  **outside the git repo — never commit invoice PDFs or other source documents.**
+- Per-company databases get their own archive next to their DB (e.g. `~/.bukio/demo.db`
+  → `~/.bukio/demo-invoices/`). Only `~/.bukio/bukio.db` (literal:Test Coaching) is the live one.
+- Archive **before** finishing the booking, so a crash mid-booking never loses the paper.
+- The journal entry description should carry the same reference
+  (`"Vendor - F2026-123"`), so entry ↔ archive lookup is one grep.
 
 ### 6.16 SEPA payment batches: payables → pain.001 → bank portal
 
