@@ -7,9 +7,9 @@
 VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v0.8.0-2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
+[![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-199%20passing-brightgreen)](AGENTS.md)
+[![Tests](https://img.shields.io/badge/tests-295%20passing-brightgreen)](AGENTS.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
