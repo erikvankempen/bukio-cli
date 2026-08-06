@@ -1,6 +1,6 @@
 // Accounts — chart of accounts CRUD, CSV import, default chart seeding.
 import { readFileSync } from 'node:fs';
-import { DEFAULT_CHART } from './chart.js';
+import { DEFAULT_CHART, inferRgs } from './chart.js';
 
 const VALID_TYPES = ['asset', 'liability', 'equity', 'income', 'expense'];
 const VALID_NORMAL = ['debit', 'credit'];
@@ -129,6 +129,10 @@ export function importChartCsv(db, csvText) {
         type: row[idx.type],
         normalBalance: row[idx.normal_balance],
         rgsCode: idx.rgs_code != null ? (row[idx.rgs_code] || null) : null,
+        // enforce RGS on import: charts without an rgs column get inferred
+        ...(idx.rgs_code == null || !(row[idx.rgs_code] || '').trim()
+          ? { rgsCode: inferRgs(row[idx.type], row[idx.name]) }
+          : {}),
       };
       validateAccount(account);
       if (getAccountByCode(db, account.code)) {

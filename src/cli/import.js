@@ -157,6 +157,9 @@ export function make(program) {
             if (d.accounts_updated?.length) {
               console.log(`renamed accounts: ${d.accounts_updated.map((a) => `${a.code} '${a.from}' -> '${a.to}'`).join(', ')}`);
             }
+            if (d.accounts_rgs_backfilled?.length) {
+              console.log(`RGS backfilled: ${d.accounts_rgs_backfilled.map((a) => `${a.code} ${a.name} -> ${a.rgs_code}`).join(', ')}`);
+            }
             for (const w of d.chart_warnings ?? []) console.log(`  warning: ${w}`);
             if (d.ignored_btw_codes.length) {
               console.log(`note: btw codes ${d.ignored_btw_codes.join(', ')} ignored — verify the booked amounts`);

@@ -63,10 +63,11 @@ export function pnl(db, { from, to }) {
     });
   }
 
-  const revenue = sections.filter((s) => s.rgs_code === 'WOMZ.80' || s.rgs_code === 'WOVB.82')
-    .reduce((s, g) => s + g.total_cents, 0);
-  const costs = sections.filter((s) => s.rgs_code !== 'WOMZ.80' && s.rgs_code !== 'WOVB.82')
-    .reduce((s, g) => s + g.total_cents, 0);
+  // revenue/costs are driven by account TYPE, not rgs_code: imported legacy
+  // charts often have no RGS codes, and a type-based split keeps the P&L
+  // correct there (rgs only shapes the display sections).
+  const revenue = rows.filter((r) => r.type === 'income').reduce((s, r) => s - r.net_cents, 0);
+  const costs = rows.filter((r) => r.type === 'expense').reduce((s, r) => s + r.net_cents, 0);
 
   return {
     from,

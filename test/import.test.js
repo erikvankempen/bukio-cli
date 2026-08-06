@@ -7,6 +7,8 @@ import {
   importOpeningBalances, importJournalCsv, importXaf, importContacts, parseImportAmount,
 } from '../src/import/index.js';
 import { listContacts } from '../src/invoice/index.js';
+import { inferRgs } from '../src/core/chart.js';
+import { importChartCsv, createAccount } from '../src/core/accounts.js';
 
 let db;
 
@@ -331,7 +333,7 @@ test('xaf (AuditFile layout): imports transaction, creates + renames chart accou
   assert.equal(getAccountByCode(db, '7150').type, 'expense');
   // colliding codes are renamed on the empty ledger (1100 Bank -> Gebouwen)
   assert.equal(getAccountByCode(db, '1100').name, 'Gebouwen');
-  assert.deepEqual(res.accounts_updated, [{ code: '1100', from: 'Bank', to: 'Gebouwen', type: 'asset', normal_balance: 'debit' }]);
+  assert.deepEqual(res.accounts_updated, [{ code: '1100', from: 'Bank', to: 'Gebouwen', type: 'asset', normal_balance: 'debit', rgs_code: 'BMVA.02' }]);
   // NOVAT reported, not booked
   assert.deepEqual(res.ignored_btw_codes, ['NOVAT']);
   const e = getEntry(db, listEntries(db, { state: 'posted' })[0].id);
@@ -475,6 +477,66 @@ test('import contacts: entry without a name fails whole-file validation', () => 
     },
   );
   assert.equal(listContacts(db).length, 0);
+});
+
+// --- RGS enforcement on import ----------------------------------------------
+
+test('inferRgs: keywords within type, then type-based fallbacks', () => {
+  assert.equal(inferRgs('income', 'Omzet diensten'), 'WOVB.82'); // diensten before omzet
+  assert.equal(inferRgs('income', 'Omzet goederen'), 'WOMZ.80');
+  assert.equal(inferRgs('income', 'Overige opbrengsten'), 'WOVB.82');
+  assert.equal(inferRgs('expense', 'Afschrijvingskosten'), 'WAFS.41');
+  assert.equal(inferRgs('expense', 'Bankkosten'), 'WFBE.84');
+  assert.equal(inferRgs('expense', 'Rentebaten'), 'WFBE.84');
+  assert.equal(inferRgs('expense', 'Kosten IT'), 'WBED.42');
+  assert.equal(inferRgs('expense', 'Inkoopwaarde'), 'WKPR.70');
+  assert.equal(inferRgs('expense', 'Voorraadmutatie'), 'WKPR.70');
+  assert.equal(inferRgs('expense', 'Kosten uitbesteed werk'), 'WKPR.70');
+  assert.equal(inferRgs('expense', 'Pensioenlasten'), 'WPER.40');
+  assert.equal(inferRgs('asset', 'Bank Rabobank ZZP'), 'BLIM.10');
+  assert.equal(inferRgs('asset', 'Hardware'), 'BMVA.02');
+  assert.equal(inferRgs('asset', 'Te vorderen btw hoog 21%'), 'BVOR.11');
+  assert.equal(inferRgs('asset', 'Vraagposten'), 'BVOR.11');
+  assert.equal(inferRgs('asset', 'Kruisposten'), 'BVOR.11');
+  assert.equal(inferRgs('asset', 'Cumulatieve afschrijvingen'), 'BMVA.02'); // contra-MVA
+  assert.equal(inferRgs('liability', 'Crediteuren'), 'BSCH.12');
+  assert.equal(inferRgs('equity', 'Privéstortingen'), 'BEIV.05');
+});
+
+test('import xaf (AuditFile): created accounts carry inferred RGS codes', () => {
+  const res = importXaf(db, { xmlText: AUDITFILE_XAF, actor: 'agent:test' });
+  // 5100 Crediteuren + 7150 Platformkosten are new; 1100/8000 exist in the seed
+  assert.equal(res.accounts_created.length, 2);
+  assert.equal(getAccountByCode(db, '1100').rgs_code, 'BMVA.02'); // renamed Gebouwen: BLIM.10 -> BMVA.02
+  assert.equal(getAccountByCode(db, '8000').rgs_code, 'WOMZ.80'); // Omzet (revenue)
+  assert.equal(getAccountByCode(db, '5100').rgs_code, 'BSCH.12'); // Crediteuren
+  assert.equal(getAccountByCode(db, '7150').rgs_code, 'WBED.42'); // Platformkosten
+});
+
+test('import xaf: re-import backfills RGS codes on accounts that lack them', () => {
+  // pre-fix chart state: 8000 exists WITHOUT an rgs code
+  db.prepare("UPDATE accounts SET rgs_code = NULL WHERE code = '8000'").run();
+  const res = importXaf(db, { xmlText: AUDITFILE_XAF, actor: 'agent:test' });
+  assert.equal(getAccountByCode(db, '8000').rgs_code, 'WOMZ.80');
+  assert.ok(res.accounts_rgs_backfilled.some((a) => a.code === '8000' && a.rgs_code === 'WOMZ.80'));
+  // idempotent: second re-run backfills nothing
+  const res2 = importXaf(db, { xmlText: AUDITFILE_XAF, actor: 'agent:test' });
+  assert.equal(res2.accounts_rgs_backfilled.length, 0);
+});
+
+test('import journal: --create-missing accounts also get RGS codes', () => {
+  const csv = JOURNAL.replaceAll('3000', '9999').replaceAll('8000', '9998');
+  importJournalCsv(db, { csvText: csv, createMissing: true });
+  assert.equal(getAccountByCode(db, '9999').rgs_code, 'WBED.42'); // expense fallback
+  assert.equal(getAccountByCode(db, '9998').rgs_code, 'WOVB.82'); // income fallback
+});
+
+test('import chart CSV without an rgs column infers RGS codes', () => {
+  const csv = 'code,name,type,normal_balance\n1350,Hardware,asset,debit\n8300,Omzet diensten,income,credit';
+  const res = importChartCsv(db, csv);
+  assert.equal(res.created, 2);
+  assert.equal(getAccountByCode(db, '1350').rgs_code, 'BMVA.02');
+  assert.equal(getAccountByCode(db, '8300').rgs_code, 'WOVB.82');
 });
 
 test('import contacts: dry-run writes nothing', () => {

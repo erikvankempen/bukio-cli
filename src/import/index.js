@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { XMLParser } from 'fast-xml-parser';
 import { parseAmount, formatAmount } from '../core/money.js';
 import { createAccount, getAccountByCode } from '../core/accounts.js';
+import { inferRgs } from '../core/chart.js';
 import { createEntry, postEntry } from '../core/entries.js';
 import { createContact, listContacts } from '../invoice/index.js';
 import { record } from '../audit/index.js';
@@ -121,15 +122,24 @@ function rekeningType(soort, netCents) {
     : { type: 'expense', normalBalance: 'debit' };
 }
 
-/** Create a missing account, inferring type from the net movement seen. */
+/** Create a missing account, inferring type from the net movement seen.
+ *  Imported accounts MUST carry an RGS code (inferRgs); existing accounts
+ *  without one are backfilled so reports group correctly. */
 function ensureAccount(db, code, name, netCents, createdList, typeHint = null) {
   const existing = getAccountByCode(db, code);
-  if (existing) return existing;
+  if (existing) {
+    const inferred = inferRgs(existing.type, existing.name);
+    if (inferred && existing.rgs_code !== inferred) {
+      db.prepare('UPDATE accounts SET rgs_code = ? WHERE id = ?').run(inferred, existing.id);
+    }
+    return existing;
+  }
   const { type, normalBalance } = typeHint ?? inferAccountType(code, netCents);
   const account = createAccount(db, {
     code, name: name || `Rekening ${code}`, type, normalBalance,
+    rgsCode: inferRgs(type, name || `Rekening ${code}`),
   });
-  createdList.push({ code: account.code, name: account.name, type: account.type, normal_balance: account.normal_balance });
+  createdList.push({ code: account.code, name: account.name, type: account.type, normal_balance: account.normal_balance, rgs_code: account.rgs_code });
   return account;
 }
 
@@ -140,14 +150,24 @@ function ensureAccount(db, code, name, netCents, createdList, typeHint = null) {
  * the default starter chart must not hijack the file's account meanings.
  * Accounts that already carry postings are left untouched (only a warning).
  */
-function syncAccountFromFile(db, code, name, typeHint, createdList, updatedList, warnings) {
+function syncAccountFromFile(db, code, name, typeHint, createdList, updatedList, warnings, rgsBackfilledList) {
   const existing = getAccountByCode(db, code);
   const cleanName = String(name ?? '').trim() || `Rekening ${code}`;
   if (!existing) {
     const { type, normalBalance } = typeHint ?? inferAccountType(code, 0);
-    const account = createAccount(db, { code, name: cleanName, type, normalBalance });
-    createdList.push({ code: account.code, name: account.name, type: account.type, normal_balance: account.normal_balance });
+    const account = createAccount(db, {
+      code, name: cleanName, type, normalBalance,
+      rgsCode: inferRgs(type, cleanName),
+    });
+    createdList.push({ code: account.code, name: account.name, type: account.type, normal_balance: account.normal_balance, rgs_code: account.rgs_code });
     return;
+  }
+  if (existing.rgs_code !== inferRgs(existing.type, existing.name)) {
+    const rgs = inferRgs(existing.type, existing.name);
+    if (rgs) {
+      db.prepare('UPDATE accounts SET rgs_code = ? WHERE id = ?').run(rgs, existing.id);
+      rgsBackfilledList.push({ code: existing.code, name: existing.name, rgs_code: rgs });
+    }
   }
   const nameDiffers = String(existing.name).trim().toLowerCase() !== cleanName.toLowerCase();
   if (!nameDiffers) return;
@@ -158,9 +178,12 @@ function syncAccountFromFile(db, code, name, typeHint, createdList, updatedList,
   }
   const { type, normalBalance } = typeHint ?? { type: existing.type, normal_balance: existing.normal_balance };
   const before = existing.name;
-  db.prepare('UPDATE accounts SET name = ?, type = ?, normal_balance = ? WHERE id = ?')
-    .run(cleanName, type, normalBalance, existing.id);
-  updatedList.push({ code, from: before, to: cleanName, type, normal_balance: normalBalance });
+  // a chart-authoritative rename also realigns the RGS code (the name/type
+  // usually change together, e.g. 1100 Bank -> 1100 Gebouwen: BLIM.10 -> BMVA.02)
+  const rgs = inferRgs(type, cleanName);
+  db.prepare('UPDATE accounts SET name = ?, type = ?, normal_balance = ?, rgs_code = ? WHERE id = ?')
+    .run(cleanName, type, normalBalance, rgs ?? existing.rgs_code, existing.id);
+  updatedList.push({ code, from: before, to: cleanName, type, normal_balance: normalBalance, rgs_code: rgs });
 }
 
 // --- opening balances -------------------------------------------------------
@@ -589,6 +612,7 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
   );
   const accountsCreated = [];
   const accountsUpdated = [];
+  const rgsBackfilled = [];
   const syncWarnings = [];
   const plan = {
     action: 'import xaf',
@@ -621,7 +645,7 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
         db, code,
         String(r.RekeningOmschrijving ?? '').trim() || `Rekening ${code}`,
         rekeningType(r.RekeningSoort, netCents),
-        accountsCreated, accountsUpdated, syncWarnings,
+        accountsCreated, accountsUpdated, syncWarnings, rgsBackfilled,
       );
     }
     for (const m of parsedMutaties) {
@@ -643,7 +667,7 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
 
   record(db, {
     actor, action: 'import.xaf', command: 'import xaf',
-    args: { mutaties: imported.length, duplicates: duplicates.length, accounts_created: accountsCreated.length, accounts_updated: accountsUpdated.length },
+    args: { mutaties: imported.length, duplicates: duplicates.length, accounts_created: accountsCreated.length, accounts_updated: accountsUpdated.length, accounts_rgs_backfilled: rgsBackfilled.length },
     outcome: 'ok', entryIds: imported.map((e) => e.id),
   });
   return {
@@ -652,6 +676,7 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
     entries: imported,
     accounts_created: accountsCreated,
     accounts_updated: accountsUpdated,
+    accounts_rgs_backfilled: rgsBackfilled,
     chart_warnings: syncWarnings,
     header: {
       company_name: fileName, company_kvk: fileKvk, fiscal_year: header.FiscalYear ?? null,
@@ -913,6 +938,7 @@ function importAuditFileLayout(db, { auditFile, actor, dryRun }) {
 
   const accountsCreated = [];
   const accountsUpdated = [];
+  const rgsBackfilled = [];
   const syncWarnings = [];
   const imported = [];
   let duplicates = 0;
@@ -924,7 +950,7 @@ function importAuditFileLayout(db, { auditFile, actor, dryRun }) {
         db, code,
         String(a.AccountDescription ?? '').trim() || `Rekening ${code}`,
         accountTypeByCode.get(code) ?? inferAccountType(code, netCents),
-        accountsCreated, accountsUpdated, syncWarnings,
+        accountsCreated, accountsUpdated, syncWarnings, rgsBackfilled,
       );
     }
     for (const p of parsed) {
@@ -942,7 +968,7 @@ function importAuditFileLayout(db, { auditFile, actor, dryRun }) {
 
   record(db, {
     actor, action: 'import.xaf', command: 'import xaf',
-    args: { transactions: parsed.length, imported: imported.length, duplicates, accounts_created: accountsCreated.length, accounts_updated: accountsUpdated.length, layout: 'auditfile' },
+    args: { transactions: parsed.length, imported: imported.length, duplicates, accounts_created: accountsCreated.length, accounts_updated: accountsUpdated.length, accounts_rgs_backfilled: rgsBackfilled.length, layout: 'auditfile' },
     outcome: 'ok', entryIds: imported.map((e) => e.id),
   });
   return {
@@ -951,6 +977,7 @@ function importAuditFileLayout(db, { auditFile, actor, dryRun }) {
     entries: imported,
     accounts_created: accountsCreated,
     accounts_updated: accountsUpdated,
+    accounts_rgs_backfilled: rgsBackfilled,
     chart_warnings: syncWarnings,
     header: {
       company_name: fileName, company_kvk: fileKvk, fiscal_year: header.FiscalYear ?? null,

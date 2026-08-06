@@ -26,7 +26,7 @@ export async function runCli(argv) {
   program
     .name('bukio')
     .description('Agent-first bookkeeping for Dutch SMEs — SQLite, VAT-optional')
-    .version('0.10.0')
+    .version('0.10.1')
     .option('--json', 'machine-readable JSON output')
     .option('--db <path>', 'database file', process.env.BUKIO_DB || path.join(os.homedir(), '.bukio', 'bukio.db'))
     .option('--actor <who>', 'acting entity (human or agent:<name>)', process.env.BUKIO_ACTOR || 'human')

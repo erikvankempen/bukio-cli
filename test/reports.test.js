@@ -87,6 +87,28 @@ test('pnl: empty period gives zero result and no sections', () => {
   assert.equal(p.sections.length, 0);
 });
 
+test('pnl: legacy chart without RGS codes still splits revenue/costs by type', () => {
+  // accounts created from an audit-file import carry NO rgs codes (pre-fix
+  // data); revenue/costs must be driven by account type, not rgs_code
+  for (const [code, name, type] of [
+    ['8200', 'Omzet diensten', 'income'],
+    ['6531', 'Kosten IT', 'expense'],
+    ['6710', 'Afschrijvingskosten', 'expense'],
+    ['9100', 'Rentebaten', 'expense'], // contra-expense account
+  ]) {
+    createAccount(db, { code, name, type, normalBalance: type === 'income' ? 'credit' : 'debit', rgsCode: null });
+  }
+  post('2026-03-01', 'Factuur', [{ code: '1100', amountCents: 29420 }, { code: '8200', amountCents: -29420 }]);
+  post('2026-03-02', 'Hosting', [{ code: '6531', amountCents: 24036 }, { code: '1100', amountCents: -24036 }]);
+  post('2026-03-03', 'Afschrijving', [{ code: '6710', amountCents: 29976 }, { code: '1100', amountCents: -29976 }]);
+  post('2026-03-04', 'Rente', [{ code: '1100', amountCents: 11716 }, { code: '9100', amountCents: -11716 }]);
+
+  const p = pnl(db, { from: '2026-01-01', to: '2026-12-31' });
+  assert.equal(p.revenue_cents, 29420); // 8200 only (9100 is typed expense)
+  assert.equal(p.costs_cents, 24036 + 29976 - 11716); // contra-expense nets out
+  assert.equal(p.result_cents, 29420 - (24036 + 29976 - 11716)); // -319.51-style
+});
+
 test('pnl: catch-all section for accounts with unknown rgs_code', () => {
   createAccount(db, { code: '5000', name: 'Testkosten', type: 'expense', normalBalance: 'debit' });
   post('2026-05-01', 'Testkosten', [{ code: '5000', amountCents: 1000 }, { code: '1100', amountCents: -1000 }]);
