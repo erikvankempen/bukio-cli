@@ -364,3 +364,18 @@ test('invoiceReminders: credit notes are not reminder candidates', () => {
   const r = invoiceReminders(db, { withinDays: 7 });
   assert.equal(r.reminders.filter((x) => x.remind === 'overdue').length, 1);
 });
+
+// --- VAT-exempt suppliers (no btw-id) ---------------------------------------
+
+test('validateCompliance: VAT-exempt company without btw-id can still invoice', () => {
+  db.prepare('UPDATE company SET vat_module = 0, btw_id = NULL WHERE id = 1').run();
+  addContact();
+  const finalized = finalizeInvoice(db, { id: mkInvoice({ lines: ['1x Coaching @ 150.00'] }).id, actor: 'agent:test' });
+  assert.equal(finalized.invoice.status, 'sent');
+});
+
+test('validateCompliance: VAT company without btw-id still fails SUPPLIER_INCOMPLETE', () => {
+  db.prepare('UPDATE company SET btw_id = NULL WHERE id = 1').run(); // vat_module stays on
+  addContact();
+  assert.throws(() => finalizeInvoice(db, { id: mkInvoice().id, actor: 'agent:test' }), { code: 'SUPPLIER_INCOMPLETE' });
+});

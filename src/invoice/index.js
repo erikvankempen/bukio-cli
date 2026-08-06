@@ -233,8 +233,12 @@ export function validateCompliance(db, invoice) {
   const contact = invoice.contact;
 
   const missingSupplier = [];
+  // The supplier btw-id is a factuurvereiste only when the supplier HAS one
+  // (art. 35a Wet OB) — a VAT-exempt business (vat module off, no btw-id)
+  // must still be able to invoice.
+  const supplierHasVat = company.vat_module === 1 || Boolean(company.btw_id);
   if (!company.name) missingSupplier.push('bedrijfsnaam');
-  if (!company.btw_id) missingSupplier.push('btw-id');
+  if (supplierHasVat && !company.btw_id) missingSupplier.push('btw-id');
   if (!company.kvk) missingSupplier.push('kvk-nummer');
   if (!company.address) missingSupplier.push('adres');
   if (!company.postal_code) missingSupplier.push('postcode');
