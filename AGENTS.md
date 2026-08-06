@@ -89,7 +89,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio payments batch export --id N [--schema 001.03\|001.09] [--out file.xml] [--dry-run]` | SEPA pain.001 XML for bank-portal upload. **Once per batch** — the MsgId is stored; re-export would double-pay. |
 | `bukio payments batch list [--status]` / `show --id` / `delete --id` | Batch tracking; delete only on drafts (releases payables to unpaid). |
 | `bukio contact update --id N [--iban …]` / `contact add --iban` | Contact IBANs (mod-97) — required before a vendor can join a batch. |
-| `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. |
+| `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. **Database only — NOT the original documents** (see 6.18). Backups are manual, not automatic. |
 | `bukio audit [--by agent:hermes] [--since ISO] [--limit N]` | Read the append-only audit log (newest first). |
 
 **Import contract (all three importers):** the ENTIRE file is validated before
@@ -410,6 +410,45 @@ Rules:
 - Archive **before** finishing the booking, so a crash mid-booking never loses the paper.
 - The journal entry description should carry the same reference
   (`"Vendor - F2026-123"`), so entry ↔ archive lookup is one grep.
+
+> ⚠️ **Archiving is NOT a backup.** Copying a document into `~/.bukio/invoices/`
+> only keeps it with the books — it does not protect it against disk loss.
+> See 6.18 for what a real backup covers (and does not).
+
+### 6.18 Backups are manual — database AND documents (not automatic)
+
+Nothing in bukio backs itself up automatically. **The agent or the user must
+take backups periodically** — there is no scheduler, no auto-archive job, and
+no off-site copy. If the disk dies, everything since the last manual backup is
+gone. Treat backups as part of the monthly close (6.6) and after any large
+import or year-end.
+
+```bash
+# 1. the DATABASE — `bukio backup` takes a consistent snapshot of the ledger
+#    (SQLite backup API: safe even mid-write). This is the ONLY thing it covers.
+bukio backup --out ~/backups/bukio-2026-08-06.db --json
+
+# 2. the ORIGINAL DOCUMENTS — `bukio backup` does NOT include these.
+#    Copy the invoice archive (and any exports) yourself:
+tar -czf ~/backups/bukio-invoices-2026-08-06.tar.gz -C ~/.bukio invoices/
+#    or plain rsync/cp — anything that copies the files off the live disk.
+```
+
+What `bukio backup` covers:
+- ✅ the SQLite database (accounts, entries, postings, audit log, everything)
+- ❌ **not** the original PDFs/images in `~/.bukio/invoices/`
+- ❌ not exports (`--out` files), jaarrekening PDFs, or SEPA files you generated
+
+Suggested cadence (agent should propose, user approves):
+- **Monthly**, at the month-end close (6.6): `bukio backup` + archive the
+  invoice directory that month's documents landed in.
+- **After big events**: a large import (XAF/journal), year-end close, or any
+  bulk mutation — backup immediately after.
+- **Off-site**: keep at least one copy off the VPS (git-backed repo, cloud
+  storage, or a USB disk). A backup on the same disk as the DB is not a backup.
+
+Restore: `bukio restore --from <file> --force` (validated). Restoring does not
+touch the invoice archive — documents must be restored from your manual copy.
 
 ### 6.16 SEPA payment batches: payables → pain.001 → bank portal
 
