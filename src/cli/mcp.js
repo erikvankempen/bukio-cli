@@ -355,7 +355,7 @@ tool({
 // --- fixed assets ------------------------------------------------------------
 
 tool({
-  name: 'assets_register', description: 'aktivastaat: cost, cumulative depreciation, book value per asset',
+  name: 'assets_register', description: 'activastaat: cost, cumulative depreciation, book value per asset',
   schema: { type: 'object', properties: { as_of: { type: 'string' } } },
   handler: (db, args) => register(db, { asOf: args.as_of ?? null, actor: 'agent' }),
 });

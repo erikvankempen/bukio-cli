@@ -186,7 +186,7 @@ export function make(program) {
 
   report
     .command('pnl')
-    .description('winst-en-verliesrekening for a period')
+    .description('winst- en verliesrekening for a period')
     .option('--year <yyyy>', 'fiscal year (overrides --from/--to)')
     .option('--from <yyyy-mm-dd>', 'period start (inclusive)')
     .option('--to <yyyy-mm-dd>', 'period end (inclusive)')
@@ -230,7 +230,7 @@ export function make(program) {
               rows: flatRows(d),
             }],
             render: (d) => {
-              console.log(`WINST-EN-VERLIESREKENING ${d.from} .. ${d.to}`);
+              console.log(`WINST- EN VERLIESREKENING ${d.from} .. ${d.to}`);
               for (const s of d.sections) {
                 console.log(`  ${s.label} (${s.rgs_code})`);
                 for (const a of s.accounts) console.log(`    ${a.code}  ${a.name.padEnd(30)} ${fmt(a.amount_cents)}`);

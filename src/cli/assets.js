@@ -1,5 +1,5 @@
 // bukio assets — fixed assets: depreciation schemes, asset register with
-// mid-life adoption, monthly depreciation runs, disposal, aktivastaat.
+// mid-life adoption, monthly depreciation runs, disposal, activastaat.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
@@ -40,7 +40,7 @@ function sheets(data) {
   });
   rows.push([]);
   rows.push(['TOTAAL', '', '', '', '', formatAmount(data.totals.purchase_price_cents), formatAmount(data.totals.total_cum_dep_cents), formatAmount(data.totals.book_value_cents)]);
-  return [{ name: 'Aktivastaat', header, rows }];
+  return [{ name: 'Activastaat', header, rows }];
 }
 
 export function make(program) {
@@ -269,7 +269,7 @@ export function make(program) {
 
   assets
     .command('register')
-    .description('aktivastaat: cost, cumulative depreciation, book value per asset (as of a date)')
+    .description('activastaat: cost, cumulative depreciation, book value per asset (as of a date)')
     .option('--as-of <yyyy-mm-dd>', 'cut-off date (default: today)')
     .option('--format <json|csv|xlsx>', 'output format', 'json')
     .option('--out <path>', 'file to write (csv/xlsx)')
@@ -294,7 +294,7 @@ export function make(program) {
             return;
           }
           output(ctx, data, (d) => {
-            console.log(`aktivastaat ${d.as_of}`);
+            console.log(`activastaat ${d.as_of}`);
             table(d.assets.map(fmtAssetRow), ASSET_COLUMNS);
             console.log(`total: ${formatAmount(d.totals.purchase_price_cents)} / ${formatAmount(d.totals.total_cum_dep_cents)} / ${formatAmount(d.totals.book_value_cents)}`);
           });

@@ -17,7 +17,7 @@ const files = readdirSync(path.join(root, 'test')).filter((f) => f.endsWith('.te
 const DESCRIPTIONS = {
   'accounts.test.js': 'chart of accounts CRUD + CSV chart import',
   'actor.test.js': 'named-actor enforcement (`<role>:<name>` required)',
-  'assets.test.js': 'fixed assets: schemes, mid-life adoption, runs, disposal, aktivastaat',
+  'assets.test.js': 'fixed assets: schemes, mid-life adoption, runs, disposal, activastaat',
   'audit.test.js': 'append-only audit log invariants',
   'bank.test.js': 'CAMT.053/CSV import, idempotency, matching/reconciliation',
   'cli.test.js': 'CLI end-to-end: init, entries, reports, backup/restore',

@@ -1,4 +1,4 @@
-// Winst-en-verliesrekening (profit & loss) for a period, grouped by RGS hoofdgroep.
+// Winst- en verliesrekening (profit & loss) for a period, grouped by RGS hoofdgroep.
 import { rgsLabel } from '../core/chart.js';
 
 // Display order: revenue first, then costs.

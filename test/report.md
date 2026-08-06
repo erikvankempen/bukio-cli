@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-06 15:10:33 UTC — **✅ 301 passing · 0 failing (301 tests)**
+**Latest run:** 2026-08-06 16:05:37 UTC — **✅ 301 passing · 0 failing (301 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -28,7 +28,7 @@
     - ✅ CLI: named actor works; JSON error shape on --json
     - ✅ CLI: BUKIO_ACTOR env satisfies the requirement
 
-### assets.test.js — fixed assets: schemes, mid-life adoption, runs, disposal, aktivastaat
+### assets.test.js — fixed assets: schemes, mid-life adoption, runs, disposal, activastaat
 
 24 passing · 0 failing
 

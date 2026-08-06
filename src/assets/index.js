@@ -1,5 +1,5 @@
 // bukio fixed assets module (Phase 7) — depreciation schemes, asset register
-// with mid-life adoption, monthly depreciation runs, disposal, aktivastaat.
+// with mid-life adoption, monthly depreciation runs, disposal, activastaat.
 //
 // Design rules:
 // - Assets enter the module at `recognition_date` with their cumulative
@@ -381,7 +381,7 @@ export function runDue(db, { asOf = null, period = null, actor = 'human', dryRun
   return { booked: result, plan: dryRun ? plan : [], dryRun: false };
 }
 
-// --- aktivastaat ------------------------------------------------------------
+// --- activastaat ------------------------------------------------------------
 
 export function register(db, { asOf = null, actor = 'human' } = {}) {
   const targetPeriod = asOf ? asOf.slice(0, 7) : new Date().toISOString().slice(0, 7);
