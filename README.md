@@ -17,7 +17,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
 bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a VPS, stores everything in one local SQLite file, and is designed so AI agents — not just humans — can operate it safely and auditably. It is built for the Dutch B2B e-invoicing mandate: every invoice ends as a compliant PDF, a Peppol BIS 3.0 UBL document, and a sendable Peppol message.
 
-**Status: Phase 7 complete (v0.10.0)** — ledger → bank/VAT → invoicing & recurring → jaarrekening → agent layer (MCP) → imports & month-end automation → fixed assets (depreciation schemes, register, disposal). Full pipeline in the [Roadmap](#roadmap).
+**Status: Phase 8 complete (v0.11.0)** — ledger → bank/VAT → invoicing & recurring → jaarrekening → agent layer (MCP) → imports & month-end automation → fixed assets → SEPA payment batches. Full pipeline in the [Roadmap](#roadmap).
 
 ## Features
 
@@ -28,6 +28,7 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 - **Migration-ready** — `import opening-balances`, `import journal` (SnelStart/Exact-style CSV) and `import xaf` (XML Auditfile Financieel 4.0) bring a whole administration in; every importer validates the entire file before writing a single cent.
 - **Runs itself** — `month-end` is the agent's close check (drafts, bank, VAT, invoices, recurring, fixed assets, profit); `invoice reminders` drafts overdue payment reminders.
 - **Fixed assets** — depreciation schemes (lineair / degressief with the standard switch-to-linear rule), an asset register with **mid-life adoption** (recognition date + cumulative depreciation at recognition — only the remaining depreciation is booked), monthly runs (idempotent per asset-month), disposal with winst/verlies booking, and the **aktivastaat** (CSV/XLSX export).
+- **SEPA payment batches** — a payables register (purchase invoices, `transfer` vs `direct_debit`/incasso), batch creation from unpaid invoices or CSV, and **pain.001 export** (`001.03`/`001.09`) for upload in any Dutch bank portal. One export per batch (unique `MsgId` — re-uploading would double-pay); the ledger is untouched until the bank statement import books the payments.
 - **One company per database** — a second company is a second SQLite file (`--db` or `BUKIO_DB`).
 - **Local-first** — no cloud, no lock-in. Your 7-year administration stays yours.
 
@@ -496,6 +497,12 @@ Imports are idempotent: re-running skips already-imported boekstukken.
 | `assets register [--as-of DATE] [--format json\|csv\|xlsx --out]` | The **aktivastaat**: cost, cumulative depreciation, book value per asset + totals |
 | `assets dispose --id N --date [--proceeds] [--bank-account 1100] [--result-account 8100] [--dry-run]` | Dispose (sale or scrap): proposes the full entry (bank / cum-dep / asset / winst-verlies), status → `disposed` |
 | `assets list [--status]` / `show --id` / `pause --id` / `resume --id` | Register inspection + depreciation pause/resume |
+| `payments payables add --contact N --ref --date --amount [--due] [--method transfer\|direct-debit] [--entry-id]` | Register a purchase invoice (payable). `direct-debit` = incasso, excluded from batches | 
+| `payments payables list [--status] [--method]` / `pay --id` | Open payables (unpaid / in_batch / paid); mark paid after the bank statement confirms |
+| `payments batch create [--from-invoices] [--payable ids] [--lines "C:AMT[:REF];…"] [--csv file] [--date] [--from-iban] [--dry-run]` | Build a batch from unpaid transfer payables and/or explicit lines; whole-set validation (IBAN mod-97, amounts, refs) |
+| `payments batch export --id N [--schema 001.03\|001.09] [--out file.xml] [--dry-run]` | Export **pain.001** SEPA XML for bank-portal upload. Once per batch (unique `MsgId` — re-export would double-pay) |
+| `payments batch list [--status]` / `show --id` / `delete --id` | Batch tracking; delete only allowed on drafts (releases payables back to unpaid) |
+| `contact update --id N [--iban] [--address] …` / `contact add --iban` | Contact IBANs (mod-97 validated) — required to include a vendor in a batch |
 
 ```bash
 # switching from your old package in one morning:
@@ -707,6 +714,11 @@ The suite covers: money parsing, posting engine invariants, reversal semantics, 
 | `UNBALANCED` | Postings do not sum to zero |
 | `ASSET_NOT_FOUND` / `SCHEME_NOT_FOUND` | Asset / scheme does not exist |
 | `ALREADY_DISPOSED` / `INVALID_STATUS` | Asset already disposed / wrong status for pause-resume |
+| `COMPANY_INCOMPLETE` | Company has no valid IBAN — set one with `company update --iban` (needed for batches) |
+| `CONTACT_IBAN_MISSING` | Contact has no IBAN — `contact update --id N --iban` |
+| `BATCH_VALIDATION_FAILED` | Batch lines failed validation (per-line `details`) |
+| `BATCH_ALREADY_EXPORTED` | Batch already exported — exporting again could double-pay; create a new batch |
+| `PAYABLE_DIRECT_DEBIT` / `PAYABLE_NOT_UNPAID` | Payable excluded from batches (incasso) / not in `unpaid` state |
 | `INVALID_LIFE` / `INVALID_METHOD` / `SCHEME_NAME_TAKEN` | Scheme validation (life 1-600 months, method lineair\|degressief, unique name) |
 | `INVALID_DEPRECIATION` | Cumulative depreciation at recognition exceeds cost minus residual |
 | `INVALID_COST` / `INVALID_RESIDUAL` | Asset purchase price / residual value invalid |
@@ -852,7 +864,8 @@ bukio init --name "Mijn ZZP" --kor
 | 5 | Agent layer: MCP server, permissions/approval gates, NL query, AI categorization suggestions, compliance calendar, FX translation | Agent closes a month end-to-end with zero unsupervised mutations — **✅ done (v0.8.0, 199 tests green)** | planned |
 | 6 | Migration & automation: `import opening-balances`, `import journal` (SnelStart/Exact CSV), `import xaf` (XML Auditfile 4.0), `month-end` close check, `invoice reminders` | Switch from an old package in one morning; the agent runs the close check monthly — **✅ done (v0.9.0, 229 tests green)** | planned |
 | 7 | Fixed assets: depreciation schemes (lineair/degressief), asset register with mid-life adoption, monthly runs, disposal, aktivastaat | Recognise mid-life assets and book only the remaining depreciation — **✅ done (v0.10.0, 271 tests green)** | planned |
-| 8 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
+| 8 | SEPA payment batches: payables register (transfer vs direct-debit), pain.001 export for bank-portal upload | Prepare vendor payments in bukio, upload the file in the bank, close the loop via the CAMT import — **✅ done (v0.11.0, 295 tests green)** | planned |
+| 9 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 

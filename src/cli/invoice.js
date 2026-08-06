@@ -2,7 +2,7 @@
 import { writeFileSync } from 'node:fs';
 import { formatAmount } from '../core/money.js';
 import {
-  createContact, createInvoice, creditInvoice, finalizeInvoice, getInvoice,
+  createContact, updateContact, createInvoice, creditInvoice, finalizeInvoice, getInvoice,
   invoiceReminders, listContacts, listInvoices, markPaid, parseLineSpec,
 } from '../invoice/index.js';
 import { invoiceToPdf } from '../invoice/pdf.js';
@@ -49,6 +49,7 @@ export function make(program) {
     .option('--email <email>', 'email')
     .option('--vat-id <id>', 'customer btw-id (required for btw verlegd)')
     .option('--kvk <kvk>', 'customer KVK number')
+    .option('--iban <iban>', 'bank account (IBAN) — needed to include the contact in payment batches')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
@@ -57,9 +58,40 @@ export function make(program) {
           const c = createContact(db, {
             name: opts.name, address: opts.address ?? null, postalCode: opts.postalCode ?? null,
             city: opts.city ?? null, country: opts.country, email: opts.email ?? null,
-            vatId: opts.vatId ?? null, kvk: opts.kvk ?? null, actor: ctx.actor,
+            vatId: opts.vatId ?? null, kvk: opts.kvk ?? null, iban: opts.iban ?? null, actor: ctx.actor,
           });
           output(ctx, { contact: c }, (d) => console.log(`contact #${d.contact.id} ${d.contact.name}`));
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+  contact
+    .command('update')
+    .description('update a contact (e.g. add the IBAN for payment batches)')
+    .requiredOption('--id <id>', 'contact id')
+    .option('--name <name>', 'contact name')
+    .option('--address <address>', 'street address')
+    .option('--postal-code <code>', 'postal code')
+    .option('--city <city>', 'city')
+    .option('--country <code>', 'country code')
+    .option('--email <email>', 'email')
+    .option('--vat-id <id>', 'customer btw-id')
+    .option('--kvk <kvk>', 'customer KVK number')
+    .option('--iban <iban>', 'bank account (IBAN)')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const c = updateContact(db, {
+            id: Number(opts.id), name: opts.name, address: opts.address, postalCode: opts.postalCode,
+            city: opts.city, country: opts.country, email: opts.email, vatId: opts.vatId,
+            kvk: opts.kvk, iban: opts.iban, actor: ctx.actor,
+          });
+          output(ctx, { contact: c }, (d) => console.log(`contact #${d.contact.id} ${d.contact.name} updated (iban: ${d.contact.iban ?? 'none'})`));
         } finally {
           db.close();
         }

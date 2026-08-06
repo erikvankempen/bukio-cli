@@ -1,5 +1,6 @@
 // bukio company — show the company record, update company details.
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { isValidIban } from '../core/iban.js';
 import { record } from '../audit/index.js';
 
 const COMPANY_FIELDS = [
@@ -89,7 +90,7 @@ export function make(program) {
               throw Object.assign(new Error(`${label} cannot be empty`), { code: 'INVALID_VALUE' });
             }
           }
-          if (changes.iban && !/^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$/.test(changes.iban)) {
+          if (changes.iban && !isValidIban(changes.iban)) {
             throw Object.assign(new Error(`invalid IBAN '${changes.iban}'`), { code: 'INVALID_IBAN' });
           }
 

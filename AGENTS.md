@@ -82,6 +82,12 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio assets register [--as-of DATE] [--format json\|csv\|xlsx --out]` | Aktivastaat: cost / cum-dep / book value per asset + totals. |
 | `bukio assets dispose --id N --date [--proceeds] [--bank-account] [--result-account] [--dry-run]` | Sale/scrap: proposes the full entry, status → disposed. |
 | `bukio assets list/show/pause/resume` | Register inspection + pause/resume. |
+| `bukio payments payables add --contact N --ref --date --amount [--due] [--method transfer\|direct-debit] [--entry-id]` | Register a purchase invoice. `direct-debit` = incasso (collected by the vendor — never in a batch). |
+| `bukio payments payables list [--status] [--method]` / `pay --id` | Open payables; `pay` marks paid after the bank statement confirms. |
+| `bukio payments batch create [--from-invoices] [--payable ids] [--lines "C:AMT[:REF];…"] [--csv file] [--date] [--from-iban] [--dry-run]` | Build a batch from unpaid transfer payables and/or explicit lines. Whole-set validation (IBAN mod-97, amounts > 0, refs ≤ 140). |
+| `bukio payments batch export --id N [--schema 001.03\|001.09] [--out file.xml] [--dry-run]` | SEPA pain.001 XML for bank-portal upload. **Once per batch** — the MsgId is stored; re-export would double-pay. |
+| `bukio payments batch list [--status]` / `show --id` / `delete --id` | Batch tracking; delete only on drafts (releases payables to unpaid). |
+| `bukio contact update --id N [--iban …]` / `contact add --iban` | Contact IBANs (mod-97) — required before a vendor can join a batch. |
 | `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. |
 | `bukio audit [--by agent:hermes] [--since ISO] [--limit N]` | Read the append-only audit log (newest first). |
 
@@ -379,6 +385,34 @@ bukio assets dispose --id 1 --date 2026-06-15 --proceeds 450.00 --dry-run
 
 Assets are `source='assets'` with `source_ref='asset:<id>:<YYYY-MM>'`; runs are
 idempotent per asset-month and auto-complete the asset at its residual.
+
+### 6.16 SEPA payment batches: payables → pain.001 → bank portal
+
+```bash
+# 1. give vendors an IBAN (mod-97 validated); company needs its IBAN too
+bukio company update --iban NL91ABNA0417164300
+bukio contact update --id 3 --iban NL02ABNA0123456789
+# 2. register purchase invoices. 'direct-debit' (incasso) payables are
+#    collected by the vendor and stay OUT of batches
+bukio payments payables add --contact Vimexx --ref 2026-118 --date 2026-07-01 \
+  --due 2026-08-01 --amount 121.00
+bukio payments payables add --contact "Energie BV" --ref 2026-09 --date 2026-07-05 \
+  --amount 99.99 --method direct-debit
+# 3. select what to pay: all unpaid transfer payables, or specific ones
+bukio payments batch create --from-invoices --dry-run      # plan
+bukio payments batch create --from-invoices                # batch #1, payables -> in_batch
+# 4. export the SEPA file (unique MsgId; export only ONCE per batch)
+bukio payments batch export --id 1 --schema 001.03 --out betalingen.xml
+#    -> upload betalingen.xml in the bank portal; the bank executes it
+# 5. after the bank statement arrives: import + match as usual, then
+bukio payments payables list                               # see what is still open
+bukio payments payables pay --id 1                         # confirm paid
+```
+
+The export books NOTHING — money moves when the bank processes the file; the
+CAMT.053 import closes the loop. Deleting a draft batch releases payables back
+to `unpaid`. Never re-export a batch (the stored MsgId guard exists because
+re-uploading the same file would pay twice).
 `assets add` never re-books the purchase or past depreciation — recognition is
 registration-only (warnings, not errors, when the GL accounts don't reconcile).
 
@@ -489,8 +523,8 @@ individual generated entries with `entry reverse` if one is wrong (the template'
 
 ---
 
-## 9. Capability boundaries (Phase 7 complete)
+## 9. Capability boundaries (Phase 8 complete)
 
-Available: company init (incl. address for compliant invoices), journal entries (incl. **FX conversion**), accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. invoice payments), optional VAT module (enable, `vat book`, OB readout 1a–5d + mark-filed), recurring entries + invoices, invoicing (lifecycle, 12-vereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payments), Peppol send, jaarrekening (`year-end close`, micro/klein statutory accounts, KVK deposit PDF, XLSX), ICP readout, **FX rates + foreign-currency booking** (`fx set`, `--currency/--rate` on entry add + vat book, `fx_currency`/`fx_amount_cents` on postings), **MCP server** (`bukio mcp`, plan-only mutations, READONLY mode), **compliance calendar** (`compliance status`/`mark`), **imports** (`import opening-balances` / `journal` / `xaf` — whole-file validation, idempotent), **month-end close check** (`month-end --period`), **invoice reminders** (`invoice reminders`, draft emails only — never sends), **fixed assets** (`assets scheme add`/`assets add`/`run`/`register`/`dispose`/`pause`/`resume` — mid-life adoption via recognition-date + cum-dep at recognition, lineair + degressief, aktivastaat, source 'assets'), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
+Available: company init (incl. address for compliant invoices), journal entries (incl. **FX conversion**), accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. invoice payments), optional VAT module (enable, `vat book`, OB readout 1a–5d + mark-filed), recurring entries + invoices, invoicing (lifecycle, 12-vereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payments), Peppol send, jaarrekening (`year-end close`, micro/klein statutory accounts, KVK deposit PDF, XLSX), ICP readout, **FX rates + foreign-currency booking** (`fx set`, `--currency/--rate` on entry add + vat book, `fx_currency`/`fx_amount_cents` on postings), **MCP server** (`bukio mcp`, plan-only mutations, READONLY mode), **compliance calendar** (`compliance status`/`mark`), **imports** (`import opening-balances` / `journal` / `xaf` — whole-file validation, idempotent), **month-end close check** (`month-end --period`), **invoice reminders** (`invoice reminders`, draft emails only — never sends), **fixed assets** (`assets scheme add`/`assets add`/`run`/`register`/`dispose`/`pause`/`resume` — mid-life adoption via recognition-date + cum-dep at recognition, lineair + degressief, aktivastaat, source 'assets'), **SEPA payment batches** (`payments payables add`/`list`/`pay` — transfer vs direct-debit; `payments batch create`/`export`/`list`/`show`/`delete` — pain.001 `001.03`/`001.09`, unique MsgId, one export per batch, contact IBANs mod-97 validated), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 
 **Not yet available:** LLM categorization suggestions, Ponto live feeds, Peppol receive, OCR, automated email sending for reminders. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds. NL query is done via the MCP tools — there is no bespoke NL parser.

@@ -454,7 +454,7 @@ function dispatch(db, ctx, msg) {
       return Promise.resolve(rpcResponse(id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: 'bukio-cli', version: '0.10.1' },
+        serverInfo: { name: 'bukio-cli', version: '0.11.0' },
       }));
     case 'notifications/initialized':
     case 'initialized':

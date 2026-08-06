@@ -4,6 +4,7 @@
 import { getAccountByCode } from '../core/accounts.js';
 import { createEntry, postEntry } from '../core/entries.js';
 import { record } from '../audit/index.js';
+import { isValidIban, normalizeIban } from '../core/iban.js';
 import { isVatEnabled, listVatCodes } from '../vat/index.js';
 import { parseBankAmount } from '../bank/csv.js';
 import { formatAmount } from '../core/money.js';
@@ -72,15 +73,46 @@ export function validateInvoiceLines(db, lines) {
 
 export function createContact(db, {
   name, address = null, postalCode = null, city = null, country = 'NL',
-  email = null, vatId = null, kvk = null, actor = 'human',
+  email = null, vatId = null, kvk = null, iban = null, actor = 'human',
 }) {
   if (!name || typeof name !== 'string') throw invoiceError('INVALID_NAME', 'contact needs a name');
+  if (iban != null && !isValidIban(iban)) throw invoiceError('INVALID_IBAN', `'${iban}' is not a valid IBAN`);
   const info = db.prepare(`
-    INSERT INTO contacts (name, address, postal_code, city, country, email, vat_id, kvk, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(name, address, postalCode, city, country, email, vatId, kvk, actor);
-  record(db, { actor, action: 'contact.create', command: 'contact add', args: { name }, outcome: 'ok' });
+    INSERT INTO contacts (name, address, postal_code, city, country, email, vat_id, kvk, iban, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(name, address, postalCode, city, country, email, vatId, kvk, iban ? iban.trim().replace(/\s+/g, '') : null, actor);
+  record(db, { actor, action: 'contact.create', command: 'contact add', args: { name, iban: iban ? true : false }, outcome: 'ok' });
   return getContact(db, info.lastInsertRowid);
+}
+
+export function updateContact(db, {
+  id, name = null, address = null, postalCode = null, city = null, country = null,
+  email = null, vatId = null, kvk = null, iban = null, actor = 'human',
+}) {
+  const existing = getContact(db, id);
+  if (!existing) throw invoiceError('CONTACT_NOT_FOUND', `contact ${id} does not exist`);
+  const changes = {
+    name: name ?? existing.name, address: address ?? existing.address,
+    postalCode: postalCode ?? existing.postal_code, city: city ?? existing.city,
+    country: country ?? existing.country, email: email ?? existing.email,
+    vatId: vatId ?? existing.vat_id, kvk: kvk ?? existing.kvk,
+    iban: iban != null ? normalizeIban(iban) : existing.iban,
+  };
+  if (changes.iban != null && !isValidIban(changes.iban)) throw invoiceError('INVALID_IBAN', `'${changes.iban}' is not a valid IBAN`);
+  const before = { ...existing };
+  db.prepare(`
+    UPDATE contacts SET name = ?, address = ?, postal_code = ?, city = ?, country = ?, email = ?, vat_id = ?, kvk = ?, iban = ?
+    WHERE id = ?
+  `).run(changes.name, changes.address, changes.postalCode, changes.city, changes.country, changes.email, changes.vatId, changes.kvk, changes.iban ? String(changes.iban).replace(/\s+/g, '') : null, id);
+  const changed = Object.entries({ name: before.name, address: before.address, postal_code: before.postal_code, city: before.city, iban: before.iban })
+    .filter(([k]) => changes[k === 'postal_code' ? 'postalCode' : k] !== before[k])
+    .map(([k]) => k);
+  record(db, {
+    actor, action: 'contact.update', command: 'contact update',
+    args: { contact_id: id, changed },
+    outcome: 'ok',
+  });
+  return getContact(db, id);
 }
 
 export function getContact(db, id) {
