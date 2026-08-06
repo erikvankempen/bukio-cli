@@ -132,6 +132,36 @@ function ensureAccount(db, code, name, netCents, createdList, typeHint = null) {
   return account;
 }
 
+/**
+ * Chart sync for audit-file imports. On an EMPTY ledger (no postings yet) the
+ * file's chart is authoritative: existing accounts with a different name are
+ * renamed (+ type/balance aligned) — this is the migrate-into-bukio case where
+ * the default starter chart must not hijack the file's account meanings.
+ * Accounts that already carry postings are left untouched (only a warning).
+ */
+function syncAccountFromFile(db, code, name, typeHint, createdList, updatedList, warnings) {
+  const existing = getAccountByCode(db, code);
+  const cleanName = String(name ?? '').trim() || `Rekening ${code}`;
+  if (!existing) {
+    const { type, normalBalance } = typeHint ?? inferAccountType(code, 0);
+    const account = createAccount(db, { code, name: cleanName, type, normalBalance });
+    createdList.push({ code: account.code, name: account.name, type: account.type, normal_balance: account.normal_balance });
+    return;
+  }
+  const nameDiffers = String(existing.name).trim().toLowerCase() !== cleanName.toLowerCase();
+  if (!nameDiffers) return;
+  const used = db.prepare('SELECT 1 FROM postings WHERE account_id = ? LIMIT 1').get(existing.id);
+  if (used) {
+    warnings.push(`account ${code} stays '${existing.name}' — it already has postings (file calls it '${cleanName}')`);
+    return;
+  }
+  const { type, normalBalance } = typeHint ?? { type: existing.type, normal_balance: existing.normal_balance };
+  const before = existing.name;
+  db.prepare('UPDATE accounts SET name = ?, type = ?, normal_balance = ? WHERE id = ?')
+    .run(cleanName, type, normalBalance, existing.id);
+  updatedList.push({ code, from: before, to: cleanName, type, normal_balance: normalBalance });
+}
+
 // --- opening balances -------------------------------------------------------
 
 /**
@@ -457,7 +487,10 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
     throw importError('INVALID_XAF', `cannot parse XML: ${err.message}`);
   }
   const xaf = doc.Xaf ?? doc.XAF;
-  if (!xaf) throw importError('INVALID_XAF', 'root element must be <Xaf> (XML Auditfile Financieel)');
+  if (!xaf && doc.AuditFile) {
+    return importBukioAuditFile(db, { auditFile: doc.AuditFile, actor, dryRun });
+  }
+  if (!xaf) throw importError('INVALID_XAF', 'root element must be <Xaf> (Belastingdienst) or <AuditFile> (bukio export)');
 
   const header = xaf.XafHeader ?? {};
   const version = String(header.Version ?? '');
@@ -554,6 +587,8 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
       .map((r) => r.source_ref),
   );
   const accountsCreated = [];
+  const accountsUpdated = [];
+  const syncWarnings = [];
   const plan = {
     action: 'import xaf',
     company: { name: fileName, kvk: fileKvk, fiscal_year: header.FiscalYear ?? null, period: `${header.StartDate ?? ''}..${header.EndDate ?? ''}` },
@@ -562,6 +597,12 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
     mutaties: parsedMutaties.length,
     duplicates: parsedMutaties.filter((m) => existingRefs.has(m.boekstuk)).length,
     accounts_to_create: rekeningen.filter((r) => !getAccountByCode(db, String(r.RekeningCode).trim())).length,
+    accounts_to_rename: rekeningen
+      .map((r) => ({ code: String(r.RekeningCode ?? '').trim(), name: String(r.RekeningOmschrijving ?? '').trim() }))
+      .filter(({ code, name }) => {
+        const existing = getAccountByCode(db, code);
+        return existing && name && String(existing.name).trim().toLowerCase() !== name.toLowerCase();
+      }),
     company_mismatch: companyMismatch,
     ignored_btw_codes: [...btwCodes],
     dryRun: true,
@@ -574,15 +615,13 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
     // upsert the file's chart
     for (const r of rekeningen) {
       const code = String(r.RekeningCode).trim();
-      if (!getAccountByCode(db, code)) {
-        const netCents = net.get(code) ?? 0;
-        ensureAccount(
-          db, code,
-          String(r.RekeningOmschrijving ?? '').trim() || `Rekening ${code}`,
-          netCents, accountsCreated,
-          rekeningType(r.RekeningSoort, netCents),
-        );
-      }
+      const netCents = net.get(code) ?? 0;
+      syncAccountFromFile(
+        db, code,
+        String(r.RekeningOmschrijving ?? '').trim() || `Rekening ${code}`,
+        rekeningType(r.RekeningSoort, netCents),
+        accountsCreated, accountsUpdated, syncWarnings,
+      );
     }
     for (const m of parsedMutaties) {
       if (existingRefs.has(m.boekstuk)) { duplicates.push(m.boekstuk); continue; }
@@ -603,7 +642,7 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
 
   record(db, {
     actor, action: 'import.xaf', command: 'import xaf',
-    args: { mutaties: imported.length, duplicates: duplicates.length, accounts_created: accountsCreated.length },
+    args: { mutaties: imported.length, duplicates: duplicates.length, accounts_created: accountsCreated.length, accounts_updated: accountsUpdated.length },
     outcome: 'ok', entryIds: imported.map((e) => e.id),
   });
   return {
@@ -611,6 +650,8 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
     duplicates: duplicates.length,
     entries: imported,
     accounts_created: accountsCreated,
+    accounts_updated: accountsUpdated,
+    chart_warnings: syncWarnings,
     header: {
       company_name: fileName, company_kvk: fileKvk, fiscal_year: header.FiscalYear ?? null,
       start_date: header.StartDate ?? null, end_date: header.EndDate ?? null,
@@ -624,4 +665,208 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
 
 export function readImportFile(filePath) {
   return readFileSync(filePath, 'utf8');
+}
+
+// --- bukio audit file flavor (root <AuditFile>, https://www.bukio.nl/xaf/4.0) --
+//
+// Same audit semantics as the Belastingdienst layout, different element names:
+//   Header            (AuditFileVersion, CompanyName, CompanyID, FiscalYear,
+//                      StartDate, EndDate, CurrencyCode, SoftwareDescription)
+//   MasterFiles/GeneralLedgerAccounts/Account   (AccountID, AccountDescription,
+//                      AccountType: Asset|Liability|Equity|Revenue|Expense)
+//   GeneralLedgerEntries/Journal[]/Transaction[]  (TransactionID,
+//                      TransactionDate, Description; Line[] with AccountID +
+//                      DebitAmount | CreditAmount, TaxInformation, ...)
+// Each Line is a complete posting on one account (no tegenrekening); the entry
+// is the sum of its lines. Tax codes (e.g. NOVAT) are reported, not booked.
+
+const BUKIO_ACCOUNT_TYPES = {
+  asset: { type: 'asset', normalBalance: 'debit' },
+  liability: { type: 'liability', normalBalance: 'credit' },
+  equity: { type: 'equity', normalBalance: 'credit' },
+  revenue: { type: 'income', normalBalance: 'credit' },
+  expense: { type: 'expense', normalBalance: 'debit' },
+};
+
+function importBukioAuditFile(db, { auditFile, actor, dryRun }) {
+  const header = auditFile.Header ?? {};
+  const version = String(header.AuditFileVersion ?? '');
+  if (!/^4(\.\d+)?$/.test(version)) {
+    throw importError('INVALID_XAF', `unsupported audit file version '${version || '(missing)'}' — expected 4.0`);
+  }
+
+  // company cross-check: only an 8-digit CompanyID is a plausible KVK; other
+  // ids (e.g. the exporting database's row id) fall back to the name check.
+  const company = db.prepare('SELECT * FROM company WHERE id = 1').get() ?? null;
+  const fileKvk = header.CompanyID ? String(header.CompanyID).trim() : null;
+  const fileName = String(header.CompanyName ?? header.BusinessName ?? '').trim() || null;
+  const currency = String(header.CurrencyCode ?? 'EUR').trim();
+  const companyMismatch = [];
+  if (company) {
+    if (fileKvk && /^\d{8}$/.test(fileKvk) && company.kvk && fileKvk !== company.kvk) {
+      throw importError('COMPANY_MISMATCH', `audit file is for ${fileKvk} (${fileName ?? 'unknown'}), database is for ${company.kvk} (${company.name})`);
+    }
+    if (fileName && company.name && fileName.toLowerCase() !== company.name.toLowerCase()) {
+      companyMismatch.push(`company name differs: file '${fileName}' vs database '${company.name}'`);
+    }
+  }
+  if (currency !== 'EUR') {
+    companyMismatch.push(`currency ${currency} — imported amounts are booked as EUR`);
+  }
+
+  const accounts = asArray(auditFile.MasterFiles?.GeneralLedgerAccounts?.Account);
+  const journals = asArray(auditFile.GeneralLedgerEntries?.Journal);
+  const transactions = journals.flatMap((j) => asArray(j.Transaction));
+
+  const errors = [];
+  const seenCodes = new Set();
+  const accountTypeByCode = new Map();
+  for (const a of accounts) {
+    const code = String(a.AccountID ?? '').trim();
+    if (!CODE_RE.test(code)) errors.push({ line: 0, error: `INVALID_CODE: account '${code}' must be 1-6 digits` });
+    else if (seenCodes.has(code)) errors.push({ line: 0, error: `DUPLICATE_CODE: account ${code} appears twice in the audit file` });
+    else seenCodes.add(code);
+    const t = BUKIO_ACCOUNT_TYPES[String(a.AccountType ?? '').toLowerCase().trim()];
+    if (t) accountTypeByCode.set(code, t);
+  }
+
+  const parsed = [];
+  const taxCodes = new Set();
+  for (const t of transactions) {
+    const id = String(t.TransactionID ?? '').trim();
+    const date = String(t.TransactionDate ?? '').trim();
+    const lines = asArray(t.Line);
+    if (!id) errors.push({ line: 0, error: 'TRANSACTION_REQUIRED: every <Transaction> needs a <TransactionID>' });
+    if (!validDate(date)) errors.push({ line: 0, error: `INVALID_DATE: transaction '${id || '?'}' date '${date}' must be yyyy-mm-dd` });
+    if (lines.length === 0) errors.push({ line: 0, error: `NO_LINES: transaction '${id || '?'}' has no <Line> rows` });
+
+    const postings = [];
+    let sum = 0;
+    for (const ln of lines) {
+      const code = String(ln.AccountID ?? '').trim();
+      const debit = String(ln.DebitAmount ?? '').trim();
+      const credit = String(ln.CreditAmount ?? '').trim();
+      if (!CODE_RE.test(code)) {
+        errors.push({ line: 0, error: `INVALID_CODE: '${code}' must be 1-6 digits (transaction '${id || '?'}')` });
+      } else if (!seenCodes.has(code) && !getAccountByCode(db, code)) {
+        errors.push({ line: 0, error: `RECORDING_NOT_FOUND: account ${code} (transaction '${id || '?'}') is not in the file's accounts nor in the chart` });
+      }
+      let amountCents = null;
+      if (debit && credit) {
+        errors.push({ line: 0, error: `INVALID_AMOUNT: transaction '${id || '?'}' line ${code} has both DebitAmount and CreditAmount` });
+      } else if (!debit && !credit) {
+        errors.push({ line: 0, error: `INVALID_AMOUNT: transaction '${id || '?'}' line ${code} has no DebitAmount/CreditAmount` });
+      } else {
+        try {
+          amountCents = debit ? parseImportAmount(debit) : -parseImportAmount(credit);
+        } catch (err) {
+          errors.push({ line: 0, error: `${err.code}: transaction '${id || '?'}' line ${code} amount '${debit || credit}'` });
+        }
+      }
+      if (amountCents === 0) errors.push({ line: 0, error: `INVALID_AMOUNT: transaction '${id || '?'}' line ${code} must be non-zero` });
+      const taxInfo = Array.isArray(ln.TaxInformation) ? ln.TaxInformation[0] : ln.TaxInformation;
+      const taxCode = String(taxInfo?.TaxCode ?? '').trim();
+      if (taxCode) taxCodes.add(taxCode);
+      sum += amountCents ?? 0;
+      postings.push({ code, amountCents: amountCents ?? 0 });
+    }
+    if (sum !== 0) {
+      errors.push({ line: 0, error: `UNBALANCED: transaction '${id || '?'}' lines sum to ${formatAmount(sum)} — debet must equal credit` });
+    }
+    const description = String(t.Description ?? lines[0]?.Description ?? '').trim() || `Boekstuk ${id || '?'}`;
+    parsed.push({ id, date, description, postings });
+  }
+
+  if (errors.length > 0) {
+    throw importError(
+      'IMPORT_VALIDATION_FAILED',
+      `XAF file has ${errors.length} problem(s) — nothing imported`,
+      errors,
+    );
+  }
+
+  const existingRefs = new Set(
+    db.prepare("SELECT source_ref FROM journal_entries WHERE source = 'xaf' AND source_ref IS NOT NULL").all()
+      .map((r) => r.source_ref),
+  );
+  const plan = {
+    action: 'import xaf',
+    company: {
+      name: fileName, kvk: fileKvk, fiscal_year: header.FiscalYear ?? null,
+      period: `${header.StartDate ?? ''}..${header.EndDate ?? ''}`,
+    },
+    software: header.SoftwareDescription ? String(header.SoftwareDescription).trim() : null,
+    rekeningen: accounts.length,
+    mutaties: parsed.length,
+    duplicates: parsed.filter((p) => existingRefs.has(p.id)).length,
+    accounts_to_create: accounts.filter((a) => !getAccountByCode(db, String(a.AccountID ?? '').trim())).length,
+    accounts_to_rename: accounts
+      .map((a) => ({ code: String(a.AccountID ?? '').trim(), name: String(a.AccountDescription ?? '').trim() }))
+      .filter(({ code, name }) => {
+        const existing = getAccountByCode(db, code);
+        return existing && name && String(existing.name).trim().toLowerCase() !== name.toLowerCase();
+      }),
+    company_mismatch: companyMismatch,
+    ignored_btw_codes: [...taxCodes],
+    dryRun: true,
+  };
+  if (dryRun) return plan;
+
+  // net movement per code (file chart + used codes) for type inference
+  const net = new Map();
+  for (const a of accounts) net.set(String(a.AccountID).trim(), 0);
+  for (const p of parsed) {
+    for (const po of p.postings) net.set(po.code, (net.get(po.code) ?? 0) + po.amountCents);
+  }
+
+  const accountsCreated = [];
+  const accountsUpdated = [];
+  const syncWarnings = [];
+  const imported = [];
+  let duplicates = 0;
+  const tx = db.transaction(() => {
+    for (const a of accounts) {
+      const code = String(a.AccountID).trim();
+      const netCents = net.get(code) ?? 0;
+      syncAccountFromFile(
+        db, code,
+        String(a.AccountDescription ?? '').trim() || `Rekening ${code}`,
+        accountTypeByCode.get(code) ?? inferAccountType(code, netCents),
+        accountsCreated, accountsUpdated, syncWarnings,
+      );
+    }
+    for (const p of parsed) {
+      if (existingRefs.has(p.id)) { duplicates += 1; continue; }
+      const entry = createEntry(db, {
+        date: p.date, description: p.description, postings: p.postings,
+        source: 'xaf', sourceRef: p.id, actor,
+      });
+      const posted = postEntry(db, { id: entry.id, actor });
+      existingRefs.add(p.id);
+      imported.push({ id: posted.id, date: posted.date, description: posted.description, state: posted.state, source_ref: p.id });
+    }
+  });
+  tx();
+
+  record(db, {
+    actor, action: 'import.xaf', command: 'import xaf',
+    args: { transactions: parsed.length, imported: imported.length, duplicates, accounts_created: accountsCreated.length, accounts_updated: accountsUpdated.length, flavor: 'bukio' },
+    outcome: 'ok', entryIds: imported.map((e) => e.id),
+  });
+  return {
+    imported: imported.length,
+    duplicates,
+    entries: imported,
+    accounts_created: accountsCreated,
+    accounts_updated: accountsUpdated,
+    chart_warnings: syncWarnings,
+    header: {
+      company_name: fileName, company_kvk: fileKvk, fiscal_year: header.FiscalYear ?? null,
+      start_date: header.StartDate ?? null, end_date: header.EndDate ?? null,
+      software: header.SoftwareDescription ? String(header.SoftwareDescription).trim() : null,
+    },
+    company_mismatch: companyMismatch,
+    ignored_btw_codes: [...taxCodes],
+    dryRun: false,
+  };
 }

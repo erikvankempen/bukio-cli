@@ -105,6 +105,10 @@ export function make(program) {
               console.log(`plan: import XAF 4.0 — ${d.company.name ?? 'unknown company'} (${d.company.kvk ?? 'no kvk'}) ${d.company.fiscal_year ?? ''}`);
               console.log(`  ${d.rekeningen} rekeningen / ${d.mutaties} mutaties`);
               if (d.accounts_to_create) console.log(`  ${d.accounts_to_create} accounts will be created`);
+              if (d.accounts_to_rename?.length) {
+                console.log(`  ${d.accounts_to_rename.length} accounts will be renamed to the file's chart:`);
+                for (const r of d.accounts_to_rename) console.log(`    ${r.code} -> ${r.name}`);
+              }
               if (d.duplicates) console.log(`  (${d.duplicates} already imported — will skip)`);
               if (d.ignored_btw_codes.length) console.log(`  note: btw codes ${d.ignored_btw_codes.join(', ')} ignored (net amounts imported)`);
               for (const w of d.company_mismatch) console.log(`  warning: ${w}`);
@@ -117,6 +121,10 @@ export function make(program) {
             if (d.accounts_created.length) {
               console.log(`created accounts: ${d.accounts_created.map((a) => `${a.code} (${a.type})`).join(', ')}`);
             }
+            if (d.accounts_updated?.length) {
+              console.log(`renamed accounts: ${d.accounts_updated.map((a) => `${a.code} '${a.from}' -> '${a.to}'`).join(', ')}`);
+            }
+            for (const w of d.chart_warnings ?? []) console.log(`  warning: ${w}`);
             if (d.ignored_btw_codes.length) {
               console.log(`note: btw codes ${d.ignored_btw_codes.join(', ')} ignored — verify the booked amounts`);
             }
