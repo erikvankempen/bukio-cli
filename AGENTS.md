@@ -76,6 +76,12 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio import contacts --file F [--dry-run]` | Import suppliers + customers from an audit file as invoice contacts (idempotent by name; whole-file validation). |
 | `bukio month-end --period yyyy-mm` | **Read-only** close check: drafts, unmatched bank, OB quarter readout, draft/overdue invoices, due recurring, period totals + profit, `warnings[]`. |
 | `bukio invoice reminders [--within-days N] [--draft-emails]` | Overdue + due-soon invoices (most overdue first) with outstanding amounts; `--draft-emails` adds Dutch email drafts — nothing is sent. |
+| `bukio assets scheme add --name [--method lineair\|degressief] [--life-months 60] [--residual-bp 0]` | Depreciation schemes; the standard 5y-lineair-0% scheme is created lazily when an asset has no scheme. |
+| `bukio assets add --name --purchase-date --purchase-price --depreciation-start --recognition-date [--cum-dep] [--scheme \| --method/--life-months] [--asset-account 1800] [--cum-dep-account] [--expense-account 4600] [--entry-id]` | Register an already-booked asset (mid-life adoption: only remaining depreciation runs forward, first run on the 1st). GL reconciliation warnings. |
+| `bukio assets run [--period yyyy-mm \| --as-of DATE] [--dry-run]` | Book due depreciation (source 'assets', idempotent per asset-month, auto-completes at residual). |
+| `bukio assets register [--as-of DATE] [--format json\|csv\|xlsx --out]` | Aktivastaat: cost / cum-dep / book value per asset + totals. |
+| `bukio assets dispose --id N --date [--proceeds] [--bank-account] [--result-account] [--dry-run]` | Sale/scrap: proposes the full entry, status → disposed. |
+| `bukio assets list/show/pause/resume` | Register inspection + pause/resume. |
 | `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. |
 | `bukio audit [--by agent:hermes] [--since ISO] [--limit N]` | Read the append-only audit log (newest first). |
 
@@ -349,7 +355,32 @@ Import failures carry per-line details:
 `error.details = [{ line: 2, error: "ACCOUNT_NOT_FOUND: account 9999 …" }]`.
 Fix the file, re-run — already-imported boekstukken are skipped, nothing is
 double-booked. Never "fix" a bad import by reversing parts of it — correct the
-file and re-import; entries are only written for the clean part of the run.
+file and re-import (idempotency handles the rest).
+
+### 6.15 Fixed assets: mid-life adoption + the monthly run
+
+```bash
+# 1. recognise an asset bought years ago (already booked in the ledger):
+#    cost 1511.74, depreciation started 2024-01-01, recognised now with
+#    989.60 already depreciated -> only the REMAINING 522.14 runs forward
+bukio assets add --name "Laptop" --category ICT --purchase-date 2023-12-20 \
+  --purchase-price 1511.74 --depreciation-start 2024-01-01 \
+  --recognition-date 2025-12-31 --cum-dep 989.60 \
+  --asset-account 1350 --cum-dep-account 1500 --expense-account 4600 --dry-run
+bukio assets add ...  # (same, without --dry-run; GL reconciliation warnings ok)
+# 2. every month (or caught by `month-end`): book what is due
+bukio assets run --period 2026-01 --dry-run
+bukio assets run --period 2026-01
+# 3. the aktivastaat for the jaarrekening
+bukio assets register --as-of 2026-12-31 --format xlsx --out aktivastaat.xlsx
+# 4. selling/scrapping: propose the full entry (bank/cum-dep/asset/result)
+bukio assets dispose --id 1 --date 2026-06-15 --proceeds 450.00 --dry-run
+```
+
+Assets are `source='assets'` with `source_ref='asset:<id>:<YYYY-MM>'`; runs are
+idempotent per asset-month and auto-complete the asset at its residual.
+`assets add` never re-books the purchase or past depreciation — recognition is
+registration-only (warnings, not errors, when the GL accounts don't reconcile).
 
 ### 6.12 Year-end: close the books, produce the jaarrekening
 
@@ -458,8 +489,8 @@ individual generated entries with `entry reverse` if one is wrong (the template'
 
 ---
 
-## 9. Capability boundaries (Phase 6 complete)
+## 9. Capability boundaries (Phase 7 complete)
 
-Available: company init (incl. address for compliant invoices), journal entries (incl. **FX conversion**), accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. invoice payments), optional VAT module (enable, `vat book`, OB readout 1a–5d + mark-filed), recurring entries + invoices, invoicing (lifecycle, 12-vereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payments), Peppol send, jaarrekening (`year-end close`, micro/klein statutory accounts, KVK deposit PDF, XLSX), ICP readout, **FX rates + foreign-currency booking** (`fx set`, `--currency/--rate` on entry add + vat book, `fx_currency`/`fx_amount_cents` on postings), **MCP server** (`bukio mcp`, plan-only mutations, READONLY mode), **compliance calendar** (`compliance status`/`mark`), **imports** (`import opening-balances` / `journal` / `xaf` — whole-file validation, idempotent), **month-end close check** (`month-end --period`), **invoice reminders** (`invoice reminders`, draft emails only — never sends), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
+Available: company init (incl. address for compliant invoices), journal entries (incl. **FX conversion**), accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. invoice payments), optional VAT module (enable, `vat book`, OB readout 1a–5d + mark-filed), recurring entries + invoices, invoicing (lifecycle, 12-vereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payments), Peppol send, jaarrekening (`year-end close`, micro/klein statutory accounts, KVK deposit PDF, XLSX), ICP readout, **FX rates + foreign-currency booking** (`fx set`, `--currency/--rate` on entry add + vat book, `fx_currency`/`fx_amount_cents` on postings), **MCP server** (`bukio mcp`, plan-only mutations, READONLY mode), **compliance calendar** (`compliance status`/`mark`), **imports** (`import opening-balances` / `journal` / `xaf` — whole-file validation, idempotent), **month-end close check** (`month-end --period`), **invoice reminders** (`invoice reminders`, draft emails only — never sends), **fixed assets** (`assets scheme add`/`assets add`/`run`/`register`/`dispose`/`pause`/`resume` — mid-life adoption via recognition-date + cum-dep at recognition, lineair + degressief, aktivastaat, source 'assets'), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 
 **Not yet available:** LLM categorization suggestions, Ponto live feeds, Peppol receive, OCR, automated email sending for reminders. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds. NL query is done via the MCP tools — there is no bespoke NL parser.

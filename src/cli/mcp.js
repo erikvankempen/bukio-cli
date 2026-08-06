@@ -18,6 +18,7 @@ import {
   createContact, createInvoice, finalizeInvoice, creditInvoice, markPaid,
 } from '../invoice/index.js';
 import { runDue, previewDue } from '../recurring/index.js';
+import { register, addAsset, runDue as assetsRunDue, disposeAsset } from '../assets/index.js';
 import { yearEndClose, yearEndStatus } from '../year-end/index.js';
 import { setFxRate, getFxRate, parseRate, toEurPostings, resolveRate } from '../fx/index.js';
 import { icpReadout } from '../icp/index.js';
@@ -347,6 +348,95 @@ tool({
   },
 });
 
+// --- fixed assets ------------------------------------------------------------
+
+tool({
+  name: 'assets_register', description: 'aktivastaat: cost, cumulative depreciation, book value per asset',
+  schema: { type: 'object', properties: { as_of: { type: 'string' } } },
+  handler: (db, args) => register(db, { asOf: args.as_of ?? null, actor: 'agent' }),
+});
+
+tool({
+  name: 'asset_add', mutating: true,
+  description: 'register an asset (already booked in the ledger) — mid-life adoption via recognition-date + cum-dep at recognition',
+  schema: {
+    type: 'object', properties: {
+      name: { type: 'string' }, category: { type: 'string' }, serial: { type: 'string' },
+      purchase_date: { type: 'string' }, purchase_price: { type: 'string' },
+      depreciation_start: { type: 'string' }, recognition_date: { type: 'string' },
+      cum_dep: { type: 'string' }, residual: { type: 'string' },
+      scheme: { type: 'string' }, method: { type: 'string' }, life_months: { type: 'string' },
+      asset_account: { type: 'string' }, cum_dep_account: { type: 'string' },
+      expense_account: { type: 'string' }, entry_id: { type: 'string' }, note: { type: 'string' },
+      actor: { type: 'string' }, mode: { type: 'string' },
+    }, required: ['name', 'purchase_date', 'purchase_price', 'depreciation_start', 'recognition_date'],
+  },
+  handler: (db, args, ctx) => {
+    guardExecute(ctx, args);
+    const toCents = (s) => Math.round(parseFloat(s ?? '0') * 100);
+    const common = {
+      name: args.name, category: args.category, serial: args.serial,
+      purchaseDate: args.purchase_date, purchasePriceCents: toCents(args.purchase_price),
+      depreciationStartDate: args.depreciation_start, recognitionDate: args.recognition_date,
+      cumDepAtRecognitionCents: toCents(args.cum_dep), residualCents: args.residual !== undefined ? toCents(args.residual) : null,
+      schemeId: args.scheme ? Number(args.scheme) : null,
+      method: args.method, lifeMonths: args.life_months ? Number(args.life_months) : null,
+      assetAccount: args.asset_account ?? '1800', cumDepAccount: args.cum_dep_account,
+      expenseAccount: args.expense_account ?? '4600',
+      entryId: args.entry_id ? Number(args.entry_id) : null, note: args.note,
+    };
+    if (modeOf(args) === 'dry-run') {
+      const r = addAsset(db, { ...common, actor: args.actor ?? ctx.actor, dryRun: true });
+      return { action: 'asset.add', mode: 'dry-run', asset: r.asset };
+    }
+    const r = addAsset(db, { ...common, actor: args.actor ?? ctx.actor, dryRun: false });
+    return { action: 'asset.add', id: r.asset.id, name: r.asset.name, warnings: r.warnings, mode: 'execute' };
+  },
+});
+
+tool({
+  name: 'assets_run', mutating: true,
+  description: 'book the depreciation runs that are due (idempotent per asset-month)',
+  schema: { type: 'object', properties: { period: { type: 'string' }, as_of: { type: 'string' }, actor: { type: 'string' }, mode: { type: 'string' } } },
+  handler: (db, args, ctx) => {
+    guardExecute(ctx, args);
+    const actor = args.actor ?? ctx.actor;
+    if (modeOf(args) === 'dry-run') {
+      const r = runDue(db, { period: args.period, asOf: args.as_of, actor, dryRun: true });
+      return { action: 'assets.run', mode: 'dry-run', plan: r.plan };
+    }
+    const r = runDue(db, { period: args.period, asOf: args.as_of, actor, dryRun: false });
+    return { action: 'assets.run', booked: r.booked, mode: 'execute' };
+  },
+});
+
+tool({
+  name: 'asset_dispose', mutating: true,
+  description: 'dispose of an asset (sale or scrap): books the full entry, status -> disposed',
+  schema: {
+    type: 'object', properties: {
+      id: { type: 'string' }, date: { type: 'string' }, proceeds: { type: 'string' },
+      bank_account: { type: 'string' }, result_account: { type: 'string' },
+      actor: { type: 'string' }, mode: { type: 'string' },
+    }, required: ['id', 'date'],
+  },
+  handler: (db, args, ctx) => {
+    guardExecute(ctx, args);
+    const actor = args.actor ?? ctx.actor;
+    const common = {
+      id: Number(args.id), date: args.date,
+      proceedsCents: Math.round(parseFloat(args.proceeds ?? '0') * 100),
+      bankAccount: args.bank_account, resultAccount: args.result_account,
+    };
+    if (modeOf(args) === 'dry-run') {
+      const r = disposeAsset(db, { ...common, actor, dryRun: true });
+      return { action: 'asset.dispose', mode: 'dry-run', asset: r.asset, postings: r.postings, result_cents: r.result_cents };
+    }
+    const r = disposeAsset(db, { ...common, actor, dryRun: false });
+    return { action: 'asset.dispose', mode: 'execute', asset: r.asset, entry_id: r.entry.id, result_cents: r.result_cents };
+  },
+});
+
 // --- JSON-RPC plumbing -----------------------------------------------------
 
 function rpcResponse(id, result) {
@@ -364,7 +454,7 @@ function dispatch(db, ctx, msg) {
       return Promise.resolve(rpcResponse(id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: 'bukio-cli', version: '0.8.0' },
+        serverInfo: { name: 'bukio-cli', version: '0.10.0' },
       }));
     case 'notifications/initialized':
     case 'initialized':

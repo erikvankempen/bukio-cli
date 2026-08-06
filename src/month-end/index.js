@@ -9,6 +9,7 @@ import { listInvoices } from '../invoice/index.js';
 import { listTemplates } from '../recurring/index.js';
 import { listTransactions } from '../bank/index.js';
 import { isVatEnabled, obReadout } from '../vat/index.js';
+import { runDue } from '../assets/index.js';
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
@@ -45,6 +46,17 @@ export function monthEnd(db, { period }) {
   const recurring = listTemplates(db, { status: 'active' })
     .filter((t) => t.next_run_date && t.next_run_date <= to);
 
+  // fixed assets: depreciation runs due in this period (books stay open until
+  // the agent runs `assets run --period <month>`)
+  const assetsDue = (() => {
+    try {
+      const plan = runDue(db, { period, dryRun: true });
+      return plan.plan.length;
+    } catch {
+      return 0; // pre-009 databases: no assets tables yet
+    }
+  })();
+
   let vat = null;
   if (isVatEnabled(db)) {
     const readout = obReadout(db, { period: quarterOf(period) });
@@ -78,7 +90,8 @@ export function monthEnd(db, { period }) {
   if (bankUnmatched.length) warnings.push(`${bankUnmatched.length} unmatched bank transaction${bankUnmatched.length === 1 ? '' : 's'}`);
   if (overdueInvoices.length) warnings.push(`${overdueInvoices.length} overdue invoice${overdueInvoices.length === 1 ? '' : 's'}`);
   if (recurring.length) warnings.push(`${recurring.length} recurring template${recurring.length === 1 ? '' : 's'} due by ${to}`);
-  if (!drafts.length && !bankUnmatched.length && !overdueInvoices.length && !recurring.length) {
+  if (assetsDue) warnings.push(`${assetsDue} depreciation run${assetsDue === 1 ? '' : 's'} due — run 'assets run --period ${period}'`);
+  if (!drafts.length && !bankUnmatched.length && !overdueInvoices.length && !recurring.length && !assetsDue) {
     warnings.push('all clear — the month can be closed');
   }
 

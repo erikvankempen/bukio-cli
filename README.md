@@ -17,7 +17,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
 bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a VPS, stores everything in one local SQLite file, and is designed so AI agents — not just humans — can operate it safely and auditably. It is built for the Dutch B2B e-invoicing mandate: every invoice ends as a compliant PDF, a Peppol BIS 3.0 UBL document, and a sendable Peppol message.
 
-**Status: Phase 6 complete (v0.9.0)** — ledger → bank/VAT → invoicing & recurring → jaarrekening → agent layer (MCP) → imports & month-end automation. Full pipeline in the [Roadmap](#roadmap).
+**Status: Phase 7 complete (v0.10.0)** — ledger → bank/VAT → invoicing & recurring → jaarrekening → agent layer (MCP) → imports & month-end automation → fixed assets (depreciation schemes, register, disposal). Full pipeline in the [Roadmap](#roadmap).
 
 ## Features
 
@@ -26,7 +26,8 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 - **Peppol BIS 3.0 ready** — the 2027 mandate in one loop: `finalize → PDF → UBL → peppol-send`.
 - **FX built in** — book foreign-currency purchase invoices in USD, GBP, …; rates resolve from your rate store or straight from the ECB.
 - **Migration-ready** — `import opening-balances`, `import journal` (SnelStart/Exact-style CSV) and `import xaf` (XML Auditfile Financieel 4.0) bring a whole administration in; every importer validates the entire file before writing a single cent.
-- **Runs itself** — `month-end` is the agent's close check (drafts, bank, VAT, invoices, recurring, profit); `invoice reminders` drafts overdue payment reminders.
+- **Runs itself** — `month-end` is the agent's close check (drafts, bank, VAT, invoices, recurring, fixed assets, profit); `invoice reminders` drafts overdue payment reminders.
+- **Fixed assets** — depreciation schemes (lineair / degressief with the standard switch-to-linear rule), an asset register with **mid-life adoption** (recognition date + cumulative depreciation at recognition — only the remaining depreciation is booked), monthly runs (idempotent per asset-month), disposal with winst/verlies booking, and the **aktivastaat** (CSV/XLSX export).
 - **One company per database** — a second company is a second SQLite file (`--db` or `BUKIO_DB`).
 - **Local-first** — no cloud, no lock-in. Your 7-year administration stays yours.
 
@@ -489,6 +490,12 @@ Imports are idempotent: re-running skips already-imported boekstukken.
 | `month-end --period yyyy-mm` | **Read-only close check**: draft entries, unmatched bank transactions, the OB readout for the containing quarter, draft + overdue invoices (with outstanding total), due recurring templates, period debit/credit totals (`balanced`), the month's profit, and human-readable `warnings` — the agent's monthly "can I close?" report |
 | `import contacts --file <audit.xaf> [--dry-run]` | Import **suppliers + customers** from an audit file (either XAF layout) as invoice contacts: name, street, postal code, city, country, email, vat-id. Whole-file validation (every entry needs a name); idempotent by name |
 | `invoice reminders [--within-days N] [--draft-emails]` | Overdue + due-soon sales invoices, sorted most-overdue first, with `outstanding` per invoice. `--draft-emails` adds a Dutch reminder email draft (`to`/`subject`/`body`) per invoice — nothing is ever sent |
+| `assets scheme add --name [--method lineair\|degressief] [--life-months 60] [--residual-bp 0]` | Create a depreciation scheme. Default scheme (created lazily): **5 years lineair, monthly, 0% residual** |
+| `assets add --name --purchase-date --purchase-price --depreciation-start --recognition-date [--cum-dep] [--scheme] [--asset-account 1800] [--cum-dep-account] [--expense-account 4600] [--entry-id] [--category] [--serial] [--residual]` | Register an **already-booked** asset: only the *remaining* depreciation is booked from the recognition date (first run on the 1st). GL reconciliation warnings, never blockers |
+| `assets run [--period yyyy-mm \| --as-of DATE] [--dry-run]` | Book due depreciation runs — `source='assets'`, idempotent per asset-month, auto-completes assets at the residual |
+| `assets register [--as-of DATE] [--format json\|csv\|xlsx --out]` | The **aktivastaat**: cost, cumulative depreciation, book value per asset + totals |
+| `assets dispose --id N --date [--proceeds] [--bank-account 1100] [--result-account 8100] [--dry-run]` | Dispose (sale or scrap): proposes the full entry (bank / cum-dep / asset / winst-verlies), status → `disposed` |
+| `assets list [--status]` / `show --id` / `pause --id` / `resume --id` | Register inspection + depreciation pause/resume |
 
 ```bash
 # switching from your old package in one morning:
@@ -694,10 +701,16 @@ The suite covers: money parsing, posting engine invariants, reversal semantics, 
 | `INVALID_POSTING` | Posting spec is not `CODE:AMOUNT` |
 | `INVALID_DATE` | Date is not `yyyy-mm-dd` or not a real calendar date |
 | `INVALID_DESCRIPTION` | Description is empty |
-| `INVALID_SOURCE` | Unknown source (`manual`/`bank`/`invoice`/`agent` only) |
+| `INVALID_SOURCE` | Unknown source (`manual`/`bank`/`invoice`/`agent`/`reversal`/`recurring`/`closing`/`import`/`xaf`/`assets`) |
 | `INVALID_ACTOR` | Actor is empty |
 | `TOO_FEW_POSTINGS` | Fewer than 2 postings |
 | `UNBALANCED` | Postings do not sum to zero |
+| `ASSET_NOT_FOUND` / `SCHEME_NOT_FOUND` | Asset / scheme does not exist |
+| `ALREADY_DISPOSED` / `INVALID_STATUS` | Asset already disposed / wrong status for pause-resume |
+| `INVALID_LIFE` / `INVALID_METHOD` / `SCHEME_NAME_TAKEN` | Scheme validation (life 1-600 months, method lineair\|degressief, unique name) |
+| `INVALID_DEPRECIATION` | Cumulative depreciation at recognition exceeds cost minus residual |
+| `INVALID_COST` / `INVALID_RESIDUAL` | Asset purchase price / residual value invalid |
+| `ENTRY_NOT_FOUND` | The `--entry-id` purchase-booking link does not exist |
 | `ACCOUNT_NOT_FOUND` | Account code does not exist |
 | `ACCOUNT_INACTIVE` | Account exists but is inactive |
 | `ACCOUNT_EXISTS` | Account code already exists (account creation, Phase 1) |
@@ -838,7 +851,8 @@ bukio init --name "Mijn ZZP" --kor
 | 4 | Jaarrekening micro/klein models, closing entries, KVK package, ICP readout | Jaarrekening package for a micro BV — **✅ done (v0.7.0, 178 tests green)** | planned |
 | 5 | Agent layer: MCP server, permissions/approval gates, NL query, AI categorization suggestions, compliance calendar, FX translation | Agent closes a month end-to-end with zero unsupervised mutations — **✅ done (v0.8.0, 199 tests green)** | planned |
 | 6 | Migration & automation: `import opening-balances`, `import journal` (SnelStart/Exact CSV), `import xaf` (XML Auditfile 4.0), `month-end` close check, `invoice reminders` | Switch from an old package in one morning; the agent runs the close check monthly — **✅ done (v0.9.0, 229 tests green)** | planned |
-| 7 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
+| 7 | Fixed assets: depreciation schemes (lineair/degressief), asset register with mid-life adoption, monthly runs, disposal, aktivastaat | Recognise mid-life assets and book only the remaining depreciation — **✅ done (v0.10.0, 271 tests green)** | planned |
+| 8 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 
