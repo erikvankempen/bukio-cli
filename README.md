@@ -79,11 +79,12 @@ printf '%s\n' \
 9. [Integrity & Safety Model](#integrity--safety-model)
 10. [The Database](#the-database)
 11. [Using Agents](#using-agents)
-12. [Project Layout](#project-layout)
-13. [Development & Testing](#development--testing)
-14. [Error Codes](#error-codes)
-15. [Common Tasks](#common-tasks)
-16. [Roadmap](#roadmap)
+12. [Scheduling recurring actions (cron)](#scheduling-recurring-actions-cron)
+13. [Project Layout](#project-layout)
+14. [Development & Testing](#development--testing)
+15. [Error Codes](#error-codes)
+16. [Common Tasks](#common-tasks)
+17. [Roadmap](#roadmap)
 
 ---
 
@@ -661,6 +662,75 @@ bukio-cli is built for agents. The companion file **`AGENTS.md`** in the repo ro
 4. **Never edit the SQLite file directly.** Use the CLI/engine — the triggers and audit log exist for a reason.
 5. **Never delete a posted entry.** Reverse it.
 6. **Verify after every mutation** (e.g. `report trial-balance --json` must say `balanced: true`).
+
+---
+
+## Scheduling recurring actions (cron)
+
+bukio never runs itself — the schedule engine, the asset module and the close
+check only act when someone calls them. That is exactly what makes them good
+cron jobs. Two flavours:
+
+- **Read-only jobs** (reminders, deadline calendar, close check, dry-run plans)
+  — safe to run unattended; output lands in a log.
+- **Mutating jobs** (`recurring run`, `assets run`) — they book entries, so
+  always **dry-run first**. The recommended pattern is an agent-driven cron
+  (e.g. Hermes Agent): produce the plan → verify → apply → re-verify
+  `trial-balance` → backup. Never let a bare cron book blindly.
+
+### Recommended schedule
+
+| Cadence | Command | Kind |
+|---|---|---|
+| Daily | `invoice reminders --within-days 7 --draft-emails --json` | read-only |
+| Weekly | `compliance status --year <yyyy> --json` | read-only |
+| Weekly | `backup --out …` + `tar` the invoice archive | backup |
+| Monthly (1st) | `recurring run --as-of <1st> --dry-run --json` | plan |
+| Monthly (1st) | `assets run --period <prev> --dry-run --json` | plan |
+| Monthly (1st) | `month-end --period <prev> --json` | read-only |
+| Quarterly | `vat readout --period <yyyy-Qn> --json` | read-only |
+
+`recurring run` and `assets run` are idempotent and backfill missed periods —
+if a cron tick was missed (server down), the next run simply catches up.
+
+### Plain system crontab (read-only + backup — safe unattended)
+
+```cron
+# ── daily 08:00 — overdue/due-soon invoices (draft emails only, never sends)
+0 8 * * *  BUKIO_DB=~/.bukio/bukio.db bukio invoice reminders --within-days 7 --draft-emails --json >> ~/.bukio/cron/invoices.log 2>&1
+
+# ── weekly Mon 08:30 — filing-deadline calendar
+30 8 * * 1 BUKIO_DB=~/.bukio/bukio.db bukio compliance status --year $(date +\%Y) --json >> ~/.bukio/cron/compliance.log 2>&1
+
+# ── weekly Sun 07:00 — consistent DB snapshot + document archive
+0 7 * * 0  BUKIO_DB=~/.bukio/bukio.db bukio backup --out ~/.bukio/backups/bukio-$(date +\%F).db >> ~/.bukio/cron/backup.log 2>&1
+0 7 * * 0  tar -czf ~/.bukio/backups/invoices-$(date +\%F).tar.gz -C ~/.bukio invoices >> ~/.bukio/cron/backup.log 2>&1
+
+# ── 1st of month 09:00 — the close check (read-only)
+0 9 1 * *  BUKIO_DB=~/.bukio/bukio.db bukio month-end --period $(date -d "1 month ago" +\%Y-\%m) --json >> ~/.bukio/cron/month-end.log 2>&1
+```
+
+The mutating pair (`recurring run`, `assets run`) deliberately has **no
+unattended line here** — their dry-run plans belong in the agent-driven loop
+below, where a human or agent reviews before anything is posted.
+
+### Agent-driven month-end loop (mutating — plan, verify, apply)
+
+With an agentic harness (e.g. Hermes Agent), the monthly close becomes one
+reviewed run instead of blind cron lines. Suggested job prompt:
+
+```text
+Run the bukio month-end for <prev-month>:
+1. bukio recurring run --as-of <1st> --dry-run --json   → show the plan
+2. bukio assets run --period <prev-month> --dry-run --json → show the plan
+3. after approval: apply both without --dry-run (--actor agent:<name>)
+4. bukio report trial-balance --json                    → must be balanced: true
+5. bukio month-end --period <prev-month> --json         → all clear?
+6. bukio backup --out ~/.bukio/backups/bukio-<date>.db + tar the invoice archive
+```
+
+Never skip the dry-run step; the whole point of bukio's `--dry-run` is that a
+machine can propose and a human (or a verifying agent) disposes.
 
 ---
 
