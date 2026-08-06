@@ -249,7 +249,7 @@ export function make(program) {
             output(ctx, { plan: result.plan, dryRun: true }, (d) => {
               if (!d.plan.length) { console.log('plan: nothing due (dry run)'); return; }
               for (const p of d.plan) {
-                console.log(`  asset #${p.asset_id} ${p.name}: ${p.periods.map((s) => `${s.period} ${formatAmount(s.amount_cents)}`).join(', ')}`);
+                console.log(`  asset #${p.asset_id} ${p.name}: ${p.periods.map((s) => `${s.period} ${formatAmount(s.amountCents)}`).join(', ')}`);
               }
               console.log('(dry run — nothing written)');
             });
