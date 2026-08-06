@@ -316,6 +316,81 @@ bukio account import --file assets/chart-nl.csv --dry-run   # validate; then imp
 bukio audit --by agent:hermes --json
 ```
 
+### 6.10 Month-end: run the recurring templates (depreciation, accruals)
+
+```bash
+# 1. what is due (read-only — never guess, always preview first)
+bukio recurring preview --as-of 2026-09-30 --json
+# 2. generate (backfills missed periods; dry-run first)
+bukio recurring run --as-of 2026-09-30 --dry-run --json
+bukio recurring run --as-of 2026-09-30 --json
+# 3. verify the books
+bukio report trial-balance --json          # data.balanced === true
+# 4. depreciation schedules: 5370.00 / 36 mnd -> 149.17/mo, final 149.05
+bukio depreciation add --name "Laptop Dell" --cost 5370.00 --life-months 36 \
+  --start 2026-08-01 --dry-run
+# 5. accrual with auto-reversal (each run reverses the previous estimate)
+bukio recurring add --name "Nog te betalen kosten admin" \
+  --postings "4310:250.00,2400:-250.00" --frequency monthly \
+  --start 2026-08-31 --day 28 --reverse-previous
+```
+
+Generated entries are `source='recurring'`, `created_by='recurring'` — never hand-edit
+them; pause the template (`recurring pause --id`) if a schedule must stop, and reverse
+individual generated entries with `entry reverse` if one is wrong (the template's
+`last_entry_id` then stays pointing at the reversal-safe state).
+
+---
+
+### 6.11 Invoice a client, get paid, correct a mistake
+
+```bash
+# 1. the supplier must be complete (init) and the customer registered
+bukio contact add --name "ACME B.V." --address "Straat 1" --postal-code "1000 AA" \
+  --city "Amsterdam" --vat-id NL999999999B01
+# 2. draft -> finalize (validates the 12 factuurvereisten, books the entry)
+bukio invoice create --contact 1 --date 2026-07-10 \
+  --lines "2x Consultancy @ 150.00 @21,1x Rapportage @ 400.00 @9" --dry-run
+bukio invoice create --contact 1 --date 2026-07-10 \
+  --lines "2x Consultancy @ 150.00 @21,1x Rapportage @ 400.00 @9"
+bukio invoice finalize --id 1 --dry-run     # plan: 2026-0001 + postings
+bukio invoice finalize --id 1
+# 3. deliverables
+bukio invoice pdf --id 1                     # 2026-0001.pdf (send to the client)
+bukio invoice ubl --id 1                     # 2026-0001.xml (Peppol BIS 3.0)
+# 4. payment arrives -> bank match closes the loop
+bukio bank import --file stmt.xml --iban NL91ABNA0417164300
+bukio bank match auto --json                 # tx -> invoice 2026-0001 (paid)
+# 5. mistake -> credit note (reversal entry), never delete
+bukio invoice credit --id 1 --reason "verkeerd tarief"
+bukio invoice finalize --id 2                # 2026-0002, reverses the booking
+```
+
+Booking rule: finalized invoices auto-post Debiteuren/Omzet/Te betalen btw (per-rate,
+line-exact VAT). Payments post Bank/Debiteuren when matched from the bank. Do not
+hand-construct invoice entries with `entry add` — finalize/credit do it correctly.
+
+### 6.12 Year-end: close the books, produce the jaarrekening
+
+```bash
+# 1. everything must be posted before closing (drafts block the close)
+bukio year-end status --year 2026
+bukio year-end close --year 2026 --dry-run     # plan: result + postings
+bukio year-end close --year 2026               # result -> 9900 -> 3000
+# 2. statutory accounts + KVK deposit package
+bukio jaarrekening report --year 2026 --model klein --format pdf   # jaarrekening-2026-klein.pdf
+# 3. quarterly EU listing (verlegde EU leveringen)
+bukio icp readout --period 2026-Q3
+# 4. the OB readout now also reports 2a (EU) and 3b (EU inkopen)
+bukio vat readout --period 2026-Q4
+```
+
+Closing rules: `source='closing'` entries are excluded from the P&L (the year's
+flow stays visible) but included in the balans (equity carries the result).
+Undo a close with `entry reverse` on the closing entries — never by deleting
+them. The OB readout tracks 2a (verlegde EU sales), 3a/3b (verlegde inkopen)
+and 1d (privégebruik at 21%); 2b and 5c are not tracked.
+
 ### 6.13 Foreign-currency purchase invoices (FX)
 
 ```bash
@@ -387,10 +462,40 @@ bukio assets dispose --id 1 --date 2026-06-15 --proceeds 450.00 --dry-run
 Assets are `source='assets'` with `source_ref='asset:<id>:<YYYY-MM>'`; runs are
 idempotent per asset-month and auto-complete the asset at its residual.
 
+### 6.16 SEPA payment batches: payables → pain.001 → bank portal
+
+```bash
+# 1. give vendors an IBAN (mod-97 validated); company needs its IBAN too
+bukio company update --iban NL91ABNA0417164300
+bukio contact update --id 3 --iban NL02ABNA0123456789
+# 2. register purchase invoices. 'direct-debit' (incasso) payables are
+#    collected by the vendor and stay OUT of batches
+bukio payments payables add --contact Vimexx --ref 2026-118 --date 2026-07-01 \
+  --due 2026-08-01 --amount 121.00
+bukio payments payables add --contact "Energie BV" --ref 2026-09 --date 2026-07-05 \
+  --amount 99.99 --method direct-debit
+# 3. select what to pay: all unpaid transfer payables, or specific ones
+bukio payments batch create --from-invoices --dry-run      # plan
+bukio payments batch create --from-invoices                # batch #1, payables -> in_batch
+# 4. export the SEPA file (unique MsgId; export only ONCE per batch)
+bukio payments batch export --id 1 --schema 001.03 --out betalingen.xml
+#    -> upload betalingen.xml in the bank portal; the bank executes it
+# 5. after the bank statement arrives: import + match as usual, then
+bukio payments payables list                               # see what is still open
+bukio payments payables pay --id 1                         # confirm paid
+```
+
+The export books NOTHING — money moves when the bank processes the file; the
+CAMT.053 import closes the loop. Deleting a draft batch releases payables back
+to `unpaid`. Never re-export a batch (the stored MsgId guard exists because
+re-uploading the same file would pay twice).
+`assets add` never re-books the purchase or past depreciation — recognition is
+registration-only (warnings, not errors, when the GL accounts don't reconcile).
+
 ### 6.17 Archive source documents (mandatory after every booking)
 
 ```bash
-# every booked invoice's original lives next to the DB, never in git
+# every booked invoice's original lives next to the DB
 mkdir -p ~/.bukio/invoices
 cp <original>.pdf ~/.bukio/invoices/2026-07-10_acme-bv_F2026-123.pdf
 # naming: YYYY-MM-DD_<vendor-slug>_<invoice-number>.<ext>
@@ -403,8 +508,7 @@ ls -la ~/.bukio/invoices/        # verify it landed
 ```
 
 Rules:
-- The archive lives at `~/.bukio/invoices/` (next to the live DB `~/.bukio/bukio.db`),
-  **outside the git repo — never commit invoice PDFs or other source documents.**
+- The archive lives at `~/.bukio/invoices/` (next to the live DB `~/.bukio/bukio.db`).
 - Per-company databases get their own archive next to their DB (e.g. `~/.bukio/demo.db`
   → `~/.bukio/demo-invoices/`).
 - Archive **before** finishing the booking, so a crash mid-booking never loses the paper.
@@ -444,116 +548,12 @@ Suggested cadence (agent should propose, user approves):
   invoice directory that month's documents landed in.
 - **After big events**: a large import (XAF/journal), year-end close, or any
   bulk mutation — backup immediately after.
-- **Off-site**: keep at least one copy off the VPS (git-backed repo, cloud
-  storage, or a USB disk). A backup on the same disk as the DB is not a backup.
+- **Off-site**: keep at least one copy on a different machine or medium than
+  the DB (cloud storage, external disk, second server). A backup on the same
+  disk as the DB is not a backup.
 
 Restore: `bukio restore --from <file> --force` (validated). Restoring does not
 touch the invoice archive — documents must be restored from your manual copy.
-
-### 6.16 SEPA payment batches: payables → pain.001 → bank portal
-
-```bash
-# 1. give vendors an IBAN (mod-97 validated); company needs its IBAN too
-bukio company update --iban NL91ABNA0417164300
-bukio contact update --id 3 --iban NL02ABNA0123456789
-# 2. register purchase invoices. 'direct-debit' (incasso) payables are
-#    collected by the vendor and stay OUT of batches
-bukio payments payables add --contact Vimexx --ref 2026-118 --date 2026-07-01 \
-  --due 2026-08-01 --amount 121.00
-bukio payments payables add --contact "Energie BV" --ref 2026-09 --date 2026-07-05 \
-  --amount 99.99 --method direct-debit
-# 3. select what to pay: all unpaid transfer payables, or specific ones
-bukio payments batch create --from-invoices --dry-run      # plan
-bukio payments batch create --from-invoices                # batch #1, payables -> in_batch
-# 4. export the SEPA file (unique MsgId; export only ONCE per batch)
-bukio payments batch export --id 1 --schema 001.03 --out betalingen.xml
-#    -> upload betalingen.xml in the bank portal; the bank executes it
-# 5. after the bank statement arrives: import + match as usual, then
-bukio payments payables list                               # see what is still open
-bukio payments payables pay --id 1                         # confirm paid
-```
-
-The export books NOTHING — money moves when the bank processes the file; the
-CAMT.053 import closes the loop. Deleting a draft batch releases payables back
-to `unpaid`. Never re-export a batch (the stored MsgId guard exists because
-re-uploading the same file would pay twice).
-`assets add` never re-books the purchase or past depreciation — recognition is
-registration-only (warnings, not errors, when the GL accounts don't reconcile).
-
-### 6.12 Year-end: close the books, produce the jaarrekening
-
-```bash
-# 1. everything must be posted before closing (drafts block the close)
-bukio year-end status --year 2026
-bukio year-end close --year 2026 --dry-run     # plan: result + postings
-bukio year-end close --year 2026               # result -> 9900 -> 3000
-# 2. statutory accounts + KVK deposit package
-bukio jaarrekening report --year 2026 --model klein --format pdf   # jaarrekening-2026-klein.pdf
-# 3. quarterly EU listing (verlegde EU leveringen)
-bukio icp readout --period 2026-Q3
-# 4. the OB readout now also reports 2a (EU) and 3b (EU inkopen)
-bukio vat readout --period 2026-Q4
-```
-
-Closing rules: `source='closing'` entries are excluded from the P&L (the year's
-flow stays visible) but included in the balans (equity carries the result).
-Undo a close with `entry reverse` on the closing entries — never by deleting
-them. The OB readout tracks 2a (verlegde EU sales), 3a/3b (verlegde inkopen)
-and 1d (privégebruik at 21%); 2b and 5c are not tracked.
-
-### 6.11 Invoice a client, get paid, correct a mistake
-
-```bash
-# 1. the supplier must be complete (init) and the customer registered
-bukio contact add --name "ACME B.V." --address "Straat 1" --postal-code "1000 AA" \
-  --city "Amsterdam" --vat-id NL999999999B01
-# 2. draft -> finalize (validates the 12 factuurvereisten, books the entry)
-bukio invoice create --contact 1 --date 2026-07-10 \
-  --lines "2x Consultancy @ 150.00 @21,1x Rapportage @ 400.00 @9" --dry-run
-bukio invoice create --contact 1 --date 2026-07-10 \
-  --lines "2x Consultancy @ 150.00 @21,1x Rapportage @ 400.00 @9"
-bukio invoice finalize --id 1 --dry-run     # plan: 2026-0001 + postings
-bukio invoice finalize --id 1
-# 3. deliverables
-bukio invoice pdf --id 1                     # 2026-0001.pdf (send to the client)
-bukio invoice ubl --id 1                     # 2026-0001.xml (Peppol BIS 3.0)
-# 4. payment arrives -> bank match closes the loop
-bukio bank import --file stmt.xml --iban NL91ABNA0417164300
-bukio bank match auto --json                 # tx -> invoice 2026-0001 (paid)
-# 5. mistake -> credit note (reversal entry), never delete
-bukio invoice credit --id 1 --reason "verkeerd tarief"
-bukio invoice finalize --id 2                # 2026-0002, reverses the booking
-```
-
-Booking rule: finalized invoices auto-post Debiteuren/Omzet/Te betalen btw (per-rate,
-line-exact VAT). Payments post Bank/Debiteuren when matched from the bank. Do not
-hand-construct invoice entries with `entry add` — finalize/credit do it correctly.
-
-### 6.10 Month-end: run the recurring templates (depreciation, accruals)
-
-```bash
-# 1. what is due (read-only — never guess, always preview first)
-bukio recurring preview --as-of 2026-09-30 --json
-# 2. generate (backfills missed periods; dry-run first)
-bukio recurring run --as-of 2026-09-30 --dry-run --json
-bukio recurring run --as-of 2026-09-30 --json
-# 3. verify the books
-bukio report trial-balance --json          # data.balanced === true
-# 4. depreciation schedules: 5370.00 / 36 mnd -> 149.17/mo, final 149.05
-bukio depreciation add --name "Laptop Dell" --cost 5370.00 --life-months 36 \
-  --start 2026-08-01 --dry-run
-# 5. accrual with auto-reversal (each run reverses the previous estimate)
-bukio recurring add --name "Nog te betalen kosten admin" \
-  --postings "4310:250.00,2400:-250.00" --frequency monthly \
-  --start 2026-08-31 --day 28 --reverse-previous
-```
-
-Generated entries are `source='recurring'`, `created_by='recurring'` — never hand-edit
-them; pause the template (`recurring pause --id`) if a schedule must stop, and reverse
-individual generated entries with `entry reverse` if one is wrong (the template's
-`last_entry_id` then stays pointing at the reversal-safe state).
-
----
 
 ## 7. Error codes you will meet
 

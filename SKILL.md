@@ -49,8 +49,8 @@ integer cents · **archive every source document (see below)**.
    cp <original>.pdf ~/.bukio/invoices/<YYYY-MM-DD>_<vendor-slug>_<invoice-number>.pdf
    ```
 
-   - Location: `~/.bukio/invoices/` next to the live DB — **outside the git
-     repo; never commit source documents** (`.gitignore` blocks `*.pdf` anyway).
+   - Location: `~/.bukio/invoices/` next to the live DB — a plain file
+     archive, separate from any version control or sync of the codebase.
    - Name: `date_vendor-invoicenumber.ext` (e.g. `2026-07-10_acme-bv_F2026-123.pdf`).
      Keep whatever format arrived (.pdf, .jpg, .png, .xml, .eml) — don't convert.
    - Other DBs archive next to their own file (e.g. `demo.db` → `demo-invoices/`).
