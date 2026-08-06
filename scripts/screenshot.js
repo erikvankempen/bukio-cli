@@ -13,7 +13,7 @@ const out = path.join(root, 'screenshot.png');
 
 const browser = await chromium.launch();
 try {
-  const page = await browser.newPage({ viewport: { width: 1000, height: 1500 }, deviceScaleFactor: 2 });
+  const page = await browser.newPage({ viewport: { width: 1120, height: 1500 }, deviceScaleFactor: 2 });
   await page.goto(`file://${template}`);
   await page.waitForTimeout(300);
   const box = await page.locator('.window').boundingBox();

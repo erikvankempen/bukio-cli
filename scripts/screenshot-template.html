@@ -6,7 +6,7 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { background: #0a0c10; padding: 48px 56px; font-family: 'DejaVu Sans Mono', Menlo, Consolas, monospace; }
   .window {
-    width: 880px;
+    width: 1000px;
     background: #0d1117;
     border: 1px solid #30363d;
     border-radius: 10px;
@@ -57,17 +57,59 @@
     <div class="line">vat:      module enabled (incl. 1500/2500)</div>
     <div class="line"><span class="green">initialised.</span></div>
     <div class="spacer"></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio entry add --desc "Startkapitaal" --postings "1100:10000.00,3000:-10000.00" --post</span></div>
+    <div class="line"><span class="green">entry #1  [posted]</span>  2026-08-06  Startkapitaal</div>
+    <div class="line">  1100  Bank                         10000.00</div>
+    <div class="line">  3000  Eigen vermogen               -10000.00</div>
+    <div class="line dim">                                  --------</div>
+    <div class="line dim">                                  0.00  (sum)</div>
+    <div class="spacer"></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio vat book --date 2026-08-03 --desc "DeKantoor B.V. - F2026-0489" --postings "4300:895.00@21,1100:-1082.95" --post</span></div>
+    <div class="line"><span class="green">entry #2  [posted]</span>  2026-08-03  DeKantoor B.V. - F2026-0489</div>
+    <div class="line">  4300  Kantoor- en algemene kosten        895.00  <span class="yellow">vat 187.95</span></div>
+    <div class="line">  1100  Bank                             -1082.95</div>
+    <div class="line">  1500  Te vorderen omzetbelasting         187.95</div>
+    <div class="spacer"></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio fx fetch --currency USD --date 2026-08-03</span></div>
+    <div class="line">1 EUR = <span class="yellow">1.1535 USD</span> on 2026-08-03 <span class="dim">(ECB, fetched for 2026-08-03)</span> — stored</div>
+    <div class="spacer"></div>
     <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio import opening-balances --file beginbalans.csv --date 2025-12-31</span></div>
-    <div class="line"><span class="green">imported opening balances (2 accounts) as entry #1 [posted] on 2025-12-31</span></div>
+    <div class="line"><span class="green">imported opening balances (2 accounts) as entry #3 [posted] on 2025-12-31</span></div>
     <div class="spacer"></div>
     <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio import journal --file journal.csv</span></div>
     <div class="line"><span class="green">imported 4 boekstukken</span>  <span class="dim"># SnelStart/Exact CSV, idempotent per boekstuk</span></div>
+    <div class="spacer"></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio report trial-balance</span></div>
+    <div class="line">code  account                      type     debit     credit    net      </div>
+    <div class="line dim">----  ---------------------------  -------  --------  --------  ---------</div>
+    <div class="line">1100  Bank                         asset    18761.00  3195.75   15565.25 </div>
+    <div class="line">1500  Te vorderen omzetbelasting   asset    187.95    0.00      187.95   </div>
+    <div class="line">3000  Eigen vermogen               equity   0.00      18412.00  -18412.00</div>
+    <div class="line">4300  Kantoor- en algemene kosten  expense  1112.80   0.00      1112.80  </div>
+    <div class="line">4400  Personeelskosten             expense  1895.00   0.00      1895.00  </div>
+    <div class="line">8000  Omzet                        income   0.00      349.00    -349.00  </div>
+    <div class="line">totals:  debit 21956.75  credit 21956.75  -&gt; <span class="green">BALANCED</span></div>
+    <div class="spacer"></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio report pnl --year 2026</span></div>
+    <div class="line">WINST- EN VERLIESREKENING 2026-01-01 .. 2026-12-31</div>
+    <div class="line">  Omzet (WOMZ.80)</div>
+    <div class="line">    8000  Omzet                          349.00</div>
+    <div class="line dim">                                     349.00</div>
+    <div class="line">  Personeelskosten (WPER.40)</div>
+    <div class="line">    4400  Personeelskosten               1895.00</div>
+    <div class="line dim">                                     1895.00</div>
+    <div class="line">  Overige bedrijfskosten (WBED.42)</div>
+    <div class="line">    4300  Kantoor- en algemene kosten    1112.80</div>
+    <div class="line dim">                                     1112.80</div>
+    <div class="line">  opbrengsten: 349.00</div>
+    <div class="line">  kosten:      3007.80</div>
+    <div class="line">  resultaat:   -2658.80</div>
     <div class="spacer"></div>
     <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio month-end --period 2026-07</span></div>
     <div class="line">MONTH-END 2026-07 (2026-07-01 .. 2026-07-31)</div>
     <div class="line">  entries:  0 draft</div>
     <div class="line">  bank:     0 unmatched</div>
-    <div class="line">  vat:      2026-Q3 → te betalen/ontvangen 0.00</div>
+    <div class="line">  vat:      2026-Q3 → te betalen/ontvangen -187.95</div>
     <div class="line">  invoices: 0 draft, 0 overdue (0.00)</div>
     <div class="line">  recurring:0 due by 2026-07-31</div>
     <div class="line">  totals:   debet 2112.80 / credit 2112.80 <span class="green">BALANCED</span></div>
@@ -82,16 +124,16 @@
     <div class="line dim">total: 2199.00 / 219.90 / 1979.10</div>
     <div class="spacer"></div>
     <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio payments batch export --id 1</span></div>
-    <div class="line">batch #1 exported — 1 lines, <span class="yellow">MsgId BUKIO202608061622551</span>, sha256 248a7b751406…</div>
+    <div class="line">batch #1 exported — 1 lines, <span class="yellow">MsgId BUKIO202608061646251</span>, sha256 fc88dd04da6e…</div>
     <div class="line dim">(pain.001 001.03 — upload in your bank portal; booking follows on CAMT import)</div>
     <div class="spacer"></div>
     <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio audit --limit 4</span></div>
     <div class="line">#   timestamp                 actor         action                 command                outcome</div>
     <div class="line dim">--  ------------------------  ------------  ---------------------  ---------------------  -------</div>
-    <div class="line">34  <span class="dim">2026-08-06T16:22:55.667Z</span>  agent:hermes  payments.batch.export  payments batch export  ok     </div>
-    <div class="line">33  <span class="dim">2026-08-06T16:22:53.525Z</span>  agent:hermes  payments.batch.create  payments batch create  ok     </div>
-    <div class="line">32  <span class="dim">2026-08-06T16:22:51.491Z</span>  agent:hermes  payables.add           payments payables add  ok     </div>
-    <div class="line">31  <span class="dim">2026-08-06T16:22:48.076Z</span>  agent:hermes  company.update         company update         ok     </div>
+    <div class="line">39  <span class="dim">2026-08-06T16:46:25.585Z</span>  agent:hermes  payments.batch.export  payments batch export  ok     </div>
+    <div class="line">38  <span class="dim">2026-08-06T16:46:23.418Z</span>  agent:hermes  payments.batch.create  payments batch create  ok     </div>
+    <div class="line">37  <span class="dim">2026-08-06T16:46:20.473Z</span>  agent:hermes  payables.add           payments payables add  ok     </div>
+    <div class="line">36  <span class="dim">2026-08-06T16:46:15.726Z</span>  agent:hermes  contact.create         contact add            ok     </div>
     <div class="spacer"></div>
     <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cursor">▊</span></div>
   </div>
