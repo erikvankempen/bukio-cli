@@ -12,6 +12,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { parseAmount, formatAmount } from '../core/money.js';
 import { createAccount, getAccountByCode } from '../core/accounts.js';
 import { createEntry, postEntry } from '../core/entries.js';
+import { createContact, listContacts } from '../invoice/index.js';
 import { record } from '../audit/index.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -665,6 +666,97 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
 
 export function readImportFile(filePath) {
   return readFileSync(filePath, 'utf8');
+}
+
+// --- contacts from audit files (Suppliers/Customers) ------------------------
+
+/**
+ * Import suppliers + customers from an audit file (XAF 4.0, either layout)
+ * as invoice contacts. Whole-file validation first (every entry needs a
+ * name); idempotent by name — contacts that already exist (case-insensitive)
+ * or appear twice in the file are skipped as duplicates.
+ */
+export function importContacts(db, { xmlText, actor = 'human', dryRun = false }) {
+  let doc;
+  try {
+    doc = new XMLParser({ parseTagValue: false, trimValues: true }).parse(xmlText);
+  } catch (err) {
+    throw importError('INVALID_XAF', `cannot parse XML: ${err.message}`);
+  }
+  const root = doc.Xaf ?? doc.XAF ?? doc.AuditFile;
+  if (!root) throw importError('INVALID_XAF', 'root element must be <Xaf> or <AuditFile>');
+
+  const mf = root.MasterFiles ?? root;
+  const suppliers = asArray(mf.Suppliers?.Supplier);
+  const customers = asArray(mf.Customers?.Customer);
+  const entries = [
+    ...suppliers.map((s, i) => ({ kind: 'supplier', id: String(s.SupplierID ?? '').trim(), raw: s, order: i })),
+    ...customers.map((c, i) => ({ kind: 'customer', id: String(c.CustomerID ?? '').trim(), raw: c, order: i })),
+  ];
+
+  const errors = [];
+  const contacts = [];
+  for (const e of entries) {
+    const r = e.raw;
+    const name = String(r.CompanyName ?? '').trim() || String(r.Contact ?? '').trim();
+    if (!name) {
+      errors.push({ line: 0, error: `CONTACT_REQUIRED: ${e.kind} '${e.id || '?'}' has no CompanyName/Contact` });
+      continue;
+    }
+    const street = String(r.Address?.StreetName ?? '').trim();
+    const extra = String(r.Address?.AdditionalAddressDetail ?? '').trim();
+    const address = extra ? `${street}, ${extra}` : street;
+    contacts.push({
+      kind: e.kind,
+      name,
+      address: address || null,
+      postalCode: String(r.Address?.PostalCode ?? '').trim() || null,
+      city: String(r.Address?.City ?? '').trim() || null,
+      country: String(r.Address?.Country ?? '').trim().toUpperCase() || 'NL',
+      email: String(r.Email ?? '').trim() || null,
+      vatId: String(r.TaxRegistrationNumber ?? '').trim() || null,
+    });
+  }
+  if (errors.length > 0) {
+    throw importError(
+      'IMPORT_VALIDATION_FAILED',
+      `audit file has ${errors.length} problem(s) — nothing imported`,
+      errors,
+    );
+  }
+
+  const existingNames = new Set(listContacts(db).map((c) => c.name.toLowerCase()));
+  const seen = new Set();
+  const fresh = contacts.filter((c) => {
+    const key = c.name.toLowerCase();
+    if (seen.has(key) || existingNames.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const duplicates = contacts.length - fresh.length;
+
+  if (dryRun) {
+    return {
+      suppliers: suppliers.length, customers: customers.length,
+      contacts: contacts.length, contacts_to_create: fresh.length,
+      duplicates, dryRun: true,
+    };
+  }
+
+  const imported = [];
+  for (const c of fresh) {
+    const contact = createContact(db, { ...c, actor });
+    imported.push({ id: contact.id, name: contact.name, kind: c.kind });
+  }
+  record(db, {
+    actor, action: 'import.contacts', command: 'import contacts',
+    args: { imported: imported.length, duplicates, suppliers: suppliers.length, customers: customers.length },
+    outcome: 'ok',
+  });
+  return {
+    imported: imported.length, duplicates, contacts: imported,
+    suppliers: suppliers.length, customers: customers.length, dryRun: false,
+  };
 }
 
 // --- XAF 4.0 AuditFile layout (root <AuditFile>) ------------------------------

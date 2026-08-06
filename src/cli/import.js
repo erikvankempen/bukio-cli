@@ -3,7 +3,7 @@
 // any problem is rejected with IMPORT_VALIDATION_FAILED + per-line details.
 import { formatAmount } from '../core/money.js';
 import {
-  importJournalCsv, importOpeningBalances, importXaf, readImportFile,
+  importJournalCsv, importOpeningBalances, importXaf, importContacts, readImportFile,
 } from '../import/index.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 
@@ -79,6 +79,39 @@ export function make(program) {
             if (d.ignored_btw_codes.length) {
               console.log(`note: btw codes ${d.ignored_btw_codes.join(', ')} ignored — verify the booked amounts`);
             }
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  imp
+    .command('contacts')
+    .description('import suppliers/customers from an audit file (XAF 4.0) as contacts')
+    .requiredOption('--file <path>', 'XAF 4.0 XML file')
+    .option('--dry-run', 'validate the whole file and show the plan without writing')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const xmlText = readImportFile(opts.file);
+          const result = importContacts(db, { xmlText, actor: ctx.actor, dryRun: ctx.dryRun });
+          if (ctx.dryRun) {
+            output(ctx, result, (d) => {
+              console.log(`plan: import contacts — ${d.suppliers} suppliers / ${d.customers} customers`);
+              console.log(`  ${d.contacts_to_create} contacts will be created`);
+              if (d.duplicates) console.log(`  (${d.duplicates} already known — will skip)`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
+          output(ctx, result, (d) => {
+            console.log(`imported contacts: ${d.imported}${d.duplicates ? ` (${d.duplicates} duplicates skipped)` : ''}`);
+            for (const c of d.contacts) console.log(`  ${c.kind.padEnd(8)} ${c.name}`);
           });
         } finally {
           db.close();

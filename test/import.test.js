@@ -4,8 +4,9 @@ import { openDb } from '../src/core/db.js';
 import { seedDefaultChart, getAccountByCode } from '../src/core/accounts.js';
 import { listEntries, getEntry, createEntry, postEntry } from '../src/core/entries.js';
 import {
-  importOpeningBalances, importJournalCsv, importXaf, parseImportAmount,
+  importOpeningBalances, importJournalCsv, importXaf, importContacts, parseImportAmount,
 } from '../src/import/index.js';
+import { listContacts } from '../src/invoice/index.js';
 
 let db;
 
@@ -391,4 +392,94 @@ test('xaf (AuditFile layout): company name mismatch is only a warning', () => {
   const res = importXaf(db, { xmlText: AUDITFILE_XAF.replace('<CompanyName>Demo BV</CompanyName>', '<CompanyName>Demo B.V. Rotterdam</CompanyName>') });
   assert.equal(res.imported, 1);
   assert.ok(res.company_mismatch.some((w) => w.includes('name differs')));
+});
+
+// --- contacts from audit files ----------------------------------------------
+
+const CONTACTS_XAF = `<?xml version="1.0" encoding="UTF-8"?>
+<AuditFile xmlns="https://www.bukio.nl/xaf/4.0" version="4.0">
+  <Header>
+    <AuditFileVersion>4.0</AuditFileVersion>
+    <CompanyName>Demo BV</CompanyName>
+  </Header>
+  <MasterFiles>
+    <Customers>
+      <Customer>
+        <CustomerID>1</CustomerID>
+        <CompanyName>Daan van der Leen</CompanyName>
+        <Email>daanleen@gmail.com</Email>
+        <Address>
+          <StreetName>Lamarckhof 9-1</StreetName>
+          <PostalCode>1098TK</PostalCode>
+          <City>Amsterdam</City>
+          <Country>NL</Country>
+        </Address>
+      </Customer>
+    </Customers>
+    <Suppliers>
+      <Supplier>
+        <SupplierID>13</SupplierID>
+        <CompanyName>Anomaly</CompanyName>
+        <Contact>Matt</Contact>
+        <Email>help@anoma.ly</Email>
+        <Address>
+          <StreetName>2443 Fillmore Street</StreetName>
+          <PostalCode>94115</PostalCode>
+          <City>San Francisco</City>
+          <Country>us</Country>
+        </Address>
+      </Supplier>
+      <Supplier>
+        <SupplierID>14</SupplierID>
+        <CompanyName>DeluxHost</CompanyName>
+        <Email></Email>
+      </Supplier>
+    </Suppliers>
+  </MasterFiles>
+</AuditFile>`;
+
+test('import contacts: suppliers + customers mapped to contacts', () => {
+  const res = importContacts(db, { xmlText: CONTACTS_XAF, actor: 'agent:test' });
+  assert.equal(res.imported, 3);
+  assert.equal(res.suppliers, 2);
+  assert.equal(res.customers, 1);
+  const [anomaly, daan, delux] = listContacts(db).sort((a, b) => a.name.localeCompare(b.name));
+  assert.equal(daan.name, 'Daan van der Leen');
+  assert.equal(daan.address, 'Lamarckhof 9-1');
+  assert.equal(daan.postal_code, '1098TK');
+  assert.equal(daan.city, 'Amsterdam');
+  assert.equal(daan.country, 'NL');
+  assert.equal(daan.email, 'daanleen@gmail.com');
+  assert.equal(anomaly.country, 'US'); // normalised to uppercase
+  assert.equal(delux.name, 'DeluxHost');
+  assert.equal(delux.address, null); // no address in the file
+  const audit = db.prepare("SELECT * FROM audit_log WHERE action = 'import.contacts' ORDER BY id DESC LIMIT 1").get();
+  assert.equal(audit.actor, 'agent:test');
+});
+
+test('import contacts: idempotent by name', () => {
+  importContacts(db, { xmlText: CONTACTS_XAF });
+  const res = importContacts(db, { xmlText: CONTACTS_XAF });
+  assert.equal(res.imported, 0);
+  assert.equal(res.duplicates, 3);
+});
+
+test('import contacts: entry without a name fails whole-file validation', () => {
+  const bad = CONTACTS_XAF.replace('<CompanyName>DeluxHost</CompanyName>', '');
+  assert.throws(
+    () => importContacts(db, { xmlText: bad }),
+    (err) => {
+      assert.equal(err.code, 'IMPORT_VALIDATION_FAILED');
+      assert.ok(err.details.some((d) => d.error.startsWith('CONTACT_REQUIRED')));
+      return true;
+    },
+  );
+  assert.equal(listContacts(db).length, 0);
+});
+
+test('import contacts: dry-run writes nothing', () => {
+  const plan = importContacts(db, { xmlText: CONTACTS_XAF, dryRun: true });
+  assert.equal(plan.contacts_to_create, 3);
+  assert.equal(plan.duplicates, 0);
+  assert.equal(listContacts(db).length, 0);
 });
