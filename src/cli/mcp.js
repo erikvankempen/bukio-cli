@@ -25,6 +25,7 @@ import { icpReadout } from '../icp/index.js';
 import { list as auditList } from '../audit/index.js';
 import { complianceStatus } from '../compliance/index.js';
 import { openDb } from '../core/db.js';
+import { isValidActor } from '../core/actor.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -47,6 +48,9 @@ function modeOf(args) {
 function guardExecute(ctx, args) {
   if (ctx.readonly && modeOf(args) === 'execute') {
     throw new McpError('MCP_READONLY', 'this server is read-only (BUKIO_MCP_READONLY=1) — no mutations allowed');
+  }
+  if (modeOf(args) === 'execute' && args.actor && !isValidActor(args.actor)) {
+    throw new McpError('INVALID_ACTOR', `invalid actor '${args.actor}' — must be '<role>:<name>' (e.g. agent:bartholomeus)`);
   }
 }
 
@@ -454,7 +458,7 @@ function dispatch(db, ctx, msg) {
       return Promise.resolve(rpcResponse(id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: 'bukio-cli', version: '0.11.0' },
+        serverInfo: { name: 'bukio-cli', version: '0.11.1' },
       }));
     case 'notifications/initialized':
     case 'initialized':

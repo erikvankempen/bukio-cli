@@ -297,7 +297,10 @@ test('compliance: closed books show on the jaarrekening obligation', async () =>
 // --- MCP server (real stdio child process) ----------------------------------
 
 function mcpSession(dbPath) {
-  const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', dbPath], { cwd: process.cwd() });
+  const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', dbPath], {
+    cwd: process.cwd(),
+    env: { ...process.env, BUKIO_ACTOR: 'agent:test' },
+  });
   let buf = '';
   const pending = [];
   const waiters = [];
@@ -449,7 +452,7 @@ test('MCP: BUKIO_MCP_READONLY blocks execution', async () => {
 
   const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', dbPath], {
     cwd: process.cwd(),
-    env: { ...process.env, BUKIO_MCP_READONLY: '1' },
+    env: { ...process.env, BUKIO_ACTOR: 'agent:test', BUKIO_MCP_READONLY: '1' },
   });
   let buf = '';
   const waiters = [];

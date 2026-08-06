@@ -7,7 +7,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 ## 1. House rules (non-negotiable)
 
 1. **Dry-run before you mutate.** Every mutating command accepts `--dry-run`. Run it, read the plan, then run without `--dry-run`.
-2. **Identify yourself.** Always pass `--actor agent:<your-name>` (e.g. `--actor agent:hermes`). Default is `human`; un-attributed agent work pollutes the audit trail.
+2. **Identify yourself.** Every command requires a named actor: `--actor '<role>:<name>'` or env `BUKIO_ACTOR` — `agent:bartholomeus` for the agent, `human:erik` for the owner. A bare `human`/`agent` is rejected (`ACTOR_REQUIRED`/`INVALID_ACTOR`); anonymous actors would pollute the audit trail.
 3. **Parse `--json`, never scrape text.** Every command prints one JSON document with `--json`. Exit code 0 = success, 1 = failure.
 4. **Never touch the SQLite file directly.** No sqlite3 CLI, no raw SQL. The engine + triggers exist to protect the books. If you need a capability that doesn't exist, say so instead of hacking the DB.
 5. **Never delete posted entries.** Correct mistakes with `entry reverse` (which posts a contra-entry) and re-book.
@@ -21,7 +21,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | What | How |
 |------|-----|
 | Database path | `--db <path>` or env `BUKIO_DB` (default `~/.bukio/bukio.db`) |
-| Actor | `--actor <who>` or env `BUKIO_ACTOR` (default `human`) |
+| Actor | `--actor <who>` or env `BUKIO_ACTOR` — **required**, format `'<role>:<name>'` (e.g. `agent:bartholomeus`, `human:erik`) |
 | JSON output | `--json` (global flag — works before or after the subcommand) |
 
 > **Single company per database.** One company = one database file. To work on company B, point `--db` at its file. Never mix companies in one database.
@@ -513,7 +513,7 @@ individual generated entries with `entry reverse` if one is wrong (the template'
 ## 8. Anti-patterns (never do these)
 
 - ❌ Posting without `--dry-run` first.
-- ❌ Omitting `--actor agent:<name>`.
+- ❌ Omitting `--actor '<role>:<name>'` — the CLI rejects it, and the audit log must always name who acted.
 - ❌ Editing/deleting rows with sqlite3 or raw SQL — the triggers will (rightly) reject it, and the audit log must stay truthful.
 - ❌ "Correcting" a posted entry by editing its postings — postings of non-draft entries are immutable by design. Use `reverse`.
 - ❌ Using floats or human-formatted strings in calculations — always `amount_cents`.

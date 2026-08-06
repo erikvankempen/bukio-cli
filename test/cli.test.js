@@ -10,7 +10,7 @@ import { openDb } from '../src/core/db.js';
 const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
 
 function run(dbPath, args, { expectFail = false } = {}) {
-  const env = { ...process.env, BUKIO_DB: dbPath };
+  const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
   try {
     const stdout = execFileSync(process.execPath, [BIN, ...args], { env, encoding: 'utf8' });
     return { code: 0, out: JSON.parse(stdout) };
@@ -24,7 +24,7 @@ function run(dbPath, args, { expectFail = false } = {}) {
 
 /** Run and return raw stdout (for non-JSON output like CSV). */
 function runText(dbPath, args) {
-  const env = { ...process.env, BUKIO_DB: dbPath };
+  const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
   return execFileSync(process.execPath, [BIN, ...args], { env, encoding: 'utf8' });
 }
 

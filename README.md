@@ -21,7 +21,7 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 
 ## Features
 
-- **Agent-native** — every command emits deterministic `--json`; every mutation supports `--dry-run` (plan mode); every action lands in an append-only audit log with actor attribution (`--actor agent:<name>`).
+- **Agent-native** — every command emits deterministic `--json`; every mutation supports `--dry-run` (plan mode); every action lands in an append-only audit log with named-actor attribution (`--actor agent:bartholomeus` / `human:erik`).
 - **VAT optional** — the core ledger is VAT-agnostic. The optional VAT module adds codes, the OB readout (fields 1a–5d) and KOR support when you need them. Filing always stays manual — bukio never submits anything.
 - **Peppol BIS 3.0 ready** — the 2027 mandate in one loop: `finalize → PDF → UBL → peppol-send`.
 - **FX built in** — book foreign-currency purchase invoices in USD, GBP, …; rates resolve from your rate store or straight from the ECB.
@@ -138,7 +138,7 @@ draft ──post──▶ posted ──reverse──▶ (original stays posted)
 
 ### Actors
 
-Every mutation records an **actor** — `human` by default, or `agent:<name>` when an agent acts (e.g. `--actor agent:hermes`). Actors appear on entries (`created_by`) and in the audit log, so a human can always see exactly what an agent did.
+Every mutation records an **actor** — every command requires a named identity in the form `'<role>:<name>'`: `human:erik` when you act yourself, `agent:bartholomeus` when an agent acts. A bare `human` or `agent` is rejected. Actors appear on entries (`created_by`) and in the audit log, so a human can always see exactly what an agent did.
 
 ### The audit log
 
@@ -579,7 +579,7 @@ bukio audit --since 2026-08-01         # everything this month
 |------|---------|---------|-------------|
 | `--json` | — | off | Machine-readable JSON output (see below) |
 | `--db <path>` | `BUKIO_DB` | `~/.bukio/bukio.db` | Database file |
-| `--actor <who>` | `BUKIO_ACTOR` | `human` | Acting entity — use `agent:<name>` when an agent acts |
+| `--actor <who>` | `BUKIO_ACTOR` | *(required)* | Acting entity — `'<role>:<name>'`, e.g. `agent:bartholomeus`, `human:erik` |
 
 ### JSON output contract
 
@@ -656,7 +656,7 @@ audit_log         — ts, actor, action, command, args_json, outcome, entry_ids
 bukio-cli is built for agents. The companion file **`AGENTS.md`** in the repo root is the agent's manual: invariants, exact command/JSON contracts, error codes, and worked examples (opening the month, correcting mistakes). Agents should read `AGENTS.md` before driving the tool, and follow the house rules:
 
 1. **Always `--dry-run` before mutating.** Show the plan, then apply.
-2. **Always pass `--actor agent:<your-name>`** so the audit trail attributes your work.
+2. **Always pass `--actor '<role>:<name>'`** (e.g. `agent:bartholomeus`, `human:erik`) so the audit trail attributes your work — it is required.
 3. **Prefer `--json`** for parsing; keep human-readable output for humans.
 4. **Never edit the SQLite file directly.** Use the CLI/engine — the triggers and audit log exist for a reason.
 5. **Never delete a posted entry.** Reverse it.
