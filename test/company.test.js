@@ -28,7 +28,7 @@ function tmpDb() {
 let t;
 test.beforeEach(() => {
   t = tmpDb();
-  cli(t.file, ['init', '--name', 'literal:Test Coaching', '--kvk', 'literal:12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
+  cli(t.file, ['init', '--name', 'Test Coaching', '--kvk', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
 });
 test.afterEach(() => {
   rmSync(t.dir, { recursive: true, force: true });
@@ -46,15 +46,15 @@ function getCompany(file) {
 test('company update: sets address/iban/city and audits', () => {
   const r = cli(t.file, [
     '--actor', 'agent:test', 'company', 'update',
-    '--address', 'literal:Teststraat 1', '--postal-code', 'literal:1000 AA',
-    '--city', 'literal:Amsterdam', '--iban', 'literal:NL91ABNA0417164300',
+    '--address', 'Teststraat 1', '--postal-code', '1000 AA',
+    '--city', 'Amsterdam', '--iban', 'NL91ABNA0417164300',
   ]);
   assert.equal(r.code, 0);
-  assert.equal(r.out.data.company.address, 'literal:Teststraat 1');
+  assert.equal(r.out.data.company.address, 'Teststraat 1');
   const c = getCompany(t.file);
-  assert.equal(c.postal_code, 'literal:1000 AA');
-  assert.equal(c.city, 'literal:Amsterdam');
-  assert.equal(c.iban, 'literal:NL91ABNA0417164300');
+  assert.equal(c.postal_code, '1000 AA');
+  assert.equal(c.city, 'Amsterdam');
+  assert.equal(c.iban, 'NL91ABNA0417164300');
   const db = openDb(t.file);
   try {
     const audit = db.prepare("SELECT * FROM audit_log WHERE action = 'company.update' ORDER BY id DESC LIMIT 1").get();
@@ -67,7 +67,7 @@ test('company update: sets address/iban/city and audits', () => {
 });
 
 test('company update: dry-run writes nothing', () => {
-  cli(t.file, ['company', 'update', '--address', 'literal:Teststraat 1', '--city', 'literal:Amsterdam', '--dry-run']);
+  cli(t.file, ['company', 'update', '--address', 'Teststraat 1', '--city', 'Amsterdam', '--dry-run']);
   const c = getCompany(t.file);
   assert.equal(c.address, null);
   assert.equal(c.city, null);
@@ -86,9 +86,9 @@ test('company update: invalid IBAN rejected', () => {
 });
 
 test('company show: returns the company record', () => {
-  cli(t.file, ['company', 'update', '--city', 'literal:Amsterdam']);
+  cli(t.file, ['company', 'update', '--city', 'Amsterdam']);
   const r = cli(t.file, ['company', 'show']);
-  assert.equal(r.out.data.company.name, 'literal:Test Coaching');
-  assert.equal(r.out.data.company.kvk, 'literal:12345678');
-  assert.equal(r.out.data.company.city, 'literal:Amsterdam');
+  assert.equal(r.out.data.company.name, 'Test Coaching');
+  assert.equal(r.out.data.company.kvk, '12345678');
+  assert.equal(r.out.data.company.city, 'Amsterdam');
 });

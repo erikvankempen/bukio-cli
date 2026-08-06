@@ -20,7 +20,7 @@ you'll do most: booking documents and keeping the books verifiable.
 
 | What | How |
 |------|-----|
-| DB | `--db <path>` or `BUKIO_DB` (default `~/.bukio/bukio.db` — literal:Test Coaching) |
+| DB | `--db <path>` or `BUKIO_DB` (default `~/.bukio/bukio.db`) |
 | Actor | `--actor '<role>:<name>'` or `BUKIO_ACTOR` — required (e.g. `agent:bartholomeus`) |
 | JSON | `--json` on every command; exit 0 = success, 1 = failure |
 | Verify | after any mutation: `bukio report trial-balance --json` → `data.balanced === true` |
@@ -51,7 +51,7 @@ integer cents · **archive every source document (see below)**.
 
    - Location: `~/.bukio/invoices/` next to the live DB — **outside the git
      repo; never commit source documents** (`.gitignore` blocks `*.pdf` anyway).
-   - Name: `date_vendor-invoicenumber.ext` (e.g. `2026-07-10_literal:acme-bv_literal:F2026-123.pdf`).
+   - Name: `date_vendor-invoicenumber.ext` (e.g. `2026-07-10_acme-bv_F2026-123.pdf`).
      Keep whatever format arrived (.pdf, .jpg, .png, .xml, .eml) — don't convert.
    - Other DBs archive next to their own file (e.g. `demo.db` → `demo-invoices/`).
    - Entry description carries the same reference (`"Vendor - F2026-123"`).
@@ -87,4 +87,3 @@ recurring, period totals + profit, `warnings[]`. Nothing is closed automatically
 - `AGENTS.md` in this repo — full manual (JSON contracts, error codes §7,
   anti-patterns §8, capability boundaries §9)
 - `bukio-invoice-booking` skill (Hermes) — extraction script + decision tables
-literal:

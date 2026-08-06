@@ -392,7 +392,7 @@ idempotent per asset-month and auto-complete the asset at its residual.
 ```bash
 # every booked invoice's original lives next to the DB, never in git
 mkdir -p ~/.bukio/invoices
-cp <original>.pdf ~/.bukio/invoices/2026-07-10_literal:acme-bv_literal:F2026-123.pdf
+cp <original>.pdf ~/.bukio/invoices/2026-07-10_acme-bv_F2026-123.pdf
 # naming: YYYY-MM-DD_<vendor-slug>_<invoice-number>.<ext>
 #   - date = invoice date (sortable, findable by month)
 #   - vendor-slug = lowercase supplier name, dashes for spaces
@@ -406,7 +406,7 @@ Rules:
 - The archive lives at `~/.bukio/invoices/` (next to the live DB `~/.bukio/bukio.db`),
   **outside the git repo — never commit invoice PDFs or other source documents.**
 - Per-company databases get their own archive next to their DB (e.g. `~/.bukio/demo.db`
-  → `~/.bukio/demo-invoices/`). Only `~/.bukio/bukio.db` (literal:Test Coaching) is the live one.
+  → `~/.bukio/demo-invoices/`).
 - Archive **before** finishing the booking, so a crash mid-booking never loses the paper.
 - The journal entry description should carry the same reference
   (`"Vendor - F2026-123"`), so entry ↔ archive lookup is one grep.

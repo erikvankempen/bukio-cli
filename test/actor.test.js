@@ -22,7 +22,7 @@ test('isValidActor: role:name formats', () => {
   assert.equal(isValidActor('agent:'), false);
   assert.equal(isValidActor(':erik'), false);
   assert.equal(isValidActor('human erik'), false);
-  assert.equal(isValidActor('human:literal:john smith'), false);
+  assert.equal(isValidActor('human:john smith'), false);
   assert.equal(isValidActor(''), false);
   assert.equal(isValidActor(null), false);
 });

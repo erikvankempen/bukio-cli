@@ -871,4 +871,4 @@ Design principles persist across phases: **agent-native from day one**, **VAT op
 
 ---
 
-literal:*Part of the Bukio product line — separate from the Bukio web platform: shared brand and philosophy, no shared code.*
+*Part of the Bukio product line — separate from the Bukio web platform: shared brand and philosophy, no shared code.*
