@@ -18,6 +18,7 @@ import { make as mcpCmd } from './mcp.js';
 import { make as complianceCmd } from './compliance.js';
 import { make as importCmd } from './import.js';
 import { make as monthEndCmd } from './month-end.js';
+import { make as companyCmd } from './company.js';
 
 export async function runCli(argv) {
   const program = new Command();
@@ -46,6 +47,7 @@ export async function runCli(argv) {
   complianceCmd(program);
   importCmd(program);
   monthEndCmd(program);
+  companyCmd(program);
 
   await program.parseAsync(argv);
 }
