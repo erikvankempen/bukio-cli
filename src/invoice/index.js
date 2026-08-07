@@ -177,6 +177,9 @@ export function listInvoices(db, { status = null, type = null } = {}) {
  * The `--draft-emails` enrichment happens in the CLI (needs company data).
  */
 export function invoiceReminders(db, { withinDays = 7 } = {}) {
+  if (!Number.isInteger(withinDays) || withinDays < 0) {
+    throw invoiceError('INVALID_WINDOW', `within-days must be a non-negative integer, got '${withinDays}'`);
+  }
   const today = new Date().toISOString().slice(0, 10);
   const dueSoon = new Date(Date.now() + withinDays * 86400000).toISOString().slice(0, 10);
   const reminders = listInvoices(db)
@@ -223,6 +226,12 @@ export function createInvoice(db, {
     }
   }
   if (!Array.isArray(lines) || lines.length === 0) throw invoiceError('NO_LINES', 'an invoice needs at least one line');
+  if (dueDays != null && (!Number.isInteger(dueDays) || dueDays < 0)) {
+    throw invoiceError('INVALID_DUE_DAYS', `due-days must be a non-negative integer, got '${dueDays}'`);
+  }
+  if (deliveryDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(deliveryDate)) {
+    throw invoiceError('INVALID_DATE', `delivery-date '${deliveryDate}' must be YYYY-MM-DD`);
+  }
 
   const vatOn = isVatEnabled(db);
   const vatCodes = new Map(listVatCodes(db).map((c) => [c.code, c]));

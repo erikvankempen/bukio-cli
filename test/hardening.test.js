@@ -49,7 +49,7 @@ import {
 import { addAsset, disposeAsset, runDue, register, createScheme } from '../src/assets/index.js';
 import {
   createContact, updateContact, getContact, getInvoice,
-  createInvoice, finalizeInvoice, markPaid, listInvoices, paymentFromBank,
+  createInvoice, finalizeInvoice, markPaid, listInvoices, paymentFromBank, invoiceReminders,
 } from '../src/invoice/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { parseBankCsv } from '../src/bank/csv.js';
@@ -1001,6 +1001,31 @@ test('postFromTransaction is atomic: a failing post leaves no draft or reconcili
   assert.equal(after, before, 'no stray draft entry may survive a failed post');
   assert.equal(db.prepare('SELECT state FROM bank_transactions WHERE id = ?').get(tx.id).state, 'unmatched');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM reconciliations').get().n, 0);
+});
+
+test('createInvoice rejects non-integer due-days and malformed delivery dates cleanly', () => {
+  const c = addContact();
+  assert.throws(
+    () => createInvoice(db, { contactId: c.id, lines: ['1x A @ 10.00'], date: '2099-01-10', dueDays: Number('abc'), actor: 'agent:test' }),
+    (err) => err.code === 'INVALID_DUE_DAYS',
+  );
+  assert.throws(
+    () => createInvoice(db, { contactId: c.id, lines: ['1x A @ 10.00'], date: '2099-01-10', dueDays: -5, actor: 'agent:test' }),
+    (err) => err.code === 'INVALID_DUE_DAYS',
+  );
+  assert.throws(
+    () => createInvoice(db, { contactId: c.id, lines: ['1x A @ 10.00'], date: '2099-01-10', deliveryDate: '10-01-2099', actor: 'agent:test' }),
+    (err) => err.code === 'INVALID_DATE',
+  );
+  // valid values still work
+  const inv = createInvoice(db, { contactId: c.id, lines: ['1x A @ 10.00'], date: '2099-01-10', dueDays: 14, actor: 'agent:test' });
+  assert.equal(inv.due_date, '2099-01-24');
+
+  // invoiceReminders rejects a NaN window instead of throwing Invalid time value
+  assert.throws(
+    () => invoiceReminders(db, { withinDays: Number('abc') }),
+    (err) => err.code === 'INVALID_WINDOW',
+  );
 });
 
 

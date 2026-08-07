@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-07 18:54:24 UTC — **✅ 356 passing · 0 failing (356 tests)**
+**Latest run:** 2026-08-07 19:00:49 UTC — **✅ 357 passing · 0 failing (357 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -195,7 +195,7 @@
 
 ### hardening.test.js — 
 
-45 passing · 0 failing
+46 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -242,6 +242,7 @@
     - ✅ the FX sanity floor is 25 cents — a 10% short payment on a €10 invoice is rejected
     - ✅ 4840 creation on demand is audited
     - ✅ postFromTransaction is atomic: a failing post leaves no draft or reconciliation
+    - ✅ createInvoice rejects non-integer due-days and malformed delivery dates cleanly
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 
