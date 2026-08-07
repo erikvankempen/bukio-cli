@@ -60,6 +60,8 @@ import {
 import { parseCamt053 } from '../src/bank/camt.js';
 import { toEurPostings, setFxRate } from '../src/fx/index.js';
 import { fetchEcbRate } from '../src/fx/ecb.js';
+import { exportXaf } from '../src/export/index.js';
+import { jaarrekening } from '../src/report/jaarrekening.js';
 import {
   addPayable, createPaymentBatch, createPaymentBatchFromCsv,
   deletePaymentBatch, exportPaymentBatch, parseBatchCsv,
@@ -1099,6 +1101,22 @@ test('createPaymentBatch rejects a garbage batch date (it would land in pain.001
   // valid still works
   const b = createPaymentBatch(db, { date: '2026-03-05', lines: [{ name: 'ACME', iban: 'NL86INGB0002445588', amountCents: 1000 }], actor: 'agent:test' });
   assert.equal(b.batch_date, '2026-03-05');
+});
+
+test('jaarrekening and exportXaf reject a non-YYYY year instead of building nonsense documents', () => {
+  // company is already seeded by setup()
+  assert.throws(
+    () => jaarrekening(db, { year: 'abc', model: 'klein' }),
+    (err) => err.code === 'INVALID_YEAR',
+  );
+  assert.throws(
+    () => jaarrekening(db, { year: 20261, model: 'klein' }),
+    (err) => err.code === 'INVALID_YEAR',
+  );
+  assert.throws(
+    () => exportXaf(db, { year: 'abc', out: '/tmp/never.xaf' }),
+    (err) => err.code === 'INVALID_YEAR',
+  );
 });
 
 

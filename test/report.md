@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-07 19:08:55 UTC — **✅ 361 passing · 0 failing (361 tests)**
+**Latest run:** 2026-08-07 19:12:16 UTC — **✅ 362 passing · 0 failing (362 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -195,7 +195,7 @@
 
 ### hardening.test.js — 
 
-50 passing · 0 failing
+51 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -247,6 +247,7 @@
     - ✅ fetchEcbRate rejects a malformed date instead of throwing Invalid time value
     - ✅ importTransactions rejects garbage or impossible transaction dates
     - ✅ createPaymentBatch rejects a garbage batch date (it would land in pain.001)
+    - ✅ jaarrekening and exportXaf reject a non-YYYY year instead of building nonsense documents
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 

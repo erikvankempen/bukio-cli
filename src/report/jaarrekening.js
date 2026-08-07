@@ -78,6 +78,7 @@ function groupSections(sections, lines) {
 
 export function jaarrekening(db, { year, model = 'klein' }) {
   if (!MODELS.includes(model)) throw jaarrekeningError('INVALID_MODEL', `model must be one of ${MODELS.join(', ')}`);
+  if (!/^\d{4}$/.test(String(year))) throw jaarrekeningError('INVALID_YEAR', `year '${year}' must be YYYY`);
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   if (!company) throw jaarrekeningError('NOT_INITIALISED', 'company database not initialised');
 

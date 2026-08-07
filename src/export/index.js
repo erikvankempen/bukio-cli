@@ -77,6 +77,11 @@ function toBoekingen(postings) {
  * year has no posted entries.
  */
 export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
+  if (!/^\d{4}$/.test(String(year))) {
+    const e = new Error(`year '${year}' must be YYYY`);
+    e.code = 'INVALID_YEAR';
+    throw e;
+  }
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get() ?? null;
   if (!company) {
     const e = new Error('no company in this database — run `bukio init` first');
