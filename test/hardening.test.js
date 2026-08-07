@@ -31,11 +31,12 @@
 //       '12,34' and '1e3' are rejected instead of silently mis-booking.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ExcelJS from 'exceljs';
 import { openDb } from '../src/core/db.js';
 import { seedDefaultChart, deactivateAccount, reactivateAccount } from '../src/core/accounts.js';
 import { createEntry, postEntry, reverseEntry, getEntry } from '../src/core/entries.js';
@@ -47,8 +48,9 @@ import {
 import { addAsset, disposeAsset, runDue, register, createScheme } from '../src/assets/index.js';
 import {
   createContact, updateContact, getContact, getInvoice,
-  createInvoice, finalizeInvoice, markPaid,
+  createInvoice, finalizeInvoice, markPaid, listInvoices,
 } from '../src/invoice/index.js';
+import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { parseBankCsv } from '../src/bank/csv.js';
 import {
   importTransactions, getOrCreateBankAccount, linkTransaction, postFromTransaction, autoMatch,
@@ -61,6 +63,7 @@ import {
 } from '../src/payments/index.js';
 import { buildDepreciationTemplate, createTemplate, getTemplate, setTemplateStatus } from '../src/recurring/index.js';
 import { markFiled } from '../src/compliance/index.js';
+import { toCsv, writeXlsx } from '../src/report/export.js';
 
 const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
 
@@ -103,6 +106,40 @@ function cli(dbPath, args) {
 
 function tmpDb() {
   return path.join(mkdtempSync(path.join(os.tmpdir(), 'bukio-hardening-')), 'test.db');
+}
+
+/** MCP stdio session against a real child process (harness like phase5.test.js). */
+function mcpSession(dbPath) {
+  const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', dbPath], {
+    cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), '..'),
+    env: { ...process.env, BUKIO_ACTOR: 'agent:test' },
+  });
+  let buf = '';
+  const pending = [];
+  const waiters = [];
+  child.stdout.on('data', (d) => {
+    buf += d.toString();
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      const msg = JSON.parse(line);
+      if (waiters.length) waiters.shift()(msg);
+      else pending.push(msg);
+    }
+  });
+  const next = () => (pending.length ? Promise.resolve(pending.shift()) : new Promise((res) => waiters.push(res)));
+  return {
+    child,
+    call(method, params = {}, id = Math.floor(Math.random() * 1e9)) {
+      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+      return next();
+    },
+    close() {
+      child.stdin.end();
+      return new Promise((res) => child.on('exit', res));
+    },
+  };
 }
 
 beforeEach(() => {
@@ -517,6 +554,121 @@ test('SEPA MsgId stays within the 35-char limit even for huge batch ids', () => 
   // the 17-digit id exceeds 2^53 so JS rounds it to 100000000000000000; the
   // slice(-16) still caps the MsgId at 35 chars — the exact digits don't matter
   assert.match(r.msg_id, /^BUKIO\d{30}$/);
+});
+
+// --- third pass (2026-08-07): UBL, export injection, derived status, MCP ---
+
+test('UBL uses EUR currencyID and carries the supplier postal code', () => {
+  const c = addContact('Klant BV');
+  db.prepare("UPDATE company SET postal_code = '2712 CD' WHERE id = 1").run();
+  const inv = createInvoice(db, { contactId: c.id, lines: ['1x Werk @ 100.00 @21'], date: '2099-01-10', actor: 'agent:test' });
+  const { invoice } = finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+  const xml = invoiceToUbl(db, invoice);
+  assert.ok(!xml.includes('currencyID="undefined"'), 'no undefined currency may leak into the UBL');
+  assert.ok(xml.includes('currencyID="EUR"'), 'currencyID must be EUR');
+  // the supplier PostalZone was always empty (snake_case row vs camelCase destructure)
+  assert.ok(xml.includes('<cbc:PostalZone>2712 CD</cbc:PostalZone>'), 'supplier postal code must be present');
+});
+
+test('CSV and XLSX exports neuter formula injection', async () => {
+  const rows = [
+    { name: 'Normaal', amount: '-12.34' },
+    { name: '=HYPERLINK("https://evil","x")', amount: '10.00' },
+    { name: '+1+1', amount: '1.00' },
+    { name: '@SUM(A1:A2)', amount: '2.00' },
+  ];
+  const csv = toCsv(rows, [{ key: 'name', label: 'naam' }, { key: 'amount', label: 'bedrag' }]);
+  const lines = csv.trim().split('\n');
+  assert.equal(lines[0], 'naam,bedrag');
+  assert.equal(lines[1], 'Normaal,-12.34'); // negative amounts stay untouched
+  // the guarded value contains quotes -> standard CSV quoting doubles them
+  assert.equal(lines[2], `"'=HYPERLINK(""https://evil"",""x"")",10.00`);
+  assert.equal(lines[3], "'+1+1,1.00");
+  assert.equal(lines[4], "'@SUM(A1:A2),2.00");
+
+  // xlsx round-trip: the guarded string must be stored as text, not a formula
+  const file = path.join(mkdtempSync(path.join(os.tmpdir(), 'bukio-inj-')), 'out.xlsx');
+  await writeXlsx(file, [{ name: 'S', columns: [{ header: 'naam', key: 'name' }], rows }]);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(file);
+  const cell = wb.getWorksheet('S').getCell('A3');
+  assert.equal(cell.value, "'=HYPERLINK(\"https://evil\",\"x\")");
+});
+
+test('invoice list --status overdue filters the derived status', () => {
+  const c = addContact();
+  // 2099: future invoice, never overdue
+  const future = createInvoice(db, { contactId: c.id, lines: ['1x T @ 100.00'], date: '2099-01-10', actor: 'agent:test' });
+  finalizeInvoice(db, { id: future.id, actor: 'agent:test' });
+  // 2026-01-01: due 2026-01-31, long past — derived status is 'overdue'
+  const past = createInvoice(db, { contactId: c.id, lines: ['1x T @ 100.00'], date: '2026-01-01', actor: 'agent:test' });
+  finalizeInvoice(db, { id: past.id, actor: 'agent:test' });
+  const overdue = listInvoices(db, { status: 'overdue' });
+  assert.equal(overdue.length, 1);
+  assert.equal(overdue[0].id, past.id);
+  // both invoices are STORED 'sent' (overdue is derived) — the SQL filter
+  // returns both; getInvoice derives the overdue one
+  const sent = listInvoices(db, { status: 'sent' });
+  assert.equal(sent.length, 2);
+  assert.deepEqual(sent.map((i) => i.status).sort(), ['overdue', 'sent']);
+});
+
+test('MCP: vat_book execute leaves a draft unless post=true; invoice_pay defaults to outstanding', async () => {
+  const dbPath = tmpDb();
+  const db0 = openDb(dbPath);
+  seedDefaultChart(db0);
+  db0.prepare(`
+    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300', 'Industrieweg 12', '2712 CD', 'Zoetermeer', 1)
+  `).run();
+  enableVatModule(db0);
+  const contact = createContact(db0, { name: 'Klant BV', address: 'A', city: 'B', actor: 'agent:test' });
+  const inv = createInvoice(db0, { contactId: contact.id, lines: ['1x Werk @ 100.00 @21'], date: '2099-01-10', actor: 'agent:test' });
+  finalizeInvoice(db0, { id: inv.id, actor: 'agent:test' });
+  db0.close();
+
+  const mcp = mcpSession(dbPath);
+  try {
+    await mcp.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+
+    // vat_book without post: draft (the old code posted by default)
+    const booked = await mcp.call('tools/call', {
+      name: 'vat_book', arguments: { date: '2099-02-01', description: 'verkoop', postings: ['8000:-50.00@21', '1100:60.50'], mode: 'execute', actor: 'agent:mcp-test' },
+    });
+    const bookedRes = booked.result.content[0].text;
+    assert.ok(bookedRes.includes('"state": "draft"'), `vat_book must leave a draft, got: ${bookedRes.slice(0, 200)}`);
+
+    // invoice_pay without amount: pays the full outstanding (121.00)
+    const paid = await mcp.call('tools/call', {
+      name: 'invoice_pay', arguments: { id: 1, date: '2099-02-10', mode: 'execute', actor: 'agent:mcp-test' },
+    });
+    const paidRes = paid.result.content[0].text;
+    assert.ok(paidRes.includes('"status": "paid"'), `invoice_pay should mark paid, got: ${paidRes.slice(0, 200)}`);
+
+    // asset money parsing: '12,34' must book as 12.34 EUR (1234 cents) — the
+    // old parseFloat silently booked 12.00; garbage must be rejected
+    const dutch = await mcp.call('tools/call', {
+      name: 'asset_add', arguments: {
+        name: 'Laptop', purchase_date: '2026-01-01', purchase_price: '12,34',
+        depreciation_start: '2026-01-01', recognition_date: '2026-01-01', mode: 'execute', actor: 'agent:mcp-test',
+      },
+    });
+    assert.ok(dutch.result.content[0].text.includes('"action": "asset.add"'), 'Dutch comma amount must book');
+    const bad = await mcp.call('tools/call', {
+      name: 'asset_add', arguments: {
+        name: 'Laptop2', purchase_date: '2026-01-01', purchase_price: 'abc',
+        depreciation_start: '2026-01-01', recognition_date: '2026-01-01', mode: 'execute', actor: 'agent:mcp-test',
+      },
+    });
+    assert.ok(bad.result.content[0].text.includes('INVALID_AMOUNT'), 'asset_add must reject garbage amounts');
+  } finally {
+    await mcp.close();
+  }
+  // the Dutch comma amount landed as the full 1234 cents, not 1200
+  const check = openDb(dbPath);
+  const asset = check.prepare("SELECT purchase_price_cents FROM assets WHERE name = 'Laptop'").get();
+  check.close();
+  assert.equal(asset.purchase_price_cents, 1234);
 });
 
 test('entry with the same account on both sides books the net', () => {

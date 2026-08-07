@@ -160,11 +160,15 @@ export function getInvoice(db, id) {
 export function listInvoices(db, { status = null, type = null } = {}) {
   const clauses = [];
   const params = [];
-  if (status) { clauses.push('status = ?'); params.push(status); }
+  // 'overdue' is a DERIVED status (sent + past due) — never stored — so it
+  // cannot be filtered in SQL; the rest filter on the stored status
+  if (status && status !== 'overdue') { clauses.push('status = ?'); params.push(status); }
   if (type) { clauses.push('invoice_type = ?'); params.push(type); }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const rows = db.prepare(`SELECT * FROM invoices ${where} ORDER BY id DESC`).all(...params);
-  return rows.map((r) => getInvoice(db, r.id));
+  let invoices = rows.map((r) => getInvoice(db, r.id));
+  if (status === 'overdue') invoices = invoices.filter((i) => i.status === 'overdue');
+  return invoices;
 }
 
 /**

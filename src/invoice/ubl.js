@@ -16,15 +16,18 @@ function moneyAmount(cents, currency = 'EUR') {
   return (cents / 100).toFixed(2);
 }
 
-function addressBlock(partyName, { address, postalCode, city, country }) {
+function addressBlock(partyName, p) {
+  // the supplier row is snake_case (postal_code); contacts are camelCase —
+  // read both so the postal code is never silently dropped
+  const postal = p.postalCode ?? p.postal_code ?? '';
   return `
         <cac:Party>
           <cac:PartyName><cbc:Name>${esc(partyName)}</cbc:Name></cac:PartyName>
           <cac:PostalAddress>
-            <cbc:StreetName>${esc(address ?? '')}</cbc:StreetName>
-            <cbc:CityName>${esc(city ?? '')}</cbc:CityName>
-            <cbc:PostalZone>${esc(postalCode ?? '')}</cbc:PostalZone>
-            <cac:Country><cbc:IdentificationCode>${esc(country ?? 'NL')}</cbc:IdentificationCode></cac:Country>
+            <cbc:StreetName>${esc(p.address ?? '')}</cbc:StreetName>
+            <cbc:CityName>${esc(p.city ?? '')}</cbc:CityName>
+            <cbc:PostalZone>${esc(postal)}</cbc:PostalZone>
+            <cac:Country><cbc:IdentificationCode>${esc(p.country ?? 'NL')}</cbc:IdentificationCode></cac:Country>
           </cac:PostalAddress>
         </cac:Party>`;
 }
@@ -37,6 +40,8 @@ export function invoiceToUbl(db, invoice) {
   const contact = invoice.contact;
   const isCredit = invoice.invoice_type === 'credit';
   const typeCode = isCredit ? '381' : '380';
+  // the invoices table has no currency column — always EUR (the ledger is EUR)
+  const currency = invoice.currency ?? 'EUR';
 
   // VAT breakdown per rate (exact per-line sums)
   const byRate = new Map();
@@ -54,8 +59,8 @@ export function invoiceToUbl(db, invoice) {
       const percent = g.code === 'R' || g.code === 'RE' ? '21.00' : (g.rateBp / 100).toFixed(2);
       return `
       <cac:TaxSubtotal>
-        <cbc:TaxableAmount currencyID="${invoice.currency}">${moneyAmount(g.taxable)}</cbc:TaxableAmount>
-        <cbc:TaxAmount currencyID="${invoice.currency}">${moneyAmount(g.tax)}</cbc:TaxAmount>
+        <cbc:TaxableAmount currencyID="${currency}">${moneyAmount(g.taxable)}</cbc:TaxableAmount>
+        <cbc:TaxAmount currencyID="${currency}">${moneyAmount(g.tax)}</cbc:TaxAmount>
         <cac:TaxCategory>
           <cbc:ID>${category}</cbc:ID>
           <cbc:Percent>${percent}</cbc:Percent>
@@ -71,7 +76,7 @@ export function invoiceToUbl(db, invoice) {
     <cac:InvoiceLine>
       <cbc:ID>${i + 1}</cbc:ID>
       <cbc:InvoicedQuantity unitCode="C62">${l.quantity}</cbc:InvoicedQuantity>
-      <cbc:LineExtensionAmount currencyID="${invoice.currency}">${moneyAmount(l.amount_cents)}</cbc:LineExtensionAmount>
+      <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(l.amount_cents)}</cbc:LineExtensionAmount>
       <cac:Item>
         <cbc:Name>${esc(l.description)}</cbc:Name>
         <cac:ClassifiedTaxCategory>
@@ -81,7 +86,7 @@ export function invoiceToUbl(db, invoice) {
         </cac:ClassifiedTaxCategory>
       </cac:Item>
       <cac:Price>
-        <cbc:PriceAmount currencyID="${invoice.currency}">${moneyAmount(l.unit_price_cents)}</cbc:PriceAmount>
+        <cbc:PriceAmount currencyID="${currency}">${moneyAmount(l.unit_price_cents)}</cbc:PriceAmount>
       </cac:Price>
     </cac:InvoiceLine>`;
   }).join('');
@@ -120,13 +125,13 @@ export function invoiceToUbl(db, invoice) {
   </cac:PaymentMeans>
   ${invoice.due_date ? `<cac:PaymentTerms><cbc:PaymentDueDate>${invoice.due_date}</cbc:PaymentDueDate></cac:PaymentTerms>` : ''}
   <cac:TaxTotal>
-    <cbc:TaxAmount currencyID="${invoice.currency}">${moneyAmount(invoice.vat_cents)}</cbc:TaxAmount>${taxSubtotals}
+    <cbc:TaxAmount currencyID="${currency}">${moneyAmount(invoice.vat_cents)}</cbc:TaxAmount>${taxSubtotals}
   </cac:TaxTotal>
   <cac:LegalMonetaryTotal>
-    <cbc:LineExtensionAmount currencyID="${invoice.currency}">${moneyAmount(invoice.net_cents)}</cbc:LineExtensionAmount>
-    <cbc:TaxExclusiveAmount currencyID="${invoice.currency}">${moneyAmount(invoice.net_cents)}</cbc:TaxExclusiveAmount>
-    <cbc:TaxInclusiveAmount currencyID="${invoice.currency}">${moneyAmount(invoice.gross_cents)}</cbc:TaxInclusiveAmount>
-    <cbc:PayableAmount currencyID="${invoice.currency}">${moneyAmount(invoice.gross_cents)}</cbc:PayableAmount>
+    <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(invoice.net_cents)}</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="${currency}">${moneyAmount(invoice.net_cents)}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="${currency}">${moneyAmount(invoice.gross_cents)}</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="${currency}">${moneyAmount(invoice.gross_cents)}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>${linesXml}
 </Invoice>`;
   return xml;

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-07 16:42:25 UTC — **✅ 338 passing · 0 failing (338 tests)**
+**Latest run:** 2026-08-07 17:18:20 UTC — **✅ 342 passing · 0 failing (342 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -195,7 +195,7 @@
 
 ### hardening.test.js — 
 
-27 passing · 0 failing
+31 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -219,6 +219,10 @@
     - ✅ batch delete cascades lines and releases payables
     - ✅ autoMatch never crosses bank accounts that share a ledger code
     - ✅ SEPA MsgId stays within the 35-char limit even for huge batch ids
+    - ✅ UBL uses EUR currencyID and carries the supplier postal code
+    - ✅ CSV and XLSX exports neuter formula injection
+    - ✅ invoice list --status overdue filters the derived status
+    - ✅ MCP: vat_book execute leaves a draft unless post=true; invoice_pay defaults to outstanding
     - ✅ entry with the same account on both sides books the net
     - ✅ reversal of an FX entry negates the fx amounts
     - ✅ invoice finalize with a 0% line books a tagged zero-vat posting

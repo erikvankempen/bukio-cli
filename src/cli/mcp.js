@@ -15,7 +15,7 @@ import {
 } from '../core/entries.js';
 import { bookVatEntry, expandVatPostings, obReadout, parseVatPostingSpecs } from '../vat/index.js';
 import {
-  createContact, createInvoice, finalizeInvoice, creditInvoice, markPaid,
+  createContact, createInvoice, finalizeInvoice, creditInvoice, markPaid, getInvoice,
 } from '../invoice/index.js';
 import { runDue, previewDue } from '../recurring/index.js';
 import { register, addAsset, runDue as assetsRunDue, disposeAsset } from '../assets/index.js';
@@ -24,6 +24,7 @@ import { setFxRate, getFxRate, parseRate, toEurPostings, resolveRate } from '../
 import { icpReadout } from '../icp/index.js';
 import { list as auditList } from '../audit/index.js';
 import { complianceStatus } from '../compliance/index.js';
+import { parseImportAmount } from '../import/index.js';
 import { openDb } from '../core/db.js';
 import { isValidActor } from '../core/actor.js';
 
@@ -230,7 +231,9 @@ tool({
     const { entry } = bookVatEntry(db, {
       date: args.date, description: args.description, postings: converted,
       source: 'agent', sourceRef: args.source_ref ?? null,
-      actor: args.actor ?? ctx.actor, post: args.post !== false,
+      actor: args.actor ?? ctx.actor,
+      // same convention as the CLI and entry_add: post only when explicitly asked
+      post: args.post === true,
     });
     return { ...plan, mode: 'execute', entry_id: entry.id, state: entry.state };
   },
@@ -288,8 +291,13 @@ tool({
   },
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);
-    if (modeOf(args) === 'dry-run') return { action: 'invoice.pay', id: args.id, date: args.date, amount_cents: args.amount_cents ?? null, mode: 'dry-run' };
-    const inv = markPaid(db, { id: args.id, date: args.date, amountCents: args.amount_cents ?? null, method: args.method, actor: args.actor ?? ctx.actor });
+    // amount omitted -> full outstanding, same as the CLI default
+    const invoice = getInvoice(db, args.id) ?? null;
+    const amountCents = args.amount_cents != null
+      ? args.amount_cents
+      : (invoice ? invoice.gross_cents - invoice.paid_cents : null);
+    if (modeOf(args) === 'dry-run') return { action: 'invoice.pay', id: args.id, date: args.date, amount_cents: amountCents, mode: 'dry-run' };
+    const inv = markPaid(db, { id: args.id, date: args.date, amountCents, method: args.method, actor: args.actor ?? ctx.actor });
     return { action: 'invoice.pay', id: args.id, status: inv.status, mode: 'execute' };
   },
 });
@@ -377,7 +385,10 @@ tool({
   },
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);
-    const toCents = (s) => Math.round(parseFloat(s ?? '0') * 100);
+    // money as strict integer cents — parseImportAmount accepts '1234.56',
+    // '1234,56' and '1.234,56' and rejects garbage (never parseFloat: a
+    // Dutch comma would silently book 12.00 for '12,34')
+    const toCents = (s) => (s == null || s === '' ? 0 : parseImportAmount(String(s)));
     const common = {
       name: args.name, category: args.category, serial: args.serial,
       purchaseDate: args.purchase_date, purchasePriceCents: toCents(args.purchase_price),
@@ -429,7 +440,10 @@ tool({
     const actor = args.actor ?? ctx.actor;
     const common = {
       id: Number(args.id), date: args.date,
-      proceedsCents: Math.round(parseFloat(args.proceeds ?? '0') * 100),
+      proceedsCents: (() => {
+        const s = args.proceeds;
+        return s == null || s === '' ? 0 : parseImportAmount(String(s));
+      })(),
       bankAccount: args.bank_account, resultAccount: args.result_account,
     };
     if (modeOf(args) === 'dry-run') {

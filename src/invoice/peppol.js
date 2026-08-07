@@ -40,14 +40,21 @@ export async function sendPeppolInvoice(db, invoice, { endpoint = null, dryRun =
     };
   }
   const xml = invoiceToUbl(db, invoice);
-  const res = await fetch(ep, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/xml; charset=utf-8',
-      ...(cfg.token ? { Authorization: `Bearer ${cfg.token}` } : {}),
-    },
-    body: xml,
-  });
+  let res;
+  try {
+    res = await fetch(ep, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/xml; charset=utf-8',
+        ...(cfg.token ? { Authorization: `Bearer ${cfg.token}` } : {}),
+      },
+      body: xml,
+      // never hang the CLI on a dead access point
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    throw peppolError('PEPPOL_SEND_FAILED', `provider unreachable at ${ep}: ${err.message}`);
+  }
   const text = await res.text();
   if (!res.ok) {
     throw peppolError('PEPPOL_SEND_FAILED', `provider returned ${res.status}: ${text.slice(0, 300)}`);
