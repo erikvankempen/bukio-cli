@@ -1,11 +1,12 @@
 <div align="center">
 
-# bukio-cli
+<a href="https://agentic.bukio.nl"><img src="https://agentic.bukio.nl/assets/logo-light.svg" alt="Bukio" width="340"></a>
 
 **Agent-first double-entry bookkeeping for Dutch SMEs.**
 
 VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
+[![Website](https://img.shields.io/badge/website-agentic.bukio.nl-2b6cb0)](https://agentic.bukio.nl)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
@@ -1028,3 +1029,7 @@ Design principles persist across phases: **agent-native from day one**, **VAT op
 ---
 
 *Part of the Bukio product line — separate from the Bukio web platform: shared brand and philosophy, no shared code.*
+
+---
+
+**bukio-cli is provided completely open source and free** by [Posthuman Resources](https://agentic.bukio.nl). No license fees, no account, no cloud dependency — clone it, audit it, run it yourself.
