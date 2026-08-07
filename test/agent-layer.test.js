@@ -1,4 +1,4 @@
-// Phase 5 tests — FX translation, MCP server (real child process), compliance.
+// Agent-layer tests — FX translation, MCP server (real child process), compliance.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';

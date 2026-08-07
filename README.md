@@ -972,20 +972,18 @@ prices** (`deepseek-v4-flash`, per 1M tokens): **$0.14** input (cache miss),
 at the output rate. Data is captured by the `bukio-token-track` tool from the
 agent's session telemetry (snapshot 2026-08-07).
 
-### Token usage by work session
+### Token usage — totals per token type
 
-| Work session | Input | Output | Cached input | Reasoning | Calls | Est. cost |
-|---|---|---|---|---|---|---|
-| Phases 0–5 (PRD, ledger, bank/VAT, invoicing) | 1.44M | 617K | 111.06M | 239K | 472 | $0.75 |
-| Phases 6–8 (imports, assets, SEPA, Rust) | 4.92M | 897K | 255.92M | 388K | 1,023 | $1.77 |
-| v0.11.1 polish (typos, screenshot, actor) | 1.25M | 233K | 62.93M | 140K | 333 | $0.46 |
-| Token accounting + v0.11.1 polish | 188K | 28K | 3.05M | 17K | 72 | $0.05 |
-| Code review pass 4–5 (12+ bugs, FX booking) | 546K | 178K | 48.79M | 75K | 184 | $0.28 |
-| Review wrap-up (perf, validation sweep) | 377K | 147K | 47.43M | 90K | 227 | $0.25 |
-| **Total** | **8.73M** | **2.10M** | **529.19M** | **948K** | **2,311** | **$3.56** |
+| Token type | Tokens | Est. cost |
+|---|---|---|
+| Input (cache miss) | 8.73M | $1.22 |
+| Cached input (cache hit) | 529.19M | $1.48 |
+| Output | 2.10M | $0.59 |
+| Reasoning (at output rate) | 948K | $0.27 |
+| **Total** | **540.96M** | **$3.56** |
 
-Cost breakdown at DeepSeek list prices: input $1.22 + cached input $1.48 +
-output $0.59 + reasoning $0.27 = **$3.56 total** for the entire project.
+**$3.56 total** at DeepSeek list prices for the entire project (2,311 API
+calls across all development sessions).
 
 ### COCOMO benchmark
 

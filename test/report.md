@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-07 19:15:29 UTC — **✅ 362 passing · 0 failing (362 tests)**
+**Latest run:** 2026-08-07 19:52:50 UTC — **✅ 362 passing · 0 failing (362 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -28,6 +28,29 @@
     - ✅ CLI: named actor works; JSON error shape on --json
     - ✅ CLI: BUKIO_ACTOR env satisfies the requirement
     - ✅ CLI: BUKIO_ACTOR env is recorded in the audit trail
+
+### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar
+
+18 passing · 0 failing
+
+    - ✅ fx: parseRate and convertFx — integer math, round-half-up
+    - ✅ fx: setFxRate upsert + audit; getFxRate exact then latest-on/before
+    - ✅ fx: toEurPostings attaches the original amounts
+    - ✅ fx: entry add with currency books EUR + keeps the original amounts (reversal too)
+    - ✅ fx: vat book with currency — VAT legs computed on the EUR amounts
+    - ✅ fx: invalid currency on a posting is rejected
+    - ✅ ecb: parses SDMX observations and falls back to the last business day
+    - ✅ ecb: 404 (unknown currency) -> null; network failure -> ECB_FETCH_FAILED
+    - ✅ fx: missing rate auto-fetches from ECB, stores it, and reuses it
+    - ✅ fx: BUKIO_FX_NO_FETCH blocks the ECB fallback
+    - ✅ fx: ECB has no rate for the currency -> ECB_RATE_NOT_AVAILABLE
+    - ✅ compliance: quarterly deadlines
+    - ✅ compliance: jaarrekening deadline is 13 months after the fiscal year end
+    - ✅ compliance: calendar shows obligations, statuses flip with filings
+    - ✅ compliance: closed books show on the jaarrekening obligation
+    - ✅ MCP: initialize + tools/list + read-only calls work end-to-end
+    - ✅ MCP: mutations are plan-only by default; execute books with the actor
+    - ✅ MCP: BUKIO_MCP_READONLY blocks execution
 
 ### assets.test.js — fixed assets: schemes, mid-life adoption, runs, disposal, activastaat
 
@@ -359,29 +382,6 @@
     - ✅ buildPain001: batch date lands in ReqdExctnDt
     - ✅ delete: only drafts; payables released back to unpaid
     - ✅ getPaymentBatch: serializes total + lines
-
-### phase5.test.js — MCP server, FX/ECB, tool gates
-
-18 passing · 0 failing
-
-    - ✅ fx: parseRate and convertFx — integer math, round-half-up
-    - ✅ fx: setFxRate upsert + audit; getFxRate exact then latest-on/before
-    - ✅ fx: toEurPostings attaches the original amounts
-    - ✅ fx: entry add with currency books EUR + keeps the original amounts (reversal too)
-    - ✅ fx: vat book with currency — VAT legs computed on the EUR amounts
-    - ✅ fx: invalid currency on a posting is rejected
-    - ✅ ecb: parses SDMX observations and falls back to the last business day
-    - ✅ ecb: 404 (unknown currency) -> null; network failure -> ECB_FETCH_FAILED
-    - ✅ fx: missing rate auto-fetches from ECB, stores it, and reuses it
-    - ✅ fx: BUKIO_FX_NO_FETCH blocks the ECB fallback
-    - ✅ fx: ECB has no rate for the currency -> ECB_RATE_NOT_AVAILABLE
-    - ✅ compliance: quarterly deadlines
-    - ✅ compliance: jaarrekening deadline is 13 months after the fiscal year end
-    - ✅ compliance: calendar shows obligations, statuses flip with filings
-    - ✅ compliance: closed books show on the jaarrekening obligation
-    - ✅ MCP: initialize + tools/list + read-only calls work end-to-end
-    - ✅ MCP: mutations are plan-only by default; execute books with the actor
-    - ✅ MCP: BUKIO_MCP_READONLY blocks execution
 
 ### recurring-invoice.test.js — subscription invoice templates
 

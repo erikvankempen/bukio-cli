@@ -123,7 +123,7 @@ function runRaw(dbPath, args) {
   }
 }
 
-/** MCP stdio session against a real child process (harness like phase5.test.js). */
+/** MCP stdio session against a real child process (harness like agent-layer.test.js). */
 function mcpSession(dbPath) {
   const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', dbPath], {
     cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), '..'),
