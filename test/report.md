@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-07 20:54:54 UTC — **✅ 373 passing · 0 failing (373 tests)**
+**Latest run:** 2026-08-07 21:05:08 UTC — **✅ 374 passing · 0 failing (374 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -218,7 +218,7 @@
 
 ### hardening.test.js — 
 
-62 passing · 0 failing
+63 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -282,6 +282,7 @@
     - ✅ year-end status rejects a non-YYYY year
     - ✅ bank match auto validates --window-days (garbage errors, 0 stays 0)
     - ✅ autoMatch FX tolerance matches the posting tolerance exactly (SQL integer-division drift)
+    - ✅ year-end close handles a zero-result year (income == expense) without zero-amount legs
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 

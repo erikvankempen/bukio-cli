@@ -46,7 +46,10 @@ export function yearEndStatus(db, { year }) {
   if (!/^\d{4}$/.test(String(year))) throw yearEndError('INVALID_YEAR', `year '${year}' must be YYYY`);
   const rows = db.prepare("SELECT * FROM journal_entries WHERE source = 'closing' AND source_ref = ? ORDER BY id").all(`fy:${year}`);
   const accounts = resultAccounts(db, year);
-  const resultCents = -accounts.reduce((s, a) => s + a.net_cents, 0);
+  // `-0` must normalize to 0 (Object.is treats them differently; it leaks
+  // into JSON consumers and renders as '-0.00' in edge cases)
+  const rawResult = accounts.reduce((s, a) => s + a.net_cents, 0);
+  const resultCents = rawResult === 0 ? 0 : -rawResult;
   return {
     year,
     closed: rows.length > 0,
@@ -76,31 +79,41 @@ export function yearEndClose(db, { year, actor = 'human', dryRun = false }) {
   if (accounts.length === 0) {
     return { closed: false, year, reason: 'EMPTY_YEAR', result_cents: 0, message: `no income/expense activity in ${year} — nothing to close` };
   }
-  const resultCents = -accounts.reduce((s, a) => s + a.net_cents, 0);
+  // `-0` must normalize to 0 (Object.is treats them differently; it leaks
+  // into JSON consumers and renders as '-0.00' in edge cases)
+  const rawResult = accounts.reduce((s, a) => s + a.net_cents, 0);
+  const resultCents = rawResult === 0 ? 0 : -rawResult;
 
-  // entry 1: reverse every result account into 9900
+  // entry 1: reverse every result account into 9900. When the year nets to
+  // zero (income == expense) the reversals alone sum to zero — there is no
+  // 9900 balance to carry, so the zero-amount 9900/3000 legs are skipped
+  // (createEntry rejects zero postings; a zero-result year closes cleanly).
   const closingPostings = accounts.map((a) => ({ code: a.code, amountCents: -a.net_cents }));
-  closingPostings.push({ code: '9900', amountCents: -resultCents });
-  // entry 2: appropriation to equity
-  const appropriationPostings = [
-    { code: '9900', amountCents: resultCents },
-    { code: '3000', amountCents: -resultCents },
-  ];
+  if (resultCents !== 0) {
+    closingPostings.push({ code: '9900', amountCents: -resultCents });
+  }
+  // entry 2: appropriation to equity (only when there is a result)
+  const appropriationPostings = resultCents !== 0
+    ? [
+      { code: '9900', amountCents: resultCents },
+      { code: '3000', amountCents: -resultCents },
+    ]
+    : [];
 
   if (dryRun) {
     return {
       closed: false, year, dryRun: true, result_cents: resultCents,
-      create_9900: !getAccountByCode(db, '9900'),
+      create_9900: resultCents !== 0 && !getAccountByCode(db, '9900'),
       entries: [
         { description: `Afsluiting boekjaar ${year}`, postings: closingPostings },
-        { description: `Resultaatbestemming ${year}`, postings: appropriationPostings },
+        ...(appropriationPostings.length ? [{ description: `Resultaatbestemming ${year}`, postings: appropriationPostings }] : []),
       ],
     };
   }
 
   const closeDate = `${year}-12-31`;
   const tx = db.transaction(() => {
-    if (!getAccountByCode(db, '9900')) {
+    if (resultCents !== 0 && !getAccountByCode(db, '9900')) {
       createAccount(db, { code: '9900', name: 'Resultaat boekjaar', type: 'equity', normalBalance: 'credit', rgsCode: 'BEIV.05' });
     }
     const e1 = createEntry(db, {
@@ -108,17 +121,21 @@ export function yearEndClose(db, { year, actor = 'human', dryRun = false }) {
       postings: closingPostings, source: 'closing', sourceRef: `fy:${year}`, actor: 'closing',
     });
     const p1 = postEntry(db, { id: e1.id, actor: 'closing' });
-    const e2 = createEntry(db, {
-      date: closeDate, description: `Resultaatbestemming ${year}`,
-      postings: appropriationPostings, source: 'closing', sourceRef: `fy:${year}`, actor: 'closing',
-    });
-    const p2 = postEntry(db, { id: e2.id, actor: 'closing' });
+    const results = { e1: p1 };
+    if (appropriationPostings.length) {
+      const e2 = createEntry(db, {
+        date: closeDate, description: `Resultaatbestemming ${year}`,
+        postings: appropriationPostings, source: 'closing', sourceRef: `fy:${year}`, actor: 'closing',
+      });
+      const p2 = postEntry(db, { id: e2.id, actor: 'closing' });
+      results.e2 = p2;
+    }
     record(db, {
       actor, action: 'year_end.close', command: 'year-end close',
-      args: { year, result_cents: resultCents }, outcome: 'ok', entryIds: [p1.id, p2.id],
+      args: { year, result_cents: resultCents }, outcome: 'ok', entryIds: [results.e1.id, ...(results.e2 ? [results.e2.id] : [])],
     });
-    return { e1: p1, e2: p2 };
+    return results;
   });
   const { e1, e2 } = tx();
-  return { closed: true, year, result_cents: resultCents, entries: [e1, e2] };
+  return { closed: true, year, result_cents: resultCents, entries: e2 ? [e1, e2] : [e1] };
 }

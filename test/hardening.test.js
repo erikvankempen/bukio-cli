@@ -77,7 +77,7 @@ import {
   deletePaymentBatch, exportPaymentBatch, parseBatchCsv,
 } from '../src/payments/index.js';
 import { buildDepreciationTemplate, createTemplate, getTemplate, setTemplateStatus, runDue as recurringRunDue, previewDue } from '../src/recurring/index.js';
-import { yearEndStatus } from '../src/year-end/index.js';
+import { yearEndStatus, yearEndClose } from '../src/year-end/index.js';
 import { markFiled } from '../src/compliance/index.js';
 import { toCsv, writeXlsx } from '../src/report/export.js';
 
@@ -1413,4 +1413,35 @@ test('autoMatch FX tolerance matches the posting tolerance exactly (SQL integer-
   const check = getInvoice(db, inv.id);
   assert.equal(check.status, 'paid');
   assert.equal(trialBalance(db, {}).balanced, true);
+});
+
+// --- F18: year-end close on a zero-result year -------------------------------
+
+test('year-end close handles a zero-result year (income == expense) without zero-amount legs', () => {
+  // income 100 + expense 100 -> net result 0
+  const e1 = createEntry(db, { date: '2026-03-01', description: 'omzet', postings: [{ code: '1100', amountCents: 10000 }, { code: '8000', amountCents: -10000 }], actor: 'agent:test' });
+  postEntry(db, { id: e1.id, actor: 'agent:test' });
+  const e2 = createEntry(db, { date: '2026-04-01', description: 'kosten', postings: [{ code: '4600', amountCents: 10000 }, { code: '1100', amountCents: -10000 }], actor: 'agent:test' });
+  postEntry(db, { id: e2.id, actor: 'agent:test' });
+
+  // dry-run first: one closing entry, no appropriation
+  const plan = yearEndClose(db, { year: '2026', dryRun: true, actor: 'agent:test' });
+  assert.equal(plan.result_cents, 0);
+  assert.equal(plan.entries.length, 1, 'zero-result year needs only the closing reversal');
+  assert.equal(plan.create_9900, false, '9900 is not needed when there is nothing to appropriate');
+
+  // real close: one posted closing entry, no 9900 account created
+  const r = yearEndClose(db, { year: '2026', actor: 'agent:test' });
+  assert.equal(r.closed, true);
+  assert.equal(r.result_cents, 0);
+  assert.equal(r.entries.length, 1);
+  assert.equal(r.entries[0].postings.length, 2, 'only the two P&L reversals, no zero legs');
+  assert.equal(getAccountByCode(db, '9900'), null, '9900 must not be created for a zero result');
+  assert.equal(trialBalance(db, {}).balanced, true);
+  // a normal (non-zero) year still closes with both entries
+  const e3 = createEntry(db, { date: '2025-05-01', description: 'omzet2', postings: [{ code: '1100', amountCents: 5000 }, { code: '8000', amountCents: -5000 }], actor: 'agent:test' });
+  postEntry(db, { id: e3.id, actor: 'agent:test' });
+  const r2 = yearEndClose(db, { year: '2025', actor: 'agent:test' });
+  assert.equal(r2.result_cents, 5000);
+  assert.equal(r2.entries.length, 2, 'non-zero result still books closing + appropriation');
 });
