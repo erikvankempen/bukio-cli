@@ -48,8 +48,8 @@ test('init: creates company + 30-account chart with VAT on', () => {
   const dbPath = tmpDb();
   const { out } = run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
   assert.equal(out.ok, true);
-  assert.equal(out.data.chart.accounts, 30); // 28 default + 2 VAT accounts
-  assert.equal(out.data.chart.created, 30);
+  assert.equal(out.data.chart.accounts, 31); // 29 default + 2 VAT accounts
+  assert.equal(out.data.chart.created, 31);
 
   const db = openDb(dbPath);
   const company = db.prepare('SELECT * FROM company').get();
@@ -170,7 +170,7 @@ test('account add/list/show/deactivate flow', () => {
   assert.equal(dup.out.error.code, 'ACCOUNT_EXISTS');
 
   const list = run(dbPath, ['account', 'list', '--type', 'expense', '--json']).out.data.accounts;
-  assert.equal(list.length, 13); // 12 default + 1 new
+  assert.equal(list.length, 14); // 13 default (incl. 4840 Koersverschillen) + 1 new
 
   run(dbPath, ['account', 'deactivate', '--code', '5000', '--json']);
   const blocked = run(dbPath, ['entry', 'add', '--desc', 'x', '--postings', '5000:1.00,1100:-1.00', '--json'], { expectFail: true });

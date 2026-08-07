@@ -1,5 +1,7 @@
 // Export helpers — CSV (hand-rolled, zero deps) and XLSX (exceljs).
-import ExcelJS from 'exceljs';
+// ExcelJS is lazy-loaded inside writeXlsx: it costs ~500ms to import, and
+// keeping it out of the static graph keeps every CLI invocation fast
+// (cli/index.js pulls this module in eagerly).
 
 /**
  * Formula-injection guard: a cell beginning with '=', '+' or '@' (after
@@ -26,6 +28,7 @@ export function toCsv(rows, columns) {
 
 /** Write an XLSX workbook. sheets: [{ name, columns: [{ header, key }], rows }] */
 export async function writeXlsx(filePath, sheets) {
+  const { default: ExcelJS } = await import('exceljs');
   const wb = new ExcelJS.Workbook();
   for (const sheet of sheets) {
     const ws = wb.addWorksheet(sheet.name);

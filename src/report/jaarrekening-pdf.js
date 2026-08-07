@@ -1,6 +1,7 @@
 // Jaarrekening PDF — the KVK deposit package in the statutory Dutch layout,
 // rendered via headless Chromium (same engine as the invoice PDF).
-import { chromium } from 'playwright-core';
+// chromium is lazy-loaded inside jaarrekeningToPdf (playwright-core costs
+// ~1.2s to import; cli/index.js pulls this module in eagerly via cli/year-end.js).
 import { formatAmount } from '../core/money.js';
 import { pdfError } from '../invoice/pdf.js';
 
@@ -87,6 +88,7 @@ export async function jaarrekeningToPdf(report, { outPath = null } = {}) {
   const html = jaarrekeningHtml(report);
   let browser;
   try {
+    const { chromium } = await import('playwright-core');
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'load' });

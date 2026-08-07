@@ -1,6 +1,8 @@
 // Invoice PDF via Playwright (headless Chromium) from an HTML template.
 // Uses the locally installed Playwright browsers (see /root/.cache/ms-playwright).
-import { chromium } from 'playwright-core';
+// chromium is lazy-loaded inside invoiceToPdf: playwright-core costs ~1.2s to
+// import, and keeping it out of the static graph keeps every CLI invocation
+// fast (cli/index.js pulls this module in eagerly via cli/invoice.js).
 import { formatAmount } from '../core/money.js';
 
 export function pdfError(code, message) {
@@ -105,6 +107,7 @@ export async function invoiceToPdf(db, invoice, { outPath = null } = {}) {
   const html = invoiceHtml(db, invoice);
   let browser;
   try {
+    const { chromium } = await import('playwright-core');
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'load' });
