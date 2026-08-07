@@ -89,6 +89,9 @@ export function createTemplate(db, {
   if (endDate && !isValidDate(endDate)) throw recurringError('INVALID_DATE', `end date '${endDate}' must be a valid YYYY-MM-DD`);
   if (endDate && endDate < startDate) throw recurringError('INVALID_RANGE', 'end date must be on or after the start date');
   if (runs != null && (!Number.isInteger(runs) || runs < 1)) throw recurringError('INVALID_RUNS', 'runs must be a positive integer');
+  if (!Number.isInteger(dueDays) || dueDays < 0) {
+    throw recurringError('INVALID_DUE_DAYS', `due-days must be a non-negative integer, got '${dueDays}'`);
+  }
 
   let postingsJson = '[]';
   let vatAware = false;

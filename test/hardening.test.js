@@ -59,6 +59,7 @@ import {
 } from '../src/bank/index.js';
 import { parseCamt053 } from '../src/bank/camt.js';
 import { toEurPostings, setFxRate } from '../src/fx/index.js';
+import { fetchEcbRate } from '../src/fx/ecb.js';
 import {
   addPayable, createPaymentBatch, createPaymentBatchFromCsv,
   deletePaymentBatch, exportPaymentBatch, parseBatchCsv,
@@ -1026,6 +1027,39 @@ test('createInvoice rejects non-integer due-days and malformed delivery dates cl
     () => invoiceReminders(db, { withinDays: Number('abc') }),
     (err) => err.code === 'INVALID_WINDOW',
   );
+});
+
+test('createTemplate rejects non-integer due-days for invoice templates', () => {
+  const c = addContact();
+  const base = { name: 'Sub', kind: 'invoice', contactId: c.id, invoiceLines: ['1x A @ 10.00'], frequency: 'monthly', dayOfPeriod: 1, startDate: '2099-01-01', actor: 'agent:test' };
+  assert.throws(
+    () => createTemplate(db, { ...base, dueDays: Number('abc') }),
+    (err) => err.code === 'INVALID_DUE_DAYS',
+  );
+  assert.throws(
+    () => createTemplate(db, { ...base, dueDays: -1 }),
+    (err) => err.code === 'INVALID_DUE_DAYS',
+  );
+  // valid still works
+  const tpl = createTemplate(db, { ...base, dueDays: 14 });
+  assert.equal(tpl.due_days, 14);
+});
+
+test('fetchEcbRate rejects a malformed date instead of throwing Invalid time value', async () => {
+  const fetcher = async () => ({ ok: false, status: 404 });
+  await assert.rejects(
+    () => fetchEcbRate({ currency: 'USD', date: 'not-a-date', fetcher }),
+    (err) => err.code === 'INVALID_DATE',
+  );
+  await assert.rejects(
+    () => fetchEcbRate({ currency: 'USD', date: '2026-02-30', fetcher }),
+    (err) => err.code === 'INVALID_DATE',
+  );
+  // valid date still flows to the fetcher
+  let called = false;
+  const okFetcher = async () => { called = true; return { ok: true, status: 200, text: async () => '<message:GenericData xmlns:message="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message"><message:DataSet><generic:Obs xmlns:generic="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/generic"><generic:ObsDimension value="2026-08-03"/><generic:ObsValue value="1.0834"/></generic:Obs></message:DataSet></message:GenericData>' }; };
+  await fetchEcbRate({ currency: 'USD', date: '2026-08-03', fetcher: okFetcher });
+  assert.equal(called, true);
 });
 
 

@@ -29,6 +29,13 @@ function addDays(isoDate, days) {
  * `fetcher` is injectable for tests (default: global fetch).
  */
 export async function fetchEcbRate({ currency, date, fetcher = fetch }) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw fxError('INVALID_DATE', `date '${date}' must be YYYY-MM-DD`);
+  }
+  const d = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) {
+    throw fxError('INVALID_DATE', `date '${date}' is not a valid calendar date`);
+  }
   const from = addDays(date, -WINDOW_DAYS);
   const url = `${BASE}/D.${currency}.EUR.SP00.A?startPeriod=${from}&endPeriod=${date}`;
   let res;
