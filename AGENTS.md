@@ -91,7 +91,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio payments batch list [--status]` / `show --id` / `delete --id` | Batch tracking; delete only on drafts (releases payables to unpaid). |
 | `bukio contact update --id N [--iban …]` / `contact add --iban` | Contact IBANs (mod-97) — required before a vendor can join a batch. |
 | `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. **Database only — NOT the original documents** (see 6.18). Backups are manual, not automatic. |
-| `bukio audit [--by agent:hermes] [--since ISO] [--limit N] [--format json\|csv\|xlsx] [--out PATH]` | Read the append-only audit log (newest first); export to csv/xlsx for an external advisor. |
+| `bukio audit [--by agent:bartholomeus] [--since ISO] [--limit N] [--format json\|csv\|xlsx] [--out PATH]` | Read the append-only audit log (newest first); export to csv/xlsx for an external advisor. |
 
 **Import contract (all three importers):** the ENTIRE file is validated before
 anything is written. Any problem → `IMPORT_VALIDATION_FAILED` with
@@ -131,7 +131,7 @@ the booked amounts.
   "source_ref": null,
   "state": "posted",            // "draft" if --post omitted
   "reversed_from_id": null,
-  "created_by": "agent:hermes",
+  "created_by": "agent:bartholomeus",
   "created_at": "2026-08-04T19:09:10.067Z",
   "posted_at": "2026-08-04T19:09:10.068Z",
   "reversed_at": null,
@@ -168,7 +168,7 @@ the booked amounts.
 {
   "id": 5,
   "ts": "2026-08-04T19:09:10.272Z",
-  "actor": "agent:hermes",
+  "actor": "agent:bartholomeus",
   "action": "entry.post",           // company.init | entry.create | entry.post | entry.reverse
   "command": "entry post",
   "args_json": "{\"id\":2}",
@@ -229,7 +229,7 @@ There are **no VAT accounts** in the core chart — VAT is an optional module. W
 BUKIO_DB=$HOME/.bukio/demo.db bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on --dry-run
 BUKIO_DB=$HOME/.bukio/demo.db bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on
 BUKIO_DB=$HOME/.bukio/demo.db bukio entry add --desc "Startkapitaal" \
-  --postings "1100:10000.00,3000:-10000.00" --post --actor agent:hermes --json
+  --postings "1100:10000.00,3000:-10000.00" --post --actor agent:bartholomeus --json
 ```
 
 ### 6.2 Book an expense paid from the bank
@@ -250,7 +250,7 @@ bukio entry add --desc "Factuur 2026-001" --postings "1100:1210.00,8000:-1210.00
 # 1. always dry-run the reversal first
 bukio entry reverse --id 2 --reason "verkeerde categorie" --dry-run --json
 # 2. apply it (original stays posted; contra-entry cancels it)
-bukio entry reverse --id 2 --reason "verkeerde categorie" --actor agent:hermes --json
+bukio entry reverse --id 2 --reason "verkeerde categorie" --actor agent:bartholomeus --json
 # 3. book the corrected entry
 bukio entry add --desc "Kantoorartikelen (gecorrigeerd)" --postings "4200:250.00,1100:-250.00" --post
 # 4. verify the books
@@ -314,7 +314,7 @@ bukio account import --file assets/chart-nl.csv --dry-run   # validate; then imp
 ### 6.9 Report on what an agent did
 
 ```bash
-bukio audit --by agent:hermes --json
+bukio audit --by agent:bartholomeus --json
 ```
 
 ### 6.10 Month-end: run the recurring templates (depreciation, accruals)
@@ -403,7 +403,7 @@ bukio fx fetch --currency GBP --date 2026-08-03          # ECB, stored as source
 bukio vat book --date 2026-08-01 --desc "Stripe Inc. - INV-9102 (USD)" \
   --currency USD --postings "4300:895.00@21,1100:-1082.95" --dry-run
 bukio vat book --date 2026-08-01 --desc "Stripe Inc. - INV-9102 (USD)" \
-  --currency USD --postings "4300:895.00@21,1100:-1082.95" --post --actor agent:hermes
+  --currency USD --postings "4300:895.00@21,1100:-1082.95" --post --actor agent:bartholomeus
 # 3. koersverschil at payment (the bank shows a different EUR amount): book the
 #    difference on 4700 Koersverschillen (create the account first)
 bukio account add --code 4700 --name "Koersverschillen" --type expense --normal-balance debit

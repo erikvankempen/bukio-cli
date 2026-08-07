@@ -13,7 +13,7 @@ beforeEach(() => {
 
 test('record + list with filters', () => {
   record(db, { actor: 'human', action: 'company.init', command: 'init', args: { name: 'X' }, outcome: 'ok' });
-  record(db, { actor: 'agent:hermes', action: 'entry.create', command: 'entry add', args: { n: 1 }, outcome: 'ok', entryIds: [7] });
+  record(db, { actor: 'agent:test', action: 'entry.create', command: 'entry add', args: { n: 1 }, outcome: 'ok', entryIds: [7] });
 
   const all = list(db);
   assert.equal(all.length, 2);
@@ -21,7 +21,7 @@ test('record + list with filters', () => {
   assert.deepEqual(all[0].entry_ids, [7]);
   assert.deepEqual(all[0].args, { n: 1 });
 
-  const byActor = list(db, { actor: 'agent:hermes' });
+  const byActor = list(db, { actor: 'agent:test' });
   assert.equal(byActor.length, 1);
   const bySince = list(db, { since: '2999-01-01T00:00:00.000Z' });
   assert.equal(bySince.length, 0);

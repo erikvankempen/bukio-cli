@@ -151,11 +151,11 @@ test('--actor is recorded on entries and audit', () => {
   run(dbPath, ['init', '--name', 'A', '--json']);
   run(dbPath, [
     'entry', 'add', '--desc', 'agent posting', '--postings', '1100:10.00,3000:-10.00', '--post',
-    '--actor', 'agent:hermes', '--json',
+    '--actor', 'agent:test', '--json',
   ]);
-  const audit = run(dbPath, ['audit', '--by', 'agent:hermes', '--json']).out.data.entries;
+  const audit = run(dbPath, ['audit', '--by', 'agent:test', '--json']).out.data.entries;
   assert.ok(audit.length >= 2);
-  assert.ok(audit.every((a) => a.actor === 'agent:hermes'));
+  assert.ok(audit.every((a) => a.actor === 'agent:test'));
 });
 
 test('account add/list/show/deactivate flow', () => {

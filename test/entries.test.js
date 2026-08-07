@@ -41,9 +41,9 @@ test('createEntry: agent actor is recorded', () => {
   const e = createEntry(db, {
     date: '2026-08-04', description: 'x',
     postings: [{ code: '1100', amountCents: 100 }, { code: '3000', amountCents: -100 }],
-    actor: 'agent:hermes',
+    actor: 'agent:test',
   });
-  assert.equal(e.created_by, 'agent:hermes');
+  assert.equal(e.created_by, 'agent:test');
 });
 
 test('createEntry: rejects unbalanced postings', () => {

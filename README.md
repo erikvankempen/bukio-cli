@@ -569,13 +569,13 @@ Read the append-only audit log (newest first).
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--since <iso-ts>` | — | Only entries at/after this timestamp (ISO 8601) |
-| `--by <who>` | all | Only entries by this actor (e.g. `agent:hermes`) |
+| `--by <who>` | all | Only entries by this actor (e.g. `agent:bartholomeus`) |
 | `--limit <n>` | `50` | Max rows |
 | `--format <fmt>` | `human` | `json` \| `csv` \| `xlsx` — hand the audit trail to an external advisor as a file |
 | `--out <path>` | — | Output file for `csv`/`xlsx` (required for `xlsx`) |
 
 ```bash
-bukio audit --by agent:hermes --json   # what did the agent do?
+bukio audit --by agent:bartholomeus --json   # what did the agent do?
 bukio audit --since 2026-08-01         # everything this month
 bukio audit --format xlsx --out ~/exports/audit-2026.xlsx --limit 1000   # for the boekhouder
 ```
@@ -877,7 +877,7 @@ bukio entry add --desc "Kantoorartikelen (gecorrigeerd)" --postings "4200:250.00
 bukio report trial-balance --year 2026 --json   # must be balanced: true
 bukio report balans --as-of 2026-12-31          # must say BALANCED
 bukio report pnl --year 2026                    # result = revenue - costs
-bukio audit --since 2026-08-01 --by agent:hermes
+bukio audit --since 2026-08-01 --by agent:bartholomeus
 ```
 
 **Hand the year to your boekhouder**
