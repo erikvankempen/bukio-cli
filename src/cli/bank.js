@@ -194,7 +194,7 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const result = autoMatch(db, {
-            windowDays: parseInt(opts.windowDays, 10) || 5,
+            windowDays: Number(opts.windowDays),
             actor: ctx.actor,
             dryRun: ctx.dryRun,
           });

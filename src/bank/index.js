@@ -236,6 +236,9 @@ export function postFromTransaction(db, { txId, accountCode, actor = 'human', po
  * dryRun returns the would-be matches without writing.
  */
 export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false } = {}) {
+  if (!Number.isInteger(windowDays) || windowDays < 0) {
+    throw bankError('INVALID_WINDOW', `window-days must be a non-negative integer, got '${windowDays}'`);
+  }
   const unmatched = db.prepare(`
     SELECT bt.*, ba.account_code, ba.iban
     FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.bank_account_id
@@ -302,7 +305,7 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
         FROM invoices i
         LEFT JOIN contacts c ON c.id = i.contact_id
         WHERE i.invoice_type = 'sales' AND i.status IN ('sent','overdue')
-          AND ABS(outstanding_cents - ?) <= MAX(ROUND(outstanding_cents * ? / 10000), ?)
+          AND ABS(outstanding_cents - ?) <= MAX(ROUND(outstanding_cents * ? / 10000.0), ?)
         ORDER BY ABS(outstanding_cents - ?), i.due_date IS NULL, i.due_date, i.id
         LIMIT 1
       `).all(txRow.amount_cents, FX_MATCH_TOLERANCE_BP, FX_MATCH_FLOOR_CENTS, txRow.amount_cents);

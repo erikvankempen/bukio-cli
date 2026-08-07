@@ -43,6 +43,7 @@ export function isYearClosed(db, year) {
 }
 
 export function yearEndStatus(db, { year }) {
+  if (!/^\d{4}$/.test(String(year))) throw yearEndError('INVALID_YEAR', `year '${year}' must be YYYY`);
   const rows = db.prepare("SELECT * FROM journal_entries WHERE source = 'closing' AND source_ref = ? ORDER BY id").all(`fy:${year}`);
   const accounts = resultAccounts(db, year);
   const resultCents = -accounts.reduce((s, a) => s + a.net_cents, 0);

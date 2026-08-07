@@ -279,6 +279,9 @@ function runTemplateOnce(db, tpl, actor) {
  * still run. dryRun returns the plan without writing anything.
  */
 export function runDue(db, { asOf = null, templateId = null, actor = 'human', dryRun = false, maxRunsPerTemplate = 120 } = {}) {
+  if (asOf != null && !isValidDate(asOf)) {
+    throw recurringError('INVALID_DATE', `as-of '${asOf}' must be yyyy-mm-dd`);
+  }
   const date = asOf || todayIso();
   let templates;
   if (templateId) {

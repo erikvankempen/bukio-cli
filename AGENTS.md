@@ -597,6 +597,7 @@ tar -czf ~/exports/bukio-documenten-2026.tar.gz -C ~/.bukio invoices/
 | `ALREADY_REVERSED` | Reversal exists | Find the contra-entry via `entry list` / `entry show` |
 | `SQLITE_CONSTRAINT_TRIGGER` | You violated an invariant (immutable posted entry, append-only audit) | You bypassed the engine or the operation is illegal — never "fix" this with raw SQL |
 | `EXPORT_EMPTY_YEAR` | No posted entries in the year | Book something first, or pick a different year — drafts are never exported |
+| `INVALID_DATE` / `INVALID_YEAR` / `INVALID_PERIOD` / `INVALID_WINDOW` / `INVALID_LIMIT` | A date, year, period, day-window or row-limit argument is malformed (e.g. `2026-13`, `2026-02-30`, `--limit abc`) | Use the format the flag help shows — these are rejected before anything is written, so nothing is half-booked |
 
 ---
 
@@ -613,7 +614,7 @@ tar -czf ~/exports/bukio-documenten-2026.tar.gz -C ~/.bukio invoices/
 
 ---
 
-## 9. Capability boundaries (Phase 8 complete)
+## 9. Capability boundaries (Phase 9 complete)
 
 Available: company init (incl. address for compliant invoices), journal entries (incl. **FX conversion**), accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. invoice payments), optional VAT module (enable, `vat book`, OB readout 1a–5d + mark-filed), recurring entries + invoices, invoicing (lifecycle, 12-vereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payments), Peppol send, jaarrekening (`year-end close`, micro/klein statutory accounts, KVK deposit PDF, XLSX), ICP readout, **FX rates + foreign-currency booking** (`fx set`, `--currency/--rate` on entry add + vat book, `fx_currency`/`fx_amount_cents` on postings), **MCP server** (`bukio mcp`, plan-only mutations, READONLY mode), **compliance calendar** (`compliance status`/`mark`), **imports** (`import opening-balances` / `journal` / `xaf` — whole-file validation, idempotent), **month-end close check** (`month-end --period`), **invoice reminders** (`invoice reminders`, draft emails only — never sends), **fixed assets** (`assets scheme add`/`assets add`/`run`/`register`/`dispose`/`pause`/`resume` — mid-life adoption via recognition-date + cum-dep at recognition, lineair + degressief, activastaat, source 'assets'), **SEPA payment batches** (`payments payables add`/`list`/`pay` — transfer vs direct-debit; `payments batch create`/`export`/`list`/`show`/`delete` — pain.001 `001.03`/`001.09`, unique MsgId, one export per batch, contact IBANs mod-97 validated), **audit-file export** (`export xaf` — Auditfile Financieel 4.0 XML for external advisors; audit log as csv/xlsx), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 

@@ -229,8 +229,14 @@ export function createInvoice(db, {
   if (dueDays != null && (!Number.isInteger(dueDays) || dueDays < 0)) {
     throw invoiceError('INVALID_DUE_DAYS', `due-days must be a non-negative integer, got '${dueDays}'`);
   }
-  if (deliveryDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(deliveryDate)) {
-    throw invoiceError('INVALID_DATE', `delivery-date '${deliveryDate}' must be YYYY-MM-DD`);
+  if (deliveryDate != null) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(deliveryDate)) {
+      throw invoiceError('INVALID_DATE', `delivery-date '${deliveryDate}' must be YYYY-MM-DD`);
+    }
+    const dd = new Date(`${deliveryDate}T00:00:00Z`);
+    if (Number.isNaN(dd.getTime()) || dd.toISOString().slice(0, 10) !== deliveryDate) {
+      throw invoiceError('INVALID_DATE', `delivery-date '${deliveryDate}' is not a valid calendar date`);
+    }
   }
 
   const vatOn = isVatEnabled(db);
@@ -460,6 +466,15 @@ export function markPaid(db, { id, date, amountCents, method = 'bank', bankTxId 
   if (invoice.invoice_type === 'credit') throw invoiceError('CREDIT_NOT_PAYABLE', 'credit notes are not payable');
   if (!['sent', 'overdue'].includes(invoice.status)) throw invoiceError('NOT_PAYABLE', `invoice ${id} is ${invoice.status}`);
   if (!Number.isInteger(amountCents) || amountCents <= 0) throw invoiceError('INVALID_AMOUNT', 'payment amount must be positive cents');
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw invoiceError('INVALID_DATE', `payment date '${date}' must be YYYY-MM-DD`);
+  }
+  {
+    const d = new Date(`${date}T00:00:00Z`);
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) {
+      throw invoiceError('INVALID_DATE', `payment date '${date}' is not a valid calendar date`);
+    }
+  }
 
   const remaining = invoice.gross_cents - invoice.paid_cents;
   if (amountCents > remaining) throw invoiceError('OVERPAYMENT', `payment ${amountCents} exceeds the outstanding ${remaining}`);

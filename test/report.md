@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-07 20:45:14 UTC — **✅ 368 passing · 0 failing (368 tests)**
+**Latest run:** 2026-08-07 20:54:54 UTC — **✅ 373 passing · 0 failing (373 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -218,7 +218,7 @@
 
 ### hardening.test.js — 
 
-57 passing · 0 failing
+62 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -277,6 +277,11 @@
     - ✅ MCP: journal honors limit with a truncation flag; year and limit are validated
     - ✅ addPayable rejects garbage or impossible dates (they would land in the payables register)
     - ✅ assets run/register reject garbage periods and as-of dates (no silent over-booking)
+    - ✅ import xaf skips a duplicate Boekstuknummer within the same file (parity with AuditFile layout)
+    - ✅ recurring run rejects a garbage as-of (it generated 120 draft runs before)
+    - ✅ year-end status rejects a non-YYYY year
+    - ✅ bank match auto validates --window-days (garbage errors, 0 stays 0)
+    - ✅ autoMatch FX tolerance matches the posting tolerance exactly (SQL integer-division drift)
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 

@@ -76,7 +76,8 @@ import {
   addPayable, createPaymentBatch, createPaymentBatchFromCsv,
   deletePaymentBatch, exportPaymentBatch, parseBatchCsv,
 } from '../src/payments/index.js';
-import { buildDepreciationTemplate, createTemplate, getTemplate, setTemplateStatus } from '../src/recurring/index.js';
+import { buildDepreciationTemplate, createTemplate, getTemplate, setTemplateStatus, runDue as recurringRunDue, previewDue } from '../src/recurring/index.js';
+import { yearEndStatus } from '../src/year-end/index.js';
 import { markFiled } from '../src/compliance/index.js';
 import { toCsv, writeXlsx } from '../src/report/export.js';
 
@@ -1343,4 +1344,73 @@ test('import xaf skips a duplicate Boekstuknummer within the same file (parity w
   const again = importXaf(db, { xmlText: xaf, actor: 'agent:test' });
   assert.equal(again.imported, 0);
   assert.equal(again.duplicates, 2);
+});
+
+// --- F16: recurring run + year-end status validate as-of/year ----------------
+
+test('recurring run rejects a garbage as-of (it generated 120 draft runs before)', () => {
+  createTemplate(db, {
+    name: 'Huur', kind: 'entry', frequency: 'monthly', dayOfPeriod: 1,
+    startDate: '2026-01-01', postings: [{ code: '4600', amountCents: 10000 }, { code: '1100', amountCents: -10000 }],
+    actor: 'agent:test',
+  });
+  assert.throws(() => recurringRunDue(db, { asOf: 'garbage', actor: 'agent:test' }), (e) => e.code === 'INVALID_DATE');
+  assert.throws(() => recurringRunDue(db, { asOf: '2026-02-30', actor: 'agent:test' }), (e) => e.code === 'INVALID_DATE');
+  assert.throws(() => previewDue(db, { asOf: 'garbage' }), (e) => e.code === 'INVALID_DATE');
+  // a valid as-of still generates exactly the due runs
+  const r = recurringRunDue(db, { asOf: '2026-03-01', actor: 'agent:test' });
+  assert.equal(r.templates[0].runs.length, 3, 'Jan, Feb, Mar');
+});
+
+test('year-end status rejects a non-YYYY year', () => {
+  assert.throws(() => yearEndStatus(db, { year: 'abc' }), (e) => e.code === 'INVALID_YEAR');
+  assert.throws(() => yearEndStatus(db, { year: 20261 }), (e) => e.code === 'INVALID_YEAR');
+  // a valid year still works
+  const s = yearEndStatus(db, { year: '2026' });
+  assert.equal(s.closed, false);
+});
+
+// --- F17: autoMatch window validation + FX tolerance parity ------------------
+
+test('bank match auto validates --window-days (garbage errors, 0 stays 0)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  const garbage = cli(dbPath, ['bank', 'match', 'auto', '--window-days', 'abc']);
+  assert.equal(garbage.code, 1);
+  assert.equal(garbage.out.error.code, 'INVALID_WINDOW');
+  // module boundary too
+  getOrCreateBankAccount(db, { iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100' });
+  assert.throws(() => autoMatch(db, { windowDays: NaN, actor: 'agent:test' }), (e) => e.code === 'INVALID_WINDOW');
+  // 0 stays 0 (the old parseInt(x) || 5 masked it) — empty result, not an error
+  const zero = cli(dbPath, ['bank', 'match', 'auto', '--window-days', '0']);
+  assert.equal(zero.code, 0);
+});
+
+test('autoMatch FX tolerance matches the posting tolerance exactly (SQL integer-division drift)', () => {
+  getOrCreateBankAccount(db, { iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100' });
+  const contact = addContact();
+  const inv = createInvoice(db, { contactId: contact.id, lines: ['1x Werk @ 123.45 @21'], date: '2026-01-10', actor: 'agent:test' });
+  finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+  const outstanding = getInvoice(db, inv.id).gross_cents; // 12345 + 21% = 14937
+  const tol = Math.round((outstanding * 200) / 10000);    // 299 (JS posting tolerance)
+  const payAmount = outstanding - tol;                    // exactly at the boundary
+  const r = importTransactions(db, {
+    iban: 'NL91ABNA0417164300',
+    transactions: [{ date: '2026-01-15', amount_cents: payAmount, counterparty: contact.name, description: `Betaling ${inv.invoice_number}` }],
+    actor: 'agent:test',
+  });
+  assert.equal(r.imported, 1);
+  // the SQL tolerance used integer division (298) and never proposed this
+  // payment; with the fix it matches the JS posting tolerance (299)
+  const dry = autoMatch(db, { dryRun: true, actor: 'agent:test' });
+  assert.ok(
+    dry.matched.some((x) => x.kind === 'invoice' && x.invoice_id === inv.id),
+    `payment at the ${tol}-cent boundary must be proposed (matches: ${JSON.stringify(dry.matched.map((m) => ({ kind: m.kind, invoice_id: m.invoice_id })))})`,
+  );
+  // and the real run settles the invoice + books the FX difference balanced
+  const real = autoMatch(db, { actor: 'agent:test' });
+  assert.equal(real.matched.length, 1);
+  const check = getInvoice(db, inv.id);
+  assert.equal(check.status, 'paid');
+  assert.equal(trialBalance(db, {}).balanced, true);
 });
