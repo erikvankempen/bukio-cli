@@ -79,6 +79,17 @@ export function importTransactions(db, { iban, transactions, name = null, accoun
   if (!Array.isArray(transactions) || transactions.length === 0) {
     throw bankError('EMPTY_STATEMENT', 'no transactions to import');
   }
+  // every transaction must carry a real calendar date — a garbage date would
+  // be stored silently, then fail at post time or vanish from every report
+  for (const t of transactions) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(t.date)) {
+      throw bankError('INVALID_DATE', `transaction date '${t.date}' must be YYYY-MM-DD`);
+    }
+    const d = new Date(`${t.date}T00:00:00Z`);
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== t.date) {
+      throw bankError('INVALID_DATE', `transaction date '${t.date}' is not a valid calendar date`);
+    }
+  }
   const account = getOrCreateBankAccount(db, { iban, name, accountCode });
   const insertTx = db.prepare(`
     INSERT INTO bank_transactions (bank_account_id, date, amount_cents, counterparty, description, iban_counter, hash)

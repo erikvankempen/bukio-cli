@@ -1062,4 +1062,24 @@ test('fetchEcbRate rejects a malformed date instead of throwing Invalid time val
   assert.equal(called, true);
 });
 
+test('importTransactions rejects garbage or impossible transaction dates', () => {
+  getOrCreateBankAccount(db, { iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100' });
+  const base = { iban: 'NL91ABNA0417164300', transactions: [{ date: '2026-01-10', amount_cents: -5000, counterparty: 'ACME', description: 'x' }], actor: 'agent:test' };
+  assert.throws(
+    () => importTransactions(db, { ...base, transactions: [{ ...base.transactions[0], date: 'garbage' }] }),
+    (err) => err.code === 'INVALID_DATE',
+  );
+  assert.throws(
+    () => importTransactions(db, { ...base, transactions: [{ ...base.transactions[0], date: '2026-02-30' }] }),
+    (err) => err.code === 'INVALID_DATE',
+  );
+  assert.throws(
+    () => importTransactions(db, { ...base, transactions: [{ ...base.transactions[0], date: '10-01-2026' }] }),
+    (err) => err.code === 'INVALID_DATE',
+  );
+  // valid still imports
+  const r = importTransactions(db, base);
+  assert.equal(r.imported, 1);
+});
+
 
