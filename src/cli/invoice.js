@@ -1,6 +1,6 @@
 // bukio invoice + contact — outgoing invoicing (Phase 3, FR3).
 import { writeFileSync } from 'node:fs';
-import { formatAmount } from '../core/money.js';
+import { formatAmount, parseAmount } from '../core/money.js';
 import {
   createContact, updateContact, createInvoice, creditInvoice, finalizeInvoice, getInvoice,
   invoiceReminders, listContacts, listInvoices, markPaid, parseLineSpec,
@@ -389,8 +389,10 @@ export function make(program) {
         try {
           const inv = getInvoice(db, opts.id);
           if (!inv) throw Object.assign(new Error(`invoice ${opts.id} does not exist`), { code: 'NOT_FOUND' });
+          // money is integer cents — parseAmount rejects '12,34' (Dutch comma
+          // would silently parse as 12.00 via parseFloat), '1e3' and garbage
           const amountCents = opts.amount
-            ? Math.round(parseFloat(opts.amount) * 100)
+            ? parseAmount(opts.amount)
             : inv.gross_cents - inv.paid_cents;
           const paid = markPaid(db, { id: opts.id, date: opts.date, amountCents, method: opts.method, actor: ctx.actor });
           output(ctx, { invoice: fmtInvoice(paid) }, (d) => {

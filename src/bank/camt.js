@@ -65,6 +65,10 @@ export function parseCamt053(xmlText) {
       if (amount == null) continue;
       const direction = String(ntry?.CdtDbtInd ?? '').toUpperCase();
       const date = isoDate(ntry?.BookgDt?.Dt ?? ntry?.ValDt?.Dt ?? ntry?.BookgDt?.Dbt);
+      // The bank's own entry reference (AcctSvcrRef) is unique per entry and
+      // goes into the dedup hash — two genuinely identical same-day payments
+      // (same amount, same counterparty, same description) must both import.
+      const bankRef = text(ntry?.AcctSvcrRef);
       const txDtls = ntry?.NtryDtls?.TxDtls;
       const txList = txDtls ? (Array.isArray(txDtls) ? txDtls : [txDtls]) : [{}];
 
@@ -85,6 +89,7 @@ export function parseCamt053(xmlText) {
           counterparty,
           description,
           iban_counter: ibanCounter ?? null,
+          bank_ref: bankRef ?? null,
           iban,
         });
       }

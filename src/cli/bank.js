@@ -121,8 +121,14 @@ export function make(program) {
             iban: opts.iban, transactions, name: opts.name ?? null,
             accountCode: opts.accountCode, actor: ctx.actor,
           });
+          // rows the CSV parser could not read (bad amount/date) — never
+          // silently dropped; the user must fix the file and re-import
+          if (transactions.skipped?.length) result.skipped = transactions.skipped;
           output(ctx, { ...result, dryRun: false }, (d) => {
             console.log(`imported ${d.imported} of ${d.total} transactions to ${d.iban} (${d.duplicates} duplicates skipped)`);
+            for (const s of d.skipped ?? []) {
+              console.log(`  ⚠ line ${s.line} skipped: ${s.reason} — fix the file and re-import`);
+            }
           });
         } finally {
           db.close();

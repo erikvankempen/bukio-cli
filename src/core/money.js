@@ -25,7 +25,9 @@ export function parseAmount(input) {
   const negative = s.startsWith('-');
   const [whole, frac = ''] = s.replace('-', '').split('.');
   const cents = parseInt(whole, 10) * 100 + parseInt(frac.padEnd(2, '0') || '0', 10);
-  return negative ? -cents : cents;
+  // '-0' must normalize to 0 (never -0 — strict equality and Object.is treat
+  // -0 differently, and it leaks into reports as '-0.00' in edge renderers)
+  return negative && cents !== 0 ? -cents : cents;
 }
 
 /** Format integer cents as "1234.56" (always 2 decimals, '-' prefix for negative). */

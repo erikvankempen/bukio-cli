@@ -115,7 +115,11 @@ export function expandVatPostings(db, specs) {
       });
       // The VAT leg carries the SAME sign as the tagged posting:
       // sales -> credit on 2500 (te betalen), purchases -> debit on 1500 (te vorderen).
-      vatLegs.push({ code: vatAccountCode, amountCents: vatAmount });
+      // A 0-rate code (@V vrijgesteld, @0 nultarief) computes a 0 leg — it is
+      // skipped entirely (createEntry rejects zero-amount postings); the
+      // tagged posting still carries vatAmountCents 0 so the readout reports
+      // the base (1c/2a).
+      if (vatAmount !== 0) vatLegs.push({ code: vatAccountCode, amountCents: vatAmount });
     } else {
       expanded.push({
         code: spec.code, amountCents: spec.amountCents, vatCode: null, vatAmountCents: null,
@@ -124,7 +128,23 @@ export function expandVatPostings(db, specs) {
     }
   }
 
-  return [...expanded, ...vatLegs];
+  // Rounding-drift absorption: with FX conversion every leg rounds
+  // independently, so for some amounts net + vat != gross by a cent or two —
+  // the entry would come out UNBALANCED. The drift is absorbed into the
+  // largest UNTAGGED user leg (the classic rounding-adjustment rule); the
+  // auto-added VAT legs are excluded (their amounts are derived, not chosen).
+  const result = [...expanded, ...vatLegs];
+  const sum = result.reduce((s, p) => s + p.amountCents, 0);
+  if (sum !== 0) {
+    const userLegs = result.slice(0, expanded.length);
+    const candidates = userLegs.filter((p) => !p.vatCode);
+    if (candidates.length) {
+      const target = candidates.reduce((a, b) => (Math.abs(b.amountCents) > Math.abs(a.amountCents) ? b : a));
+      target.amountCents -= sum;
+    }
+  }
+
+  return result;
 }
 
 /** Book a VAT-aware entry via the core engine. */
@@ -155,6 +175,9 @@ export function parsePeriod(period) {
   const m = period.match(/^(\d{4})-(\d{2})$/);
   if (m) {
     const [, y, mn] = m;
+    if (Number(mn) < 1 || Number(mn) > 12) {
+      throw vatError('INVALID_PERIOD', `period '${period}' must be YYYY-Qn or YYYY-MM (month 01-12)`);
+    }
     const from = `${y}-${mn}-01`;
     const to = new Date(Date.UTC(Number(y), Number(mn), 0)).toISOString().slice(0, 10);
     return { from, to, label: period };

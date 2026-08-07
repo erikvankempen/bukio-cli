@@ -7,7 +7,10 @@ import { paymentFromBank } from '../invoice/index.js';
 import { record } from '../audit/index.js';
 
 function txHash(iban, tx) {
-  const raw = [iban, tx.date, tx.amount_cents, tx.counterparty ?? '', tx.description ?? ''].join('|');
+  // bank_ref (CAMT AcctSvcrRef) is included so two genuinely identical
+  // same-day payments (same amount/counterparty/description) each import —
+  // without it the second is wrongly deduped as a duplicate.
+  const raw = [iban, tx.date, tx.amount_cents, tx.counterparty ?? '', tx.description ?? '', tx.bank_ref ?? ''].join('|');
   return createHash('sha256').update(raw).digest('hex');
 }
 

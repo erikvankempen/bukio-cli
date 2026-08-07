@@ -465,7 +465,10 @@ export function disposeAsset(db, {
     postings.push({ code: cumLegCode, amountCents: totalCumDep });
   }
   postings.push({ code: asset.asset_account_code, amountCents: -asset.purchase_price_cents });
-  postings.push({ code: resultAccountRow.code, amountCents: -result }); // +winst credit, -verlies debit
+  // the result leg is skipped when it would be zero — createEntry rejects
+  // zero-amount postings, and disposing exactly at book value (or a fully
+  // depreciated asset with no proceeds) would otherwise crash
+  if (result !== 0) postings.push({ code: resultAccountRow.code, amountCents: -result }); // +winst credit, -verlies debit
 
   if (dryRun) {
     return {

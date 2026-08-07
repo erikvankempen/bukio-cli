@@ -98,6 +98,7 @@ export function parseBankCsv(csvText, { defaultIban = null } = {}) {
   }
 
   const transactions = [];
+  const skipped = [];
   for (let i = 1; i < lines.length; i += 1) {
     const row = splitLine(lines[i], delimiter);
     if (row.length === 1 && row[0].trim() === '') continue;
@@ -105,7 +106,11 @@ export function parseBankCsv(csvText, { defaultIban = null } = {}) {
 
     const date = get('date').slice(0, 10);
     const amount = parseBankAmount(get('amount'));
-    if (!date || amount == null) continue; // skip unparseable rows
+    if (!date || amount == null) {
+      // never drop money silently — report the row so the user can fix the file
+      skipped.push({ line: i + 1, reason: !date ? 'missing/invalid date' : `unparseable amount '${get('amount')}'` });
+      continue;
+    }
 
     let signedAmount = amount;
     const afbij = get('afbij').toLowerCase();
@@ -126,5 +131,8 @@ export function parseBankCsv(csvText, { defaultIban = null } = {}) {
   if (transactions.length === 0) {
     throw bankError('EMPTY_STATEMENT', 'no parseable transactions found in the CSV');
   }
+  // skipped-row visibility: same array shape as before, with the skipped
+  // rows attached (the CLI surfaces them as a warning)
+  transactions.skipped = skipped;
   return transactions;
 }

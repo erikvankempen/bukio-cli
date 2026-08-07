@@ -383,6 +383,11 @@ export function buildDepreciationTemplate(db, {
   const monthly = Math.round(depreciable / lifeMonths);
   if (monthly === 0) throw recurringError('INVALID_LIFE', 'life-months too long: monthly depreciation rounds to zero');
   const final = depreciable - monthly * (lifeMonths - 1);
+  // the final run books `final` — a non-positive final would book zero or a
+  // negative (reversing) depreciation leg; reject the template instead
+  if (final <= 0) {
+    throw recurringError('INVALID_LIFE', `life-months too long: the final run would be ${final} cents — shorten the life or raise the cost`);
+  }
   const normalPostings = [
     { code: expenseCode, amountCents: monthly },
     { code: assetCode, amountCents: -monthly },

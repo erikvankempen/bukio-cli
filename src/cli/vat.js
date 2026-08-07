@@ -20,7 +20,7 @@ function fmtEntry(entry) {
     postings: entry.postings.map((p) => ({
       account_code: p.account_code, account_name: p.account_name,
       amount_cents: p.amount_cents, amount: formatAmount(p.amount_cents),
-      vat_code: p.vat_code_id ? undefined : null,
+      vat_code: p.vat_code ?? null,
       vat_amount_cents: p.vat_amount_cents,
       vat_amount: p.vat_amount_cents == null ? null : formatAmount(p.vat_amount_cents),
     })),

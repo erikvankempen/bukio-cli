@@ -202,6 +202,12 @@ export function createInvoice(db, {
   const contact = getContact(db, contactId);
   if (!contact) throw invoiceError('CONTACT_NOT_FOUND', `contact ${contactId} does not exist`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw invoiceError('INVALID_DATE', `date '${date}' must be YYYY-MM-DD`);
+  {
+    const d = new Date(`${date}T00:00:00Z`);
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) {
+      throw invoiceError('INVALID_DATE', `date '${date}' is not a valid calendar date`);
+    }
+  }
   if (!Array.isArray(lines) || lines.length === 0) throw invoiceError('NO_LINES', 'an invoice needs at least one line');
 
   const vatOn = isVatEnabled(db);

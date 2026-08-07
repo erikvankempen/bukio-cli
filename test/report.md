@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-07 09:57:23 UTC — **✅ 311 passing · 0 failing (311 tests)**
+**Latest run:** 2026-08-07 16:26:59 UTC — **✅ 331 passing · 0 failing (331 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -192,6 +192,31 @@
     - ✅ audit: csv format exports rows with headers
     - ✅ audit: xlsx format requires --out and writes a workbook
     - ✅ export xaf: unknown-year-only drafts → EXPORT_EMPTY_YEAR via CLI
+
+### hardening.test.js — 
+
+20 passing · 0 failing
+
+    - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
+    - ✅ parsePeriod rejects out-of-range months
+    - ✅ dispose at exactly book value (result 0) books a balanced entry
+    - ✅ dispose a fully-depreciated asset with no proceeds
+    - ✅ invoice create rejects impossible calendar dates
+    - ✅ two identical same-day CAMT entries both import (distinct AcctSvcrRef)
+    - ✅ bank CSV surfaces skipped rows instead of dropping them silently
+    - ✅ payments batch CSV without a header parses positionally
+    - ✅ buildDepreciationTemplate rejects a non-positive final run
+    - ✅ vat book with @V (vrijgesteld) and @0 (nultarief) books without a zero leg
+    - ✅ vat book with @R (verlegd) still books the 21% due leg
+    - ✅ FX+VAT booking absorbs rounding drift (rate 1.0001, 41.33 USD @21)
+    - ✅ FX+VAT: a range of amounts never trips UNBALANCED
+    - ✅ CLI: vat book --json reports the vat_code on tagged postings
+    - ✅ CLI: invoice pay rejects non-international amounts
+    - ✅ entry with the same account on both sides books the net
+    - ✅ reversal of an FX entry negates the fx amounts
+    - ✅ invoice finalize with a 0% line books a tagged zero-vat posting
+    - ✅ parseAmount boundaries: 1 decimal, zero, negatives, large values
+    - ✅ obReadout period with a year boundary stays within the period
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 

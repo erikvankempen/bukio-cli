@@ -188,16 +188,21 @@ export function reverseEntry(db, { id, actor = 'human', reason = null }) {
     'INSERT INTO journal_entries (date, description, source, source_ref, state, reversed_from_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
   );
   const insertPosting = db.prepare(
-    'INSERT INTO postings (entry_id, account_id, amount_cents, fx_currency, fx_amount_cents) VALUES (?, ?, ?, ?, ?)',
+    'INSERT INTO postings (entry_id, account_id, amount_cents, vat_code_id, vat_amount_cents, fx_currency, fx_amount_cents) VALUES (?, ?, ?, ?, ?, ?, ?)',
   );
 
   const tx = db.transaction(() => {
     // Create the contra-entry as draft, add its (negated) postings, then post
     // it through the normal validated transition (count >= 2, sum == 0).
+    // VAT fields are carried over (negated) so the OB readout cancels the
+    // original entry — a reversal without vat_code_id would leave the
+    // readout counting VAT that is no longer due.
     const info = insertEntry.run(entry.date, description, 'reversal', null, 'draft', id, actor);
     const reversalId = info.lastInsertRowid;
     for (const p of entry.postings) {
-      insertPosting.run(reversalId, p.account_id, -p.amount_cents, p.fx_currency, p.fx_amount_cents == null ? null : -p.fx_amount_cents);
+      insertPosting.run(reversalId, p.account_id, -p.amount_cents,
+        p.vat_code_id, p.vat_amount_cents == null ? null : -p.vat_amount_cents,
+        p.fx_currency, p.fx_amount_cents == null ? null : -p.fx_amount_cents);
     }
     db.prepare("UPDATE journal_entries SET state = 'posted', posted_at = ? WHERE id = ?")
       .run(nowIso(), reversalId);
@@ -239,8 +244,10 @@ export function getEntry(db, id) {
   entry.postings = db.prepare(
     `SELECT p.id, p.account_id, p.amount_cents, p.document_id, p.vat_code_id, p.vat_amount_cents,
             p.fx_currency, p.fx_amount_cents,
-            a.code AS account_code, a.name AS account_name, a.type AS account_type
+            a.code AS account_code, a.name AS account_name, a.type AS account_type,
+            vc.code AS vat_code
      FROM postings p JOIN accounts a ON a.id = p.account_id
+     LEFT JOIN vat_codes vc ON vc.id = p.vat_code_id
      WHERE p.entry_id = ? ORDER BY p.id`,
   ).all(id);
   // surface EUR amount for FX postings

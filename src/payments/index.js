@@ -215,7 +215,11 @@ export function parseBatchCsv(csvText) {
     ? Object.fromEntries(header.map((h, i) => [h, i]))
     : null;
   const col = (row, key) => {
-    if (!idx) return null;
+    if (!idx) {
+      // headerless CSV: fixed positional layout contact,amount[,reference]
+      const pos = { contact: 0, amount: 1, reference: 2 };
+      return row[pos[key]] ?? null;
+    }
     for (const alias of CSV_HEADER_ALIASES[key]) {
       if (idx[alias] != null) return row[idx[alias]];
     }

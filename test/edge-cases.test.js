@@ -121,7 +121,12 @@ test('invoice: 0% and exempt (V) lines book without VAT', () => {
   const inv = createInvoice(db, { contactId: 1, date: '2026-07-10', lines: ['1x Export @ 500.00 @0', '1x Vrijstelling @ 100.00 @V'] });
   finalizeInvoice(db, { id: inv.id });
   const e = getEntry(db, 1);
-  assert.equal(e.postings.filter((p) => p.vat_code).length, 0);
+  // 0%/V lines are TAGGED (vat_code surfaced since the 2026-08-07 getEntry
+  // join) with a zero vat amount — that is what makes the OB readout report
+  // the base in 1c without any vat due in 5a
+  const tagged = e.postings.filter((p) => p.vat_code);
+  assert.equal(tagged.length, 2);
+  assert.ok(tagged.every((p) => p.vat_amount_cents === 0));
   assert.equal(e.postings.find((p) => p.account_code === '1200').amount_cents, 60000);
   const omzet = e.postings.filter((p) => p.account_code === '8000').reduce((s, p) => s + p.amount_cents, 0);
   assert.equal(omzet, -60000);
