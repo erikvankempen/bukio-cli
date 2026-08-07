@@ -1,6 +1,6 @@
 <div align="center">
 
-<a href="https://agentic.bukio.nl"><img src="https://agentic.bukio.nl/assets/logo-light.svg" alt="Bukio" width="340"></a>
+<a href="https://agentic.bukio.nl"><img src="https://agentic.bukio.nl/assets/logo-light.svg?v=2" alt="Bukio" width="340"></a>
 
 **Agent-first double-entry bookkeeping for Dutch SMEs.**
 
