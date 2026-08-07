@@ -1082,4 +1082,23 @@ test('importTransactions rejects garbage or impossible transaction dates', () =>
   assert.equal(r.imported, 1);
 });
 
+test('createPaymentBatch rejects a garbage batch date (it would land in pain.001)', () => {
+  const company = db.prepare('SELECT * FROM company').get();
+  if (!company) {
+    db.prepare("INSERT INTO company (name, kvk, legal_form) VALUES ('Test BV', '12345678', 'bv')").run();
+  }
+  db.prepare("UPDATE company SET iban = 'NL91ABNA0417164300' WHERE id = 1").run();
+  assert.throws(
+    () => createPaymentBatch(db, { date: 'garbage', lines: [{ name: 'ACME', iban: 'NL86INGB0002445588', amountCents: 1000 }], actor: 'agent:test' }),
+    (err) => err.code === 'INVALID_DATE',
+  );
+  assert.throws(
+    () => createPaymentBatch(db, { date: '2026-02-30', lines: [{ name: 'ACME', iban: 'NL86INGB0002445588', amountCents: 1000 }], actor: 'agent:test' }),
+    (err) => err.code === 'INVALID_DATE',
+  );
+  // valid still works
+  const b = createPaymentBatch(db, { date: '2026-03-05', lines: [{ name: 'ACME', iban: 'NL86INGB0002445588', amountCents: 1000 }], actor: 'agent:test' });
+  assert.equal(b.batch_date, '2026-03-05');
+});
+
 

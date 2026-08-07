@@ -125,6 +125,13 @@ export function createPaymentBatch(db, {
     throw paymentsError('COMPANY_INCOMPLETE', 'no valid company IBAN — set one with: bukio company update --iban <IBAN>');
   }
   const batchDate = date ?? new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(batchDate)) {
+    throw paymentsError('INVALID_DATE', `batch date '${batchDate}' must be YYYY-MM-DD`);
+  }
+  const bd = new Date(`${batchDate}T00:00:00Z`);
+  if (Number.isNaN(bd.getTime()) || bd.toISOString().slice(0, 10) !== batchDate) {
+    throw paymentsError('INVALID_DATE', `batch date '${batchDate}' is not a valid calendar date`);
+  }
 
   const items = [];
   const errors = [];
