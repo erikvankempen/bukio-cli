@@ -92,9 +92,9 @@ test('importChartCsv: quoted values with commas parse', () => {
 
 test('listAccounts: type filter and includeInactive', () => {
   assert.equal(listAccounts(db, { type: 'income' }).length, 2);
-  assert.equal(listAccounts(db, { type: 'expense' }).length, 12);
+  assert.equal(listAccounts(db, { type: 'expense' }).length, 13); // incl. 4840 Koersverschillen
   createAccount(db, { code: '5000', name: 'x', type: 'expense', normalBalance: 'debit' });
   deactivateAccount(db, '5000');
-  assert.equal(listAccounts(db, { type: 'expense' }).length, 12); // inactive hidden
-  assert.equal(listAccounts(db, { type: 'expense', includeInactive: true }).length, 13);
+  assert.equal(listAccounts(db, { type: 'expense' }).length, 13); // inactive hidden
+  assert.equal(listAccounts(db, { type: 'expense', includeInactive: true }).length, 14);
 });

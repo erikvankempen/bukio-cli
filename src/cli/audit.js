@@ -54,6 +54,7 @@ export function make(program) {
           if (format === 'csv') {
             const csv = toCsv(rows.map(auditRow), auditColumns());
             if (opts.out) {
+              mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
               writeFileSync(opts.out, csv);
               console.log(`wrote ${opts.out}`);
             } else {

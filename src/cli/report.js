@@ -26,6 +26,7 @@ async function emitReport(ctx, opts, data, { csvColumns, csvRows, sheets, render
   if (format === 'csv') {
     const csv = toCsv(csvRows(data), csvColumns);
     if (opts.out) {
+      mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
       writeFileSync(opts.out, csv);
       console.log(`wrote ${opts.out}`);
     } else {

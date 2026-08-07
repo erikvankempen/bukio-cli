@@ -169,8 +169,7 @@ export function make(program) {
           db.close();
         }
       } catch (err) {
-        fail(ctx, err);
-        if (err.details) renderErrors({ error: err });
+        fail(ctx, err); // fail() already prints per-line details in human mode
       }
     });
 }

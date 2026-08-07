@@ -139,9 +139,10 @@ async function addAction(ctx, opts) {
 
   if (ctx.dryRun) {
     const db = existsSync(ctx.dbPath) ? openDb(ctx.dbPath) : null;
+    let converted = postings;
     let resolved = null;
     try {
-      const converted = await applyFx(db, postings, { ...opts, actor: ctx.actor });
+      converted = await applyFx(db, postings, { ...opts, actor: ctx.actor });
       if (db) {
         resolved = resolvePostings(db, converted).map((p) => ({
           code: p.code, amount_cents: p.amountCents, amount: formatAmount(p.amountCents),
@@ -153,7 +154,9 @@ async function addAction(ctx, opts) {
     } finally {
       if (db) db.close();
     }
-    const sum = postings.reduce((s, p) => s + p.amountCents, 0);
+    // the displayed sum must match the displayed (EUR) postings — for FX
+    // entries the raw specs sum in the foreign currency
+    const sum = converted.reduce((s, p) => s + p.amountCents, 0);
     output(ctx, {
       action: 'create journal entry',
       date: opts.date,

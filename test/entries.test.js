@@ -14,10 +14,12 @@ beforeEach(() => {
   seedDefaultChart(db);
 });
 
-test('default chart is seeded with 28 VAT-free accounts', () => {
+test('default chart is seeded with 29 accounts (incl. 4840 Koersverschillen)', () => {
   const accounts = listAccounts(db);
-  assert.equal(accounts.length, 28);
+  assert.equal(accounts.length, 29);
   assert.equal(accounts.some((a) => a.code === '1100' && a.type === 'asset'), true);
+  // 4840 Koersverschillen (FX differences on invoice payments, 2026-08-07)
+  assert.equal(accounts.some((a) => a.code === '4840' && a.rgs_code === 'WFBE.84'), true);
   assert.equal(accounts.some((a) => a.code === '8000' && a.type === 'income'), true);
   assert.equal(accounts.every((a) => a.rgs_code), true); // all RGS-mapped
   // VAT-agnostic: no btw accounts in the core chart

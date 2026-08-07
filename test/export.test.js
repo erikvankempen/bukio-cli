@@ -70,7 +70,7 @@ test('export xaf: writes a 4.0 file with header, chart and one Mutatie per poste
   assert.equal(res.ok, true);
   assert.equal(res.year, '2026');
   assert.equal(res.company.name, 'Test Coaching'); // default seeded chart has no company? see below
-  assert.equal(res.rekeningen, 28);
+  assert.equal(res.rekeningen, 29);
   assert.equal(res.mutaties, 3); // draft excluded
 
   const xml = readFileSync(out, 'utf8');

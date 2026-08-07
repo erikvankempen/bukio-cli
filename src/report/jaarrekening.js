@@ -35,7 +35,9 @@ const PNL_LINES = [
   { rgs: 'WKPR.70', label: 'Inkoopwaarde van de omzet' },
   { rgs: 'WBED.42', label: 'Overige bedrijfskosten' },
   { rgs: 'WAFS.41', label: 'Afschrijvingen' },
-  { rgs: 'WFIN.50', label: 'Financiële baten en lasten' },
+  // the chart system tags financiële baten en lasten as WFBE.84 (rgsLabel);
+  // WBEL.60 is kept for imported charts that use the official code
+  { rgs: 'WFBE.84', label: 'Financiële baten en lasten' },
   { rgs: 'WBEL.60', label: 'Belastingen' },
 ];
 

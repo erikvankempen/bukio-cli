@@ -76,7 +76,7 @@ function toBoekingen(postings) {
  * file; records an `export.xaf` audit row. Throws EXPORT_EMPTY_YEAR when the
  * year has no posted entries.
  */
-export function exportXaf(db, { year, out, actor = 'human' }) {
+export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get() ?? null;
   if (!company) {
     const e = new Error('no company in this database — run `bukio init` first');
@@ -112,6 +112,15 @@ export function exportXaf(db, { year, out, actor = 'human' }) {
     const e = new Error(`no posted entries in fiscal year ${year} — nothing to export`);
     e.code = 'EXPORT_EMPTY_YEAR';
     throw e;
+  }
+
+  if (dryRun) {
+    return {
+      ok: true, path: out, year, dryRun: true,
+      company: { name: company.name, kvk: company.kvk },
+      rekeningen: accounts.length,
+      mutaties: posted.filter((e) => (byEntry.get(e.id) ?? []).length > 0).length,
+    };
   }
 
   const parts = [];

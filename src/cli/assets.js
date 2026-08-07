@@ -7,6 +7,7 @@ import {
   runDue, register, disposeAsset,
 } from '../assets/index.js';
 import { formatAmount } from '../core/money.js';
+import { parseImportAmount } from '../import/index.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 import { toCsv, writeXlsx } from '../report/export.js';
 import { record } from '../audit/index.js';
@@ -66,7 +67,9 @@ export function make(program) {
             lifeMonths: Number(opts.lifeMonths), residualBp: Number(opts.residualBp),
           };
           if (ctx.dryRun) {
-            output(ctx, { ...plan, dryRun: true }, (d) => console.log(`plan: scheme '${d.name}' — ${d.method}, ${d.lifeMonths} months, residual ${d.residualBp}bp (dry run)`));
+            // validation runs in dry-run too (createScheme checks life/residual bounds)
+            const checked = createScheme(db, { ...plan, actor: ctx.actor, dryRun: true });
+            output(ctx, { ...checked, dryRun: true }, (d) => console.log(`plan: scheme '${d.name}' — ${d.method}, ${d.life_months} months, residual ${d.residual_bp}bp (dry run)`));
             return;
           }
           const s = createScheme(db, { ...plan, actor: ctx.actor });
@@ -133,12 +136,12 @@ export function make(program) {
             schemeId: opts.scheme ? Number(opts.scheme) : null,
             method: opts.method, lifeMonths: opts.lifeMonths ? Number(opts.lifeMonths) : null,
             residualBp: opts.residualBp !== undefined ? Number(opts.residualBp) : null,
-            residualCents: opts.residual !== undefined ? Math.round(parseFloat(opts.residual) * 100) : null,
+            residualCents: opts.residual !== undefined ? parseImportAmount(opts.residual) : null,
             purchaseDate: opts.purchaseDate,
-            purchasePriceCents: Math.round(parseFloat(opts.purchasePrice) * 100),
+            purchasePriceCents: parseImportAmount(opts.purchasePrice),
             depreciationStartDate: opts.depreciationStart,
             recognitionDate: opts.recognitionDate,
-            cumDepAtRecognitionCents: Math.round(parseFloat(opts.cumDep ?? '0') * 100),
+            cumDepAtRecognitionCents: parseImportAmount(opts.cumDep ?? '0'),
             assetAccount: opts.assetAccount, cumDepAccount: opts.cumDepAccount,
             expenseAccount: opts.expenseAccount,
             entryId: opts.entryId ? Number(opts.entryId) : null,
@@ -281,9 +284,18 @@ export function make(program) {
           const data = register(db, { asOf: opts.asOf, actor: ctx.actor });
           const format = opts.format;
           if (format === 'csv') {
-            const csv = toCsv(sheets(data)[0].rows, sheets(data)[0].header);
-            if (opts.out) { writeFileSync(opts.out, csv); console.log(`wrote ${opts.out}`); }
-            else process.stdout.write(csv);
+            const totaalRow = {
+              id: '', name: 'TOTAAL', category: '', status: '',
+              purchase_date: '', purchase_price: formatAmount(data.totals.purchase_price_cents),
+              total_cum_dep: formatAmount(data.totals.total_cum_dep_cents),
+              book_value: formatAmount(data.totals.book_value_cents),
+            };
+            const csv = toCsv([...data.assets.map(fmtAssetRow), totaalRow], ASSET_COLUMNS);
+            if (opts.out) {
+              mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
+              writeFileSync(opts.out, csv);
+              console.log(`wrote ${opts.out}`);
+            } else process.stdout.write(csv);
             return;
           }
           if (format === 'xlsx') {
@@ -323,7 +335,7 @@ export function make(program) {
         try {
           const result = disposeAsset(db, {
             id: Number(opts.id), date: opts.date,
-            proceedsCents: Math.round(parseFloat(opts.proceeds) * 100),
+            proceedsCents: parseImportAmount(opts.proceeds),
             bankAccount: opts.bankAccount, resultAccount: opts.resultAccount,
             note: opts.note, actor: ctx.actor, dryRun: ctx.dryRun,
           });
@@ -351,6 +363,7 @@ export function make(program) {
     .command('pause')
     .description('pause depreciation for an asset (status -> paused)')
     .requiredOption('--id <n>', 'asset id')
+    .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
@@ -359,6 +372,13 @@ export function make(program) {
           const asset = getAsset(db, Number(opts.id));
           if (!asset) throw Object.assign(new Error(`asset ${opts.id} does not exist`), { code: 'ASSET_NOT_FOUND' });
           if (asset.status !== 'active') throw Object.assign(new Error(`asset ${opts.id} is ${asset.status}, only active assets can be paused`), { code: 'INVALID_STATUS' });
+          if (ctx.dryRun) {
+            output(ctx, { action: 'assets.pause', asset_id: asset.id, name: asset.name, from: asset.status, to: 'paused', dryRun: true }, (d) => {
+              console.log(`plan: pause asset #${d.asset_id} '${d.name}' (${d.from} -> ${d.to})`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
           db.prepare("UPDATE assets SET status = 'paused' WHERE id = ?").run(asset.id);
           record(db, { actor: ctx.actor, action: 'assets.pause', command: 'assets pause', args: { asset_id: asset.id }, outcome: 'ok' });
           output(ctx, { asset: { id: asset.id, name: asset.name, status: 'paused' } }, (d) => console.log(`asset #${d.asset.id} '${d.asset.name}' paused`));
@@ -374,6 +394,7 @@ export function make(program) {
     .command('resume')
     .description('resume depreciation for an asset (status -> active)')
     .requiredOption('--id <n>', 'asset id')
+    .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
@@ -382,6 +403,13 @@ export function make(program) {
           const asset = getAsset(db, Number(opts.id));
           if (!asset) throw Object.assign(new Error(`asset ${opts.id} does not exist`), { code: 'ASSET_NOT_FOUND' });
           if (asset.status !== 'paused') throw Object.assign(new Error(`asset ${opts.id} is ${asset.status}, only paused assets can be resumed`), { code: 'INVALID_STATUS' });
+          if (ctx.dryRun) {
+            output(ctx, { action: 'assets.resume', asset_id: asset.id, name: asset.name, from: asset.status, to: 'active', dryRun: true }, (d) => {
+              console.log(`plan: resume asset #${d.asset_id} '${d.name}' (${d.from} -> ${d.to})`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
           db.prepare("UPDATE assets SET status = 'active' WHERE id = ?").run(asset.id);
           record(db, { actor: ctx.actor, action: 'assets.resume', command: 'assets resume', args: { asset_id: asset.id }, outcome: 'ok' });
           output(ctx, { asset: { id: asset.id, name: asset.name, status: 'active' } }, (d) => console.log(`asset #${d.asset.id} '${d.asset.name}' resumed`));

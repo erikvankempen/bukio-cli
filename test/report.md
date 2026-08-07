@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-07 17:18:20 UTC — **✅ 342 passing · 0 failing (342 tests)**
+**Latest run:** 2026-08-07 18:54:24 UTC — **✅ 356 passing · 0 failing (356 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -161,7 +161,7 @@
 
 17 passing · 0 failing
 
-    - ✅ default chart is seeded with 28 VAT-free accounts
+    - ✅ default chart is seeded with 29 accounts (incl. 4840 Koersverschillen)
     - ✅ createEntry: balanced 2-posting entry lands as draft
     - ✅ createEntry: agent actor is recorded
     - ✅ createEntry: rejects unbalanced postings
@@ -195,7 +195,7 @@
 
 ### hardening.test.js — 
 
-31 passing · 0 failing
+45 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -228,6 +228,20 @@
     - ✅ invoice finalize with a 0% line books a tagged zero-vat posting
     - ✅ parseAmount boundaries: 1 decimal, zero, negatives, large values
     - ✅ obReadout period with a year boundary stays within the period
+    - ✅ CLI: import xaf failure prints cleanly (no renderErrors crash)
+    - ✅ CLI: assets register --format csv has a header row and totals
+    - ✅ CLI: recurring run --dry-run renders plans, not undefined ids
+    - ✅ CLI: export xaf --dry-run writes nothing; scheme/depreciation dry-runs validate
+    - ✅ bank ignore dry-run leaves the transaction untouched
+    - ✅ assets pause dry-run leaves the status unchanged
+    - ✅ autoMatch books a small FX difference on an invoice payment to 4840
+    - ✅ paymentFromBank with an FX gain books a credit on 4840
+    - ✅ a difference beyond the sanity bound is not an FX move — rejected
+    - ✅ 4840 Koersverschillen is created on demand for pre-2026-08-07 databases
+    - ✅ paymentFromBank is atomic: a failing entry leaves no payment behind
+    - ✅ the FX sanity floor is 25 cents — a 10% short payment on a €10 invoice is rejected
+    - ✅ 4840 creation on demand is audited
+    - ✅ postFromTransaction is atomic: a failing post leaves no draft or reconciliation
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 

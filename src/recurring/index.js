@@ -371,7 +371,7 @@ export function previewDue(db, { asOf = null, templateId = null } = {}) {
  */
 export function buildDepreciationTemplate(db, {
   name, assetCode = '1800', expenseCode = '4600', costCents, residualCents = 0,
-  lifeMonths, startDate, description = null, actor = 'human',
+  lifeMonths, startDate, description = null, actor = 'human', dryRun = false,
 }) {
   if (!Number.isInteger(costCents) || costCents <= 0) {
     throw recurringError('INVALID_COST', 'cost must be a positive amount in cents');
@@ -390,6 +390,15 @@ export function buildDepreciationTemplate(db, {
   // negative (reversing) depreciation leg; reject the template instead
   if (final <= 0) {
     throw recurringError('INVALID_LIFE', `life-months too long: the final run would be ${final} cents — shorten the life or raise the cost`);
+  }
+  if (dryRun) {
+    return {
+      template: null,
+      monthly_cents: monthly, final_cents: final,
+      total_cents: monthly * (lifeMonths - 1) + final,
+      monthly: (monthly / 100).toFixed(2), final: (final / 100).toFixed(2),
+      dryRun: true,
+    };
   }
   const normalPostings = [
     { code: expenseCode, amountCents: monthly },

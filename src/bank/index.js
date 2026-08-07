@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { bankError } from './camt.js';
 import { getAccountByCode } from '../core/accounts.js';
 import { createEntry, getEntry, postEntry } from '../core/entries.js';
-import { paymentFromBank } from '../invoice/index.js';
+import { paymentFromBank, FX_MATCH_TOLERANCE_BP, FX_MATCH_FLOOR_CENTS } from '../invoice/index.js';
 import { record } from '../audit/index.js';
 
 function txHash(iban, tx) {
@@ -133,9 +133,12 @@ export function getTransaction(db, id) {
   `).get(id) ?? null;
 }
 
-export function setTransactionState(db, { id, state, actor = 'human' }) {
+export function setTransactionState(db, { id, state, actor = 'human', dryRun = false }) {
   const txRow = getTransaction(db, id);
   if (!txRow) throw bankError('NOT_FOUND', `bank transaction ${id} does not exist`);
+  if (dryRun) {
+    return { action: `bank.${state}`, id, from: txRow.state, to: state, dryRun: true };
+  }
   db.prepare('UPDATE bank_transactions SET state = ? WHERE id = ?').run(state, id);
   record(db, { actor, action: `bank.${state}`, command: 'bank match', args: { id }, outcome: 'ok' });
   return getTransaction(db, id);
@@ -159,16 +162,18 @@ export function linkTransaction(db, { txId, entryId, method = 'manual', confiden
     };
   }
 
-  db.prepare(`
-    INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
-    VALUES (?, 'entry', ?, ?, ?, ?)
-  `).run(txId, entryId, method, confidence, actor);
-  db.prepare("UPDATE bank_transactions SET state = 'matched' WHERE id = ?").run(txId);
-  record(db, {
-    actor, action: 'bank.link', command: 'bank match --link',
-    args: { txId, entryId, method, confidence }, outcome: 'ok', entryIds: [entryId],
-  });
-  return getTransaction(db, txId);
+  return db.transaction(() => {
+    db.prepare(`
+      INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
+      VALUES (?, 'entry', ?, ?, ?, ?)
+    `).run(txId, entryId, method, confidence, actor);
+    db.prepare("UPDATE bank_transactions SET state = 'matched' WHERE id = ?").run(txId);
+    record(db, {
+      actor, action: 'bank.link', command: 'bank match --link',
+      args: { txId, entryId, method, confidence }, outcome: 'ok', entryIds: [entryId],
+    });
+    return getTransaction(db, txId);
+  })();
 }
 
 /** Post a new entry from an unmatched transaction (bank leg + counter leg). */
@@ -183,29 +188,31 @@ export function postFromTransaction(db, { txId, accountCode, actor = 'human', po
   }
 
   const description = txRow.description || txRow.counterparty || `Banktransactie ${txId}`;
-  const entry = createEntry(db, {
-    date: txRow.date,
-    description,
-    source: 'bank',
-    sourceRef: `tx:${txId}`,
-    actor,
-    postings: [
-      { code: txRow.account_code, amountCents: txRow.amount_cents },
-      { code: accountCode, amountCents: -txRow.amount_cents },
-    ],
-  });
-  const posted = post ? postEntry(db, { id: entry.id, actor }) : entry;
-  const method = actor.startsWith('agent') ? 'agent' : 'manual';
-  db.prepare(`
-    INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
-    VALUES (?, 'entry', ?, ?, 1.0, ?)
-  `).run(txId, posted.id, method, actor);
-  db.prepare("UPDATE bank_transactions SET state = 'matched' WHERE id = ?").run(txId);
-  record(db, {
-    actor, action: 'bank.post', command: 'bank match --post',
-    args: { txId, accountCode }, outcome: 'ok', entryIds: [posted.id],
-  });
-  return { transaction: getTransaction(db, txId), entry: posted };
+  return db.transaction(() => {
+    const entry = createEntry(db, {
+      date: txRow.date,
+      description,
+      source: 'bank',
+      sourceRef: `tx:${txId}`,
+      actor,
+      postings: [
+        { code: txRow.account_code, amountCents: txRow.amount_cents },
+        { code: accountCode, amountCents: -txRow.amount_cents },
+      ],
+    });
+    const posted = post ? postEntry(db, { id: entry.id, actor }) : entry;
+    const method = actor.startsWith('agent') ? 'agent' : 'manual';
+    db.prepare(`
+      INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
+      VALUES (?, 'entry', ?, ?, 1.0, ?)
+    `).run(txId, posted.id, method, actor);
+    db.prepare("UPDATE bank_transactions SET state = 'matched' WHERE id = ?").run(txId);
+    record(db, {
+      actor, action: 'bank.post', command: 'bank match --post',
+      args: { txId, accountCode }, outcome: 'ok', entryIds: [posted.id],
+    });
+    return { transaction: getTransaction(db, txId), entry: posted };
+  })();
 }
 
 /**
@@ -267,19 +274,24 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
       continue;
     }
 
-    // 2) incoming money -> unpaid sales invoice with a matching outstanding amount
+    // 2) incoming money -> unpaid sales invoice whose outstanding matches the
+    // amount within the FX sanity bound (FX_MATCH_TOLERANCE_BP, floor
+    // FX_MATCH_FLOOR_CENTS): a foreign-currency invoice is EUR-translated at
+    // invoice date, the payment arrives converted at payment date, so a small
+    // difference is an FX move, not an error. Must stay in sync with the
+    // paymentFromBank tolerance or autoMatch matches what posting rejects.
     if (txRow.amount_cents > 0) {
       const invoiceHits = db.prepare(`
-        SELECT i.id, i.invoice_number, i.date, i.due_date, i.contact_id, c.name AS contact_name
+        SELECT i.id, i.invoice_number, i.date, i.due_date, i.contact_id, c.name AS contact_name,
+          (SELECT COALESCE(SUM(l.amount_cents + l.vat_amount_cents), 0) FROM invoice_lines l WHERE l.invoice_id = i.id)
+            - (SELECT COALESCE(SUM(p.amount_cents), 0) FROM invoice_payments p WHERE p.invoice_id = i.id) AS outstanding_cents
         FROM invoices i
         LEFT JOIN contacts c ON c.id = i.contact_id
         WHERE i.invoice_type = 'sales' AND i.status IN ('sent','overdue')
-          AND (SELECT COALESCE(SUM(l.amount_cents + l.vat_amount_cents), 0) FROM invoice_lines l WHERE l.invoice_id = i.id)
-            - (SELECT COALESCE(SUM(p.amount_cents), 0) FROM invoice_payments p WHERE p.invoice_id = i.id)
-            = ?
-        ORDER BY i.due_date IS NULL, i.due_date, i.id
+          AND ABS(outstanding_cents - ?) <= MAX(ROUND(outstanding_cents * ? / 10000), ?)
+        ORDER BY ABS(outstanding_cents - ?), i.due_date IS NULL, i.due_date, i.id
         LIMIT 1
-      `).all(txRow.amount_cents);
+      `).all(txRow.amount_cents, FX_MATCH_TOLERANCE_BP, FX_MATCH_FLOOR_CENTS, txRow.amount_cents);
       const inv = invoiceHits[0];
       if (inv) {
         matches.push({
@@ -292,6 +304,7 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
           invoice_id: inv.id,
           invoice_number: inv.invoice_number,
           contact_name: inv.contact_name,
+          fx_delta_cents: txRow.amount_cents - inv.outstanding_cents,
           method: 'invoice',
           confidence: 0.95,
         });

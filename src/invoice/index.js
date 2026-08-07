@@ -1,7 +1,7 @@
 // Invoicing module (Phase 3, FR3) — outgoing invoices compliant with the
 // 12 verplichte factuurvereisten, lifecycle draft -> sent -> paid, credit
 // notes, booking integration, UBL/PDF export hooks.
-import { getAccountByCode } from '../core/accounts.js';
+import { createAccount, getAccountByCode } from '../core/accounts.js';
 import { createEntry, postEntry } from '../core/entries.js';
 import { record } from '../audit/index.js';
 import { isValidIban, normalizeIban } from '../core/iban.js';
@@ -473,39 +473,109 @@ export function markPaid(db, { id, date, amountCents, method = 'bank', bankTxId 
 }
 
 /**
+ * Ensure the FX-differences account exists (4840 Koersverschillen).
+ * The default chart has it since 2026-08-07; databases seeded before that
+ * get it created on demand, the same way year-end creates account 9900.
+ * The creation is audited (chart mutations must be traceable).
+ */
+export function ensureFxDifferenceAccount(db, { actor = 'human' } = {}) {
+  let account = getAccountByCode(db, '4840');
+  if (!account) {
+    account = createAccount(db, {
+      code: '4840', name: 'Koersverschillen', type: 'expense',
+      normalBalance: 'debit', rgsCode: 'WFBE.84',
+    });
+    record(db, {
+      actor, action: 'account.create', command: 'bank match',
+      args: { code: '4840', name: 'Koersverschillen' }, outcome: 'ok',
+    });
+  }
+  return account;
+}
+
+/**
+ * FX-match sanity bound shared by the autoMatch SQL (src/bank/index.js) and
+ * paymentFromBank: a payment may differ from an invoice's outstanding by up to
+ * 2% (floor 25 cents) and the gap is booked to 4840 Koersverschillen. Keep the
+ * two consumers in sync — drift would make autoMatch match what paymentFromBank
+ * then rejects (FX_DIFFERENCE_TOO_LARGE).
+ */
+export const FX_MATCH_TOLERANCE_BP = 200; // 2%
+export const FX_MATCH_FLOOR_CENTS = 25;   // small-invoice absolute floor
+
+/**
  * Apply a bank payment to an invoice: record the payment, post the bank entry
  * (Bank / Debiteuren) and reconcile the transaction. Used by the bank
- * auto-match engine and by `invoice pay --from-bank`.
+ * auto-match engine.
+ *
+ * An invoice booked from a foreign-currency price is translated to EUR at the
+ * invoice date; the incoming bank transfer is converted at the PAYMENT date,
+ * so the received amount can differ. When the difference is within the sanity
+ * bound (fxToleranceBp, default 200bp = 2%, floor 25 cents) it is booked to
+ * 4840 Koersverschillen and the invoice settles in full. Beyond the bound it
+ * is rejected — a large difference is not an FX move, it is a wrong amount.
+ * The whole flow is one transaction: payment, entry, reconciliation and state
+ * update all-or-nothing (a half-written payment with no entry would double-pay
+ * on re-match).
  */
-export function paymentFromBank(db, { invoiceId, bankTxId, actor = 'human' }) {
-  const invoice = getInvoice(db, invoiceId);
-  if (!invoice) throw invoiceError('NOT_FOUND', `invoice ${invoiceId} does not exist`);
-  const txRow = db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(bankTxId);
-  if (!txRow) throw invoiceError('NOT_FOUND', `bank transaction ${bankTxId} does not exist`);
-  if (txRow.state !== 'unmatched') throw invoiceError('ALREADY_MATCHED', `bank transaction ${bankTxId} is already ${txRow.state}`);
-  const bankAccount = db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(txRow.bank_account_id);
+export function paymentFromBank(db, { invoiceId, bankTxId, actor = 'human', fxToleranceBp = FX_MATCH_TOLERANCE_BP }) {
+  return db.transaction(() => {
+    const invoice = getInvoice(db, invoiceId);
+    if (!invoice) throw invoiceError('NOT_FOUND', `invoice ${invoiceId} does not exist`);
+    const txRow = db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(bankTxId);
+    if (!txRow) throw invoiceError('NOT_FOUND', `bank transaction ${bankTxId} does not exist`);
+    if (txRow.state !== 'unmatched') throw invoiceError('ALREADY_MATCHED', `bank transaction ${bankTxId} is already ${txRow.state}`);
+    const bankAccount = db.prepare('SELECT * FROM bank_accounts WHERE id = ?').get(txRow.bank_account_id);
+    if (!bankAccount?.account_code) {
+      throw invoiceError('ACCOUNT_NOT_FOUND', `bank account ${txRow.bank_account_id} has no ledger account — set one before matching`);
+    }
 
-  const paid = markPaid(db, { id: invoiceId, date: txRow.date, amountCents: txRow.amount_cents, method: 'bank', bankTxId, actor });
-  const entry = createEntry(db, {
-    date: txRow.date,
-    description: `Betaling ${invoice.invoice_number ?? invoiceId}${invoice.contact ? ` - ${invoice.contact.name}` : ''}`,
-    postings: [
+    const outstanding = invoice.gross_cents - invoice.paid_cents;
+    const delta = txRow.amount_cents - outstanding; // + paid more (FX gain), - paid less (FX loss)
+    let fxCents = 0;
+    if (delta !== 0) {
+      // floor 25 cents: enough to absorb cent-level rounding on tiny invoices,
+      // small enough that a €10 invoice paid €9 (10% off) is still rejected
+      const tolerance = Math.max(Math.round((outstanding * fxToleranceBp) / 10000), 25);
+      if (Math.abs(delta) > tolerance) {
+        throw invoiceError(
+          'FX_DIFFERENCE_TOO_LARGE',
+          `payment ${txRow.amount_cents} differs from the outstanding ${outstanding} by ${delta} cents — beyond the ${fxToleranceBp}bp sanity bound; check the amount before booking`,
+        );
+      }
+      fxCents = delta;
+    }
+
+    // settle the invoice in full — the FX difference absorbs the cent-level gap
+    const paid = markPaid(db, { id: invoiceId, date: txRow.date, amountCents: outstanding, method: 'bank', bankTxId, actor });
+    const postings = [
       { code: bankAccount.account_code, amountCents: txRow.amount_cents },
-      { code: '1200', amountCents: -txRow.amount_cents },
-    ],
-    source: 'bank',
-    sourceRef: `tx:${bankTxId}`,
-    actor,
-  });
-  const posted = postEntry(db, { id: entry.id, actor });
-  db.prepare(`
-    INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
-    VALUES (?, 'invoice', ?, ?, 1.0, ?)
-  `).run(bankTxId, invoiceId, actor.startsWith('agent') ? 'agent' : 'manual', actor);
-  db.prepare("UPDATE bank_transactions SET state = 'matched' WHERE id = ?").run(bankTxId);
-  record(db, {
-    actor, action: 'invoice.payment_bank', command: 'bank match',
-    args: { invoiceId, bankTxId }, outcome: 'ok', entryIds: [posted.id],
-  });
-  return { invoice: paid, entry: posted };
+      { code: '1200', amountCents: -outstanding },
+    ];
+    let description = `Betaling ${invoice.invoice_number ?? invoiceId}${invoice.contact ? ` - ${invoice.contact.name}` : ''}`;
+    if (fxCents !== 0) {
+      const fxAccount = ensureFxDifferenceAccount(db, { actor });
+      postings.push({ code: fxAccount.code, amountCents: -fxCents });
+      description += ` (koersverschil ${formatAmount(fxCents)})`;
+    }
+    const entry = createEntry(db, {
+      date: txRow.date,
+      description,
+      postings,
+      source: 'bank',
+      sourceRef: `tx:${bankTxId}`,
+      actor,
+    });
+    const posted = postEntry(db, { id: entry.id, actor });
+    db.prepare(`
+      INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
+      VALUES (?, 'invoice', ?, ?, 1.0, ?)
+    `).run(bankTxId, invoiceId, actor.startsWith('agent') ? 'agent' : 'manual', actor);
+    db.prepare("UPDATE bank_transactions SET state = 'matched' WHERE id = ?").run(bankTxId);
+    record(db, {
+      actor, action: 'invoice.payment_bank', command: 'bank match',
+      args: { invoiceId, bankTxId }, outcome: 'ok', entryIds: [posted.id],
+    });
+    return { invoice: paid, entry: posted };
+  })();
 }

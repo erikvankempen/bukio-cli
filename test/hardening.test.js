@@ -32,15 +32,16 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ExcelJS from 'exceljs';
 import { openDb } from '../src/core/db.js';
-import { seedDefaultChart, deactivateAccount, reactivateAccount } from '../src/core/accounts.js';
+import { seedDefaultChart, deactivateAccount, reactivateAccount, getAccountByCode } from '../src/core/accounts.js';
 import { createEntry, postEntry, reverseEntry, getEntry } from '../src/core/entries.js';
 import { parseAmount } from '../src/core/money.js';
+import { trialBalance } from '../src/report/trial-balance.js';
 import {
   enableVatModule, bookVatEntry, obReadout, parsePeriod,
   parseVatPostingSpecs, expandVatPostings,
@@ -48,12 +49,13 @@ import {
 import { addAsset, disposeAsset, runDue, register, createScheme } from '../src/assets/index.js';
 import {
   createContact, updateContact, getContact, getInvoice,
-  createInvoice, finalizeInvoice, markPaid, listInvoices,
+  createInvoice, finalizeInvoice, markPaid, listInvoices, paymentFromBank,
 } from '../src/invoice/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { parseBankCsv } from '../src/bank/csv.js';
 import {
   importTransactions, getOrCreateBankAccount, linkTransaction, postFromTransaction, autoMatch,
+  setTransactionState,
 } from '../src/bank/index.js';
 import { parseCamt053 } from '../src/bank/camt.js';
 import { toEurPostings, setFxRate } from '../src/fx/index.js';
@@ -106,6 +108,16 @@ function cli(dbPath, args) {
 
 function tmpDb() {
   return path.join(mkdtempSync(path.join(os.tmpdir(), 'bukio-hardening-')), 'test.db');
+}
+
+/** Raw (non-JSON) CLI output for csv/human renders. */
+function runRaw(dbPath, args) {
+  const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
+  try {
+    return { code: 0, raw: execFileSync(process.execPath, [BIN, ...args], { env, encoding: 'utf8' }) };
+  } catch (err) {
+    return { code: err.status, raw: `${err.stdout ?? ''}${err.stderr ?? ''}` };
+  }
 }
 
 /** MCP stdio session against a real child process (harness like phase5.test.js). */
@@ -744,3 +756,251 @@ test('obReadout period with a year boundary stays within the period', () => {
   const q1 = obReadout(db, { period: '2027-Q1' });
   assert.equal(q1.fields['1a'], 5000);
 });
+
+// --- fourth pass (2026-08-07): CLI crash paths, CSV shapes, dry-run validity ---
+
+test('CLI: import xaf failure prints cleanly (no renderErrors crash)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  const badFile = path.join(path.dirname(dbPath), 'bad.xaf');
+  writeFileSync(badFile, '<?xml version="1.0"?><Xaf><XafHeader><Version>4.0</Version></XafHeader><Mutaties><Mutatie><Boekstuknummer>1</Boekstuknummer><Datum>2026-01-01</Datum></Mutatie></Mutaties></Xaf>');
+  const { code, raw } = runRaw(dbPath, ['import', 'xaf', '--file', badFile]);
+  assert.equal(code, 1);
+  assert.ok(raw.includes('IMPORT_VALIDATION_FAILED'), `expected validation error, got: ${raw.slice(0, 300)}`);
+  assert.ok(!raw.includes('ReferenceError'), 'the CLI must not crash with a ReferenceError');
+  assert.ok(!raw.includes('renderErrors'), 'the dead renderErrors call must be gone');
+});
+
+test('CLI: assets register --format csv has a header row and totals', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  cli(dbPath, ['assets', 'add', '--name', 'Laptop', '--purchase-date', '2026-01-01', '--purchase-price', '1200.00', '--depreciation-start', '2026-01-01', '--recognition-date', '2026-01-01']);
+  const csv = runRaw(dbPath, ['assets', 'register', '--format', 'csv']).raw;
+  const lines = csv.trim().split('\n');
+  assert.ok(lines[0].startsWith('id,naam,categorie'), `header row expected, got: ${lines[0]}`);
+  assert.ok(csv.includes('Laptop'), 'asset row must be present');
+  assert.ok(csv.includes('TOTAAL'), 'totals row must be present');
+});
+
+test('CLI: recurring run --dry-run renders plans, not undefined ids', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  cli(dbPath, ['recurring', 'add', '--name', 'Huur', '--postings', '4300:1000.00,1100:-1000.00', '--frequency', 'monthly', '--start', '2026-01-10']);
+  const out = runRaw(dbPath, ['recurring', 'run', '--dry-run']).raw;
+  assert.ok(!out.includes('#undefined'), `dry-run must not render undefined ids, got: ${out.slice(0, 300)}`);
+  assert.ok(out.includes('(plan)'), 'dry-run runs should render as plans');
+});
+
+test('CLI: export xaf --dry-run writes nothing; scheme/depreciation dry-runs validate', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  cli(dbPath, ['entry', 'add', '--date', '2026-01-10', '--desc', 'Start', '--postings', '1100:1000.00,3000:-1000.00', '--post']);
+  const outPath = path.join(path.dirname(dbPath), 'never.xaf');
+  const { code, out } = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', outPath, '--dry-run']);
+  assert.equal(code, 0);
+  assert.equal(out.data.dryRun, true);
+  assert.equal(existsSync(outPath), false);
+
+  // scheme dry-run validates bounds instead of printing a NaN plan
+  const badScheme = runRaw(dbPath, ['assets', 'scheme', 'add', '--name', 'X', '--life-months', 'abc', '--dry-run']);
+  assert.equal(badScheme.code, 1);
+  assert.ok(badScheme.raw.includes('INVALID_LIFE'));
+
+  // depreciation dry-run validates the non-positive-final guard
+  const badDep = runRaw(dbPath, ['depreciation', 'add', '--name', 'D', '--cost', '1.00', '--life-months', '150', '--start', '2026-01-01', '--dry-run']);
+  assert.equal(badDep.code, 1);
+  assert.ok(badDep.raw.includes('INVALID_LIFE'));
+});
+
+test('bank ignore dry-run leaves the transaction untouched', () => {
+  setup({ vat: false });
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100',
+    transactions: [{ date: '2026-01-10', amount_cents: -5000, counterparty: 'ACME', description: 'factuur' }],
+    actor: 'agent:test',
+  });
+  const tx = db.prepare("SELECT * FROM bank_transactions WHERE state = 'unmatched'").get();
+  const plan = setTransactionState(db, { id: tx.id, state: 'ignored', actor: 'agent:test', dryRun: true });
+  assert.equal(plan.dryRun, true);
+  assert.equal(db.prepare('SELECT state FROM bank_transactions WHERE id = ?').get(tx.id).state, 'unmatched');
+});
+
+test('assets pause dry-run leaves the status unchanged', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  cli(dbPath, ['assets', 'add', '--name', 'Laptop', '--purchase-date', '2026-01-01', '--purchase-price', '1200.00', '--depreciation-start', '2026-01-01', '--recognition-date', '2026-01-01']);
+  const paused = cli(dbPath, ['assets', 'pause', '--id', '1', '--dry-run']);
+  assert.equal(paused.code, 0);
+  const show = cli(dbPath, ['assets', 'list']);
+  assert.equal(show.out.data.assets[0].status, 'active');
+});
+
+// --- FX-difference booking on invoice payments (user request 2026-08-07) ---
+
+function fxInvoice(db, { grossCents, date = '2099-01-10' }) {
+  const c = addContact();
+  const inv = createInvoice(db, { contactId: c.id, lines: [`1x Werk @ ${(grossCents / 100).toFixed(2)}`], date, actor: 'agent:test' });
+  return finalizeInvoice(db, { id: inv.id, actor: 'agent:test' }).invoice;
+}
+
+test('autoMatch books a small FX difference on an invoice payment to 4840', () => {
+  // EUR invoice of 1000.00; the bank payment arrives as 997.50 (FX move at
+  // payment date) — the 2.50 loss books to 4840 Koersverschillen
+  const inv = fxInvoice(db, { grossCents: 100000 });
+  const ba = getOrCreateBankAccount(db, { iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100' });
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100',
+    transactions: [{ date: '2099-01-20', amount_cents: 99750, counterparty: 'Klant BV', description: 'betaling' }],
+    actor: 'agent:test',
+  });
+  const res = autoMatch(db, { actor: 'agent:test' });
+  const m = res.matched.find((x) => x.kind === 'invoice');
+  assert.ok(m, 'payment within the FX bound must match');
+  assert.equal(m.fx_delta_cents, -250);
+
+  // invoice settled, entry balanced with the FX leg
+  assert.equal(getInvoice(db, inv.id).status, 'paid');
+  const tb = trialBalance(db, {});
+  assert.equal(tb.balanced, true);
+  const fxNet = tb.accounts.find((a) => a.code === '4840').net_cents;
+  assert.equal(fxNet, 250, 'loss of 2.50 must sit on 4840 (debit)');
+  const bankNet = tb.accounts.find((a) => a.code === '1100').net_cents;
+  assert.equal(bankNet, 99750);
+  const deb = tb.accounts.find((a) => a.code === '1200').net_cents;
+  assert.equal(deb, 0, 'Debiteuren must be fully released');
+});
+
+test('paymentFromBank with an FX gain books a credit on 4840', () => {
+  const inv = fxInvoice(db, { grossCents: 50000 }); // 500.00
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100',
+    transactions: [{ date: '2099-01-20', amount_cents: 50150, counterparty: 'Klant BV', description: 'betaling' }],
+    actor: 'agent:test',
+  });
+  const tx = db.prepare("SELECT * FROM bank_transactions WHERE state = 'unmatched'").get();
+  paymentFromBank(db, { invoiceId: inv.id, bankTxId: tx.id, actor: 'agent:test' });
+  const tb = trialBalance(db, {});
+  assert.equal(tb.balanced, true);
+  assert.equal(tb.accounts.find((a) => a.code === '4840').net_cents, -150, 'gain of 1.50 must be a credit');
+  assert.equal(getInvoice(db, inv.id).status, 'paid');
+});
+
+test('a difference beyond the sanity bound is not an FX move — rejected', () => {
+  const inv = fxInvoice(db, { grossCents: 100000 }); // 1000.00
+  // 950.00 = 5% off — beyond the 2% bound: wrong amount, not FX
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100',
+    transactions: [{ date: '2099-01-20', amount_cents: 95000, counterparty: 'Klant BV', description: 'betaling' }],
+    actor: 'agent:test',
+  });
+  const res = autoMatch(db, { actor: 'agent:test' });
+  assert.equal(res.matched.filter((m) => m.kind === 'invoice').length, 0);
+  assert.equal(res.unmatched_remaining, 1, 'the transaction must stay unmatched');
+  assert.equal(getInvoice(db, inv.id).status, 'sent');
+
+  const tx = db.prepare("SELECT * FROM bank_transactions WHERE state = 'unmatched'").get();
+  assert.throws(
+    () => paymentFromBank(db, { invoiceId: inv.id, bankTxId: tx.id, actor: 'agent:test' }),
+    (err) => err.code === 'FX_DIFFERENCE_TOO_LARGE',
+  );
+});
+
+test('4840 Koersverschillen is created on demand for pre-2026-08-07 databases', () => {
+  db.prepare("DELETE FROM accounts WHERE code = '4840'").run();
+  assert.equal(getAccountByCode(db, '4840'), null);
+  const inv = fxInvoice(db, { grossCents: 10000 }); // 100.00
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100',
+    transactions: [{ date: '2099-01-20', amount_cents: 9980, counterparty: 'Klant BV', description: 'betaling' }],
+    actor: 'agent:test',
+  });
+  const tx = db.prepare("SELECT * FROM bank_transactions WHERE state = 'unmatched'").get();
+  paymentFromBank(db, { invoiceId: inv.id, bankTxId: tx.id, actor: 'agent:test' });
+  const fx = getAccountByCode(db, '4840');
+  assert.ok(fx, '4840 must be created on demand');
+  assert.equal(fx.rgs_code, 'WFBE.84');
+  assert.equal(trialBalance(db, {}).balanced, true);
+});
+
+// --- fifth pass (2026-08-07): paymentFromBank atomicity, FX floor, audit ---
+
+test('paymentFromBank is atomic: a failing entry leaves no payment behind', () => {
+  const inv = fxInvoice(db, { grossCents: 50000 }); // 500.00
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100',
+    transactions: [{ date: '2099-01-20', amount_cents: 50150, counterparty: 'Klant BV', description: 'betaling' }],
+    actor: 'agent:test',
+  });
+  const tx = db.prepare("SELECT * FROM bank_transactions WHERE state = 'unmatched'").get();
+
+  // break the ledger: deactivate the bank account's ledger code so
+  // createEntry's resolvePostings fails (ACCOUNT_INACTIVE)
+  deactivateAccount(db, '1100');
+  assert.throws(
+    () => paymentFromBank(db, { invoiceId: inv.id, bankTxId: tx.id, actor: 'agent:test' }),
+    (err) => err.code === 'ACCOUNT_INACTIVE',
+  );
+
+  // nothing may be half-written: no payment row, invoice still sent, tx unmatched
+  const payments = db.prepare('SELECT COUNT(*) AS n FROM invoice_payments WHERE invoice_id = ?').get(inv.id);
+  assert.equal(payments.n, 0, 'no payment row may exist after a failed booking');
+  assert.equal(getInvoice(db, inv.id).status, 'sent', 'invoice must not be marked paid');
+  const state = db.prepare('SELECT state FROM bank_transactions WHERE id = ?').get(tx.id).state;
+  assert.equal(state, 'unmatched', 'transaction must stay unmatched for re-match');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM reconciliations').get().n, 0, 'no dangling reconciliation');
+});
+
+test('the FX sanity floor is 25 cents — a 10% short payment on a €10 invoice is rejected', () => {
+  // 200bp of €10 = 20 cents; floor 25 cents caps the tolerance — a €1 (10%)
+  // shortfall is a wrong amount, not an FX move, and must NOT auto-settle.
+  const inv = fxInvoice(db, { grossCents: 1000 }); // 10.00
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100',
+    transactions: [{ date: '2099-01-20', amount_cents: 900, counterparty: 'Klant BV', description: 'betaling' }],
+    actor: 'agent:test',
+  });
+  const res = autoMatch(db, { actor: 'agent:test' });
+  assert.equal(res.matched.filter((m) => m.kind === 'invoice').length, 0, '10% off must not match');
+  assert.equal(getInvoice(db, inv.id).status, 'sent');
+});
+
+test('4840 creation on demand is audited', () => {
+  db.prepare("DELETE FROM accounts WHERE code = '4840'").run();
+  const inv = fxInvoice(db, { grossCents: 10000 });
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100',
+    transactions: [{ date: '2099-01-20', amount_cents: 9980, counterparty: 'Klant BV', description: 'betaling' }],
+    actor: 'agent:test',
+  });
+  const tx = db.prepare("SELECT * FROM bank_transactions WHERE state = 'unmatched'").get();
+  paymentFromBank(db, { invoiceId: inv.id, bankTxId: tx.id, actor: 'agent:test' });
+  const rows = db.prepare("SELECT * FROM audit_log WHERE action = 'account.create'").all();
+  assert.equal(rows.length, 1, 'the on-demand account creation must leave an audit trail');
+  assert.equal(rows[0].actor, 'agent:test');
+  assert.equal(JSON.parse(rows[0].args_json).code, '4840');
+});
+
+test('postFromTransaction is atomic: a failing post leaves no draft or reconciliation', () => {
+  const ba = getOrCreateBankAccount(db, { iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100' });
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100',
+    transactions: [{ date: '2099-01-20', amount_cents: -5000, counterparty: 'ACME', description: 'kosten' }],
+    actor: 'agent:test',
+  });
+  const tx = db.prepare("SELECT * FROM bank_transactions WHERE state = 'unmatched'").get();
+  const before = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+
+  // counter leg on a deactivated account -> postEntry fails inside the transaction
+  deactivateAccount(db, '4300');
+  assert.throws(
+    () => postFromTransaction(db, { txId: tx.id, accountCode: '4300', actor: 'agent:test' }),
+    (err) => err.code === 'ACCOUNT_INACTIVE',
+  );
+
+  const after = db.prepare('SELECT COUNT(*) AS n FROM journal_entries').get().n;
+  assert.equal(after, before, 'no stray draft entry may survive a failed post');
+  assert.equal(db.prepare('SELECT state FROM bank_transactions WHERE id = ?').get(tx.id).state, 'unmatched');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM reconciliations').get().n, 0);
+});
+
+

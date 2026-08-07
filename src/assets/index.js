@@ -85,7 +85,7 @@ export function ensureDefaultScheme(db, actor = 'human') {
 }
 
 export function createScheme(db, {
-  name, method = 'lineair', lifeMonths = 60, residualBp = 0, actor = 'human',
+  name, method = 'lineair', lifeMonths = 60, residualBp = 0, actor = 'human', dryRun = false,
 }) {
   const clean = String(name ?? '').trim();
   if (!clean) throw assetsError('INVALID_NAME', 'scheme needs a name');
@@ -98,6 +98,9 @@ export function createScheme(db, {
   }
   if (!Number.isInteger(residualBp) || residualBp < 0 || residualBp > 10000) {
     throw assetsError('INVALID_RESIDUAL', 'residual-bp must be between 0 and 10000');
+  }
+  if (dryRun) {
+    return { action: 'assets.scheme.add', name: clean, method, life_months: lifeMonths, residual_bp: residualBp, dryRun: true };
   }
   const info = db.prepare(
     'INSERT INTO depreciation_schemes (name, method, life_months, residual_bp, created_by) VALUES (?, ?, ?, ?, ?)',

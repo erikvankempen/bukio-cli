@@ -76,6 +76,7 @@ export const DEFAULT_CHART = [
   { code: '4500', name: 'Financiële baten en lasten', type: 'expense', normalBalance: 'debit', rgsCode: 'WFBE.84' },
   { code: '4600', name: 'Afschrijvingen', type: 'expense', normalBalance: 'debit', rgsCode: 'WAFS.41' },
   { code: '4700', name: 'Overige bedrijfskosten', type: 'expense', normalBalance: 'debit', rgsCode: 'WBED.42' },
+  { code: '4840', name: 'Koersverschillen', type: 'expense', normalBalance: 'debit', rgsCode: 'WFBE.84' },
   // Opbrengsten
   { code: '8000', name: 'Omzet', type: 'income', normalBalance: 'credit', rgsCode: 'WOMZ.80' },
   { code: '8100', name: 'Overige opbrengsten', type: 'income', normalBalance: 'credit', rgsCode: 'WOVB.82' },

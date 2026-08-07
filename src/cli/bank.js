@@ -207,7 +207,8 @@ export function make(program) {
             console.log(`auto-match: ${d.matched.length} matched, ${d.unmatched_remaining} unmatched remaining${d.dryRun ? ' (dry run)' : ''}`);
             for (const m of d.matched) {
               if (m.kind === 'invoice') {
-                console.log(`  tx #${m.tx_id} ${m.tx_date} ${m.amount.padStart(12)} -> invoice ${m.invoice_number} (${m.contact_name ?? ''})`);
+                const fx = m.fx_delta_cents ? ` (fx ${formatAmount(m.fx_delta_cents)})` : '';
+                console.log(`  tx #${m.tx_id} ${m.tx_date} ${m.amount.padStart(12)} -> invoice ${m.invoice_number} (${m.contact_name ?? ''})${fx}`);
               } else {
                 console.log(`  tx #${m.tx_id} ${m.tx_date} ${m.amount.padStart(12)} -> entry #${m.entry_id} (${m.method}, ${m.day_diff}d)`);
               }
@@ -324,12 +325,20 @@ export function make(program) {
     .command('ignore')
     .description('mark a transaction as ignored (e.g. transfer between own accounts)')
     .requiredOption('--tx <id>', 'bank transaction id')
+    .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
         try {
-          const txRow = setTransactionState(db, { id: opts.tx, state: 'ignored', actor: ctx.actor });
+          const txRow = setTransactionState(db, { id: opts.tx, state: 'ignored', actor: ctx.actor, dryRun: ctx.dryRun });
+          if (txRow.dryRun) {
+            output(ctx, { plan: txRow }, (d) => {
+              console.log(`plan: ignore tx #${d.plan.id} (${d.plan.from} -> ${d.plan.to})`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
           output(ctx, { transaction: fmtTx(txRow) }, (d) => console.log(`ignored tx #${d.transaction.id}`));
         } finally {
           db.close();
@@ -343,12 +352,20 @@ export function make(program) {
     .command('unignore')
     .description('re-open an ignored transaction')
     .requiredOption('--tx <id>', 'bank transaction id')
+    .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
         try {
-          const txRow = setTransactionState(db, { id: opts.tx, state: 'unmatched', actor: ctx.actor });
+          const txRow = setTransactionState(db, { id: opts.tx, state: 'unmatched', actor: ctx.actor, dryRun: ctx.dryRun });
+          if (txRow.dryRun) {
+            output(ctx, { plan: txRow }, (d) => {
+              console.log(`plan: re-open tx #${d.plan.id} (${d.plan.from} -> ${d.plan.to})`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
           output(ctx, { transaction: fmtTx(txRow) }, (d) => console.log(`re-opened tx #${d.transaction.id}`));
         } finally {
           db.close();

@@ -1,5 +1,6 @@
 // bukio recurring + depreciation — scheduled entries (FR3A).
 import { formatAmount } from '../core/money.js';
+import { parseImportAmount } from '../import/index.js';
 import {
   buildDepreciationTemplate, createTemplate, listTemplates, getTemplate,
   previewDue, runDue, setTemplateStatus,
@@ -257,7 +258,11 @@ export function make(program) {
                   g.kind === 'invoice'
                     ? { kind: 'invoice', invoice_id: g.invoice.id, date: g.invoice.date ?? g.entry?.date, state: 'draft' }
                     : { kind: g.kind, entry_id: g.entry.id, date: g.entry.date, state: g.entry.state }
-                )) : [r.entry],
+                )) : [{
+                  // dry-run plan entries have no id yet — render as plans
+                  kind: r.kind ?? 'entry', entry_id: r.entry?.id ?? null,
+                  date: r.entry?.date, state: 'plan',
+                }],
               })),
             })),
           };
@@ -271,6 +276,8 @@ export function make(program) {
                 for (const e of r.entries) {
                   if (e.kind === 'invoice') {
                     console.log(`  ${e.date}  → draft invoice #${e.invoice_id} (finalize to book & number)`);
+                  } else if (e.entry_id == null) {
+                    console.log(`  ${e.date}  ${e.kind === 'reversal' ? '→ reversal of previous entry' : '→ entry'} (plan)`);
                   } else {
                     console.log(`  ${e.date}  ${e.kind === 'reversal' ? '→ reversal of' : '→ booked'} entry #${e.entry_id} (${e.state})`);
                   }
@@ -305,18 +312,21 @@ export function make(program) {
       try {
         const db = ensureDb(ctx);
         try {
-          const costCents = Math.round(parseFloat(opts.cost) * 100);
-          const residualCents = Math.round(parseFloat(opts.residual) * 100);
+          const costCents = parseImportAmount(opts.cost);
+          const residualCents = parseImportAmount(opts.residual);
           const lifeMonths = Number(opts.lifeMonths);
-          if (ctx.dryRun) {
-            const monthly = Math.round((costCents - residualCents) / lifeMonths);
-            const final = (costCents - residualCents) - monthly * (lifeMonths - 1);
+          const result = buildDepreciationTemplate(db, {
+            name: opts.name, assetCode: opts.asset, expenseCode: opts.expense,
+            costCents, residualCents, lifeMonths, startDate: opts.start,
+            description: opts.desc ?? null, actor: ctx.actor, dryRun: ctx.dryRun,
+          });
+          if (result.dryRun) {
             output(ctx, {
-              action: 'create depreciation template',
-              name: opts.name, asset: opts.asset, expense: opts.expense,
+              action: 'create depreciation template', name: opts.name,
+              asset: opts.asset, expense: opts.expense,
               cost_cents: costCents, residual_cents: residualCents, life_months: lifeMonths,
-              monthly_cents: monthly, final_cents: final,
-              monthly: formatAmount(monthly), final: formatAmount(final),
+              monthly_cents: result.monthly_cents, final_cents: result.final_cents,
+              monthly: formatAmount(result.monthly_cents), final: formatAmount(result.final_cents),
               dryRun: true,
             }, (d) => {
               console.log(`plan: depreciate "${d.name}" ${d.monthly}/mo for ${d.life_months} months (final ${d.final})`);
@@ -325,11 +335,6 @@ export function make(program) {
             });
             return;
           }
-          const result = buildDepreciationTemplate(db, {
-            name: opts.name, assetCode: opts.asset, expenseCode: opts.expense,
-            costCents, residualCents, lifeMonths, startDate: opts.start,
-            description: opts.desc ?? null, actor: ctx.actor,
-          });
           output(ctx, {
             template: fmtTemplate(result.template),
             monthly: result.monthly, final: result.final,
