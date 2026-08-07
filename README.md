@@ -84,7 +84,9 @@ printf '%s\n' \
 14. [Development & Testing](#development--testing)
 15. [Error Codes](#error-codes)
 16. [Common Tasks](#common-tasks)
-17. [Roadmap](#roadmap)
+17. [EU AI Act Transparency](#eu-ai-act-transparency)
+18. [AI Development Cost & Token Usage](#ai-development-cost--token-usage)
+19. [Roadmap](#roadmap)
 
 ---
 
@@ -926,6 +928,86 @@ bukio --db ~/.bukio/bv-b.db init --name "BV B" --legal-form bv
 ```bash
 bukio init --name "Mijn ZZP" --kor
 ```
+
+---
+
+## EU AI Act Transparency
+
+*Regulation (EU) 2024/1689 — the EU Artificial Intelligence Act.*
+
+**This software is not an AI system.** bukio-cli is deterministic, rule-based
+accounting software: every booking, VAT calculation and report follows fixed
+double-entry rules over integer cents. It performs no inference, no
+machine learning, no autonomous decision-making, and no profiling — so the
+obligations the AI Act places on providers/deployers of AI systems (high-risk
+requirements, conformity assessment, risk management, Article 50 interaction
+transparency) do not apply to the product itself.
+
+**The code, however, was written with AI assistance.** This section is the
+project's transparency disclosure, in the spirit of the Act's transparency
+principle for AI-generated content:
+
+| Aspect | Disclosure |
+|---|---|
+| Development method | All source, tests and documentation were generated with an AI coding assistant (Hermes Agent, running `deepseek-v4-flash`), then reviewed, verified and accepted by the repository owner. |
+| Human oversight | Every commit is reviewed by the owner before it lands; the automated test suite (362 tests, `npm test`) must pass; money paths additionally require a balanced trial balance. Nothing is accepted blind. |
+| Synthetic content | Code, tests and docs are AI-generated output; this README section and the commit history serve as the disclosure that the content is machine-generated. |
+| Model provider obligations | The underlying general-purpose AI model is provided by DeepSeek; its obligations under the AI Act (e.g. Article 53 documentation, copyright policy, training-data summary) sit with the provider, not with this repository. |
+| No prohibited practices | The project involves none of the Article 5 prohibited practices (no social scoring, no biometric identification, no manipulation). |
+| No high-risk use | Bookkeeping is not a high-risk use case under Annex III; no fundamental-rights decisions are made by this software. |
+| AI literacy | The developer maintains AI literacy (Article 4) and exercises it: every AI output is verified against accounting invariants before use. |
+
+Status for the record: the AI Act entered into force on 1 August 2024;
+prohibitions and AI-literacy obligations applied from 2 February 2025; GPAI
+and governance provisions from 2 August 2025; the remainder of the Act applies
+from 2 August 2026. This disclosure is provided as a matter of transparency
+and good faith; it is not legal advice.
+
+---
+
+## AI Development Cost & Token Usage
+
+The entire project was built with AI assistance. For full transparency, here
+is the measured token consumption and its cost at **official DeepSeek API list
+prices** (`deepseek-v4-flash`, per 1M tokens): **$0.14** input (cache miss),
+**$0.0028** input (cache hit), **$0.28** output. Reasoning tokens are billed
+at the output rate. Data is captured by the `bukio-token-track` tool from the
+agent's session telemetry (snapshot 2026-08-07).
+
+### Token usage by work session
+
+| Work session | Input | Output | Cached input | Reasoning | Calls | Est. cost |
+|---|---|---|---|---|---|---|
+| Phases 0–5 (PRD, ledger, bank/VAT, invoicing) | 1.44M | 617K | 111.06M | 239K | 472 | $0.75 |
+| Phases 6–8 (imports, assets, SEPA, Rust) | 4.92M | 897K | 255.92M | 388K | 1,023 | $1.77 |
+| v0.11.1 polish (typos, screenshot, actor) | 1.25M | 233K | 62.93M | 140K | 333 | $0.46 |
+| Token accounting + v0.11.1 polish | 188K | 28K | 3.05M | 17K | 72 | $0.05 |
+| Code review pass 4–5 (12+ bugs, FX booking) | 546K | 178K | 48.79M | 75K | 184 | $0.28 |
+| Review wrap-up (perf, validation sweep) | 377K | 147K | 47.43M | 90K | 227 | $0.25 |
+| **Total** | **8.73M** | **2.10M** | **529.19M** | **948K** | **2,311** | **$3.56** |
+
+Cost breakdown at DeepSeek list prices: input $1.22 + cached input $1.48 +
+output $0.59 + reasoning $0.27 = **$3.56 total** for the entire project.
+
+### COCOMO benchmark
+
+For a frame of reference, the same codebase priced by the classic COCOMO
+model (Boehm, 1981): **14,790 non-blank, non-comment lines of JavaScript**
+across 84 files (9,452 in `src/`, 5,220 in `test/`), i.e. **14.79 KLOC**.
+
+| COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
+|---|---|---|---|---|
+| Organic | 40.6 PM | 10.2 months | ~4 developers | ≈ €365K |
+| Semi-detached | 61.3 PM | 10.6 months | ~6 developers | ≈ €552K |
+| Embedded | 91.3 PM | 10.6 months | ~9 developers | ≈ €821K |
+
+\*Fully-loaded senior developer rate in the Netherlands (2026).
+
+**Comparison:** a conventional team building this would estimate **≈ 41–91
+person-months (≈ €365K–€821K)**; the AI-assisted build consumed **$3.56 in API
+costs** over four calendar days of sessions — before the owner's review time.
+COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
+three standard modes); treat the ratios, not the decimals, as the point.
 
 ---
 
