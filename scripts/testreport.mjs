@@ -24,6 +24,7 @@ const DESCRIPTIONS = {
   'company.test.js': 'company show/update',
   'edge-cases.test.js': 'rounding, boundaries, idempotency, lifecycle violations, dry-run hygiene',
   'entries.test.js': 'journal entries: add/post/reverse, immutability',
+  'export.test.js': 'export xaf (Auditfile 4.0, round-trips through the importer) + audit csv/xlsx',
   'import.test.js': 'opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference',
   'invoice.test.js': 'invoicing: lifecycle, 12-vereisten, credit notes, payments, reminders',
   'money.test.js': 'integer-cents money helpers',

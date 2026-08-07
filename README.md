@@ -9,7 +9,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-301%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-311%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -504,15 +504,19 @@ Imports are idempotent: re-running skips already-imported boekstukken.
 | `payments batch export --id N [--schema 001.03\|001.09] [--out file.xml] [--dry-run]` | Export **pain.001** SEPA XML for bank-portal upload. Once per batch (unique `MsgId` — re-export would double-pay) |
 | `payments batch list [--status]` / `show --id` / `delete --id` | Batch tracking; delete only allowed on drafts (releases payables back to unpaid) |
 | `contact update --id N [--iban] [--address] …` / `contact add --iban` | Contact IBANs (mod-97 validated) — required to include a vendor in a batch |
+| `export xaf --year yyyy --out <file.xaf>` | Export the fiscal year as an **Auditfile Financieel 4.0 XML** (Belastingdienst standard) — the file a boekhouder, tax advisor or auditor imports directly into SnelStart/Exact. One `<Mutatie>` per **posted** entry (drafts excluded); postings as `<Boeking>` debet/credit pairs that re-import losslessly. Records an `export.xaf` audit row; read-only |
 
 ```bash
 # switching from your old package in one morning:
 bukio import opening-balances --file beginbalans.csv --date 2026-01-01
 bukio import journal --file snelstart-export.csv --create-missing
 bukio import xaf --file audit.xaf                      # the Belastingdienst format
-# then let an agent run the close every month:
+# let an agent run the close every month:
 bukio month-end --period 2026-08
 bukio invoice reminders --within-days 7 --draft-emails
+# hand the year to your boekhouder / tax advisor / auditor:
+bukio export xaf --year 2026 --out ~/exports/bukio-2026.xaf
+bukio audit --format xlsx --out ~/exports/bukio-audit-2026.xlsx --limit 1000
 ```
 
 **Import validation notes:** amounts accept the international form (`1234.56`)
@@ -566,10 +570,13 @@ Read the append-only audit log (newest first).
 | `--since <iso-ts>` | — | Only entries at/after this timestamp (ISO 8601) |
 | `--by <who>` | all | Only entries by this actor (e.g. `agent:hermes`) |
 | `--limit <n>` | `50` | Max rows |
+| `--format <fmt>` | `human` | `json` \| `csv` \| `xlsx` — hand the audit trail to an external advisor as a file |
+| `--out <path>` | — | Output file for `csv`/`xlsx` (required for `xlsx`) |
 
 ```bash
 bukio audit --by agent:hermes --json   # what did the agent do?
 bukio audit --since 2026-08-01         # everything this month
+bukio audit --format xlsx --out ~/exports/audit-2026.xlsx --limit 1000   # for the boekhouder
 ```
 
 ---
@@ -935,7 +942,8 @@ bukio init --name "Mijn ZZP" --kor
 | 6 | Migration & automation: `import opening-balances`, `import journal` (SnelStart/Exact CSV), `import xaf` (XML Auditfile 4.0), `month-end` close check, `invoice reminders` | Switch from an old package in one morning; the agent runs the close check monthly — **✅ done (v0.9.0, 229 tests green)** | planned |
 | 7 | Fixed assets: depreciation schemes (lineair/degressief), asset register with mid-life adoption, monthly runs, disposal, activastaat | Recognise mid-life assets and book only the remaining depreciation — **✅ done (v0.10.0, 271 tests green)** | planned |
 | 8 | SEPA payment batches: payables register (transfer vs direct-debit), pain.001 export for bank-portal upload | Prepare vendor payments in bukio, upload the file in the bank, close the loop via the CAMT import — **✅ done (v0.11.0, 295 tests green)** | planned |
-| 9 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
+| 9 | External handover: `export xaf` (Auditfile Financieel 4.0) + audit log as csv/xlsx | The year as a file your boekhouder/tax advisor/auditor imports directly — **✅ done (v0.12.0, 311 tests green)** | planned |
+| 10 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 

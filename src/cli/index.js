@@ -17,6 +17,7 @@ import { make as fxCmd } from './fx.js';
 import { make as mcpCmd } from './mcp.js';
 import { make as complianceCmd } from './compliance.js';
 import { make as importCmd } from './import.js';
+import { make as exportCmd } from './export.js';
 import { make as monthEndCmd } from './month-end.js';
 import { make as companyCmd } from './company.js';
 import { make as assetsCmd } from './assets.js';
@@ -28,7 +29,7 @@ export async function runCli(argv) {
   program
     .name('bukio')
     .description('Agent-first bookkeeping for Dutch SMEs — SQLite, VAT-optional')
-    .version('0.11.1')
+    .version('0.12.0')
     .option('--json', 'machine-readable JSON output')
     .option('--db <path>', 'database file', process.env.BUKIO_DB || path.join(os.homedir(), '.bukio', 'bukio.db'))
     .option('--actor <who>', "acting entity '<role>:<name>' — e.g. agent:bartholomeus, human:erik (or BUKIO_ACTOR env; required)", undefined)
@@ -49,6 +50,7 @@ export async function runCli(argv) {
   mcpCmd(program);
   complianceCmd(program);
   importCmd(program);
+  exportCmd(program);
   monthEndCmd(program);
   companyCmd(program);
   assetsCmd(program);

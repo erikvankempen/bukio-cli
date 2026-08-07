@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-06 16:43:45 UTC — **✅ 302 passing · 0 failing (302 tests)**
+**Latest run:** 2026-08-07 09:57:23 UTC — **✅ 311 passing · 0 failing (311 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -178,6 +178,20 @@
     - ✅ parsePostingSpecs: repeatable and comma-separated, negative = credit
     - ✅ every mutation writes an audit record
     - ✅ listEntries: filters
+
+### export.test.js — export xaf (Auditfile 4.0, round-trips through the importer) + audit csv/xlsx
+
+9 passing · 0 failing
+
+    - ✅ export xaf: writes a 4.0 file with header, chart and one Mutatie per posted entry
+    - ✅ export xaf: 3-leg entry round-trips through the importer losslessly
+    - ✅ export xaf: records an export.xaf audit row
+    - ✅ export xaf: throws EXPORT_EMPTY_YEAR for a year with no posted entries
+    - ✅ export xaf: escaping — ampersands and < in descriptions survive XML
+    - ✅ cli: bukio export xaf --year --out writes a file
+    - ✅ audit: csv format exports rows with headers
+    - ✅ audit: xlsx format requires --out and writes a workbook
+    - ✅ export xaf: unknown-year-only drafts → EXPORT_EMPTY_YEAR via CLI
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 

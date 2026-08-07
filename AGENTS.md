@@ -75,6 +75,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio import journal --file F [--create-missing] [--dry-run]` | SnelStart/Exact-style journal CSV (aliases, `;` delimiter, Dutch amounts). One posted entry per boekstuknummer; idempotent. |
 | `bukio import xaf --file F [--dry-run]` | XML Auditfile Financieel 4.0 import — Belastingdienst OR generic AuditFile layout; file chart upserted (renames colliding codes on an empty ledger, shown in the dry-run); KVK mismatch fails `COMPANY_MISMATCH`. |
 | `bukio import contacts --file F [--dry-run]` | Import suppliers + customers from an audit file as invoice contacts (idempotent by name; whole-file validation). |
+| `bukio export xaf --year YYYY --out file.xaf` | Export the fiscal year as an **Auditfile Financieel 4.0 XML** (Belastingdienst format) — the file a boekhouder/tax advisor/auditor can pull straight into their own software. Posted entries only; drafts are excluded. Round-trips through `import xaf`. |
 | `bukio month-end --period yyyy-mm` | **Read-only** close check: drafts, unmatched bank, OB quarter readout, draft/overdue invoices, due recurring, period totals + profit, `warnings[]`. |
 | `bukio invoice reminders [--within-days N] [--draft-emails]` | Overdue + due-soon invoices (most overdue first) with outstanding amounts; `--draft-emails` adds Dutch email drafts — nothing is sent. |
 | `bukio assets scheme add --name [--method lineair\|degressief] [--life-months 60] [--residual-bp 0]` | Depreciation schemes; the standard 5y-lineair-0% scheme is created lazily when an asset has no scheme. |
@@ -90,7 +91,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio payments batch list [--status]` / `show --id` / `delete --id` | Batch tracking; delete only on drafts (releases payables to unpaid). |
 | `bukio contact update --id N [--iban …]` / `contact add --iban` | Contact IBANs (mod-97) — required before a vendor can join a batch. |
 | `bukio backup [--out PATH]` / `bukio restore --from FILE [--force]` | Consistent backup / validated restore. **Database only — NOT the original documents** (see 6.18). Backups are manual, not automatic. |
-| `bukio audit [--by agent:hermes] [--since ISO] [--limit N]` | Read the append-only audit log (newest first). |
+| `bukio audit [--by agent:hermes] [--since ISO] [--limit N] [--format json\|csv\|xlsx] [--out PATH]` | Read the append-only audit log (newest first); export to csv/xlsx for an external advisor. |
 
 **Import contract (all three importers):** the ENTIRE file is validated before
 anything is written. Any problem → `IMPORT_VALIDATION_FAILED` with
@@ -555,6 +556,30 @@ Suggested cadence (agent should propose, user approves):
 Restore: `bukio restore --from <file> --force` (validated). Restoring does not
 touch the invoice archive — documents must be restored from your manual copy.
 
+### 6.19 Hand the year to an external advisor (XAF + audit export)
+
+When a boekhouder, tax advisor or auditor needs to look at the books, export
+the year as an Auditfile Financieel 4.0 XML — the Belastingdienst standard that
+SnelStart, Exact and other accounting packages import directly:
+
+```bash
+# 1. the audit file: company header + chart + one Mutatie per posted entry
+bukio export xaf --year 2026 --out ~/exports/bukio-2026.xaf
+# 2. the audit trail as a spreadsheet (who did what, when)
+bukio audit --format xlsx --out ~/exports/bukio-audit-2026.xlsx --limit 1000
+# 3. hand over the source documents too (see 6.17 for the archive convention)
+tar -czf ~/exports/bukio-documenten-2026.tar.gz -C ~/.bukio invoices/
+```
+
+`export xaf` semantics:
+- **Posted entries only** — drafts are not part of the books as they stand and
+  are excluded (an export of a year with only drafts fails `EXPORT_EMPTY_YEAR`).
+- One `<Mutatie>` per entry, `<Boekstuknummer>` = the entry id (stable,
+  unique); postings become `<Boeking>` pairs (debet vs credit) exactly like the
+  importer reads them — **an exported file re-imports losslessly**.
+- Read-only: it writes the file and one `export.xaf` audit row; nothing else
+  is touched.
+
 ## 7. Error codes you will meet
 
 | Code | What it means | What to do |
@@ -571,6 +596,7 @@ touch the invoice archive — documents must be restored from your manual copy.
 | `NOT_POSTED` | Entry is draft | `entry post` first, then reverse |
 | `ALREADY_REVERSED` | Reversal exists | Find the contra-entry via `entry list` / `entry show` |
 | `SQLITE_CONSTRAINT_TRIGGER` | You violated an invariant (immutable posted entry, append-only audit) | You bypassed the engine or the operation is illegal — never "fix" this with raw SQL |
+| `EXPORT_EMPTY_YEAR` | No posted entries in the year | Book something first, or pick a different year — drafts are never exported |
 
 ---
 
@@ -589,6 +615,6 @@ touch the invoice archive — documents must be restored from your manual copy.
 
 ## 9. Capability boundaries (Phase 8 complete)
 
-Available: company init (incl. address for compliant invoices), journal entries (incl. **FX conversion**), accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. invoice payments), optional VAT module (enable, `vat book`, OB readout 1a–5d + mark-filed), recurring entries + invoices, invoicing (lifecycle, 12-vereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payments), Peppol send, jaarrekening (`year-end close`, micro/klein statutory accounts, KVK deposit PDF, XLSX), ICP readout, **FX rates + foreign-currency booking** (`fx set`, `--currency/--rate` on entry add + vat book, `fx_currency`/`fx_amount_cents` on postings), **MCP server** (`bukio mcp`, plan-only mutations, READONLY mode), **compliance calendar** (`compliance status`/`mark`), **imports** (`import opening-balances` / `journal` / `xaf` — whole-file validation, idempotent), **month-end close check** (`month-end --period`), **invoice reminders** (`invoice reminders`, draft emails only — never sends), **fixed assets** (`assets scheme add`/`assets add`/`run`/`register`/`dispose`/`pause`/`resume` — mid-life adoption via recognition-date + cum-dep at recognition, lineair + degressief, activastaat, source 'assets'), **SEPA payment batches** (`payments payables add`/`list`/`pay` — transfer vs direct-debit; `payments batch create`/`export`/`list`/`show`/`delete` — pain.001 `001.03`/`001.09`, unique MsgId, one export per batch, contact IBANs mod-97 validated), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
+Available: company init (incl. address for compliant invoices), journal entries (incl. **FX conversion**), accounts, reports (trial balance, balans, P&L, journal — JSON/CSV/XLSX), bank (CAMT.053 + Dutch CSV import, idempotent hashing, auto-match/link/post reconciliation incl. invoice payments), optional VAT module (enable, `vat book`, OB readout 1a–5d + mark-filed), recurring entries + invoices, invoicing (lifecycle, 12-vereisten, PDF, UBL/Peppol BIS 3.0, credit notes, payments), Peppol send, jaarrekening (`year-end close`, micro/klein statutory accounts, KVK deposit PDF, XLSX), ICP readout, **FX rates + foreign-currency booking** (`fx set`, `--currency/--rate` on entry add + vat book, `fx_currency`/`fx_amount_cents` on postings), **MCP server** (`bukio mcp`, plan-only mutations, READONLY mode), **compliance calendar** (`compliance status`/`mark`), **imports** (`import opening-balances` / `journal` / `xaf` — whole-file validation, idempotent), **month-end close check** (`month-end --period`), **invoice reminders** (`invoice reminders`, draft emails only — never sends), **fixed assets** (`assets scheme add`/`assets add`/`run`/`register`/`dispose`/`pause`/`resume` — mid-life adoption via recognition-date + cum-dep at recognition, lineair + degressief, activastaat, source 'assets'), **SEPA payment batches** (`payments payables add`/`list`/`pay` — transfer vs direct-debit; `payments batch create`/`export`/`list`/`show`/`delete` — pain.001 `001.03`/`001.09`, unique MsgId, one export per batch, contact IBANs mod-97 validated), **audit-file export** (`export xaf` — Auditfile Financieel 4.0 XML for external advisors; audit log as csv/xlsx), backup/restore, audit log, `--json`/`--dry-run` everywhere, actor attribution, per-company databases.
 
 **Not yet available:** LLM categorization suggestions, Ponto live feeds, Peppol receive, OCR, automated email sending for reminders. Do not pretend these exist; propose them to the maintainer instead of fabricating workarounds. NL query is done via the MCP tools — there is no bespoke NL parser.
