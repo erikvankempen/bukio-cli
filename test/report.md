@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-07 19:52:50 UTC — **✅ 362 passing · 0 failing (362 tests)**
+**Latest run:** 2026-08-07 20:45:14 UTC — **✅ 368 passing · 0 failing (368 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -218,7 +218,7 @@
 
 ### hardening.test.js — 
 
-51 passing · 0 failing
+57 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -271,6 +271,12 @@
     - ✅ importTransactions rejects garbage or impossible transaction dates
     - ✅ createPaymentBatch rejects a garbage batch date (it would land in pain.001)
     - ✅ jaarrekening and exportXaf reject a non-YYYY year instead of building nonsense documents
+    - ✅ invoice reminders --within-days 0 stays 0 and garbage is rejected (no silent 7)
+    - ✅ list limits validate at the module boundary (INVALID_LIMIT, not SQLITE_MISMATCH)
+    - ✅ CLI --limit 0 returns 0 rows; garbage --limit errors (no parseInt || default masking)
+    - ✅ MCP: journal honors limit with a truncation flag; year and limit are validated
+    - ✅ addPayable rejects garbage or impossible dates (they would land in the payables register)
+    - ✅ assets run/register reject garbage periods and as-of dates (no silent over-booking)
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 

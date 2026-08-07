@@ -44,7 +44,7 @@ export function make(program) {
           const rows = list(db, {
             since: opts.since || null,
             actor: opts.by || null,
-            limit: parseInt(opts.limit, 10) || 50,
+            limit: Number(opts.limit),
           });
           const format = opts.format || (ctx.json ? 'json' : 'human');
           if (format === 'json') {

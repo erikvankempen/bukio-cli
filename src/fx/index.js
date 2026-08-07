@@ -68,6 +68,9 @@ export function getFxRate(db, { currency, date }) {
 }
 
 export function listFxRates(db, { currency = null, limit = 50 } = {}) {
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw fxError('INVALID_LIMIT', `limit must be a non-negative integer, got '${limit}'`);
+  }
   const rows = currency
     ? db.prepare('SELECT * FROM fx_rates WHERE currency = ? ORDER BY date DESC LIMIT ?').all(currency, limit)
     : db.prepare('SELECT * FROM fx_rates ORDER BY date DESC LIMIT ?').all(limit);

@@ -317,6 +317,12 @@ export function addAsset(db, {
 // --- runs -------------------------------------------------------------------
 
 export function runDue(db, { asOf = null, period = null, actor = 'human', dryRun = false }) {
+  if (period != null && !/^\d{4}-(0[1-9]|1[0-2])$/.test(period)) {
+    throw assetsError('INVALID_PERIOD', `period '${period}' must be YYYY-MM (01-12)`);
+  }
+  if (asOf != null && !validDate(asOf)) {
+    throw assetsError('INVALID_DATE', `as-of '${asOf}' must be yyyy-mm-dd`);
+  }
   const target = period ?? asOf?.slice(0, 7) ?? new Date().toISOString().slice(0, 7);
   const assets = listAssets(db);
   const plan = [];
@@ -387,6 +393,9 @@ export function runDue(db, { asOf = null, period = null, actor = 'human', dryRun
 // --- activastaat ------------------------------------------------------------
 
 export function register(db, { asOf = null, actor = 'human' } = {}) {
+  if (asOf != null && !validDate(asOf)) {
+    throw assetsError('INVALID_DATE', `as-of '${asOf}' must be yyyy-mm-dd`);
+  }
   const targetPeriod = asOf ? asOf.slice(0, 7) : new Date().toISOString().slice(0, 7);
   const rows = [];
   for (const a of listAssets(db)) {

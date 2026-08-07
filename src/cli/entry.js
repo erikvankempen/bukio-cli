@@ -264,7 +264,7 @@ function listAction(ctx, opts) {
       state: opts.state || null,
       dateFrom: opts.dateFrom || null,
       dateTo: opts.dateTo || null,
-      limit: parseInt(opts.limit, 10) || 100,
+      limit: Number(opts.limit),
     });
     const data = entries.map((e) => ({
       id: e.id, date: e.date, description: e.description, state: e.state,

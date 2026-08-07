@@ -217,6 +217,9 @@ export function reverseEntry(db, { id, actor = 'human', reason = null }) {
 }
 
 export function listEntries(db, { state = null, dateFrom = null, dateTo = null, limit = 100 } = {}) {
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw entryError('INVALID_LIMIT', `limit must be a non-negative integer, got '${limit}'`);
+  }
   const clauses = [];
   const params = [];
   if (state) {

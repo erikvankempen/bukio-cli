@@ -76,7 +76,10 @@ tool({
   name: 'trial_balance', description: 'per-account totals; balanced tells you the books reconcile', schema: {
     type: 'object', properties: { year: { type: 'string' } },
   },
-  handler: (db, args) => trialBalance(db, { year: args.year ?? null }),
+  handler: (db, args) => {
+    if (args.year != null && !/^\d{4}$/.test(String(args.year))) throw new McpError('INVALID_YEAR', `year '${args.year}' must be YYYY`);
+    return trialBalance(db, { year: args.year ?? null });
+  },
 });
 tool({
   name: 'balans', description: 'balance sheet as of a date (balanced must be true)', schema: {
@@ -88,13 +91,25 @@ tool({
   name: 'pnl', description: 'profit & loss for a year (excludes closing entries)', schema: {
     type: 'object', properties: { year: { type: 'string' } },
   },
-  handler: (db, args) => pnl(db, { from: `${args.year}-01-01`, to: `${args.year}-12-31` }),
+  handler: (db, args) => {
+    const year = String(args.year ?? '');
+    if (!/^\d{4}$/.test(year)) throw new McpError('INVALID_YEAR', `year '${args.year}' must be YYYY`);
+    return pnl(db, { from: `${year}-01-01`, to: `${year}-12-31` });
+  },
 });
 tool({
-  name: 'journal', description: 'journal export for a year', schema: {
+  name: 'journal', description: 'journal export for a year (complete unless a limit is given; truncated: true when rows were cut)', schema: {
     type: 'object', properties: { year: { type: 'string' }, limit: { type: 'number' } },
   },
-  handler: (db, args) => journal(db, { from: `${args.year}-01-01`, to: `${args.year}-12-31`, limit: args.limit ?? 500 }),
+  handler: (db, args) => {
+    const year = String(args.year ?? '');
+    if (!/^\d{4}$/.test(year)) throw new McpError('INVALID_YEAR', `year '${args.year}' must be YYYY`);
+    const limit = args.limit ?? 500;
+    if (!Number.isInteger(limit) || limit < 0) throw new McpError('INVALID_LIMIT', `limit must be a non-negative integer, got '${limit}'`);
+    const rows = journal(db, { from: `${year}-01-01`, to: `${year}-12-31`, limit: limit + 1 });
+    const truncated = rows.length > limit;
+    return { rows: truncated ? rows.slice(0, limit) : rows, truncated, limit };
+  },
 });
 tool({
   name: 'accounts', description: 'chart of accounts', schema: { type: 'object', properties: {} },
@@ -122,15 +137,22 @@ tool({
   name: 'compliance', description: 'compliance calendar for a year (OB/ICP deadlines, jaarrekening deposit)', schema: {
     type: 'object', properties: { year: { type: 'string' } },
   },
-  handler: (db, args) => complianceStatus(db, { year: args.year }),
+  handler: (db, args) => {
+    if (args.year != null && !/^\d{4}$/.test(String(args.year))) throw new McpError('INVALID_YEAR', `year '${args.year}' must be YYYY`);
+    return complianceStatus(db, { year: args.year });
+  },
 });
 tool({
   name: 'invoices', description: 'outstanding + recent invoices', schema: {
     type: 'object', properties: { limit: { type: 'number' } },
   },
-  handler: (db, args) => ({
-    invoices: db.prepare('SELECT * FROM invoices ORDER BY id DESC LIMIT ?').all(args.limit ?? 50),
-  }),
+  handler: (db, args) => {
+    const limit = args.limit ?? 50;
+    if (!Number.isInteger(limit) || limit < 0) throw new McpError('INVALID_LIMIT', `limit must be a non-negative integer, got '${limit}'`);
+    return {
+      invoices: db.prepare('SELECT * FROM invoices ORDER BY id DESC LIMIT ?').all(limit),
+    };
+  },
 });
 
 // mutation tools (plan-only unless mode=execute)

@@ -237,7 +237,7 @@ export function make(program) {
   assets
     .command('run')
     .description('book the depreciation runs that are due (idempotent per asset-month)')
-    .option('--period <yyyy-mm>', 'book exactly this period')
+    .option('--period <yyyy-mm>', 'book all runs due up to and including this period')
     .option('--as-of <yyyy-mm-dd>', 'book everything due up to this date')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {

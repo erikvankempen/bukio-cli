@@ -160,7 +160,7 @@ export function make(program) {
           const rows = listTransactions(db, {
             state: opts.state || null,
             iban: opts.iban || null,
-            limit: parseInt(opts.limit, 10) || 200,
+            limit: Number(opts.limit),
           });
           const data = { transactions: rows.map(fmtTx) };
           output(ctx, data, (d) => {

@@ -29,6 +29,14 @@ function getCompany(db) {
   return db.prepare('SELECT * FROM company WHERE id = 1').get() ?? null;
 }
 
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function validDate(s) {
+  if (!DATE_RE.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
 /** Resolve a contact by id (number) or case-insensitive name. */
 export function resolveContact(db, ref) {
   const id = Number(ref);
@@ -74,6 +82,8 @@ export function addPayable(db, {
   }
   if (!invoiceRef || !String(invoiceRef).trim()) throw paymentsError('INVOICE_REF_REQUIRED', 'invoice reference is required');
   if (!['transfer', 'direct_debit'].includes(method)) throw paymentsError('INVALID_METHOD', "payment method must be 'transfer' or 'direct_debit'");
+  if (!validDate(date)) throw paymentsError('INVALID_DATE', `date '${date}' must be yyyy-mm-dd`);
+  if (dueDate != null && !validDate(dueDate)) throw paymentsError('INVALID_DATE', `due date '${dueDate}' must be yyyy-mm-dd`);
   const payable = { contact_id: c.id, invoice_ref: String(invoiceRef).trim(), date, due_date: dueDate, amount_cents: amountCents, payment_method: method, entry_id: entryId };
   if (dryRun) return { action: 'payables.add', ...payable, contact_name: c.name, dryRun: true };
   const info = db.prepare(

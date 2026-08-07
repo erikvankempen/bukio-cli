@@ -29,6 +29,13 @@
 //       inverted the check and dropped it).
 //   F12 `invoice pay --amount` parses money as integer cents (parseAmount):
 //       '12,34' and '1e3' are rejected instead of silently mis-booking.
+//   F13 numeric CLI inputs validate: `invoice reminders --within-days 0` stays
+//       0 (was masked to 7 by `Number(x) || 7`); garbage within-days errors
+//       INVALID_WINDOW; `--limit` validates at the module boundary
+//       (INVALID_LIMIT instead of a raw SQLITE_MISMATCH from NaN LIMIT
+//       binding); `--limit 0` returns 0 rows instead of the default; the MCP
+//       journal tool actually applies its limit and flags truncation, and the
+//       MCP year/limit params are validated (INVALID_YEAR/INVALID_LIMIT).
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
@@ -39,7 +46,7 @@ import { fileURLToPath } from 'node:url';
 import ExcelJS from 'exceljs';
 import { openDb } from '../src/core/db.js';
 import { seedDefaultChart, deactivateAccount, reactivateAccount, getAccountByCode } from '../src/core/accounts.js';
-import { createEntry, postEntry, reverseEntry, getEntry } from '../src/core/entries.js';
+import { createEntry, postEntry, reverseEntry, getEntry, listEntries } from '../src/core/entries.js';
 import { parseAmount } from '../src/core/money.js';
 import { trialBalance } from '../src/report/trial-balance.js';
 import {
@@ -53,15 +60,18 @@ import {
 } from '../src/invoice/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { parseBankCsv } from '../src/bank/csv.js';
+import { importXaf } from '../src/import/index.js';
 import {
   importTransactions, getOrCreateBankAccount, linkTransaction, postFromTransaction, autoMatch,
-  setTransactionState,
+  setTransactionState, listTransactions,
 } from '../src/bank/index.js';
 import { parseCamt053 } from '../src/bank/camt.js';
-import { toEurPostings, setFxRate } from '../src/fx/index.js';
+import { toEurPostings, setFxRate, listFxRates } from '../src/fx/index.js';
 import { fetchEcbRate } from '../src/fx/ecb.js';
 import { exportXaf } from '../src/export/index.js';
 import { jaarrekening } from '../src/report/jaarrekening.js';
+import { journal } from '../src/report/journal.js';
+import { list as listAudit } from '../src/audit/index.js';
 import {
   addPayable, createPaymentBatch, createPaymentBatchFromCsv,
   deletePaymentBatch, exportPaymentBatch, parseBatchCsv,
@@ -1120,3 +1130,217 @@ test('jaarrekening and exportXaf reject a non-YYYY year instead of building nons
 });
 
 
+
+// --- F13: numeric CLI inputs validate — no silent defaults, no raw SQL errors ---
+
+test('invoice reminders --within-days 0 stays 0 and garbage is rejected (no silent 7)', () => {
+  const dbPath = tmpDb();
+  const db0 = openDb(dbPath);
+  seedDefaultChart(db0);
+  db0.prepare("INSERT INTO company (name, kvk, legal_form) VALUES ('Test BV', '12345678', 'bv')").run();
+  db0.close();
+
+  // 0 must stay 0 — the old `Number(x) || 7` masked it to 7
+  const zero = cli(dbPath, ['invoice', 'reminders', '--within-days', '0']);
+  assert.equal(zero.code, 0);
+  assert.equal(zero.out.data.within_days, 0, '--within-days 0 must not become 7');
+
+  // garbage must error, not silently default to 7
+  const garbage = cli(dbPath, ['invoice', 'reminders', '--within-days', 'abc']);
+  assert.equal(garbage.code, 1);
+  assert.equal(garbage.out.error.code, 'INVALID_WINDOW');
+
+  // negatives stay rejected
+  const neg = cli(dbPath, ['invoice', 'reminders', '--within-days', '-1']);
+  assert.equal(neg.code, 1);
+  assert.equal(neg.out.error.code, 'INVALID_WINDOW');
+});
+
+test('list limits validate at the module boundary (INVALID_LIMIT, not SQLITE_MISMATCH)', () => {
+  assert.throws(() => listEntries(db, { limit: 'abc' }), (e) => e.code === 'INVALID_LIMIT');
+  assert.throws(() => listEntries(db, { limit: -1 }), (e) => e.code === 'INVALID_LIMIT');
+  assert.throws(() => listAudit(db, { limit: 'abc' }), (e) => e.code === 'INVALID_LIMIT');
+  assert.throws(() => listTransactions(db, { limit: NaN }), (e) => e.code === 'INVALID_LIMIT');
+  assert.throws(() => listFxRates(db, { limit: 'abc' }), (e) => e.code === 'INVALID_LIMIT');
+  assert.throws(() => listFxRates(db, { limit: -5 }), (e) => e.code === 'INVALID_LIMIT');
+
+  // zero is legal and returns zero rows (SQLite LIMIT 0 semantics)
+  assert.equal(listEntries(db, { limit: 0 }).length, 0);
+  assert.equal(listFxRates(db, { limit: 0 }).length, 0);
+});
+
+test('CLI --limit 0 returns 0 rows; garbage --limit errors (no parseInt || default masking)', () => {
+  const dbPath = tmpDb();
+  const db0 = openDb(dbPath);
+  seedDefaultChart(db0);
+  db0.prepare("INSERT INTO company (name, kvk, legal_form) VALUES ('Test BV', '12345678', 'bv')").run();
+  for (let i = 0; i < 2; i += 1) {
+    const e = createEntry(db0, {
+      date: '2026-01-01', description: `e${i}`,
+      postings: [{ code: '1100', amountCents: 1000 }, { code: '8000', amountCents: -1000 }],
+      actor: 'agent:test',
+    });
+    postEntry(db0, { id: e.id, actor: 'agent:test' });
+  }
+  db0.close();
+
+  // --limit 0 stays 0 (the old parseInt(x) || 100 returned the default)
+  const zero = cli(dbPath, ['entry', 'list', '--limit', '0']);
+  assert.equal(zero.code, 0);
+  assert.equal(zero.out.data.entries.length, 0, '--limit 0 must not become the default');
+
+  // --limit 1 caps
+  const one = cli(dbPath, ['entry', 'list', '--limit', '1']);
+  assert.equal(one.code, 0);
+  assert.equal(one.out.data.entries.length, 1);
+
+  // garbage errors with the proper code, not SQLITE_MISMATCH
+  const garbage = cli(dbPath, ['entry', 'list', '--limit', 'abc']);
+  assert.equal(garbage.code, 1);
+  assert.equal(garbage.out.error.code, 'INVALID_LIMIT');
+
+  // audit --limit 0
+  const auditZero = cli(dbPath, ['audit', '--limit', '0']);
+  assert.equal(auditZero.code, 0);
+  assert.equal(auditZero.out.data.entries.length, 0);
+
+  // fx list --limit abc (the original SQLITE_MISMATCH path)
+  const fxGarbage = cli(dbPath, ['fx', 'list', '--limit', 'abc']);
+  assert.equal(fxGarbage.code, 1);
+  assert.equal(fxGarbage.out.error.code, 'INVALID_LIMIT');
+  const fxZero = cli(dbPath, ['fx', 'list', '--limit', '0']);
+  assert.equal(fxZero.code, 0);
+  assert.equal(fxZero.out.data.rates.length, 0);
+});
+
+test('MCP: journal honors limit with a truncation flag; year and limit are validated', async () => {
+  const dbPath = tmpDb();
+  const db0 = openDb(dbPath);
+  seedDefaultChart(db0);
+  db0.prepare("INSERT INTO company (name, kvk, legal_form) VALUES ('Test BV', '12345678', 'bv')").run();
+  for (let i = 0; i < 3; i += 1) {
+    const e = createEntry(db0, {
+      date: '2026-01-01', description: `e${i}`,
+      postings: [{ code: '1100', amountCents: 1000 }, { code: '8000', amountCents: -1000 }],
+      actor: 'agent:test',
+    });
+    postEntry(db0, { id: e.id, actor: 'agent:test' });
+  }
+  db0.close();
+
+  const mcp = mcpSession(dbPath);
+  try {
+    await mcp.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+
+    // limit actually bounds the response and flags truncation
+    const capped = await mcp.call('tools/call', { name: 'journal', arguments: { year: '2026', limit: 2 } });
+    const cappedRes = JSON.parse(capped.result.content[0].text);
+    assert.equal(cappedRes.rows.length, 2, 'journal limit must actually cap the rows');
+    assert.equal(cappedRes.truncated, true, 'truncation must be flagged');
+
+    // no limit -> complete journal, not truncated
+    const full = await mcp.call('tools/call', { name: 'journal', arguments: { year: '2026' } });
+    const fullRes = JSON.parse(full.result.content[0].text);
+    assert.equal(fullRes.truncated, false);
+    assert.ok(fullRes.rows.length > 2, 'unlimited journal must be complete');
+
+    // garbage year -> INVALID_YEAR, not a silent empty result
+    const badYear = await mcp.call('tools/call', { name: 'journal', arguments: { year: 'abcd' } });
+    assert.ok(badYear.result.content[0].text.includes('INVALID_YEAR'), badYear.result.content[0].text.slice(0, 200));
+
+    // garbage limit -> INVALID_LIMIT, not SQLITE_MISMATCH
+    const badLimit = await mcp.call('tools/call', { name: 'journal', arguments: { year: '2026', limit: 'abc' } });
+    assert.ok(badLimit.result.content[0].text.includes('INVALID_LIMIT'), badLimit.result.content[0].text.slice(0, 200));
+
+    // invoices tool validates its limit too
+    const badInvLimit = await mcp.call('tools/call', { name: 'invoices', arguments: { limit: 'abc' } });
+    assert.ok(badInvLimit.result.content[0].text.includes('INVALID_LIMIT'), badInvLimit.result.content[0].text.slice(0, 200));
+
+    // pnl rejects a garbage year instead of silently querying '2026-13-01'
+    const badPnl = await mcp.call('tools/call', { name: 'pnl', arguments: { year: '2026-13' } });
+    assert.ok(badPnl.result.content[0].text.includes('INVALID_YEAR'), badPnl.result.content[0].text.slice(0, 200));
+  } finally {
+    await mcp.close();
+  }
+});
+
+// --- F14: payable + asset-run dates validate (no silent over-booking) --------
+
+test('addPayable rejects garbage or impossible dates (they would land in the payables register)', () => {
+  const contact = addContact();
+  assert.throws(
+    () => addPayable(db, { contact: contact.name, invoiceRef: 'F1', date: 'garbage', amountCents: 1000, actor: 'agent:test' }),
+    (e) => e.code === 'INVALID_DATE',
+  );
+  assert.throws(
+    () => addPayable(db, { contact: contact.name, invoiceRef: 'F1', date: '2026-02-30', amountCents: 1000, actor: 'agent:test' }),
+    (e) => e.code === 'INVALID_DATE',
+  );
+  assert.throws(
+    () => addPayable(db, { contact: contact.name, invoiceRef: 'F1', date: '2026-01-05', dueDate: 'nonsense', amountCents: 1000, actor: 'agent:test' }),
+    (e) => e.code === 'INVALID_DATE',
+  );
+  // valid still works
+  const ok = addPayable(db, { contact: contact.name, invoiceRef: 'F1', date: '2026-01-05', dueDate: '2026-02-05', amountCents: 1000, actor: 'agent:test' });
+  assert.equal(ok.date, '2026-01-05');
+  assert.equal(ok.due_date, '2026-02-05');
+});
+
+test('assets run/register reject garbage periods and as-of dates (no silent over-booking)', () => {
+  createScheme(db, { name: '3y', method: 'lineair', lifeMonths: 36, actor: 'agent:test' });
+  addAsset(db, {
+    name: 'Laptop', schemeId: 1, purchaseDate: '2026-01-01', purchasePriceCents: 360000,
+    depreciationStartDate: '2026-01-01', recognitionDate: '2026-01-01',
+    assetAccount: '1200', expenseAccount: '4600', actor: 'agent:test',
+  });
+  // a 13th month previously booked the WHOLE year; garbage as-of booked the
+  // whole remaining life (25 months) — both must now fail before any write
+  assert.throws(() => runDue(db, { period: '2026-13', actor: 'agent:test' }), (e) => e.code === 'INVALID_PERIOD');
+  assert.throws(() => runDue(db, { period: '2026-00', actor: 'agent:test' }), (e) => e.code === 'INVALID_PERIOD');
+  assert.throws(() => runDue(db, { asOf: 'garbage', actor: 'agent:test' }), (e) => e.code === 'INVALID_DATE');
+  assert.throws(() => runDue(db, { asOf: '2026-02-30', actor: 'agent:test' }), (e) => e.code === 'INVALID_DATE');
+  assert.throws(() => register(db, { asOf: 'garbage', actor: 'agent:test' }), (e) => e.code === 'INVALID_DATE');
+  // valid period still books exactly the due runs up to it (catch-up model)
+  const r = runDue(db, { period: '2026-02', actor: 'agent:test' });
+  assert.deepEqual(r.booked.map((b) => b.period), ['2026-01', '2026-02']);
+  const entries = listEntries(db);
+  assert.equal(entries.filter((e) => e.state === 'posted').length, 2);
+});
+
+// --- F15: XAF import dedupes duplicate boekstuknummer within one file --------
+
+test('import xaf skips a duplicate Boekstuknummer within the same file (parity with AuditFile layout)', () => {
+  const xaf = `<?xml version="1.0" encoding="UTF-8"?>
+<Xaf xmlns="http://www.auditfiles.nl/XAF/4.0">
+  <XafHeader><Version>4.0</Version><CompanyName>Demo BV</CompanyName><CompanyID>12345678</CompanyID><FiscalYear>2026</FiscalYear></XafHeader>
+  <Rekeningen>
+    <Rekening><RekeningCode>1100</RekeningCode><RekeningOmschrijving>Bank</RekeningOmschrijving><RekeningSoort>Balans</RekeningSoort></Rekening>
+    <Rekening><RekeningCode>8000</RekeningCode><RekeningOmschrijving>Omzet</RekeningOmschrijving><RekeningSoort>Winst en Verlies</RekeningSoort></Rekening>
+  </Rekeningen>
+  <Mutaties>
+    <Mutatie>
+      <Boekstuknummer>DUP-1</Boekstuknummer><Datum>2026-01-10</Datum>
+      <Boekingen>
+        <Boeking><RekeningCode>1100</RekeningCode><TegenrekeningCode>8000</TegenrekeningCode><Bedrag>100.00</Bedrag></Boeking>
+      </Boekingen>
+    </Mutatie>
+    <Mutatie>
+      <Boekstuknummer>DUP-1</Boekstuknummer><Datum>2026-01-11</Datum>
+      <Boekingen>
+        <Boeking><RekeningCode>1100</RekeningCode><TegenrekeningCode>8000</TegenrekeningCode><Bedrag>200.00</Bedrag></Boeking>
+      </Boekingen>
+    </Mutatie>
+  </Mutaties>
+</Xaf>`;
+  const r = importXaf(db, { xmlText: xaf, actor: 'agent:test' });
+  // the second mutatie shares the boekstuknummer -> skipped as a duplicate
+  assert.equal(r.imported, 1, 'only the first mutatie imports');
+  assert.equal(r.duplicates, 1, 'the duplicate boekstuknummer is reported');
+  const entries = db.prepare("SELECT * FROM journal_entries WHERE source = 'xaf'").all();
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].source_ref, 'DUP-1');
+  // re-importing the same file stays idempotent (both mutaties now dupes)
+  const again = importXaf(db, { xmlText: xaf, actor: 'agent:test' });
+  assert.equal(again.imported, 0);
+  assert.equal(again.duplicates, 2);
+});

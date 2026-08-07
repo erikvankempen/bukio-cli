@@ -445,7 +445,7 @@ export function make(program) {
       try {
         const db = ensureDb(ctx);
         try {
-          const result = invoiceReminders(db, { withinDays: Number(opts.withinDays) || 7 });
+          const result = invoiceReminders(db, { withinDays: Number(opts.withinDays) });
           if (opts.draftEmails) {
             const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
             result.reminders = result.reminders.map((r) => {

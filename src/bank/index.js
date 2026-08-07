@@ -118,6 +118,9 @@ export function importTransactions(db, { iban, transactions, name = null, accoun
 }
 
 export function listTransactions(db, { state = null, iban = null, limit = 200 } = {}) {
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw bankError('INVALID_LIMIT', `limit must be a non-negative integer, got '${limit}'`);
+  }
   const clauses = [];
   const params = [];
   if (state) { clauses.push('bt.state = ?'); params.push(state); }

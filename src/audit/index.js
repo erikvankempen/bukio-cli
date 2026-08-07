@@ -14,6 +14,11 @@ export function record(db, { actor, action, command = null, args = null, outcome
 }
 
 export function list(db, { since = null, actor = null, limit = 50 } = {}) {
+  if (!Number.isInteger(limit) || limit < 0) {
+    const e = new Error(`limit must be a non-negative integer, got '${limit}'`);
+    e.code = 'INVALID_LIMIT';
+    throw e;
+  }
   const clauses = [];
   const params = [];
   if (since) {

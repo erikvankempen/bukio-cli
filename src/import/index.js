@@ -660,6 +660,7 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
         source: 'xaf', sourceRef: m.boekstuk, actor,
       });
       const posted = postEntry(db, { id: entry.id, actor });
+      existingRefs.add(m.boekstuk); // same-file duplicate boekstuknummer -> skip (parity with the AuditFile layout)
       imported.push({ id: posted.id, date: posted.date, description: posted.description, boekstuk: m.boekstuk });
     }
   });
