@@ -10,6 +10,7 @@ export function make(program) {
     .description('fetch the ECB reference rate (1 EUR = N) for a currency on/before a date and store it')
     .requiredOption('--currency <ISO>', 'ISO 4217 currency (USD, GBP, ...)')
     .option('--date <yyyy-mm-dd>', 'rate date (default: today; weekends/holidays fall back to the last business day)')
+    .option('--dry-run', 'fetch and show the rate without storing it')
     .action(async (opts, command) => {
       const ctx = makeCtx(command);
       try {
@@ -19,6 +20,12 @@ export function make(program) {
           const r = await fetchEcbRate({ currency: opts.currency, date });
           if (!r) {
             throw Object.assign(new Error(`no ECB reference rate for ${opts.currency} on/before ${date} (not in the ECB set, or before 1999)`), { code: 'ECB_RATE_NOT_AVAILABLE' });
+          }
+          if (ctx.dryRun) {
+            output(ctx, { rate: { currency: opts.currency, date: r.date, rate: (r.rateX10000 / 10000).toFixed(4), source: 'ECB' }, fetched_for: date, dryRun: true }, (d) =>
+              console.log(`plan: store 1 EUR = ${d.rate.rate} ${d.rate.currency} on ${d.rate.date} (ECB, fetched for ${d.fetched_for})`));
+            console.log('(dry run — nothing written)');
+            return;
           }
           const stored = setFxRate(db, { currency: opts.currency, date: r.date, rate: r.rateX10000, source: 'ECB', actor: ctx.actor });
           output(ctx, { rate: stored, fetched_for: date }, (d) =>
@@ -37,13 +44,21 @@ export function make(program) {
     .requiredOption('--date <YYYY-MM-DD>', 'rate as of this date')
     .requiredOption('--rate <n>', 'units of foreign currency per EUR (e.g. 1.0875)')
     .option('--source <text>', 'rate source (default: manual)')
+    .option('--dry-run', 'validate the rate without storing it')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
         try {
-          const r = setFxRate(db, { currency: opts.currency, date: opts.date, rate: opts.rate, source: opts.source, actor: ctx.actor });
-          output(ctx, { rate: r }, (d) => console.log(`1 EUR = ${d.rate.rate} ${d.rate.currency} on ${d.rate.date} (stored)`));
+          const r = setFxRate(db, { currency: opts.currency, date: opts.date, rate: opts.rate, source: opts.source, actor: ctx.actor, dryRun: ctx.dryRun });
+          output(ctx, { rate: r }, (d) => {
+            if (d.rate.dryRun) {
+              console.log(`plan: store 1 EUR = ${d.rate.rate} ${d.rate.currency} on ${d.rate.date}`);
+              console.log('(dry run — nothing written)');
+              return;
+            }
+            console.log(`1 EUR = ${d.rate.rate} ${d.rate.currency} on ${d.rate.date} (stored)`);
+          });
         } finally {
           db.close();
         }

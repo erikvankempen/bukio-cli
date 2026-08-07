@@ -35,10 +35,13 @@ export function convertFx(fxCents, rateX10000) {
   return Math.round((fxCents * 10000) / rateX10000);
 }
 
-export function setFxRate(db, { currency, date, rate, source = 'manual', actor = 'human' }) {
+export function setFxRate(db, { currency, date, rate, source = 'manual', actor = 'human', dryRun = false }) {
   if (!ISO4217.test(currency)) throw fxError('INVALID_CURRENCY', `currency '${currency}' must be ISO 4217 (3 letters)`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw fxError('INVALID_DATE', `date '${date}' must be YYYY-MM-DD`);
   const rateX10000 = typeof rate === 'number' ? rate : parseRate(rate);
+  if (dryRun) {
+    return { action: 'fx.set', currency, date, rate: (rateX10000 / 10000).toFixed(4), rate_x10000: rateX10000, dryRun: true };
+  }
   db.prepare(`
     INSERT INTO fx_rates (currency, date, rate_x10000, source, created_by)
     VALUES (?, ?, ?, ?, ?)

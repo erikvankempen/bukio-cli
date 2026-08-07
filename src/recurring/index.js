@@ -184,10 +184,13 @@ export function listTemplates(db, { status = 'active' } = {}) {
   return rows;
 }
 
-export function setTemplateStatus(db, { id, status, actor = 'human' }) {
+export function setTemplateStatus(db, { id, status, actor = 'human', dryRun = false }) {
   const tpl = getTemplate(db, id);
   if (!tpl) throw recurringError('NOT_FOUND', `recurring template ${id} does not exist`);
   if (tpl.status === 'completed') throw recurringError('ALREADY_COMPLETED', 'a completed template cannot be re-activated');
+  if (dryRun) {
+    return { action: `recurring.${status}`, id, from: tpl.status, to: status, dryRun: true };
+  }
   db.prepare('UPDATE recurring_templates SET status = ? WHERE id = ?').run(status, id);
   record(db, { actor, action: `recurring.${status}`, command: 'recurring', args: { id }, outcome: 'ok' });
   return getTemplate(db, id);

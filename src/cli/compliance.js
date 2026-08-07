@@ -43,13 +43,21 @@ export function make(program) {
     .requiredOption('--type <OB|ICP|JAARREKENING>', 'obligation type')
     .requiredOption('--period <p>', '2026-Q3 (OB/ICP) or 2026 (JAARREKENING)')
     .option('--date <yyyy-mm-dd>', 'filing date (default: today)')
+    .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
         try {
-          const r = markFiled(db, { type: opts.type, period: opts.period, date: opts.date, actor: ctx.actor });
-          output(ctx, { filed: r }, (d) => console.log(`${d.filed.type} ${d.filed.period} filed on ${d.filed.filed_at}`));
+          const r = markFiled(db, { type: opts.type, period: opts.period, date: opts.date, actor: ctx.actor, dryRun: ctx.dryRun });
+          output(ctx, { filed: r }, (d) => {
+            if (d.filed.dryRun) {
+              console.log(`plan: mark ${d.filed.type} ${d.filed.period} filed on ${d.filed.filed_at}`);
+              console.log('(dry run — nothing written)');
+              return;
+            }
+            console.log(`${d.filed.type} ${d.filed.period} filed on ${d.filed.filed_at}`);
+          });
         } finally {
           db.close();
         }

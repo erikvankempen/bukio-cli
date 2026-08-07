@@ -142,13 +142,21 @@ export function make(program) {
     .command('reactivate')
     .description('reactivate an account')
     .requiredOption('--code <code>', 'account code')
+    .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
         try {
-          const updated = reactivateAccount(db, opts.code);
-          output(ctx, serializeAccount(updated), (d) => console.log(`reactivated account ${d.code} ${d.name}`));
+          const updated = reactivateAccount(db, opts.code, { dryRun: ctx.dryRun });
+          output(ctx, { account: updated }, (d) => {
+            if (d.account.dryRun) {
+              console.log(`plan: reactivate account ${d.account.code} (${d.account.from} -> ${d.account.to})`);
+              console.log('(dry run — nothing written)');
+              return;
+            }
+            console.log(`reactivated account ${d.account.code} ${d.account.name}`);
+          });
         } finally {
           db.close();
         }

@@ -50,6 +50,7 @@ export function make(program) {
     .option('--vat-id <id>', 'customer btw-id (required for btw verlegd)')
     .option('--kvk <kvk>', 'customer KVK number')
     .option('--iban <iban>', 'bank account (IBAN) — needed to include the contact in payment batches')
+    .option('--dry-run', 'validate without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
@@ -58,9 +59,17 @@ export function make(program) {
           const c = createContact(db, {
             name: opts.name, address: opts.address ?? null, postalCode: opts.postalCode ?? null,
             city: opts.city ?? null, country: opts.country, email: opts.email ?? null,
-            vatId: opts.vatId ?? null, kvk: opts.kvk ?? null, iban: opts.iban ?? null, actor: ctx.actor,
+            vatId: opts.vatId ?? null, kvk: opts.kvk ?? null, iban: opts.iban ?? null,
+            actor: ctx.actor, dryRun: ctx.dryRun,
           });
-          output(ctx, { contact: c }, (d) => console.log(`contact #${d.contact.id} ${d.contact.name}`));
+          output(ctx, { contact: c }, (d) => {
+            if (d.contact.dryRun) {
+              console.log(`plan: add contact '${d.contact.name}'${d.contact.iban ? ` (iban ${d.contact.iban})` : ''}`);
+              console.log('(dry run — nothing written)');
+              return;
+            }
+            console.log(`contact #${d.contact.id} ${d.contact.name}`);
+          });
         } finally {
           db.close();
         }
@@ -81,6 +90,7 @@ export function make(program) {
     .option('--vat-id <id>', 'customer btw-id')
     .option('--kvk <kvk>', 'customer KVK number')
     .option('--iban <iban>', 'bank account (IBAN)')
+    .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
@@ -89,9 +99,20 @@ export function make(program) {
           const c = updateContact(db, {
             id: Number(opts.id), name: opts.name, address: opts.address, postalCode: opts.postalCode,
             city: opts.city, country: opts.country, email: opts.email, vatId: opts.vatId,
-            kvk: opts.kvk, iban: opts.iban, actor: ctx.actor,
+            kvk: opts.kvk, iban: opts.iban, actor: ctx.actor, dryRun: ctx.dryRun,
           });
-          output(ctx, { contact: c }, (d) => console.log(`contact #${d.contact.id} ${d.contact.name} updated (iban: ${d.contact.iban ?? 'none'})`));
+          output(ctx, { contact: c }, (d) => {
+            if (d.contact.dryRun) {
+              console.log(`plan: update contact #${d.contact.id}`);
+              for (const [k, v] of Object.entries(d.contact.changes)) {
+                const snake = k.replace(/[A-Z]/g, (m) => `_${m.toLowerCase()}`);
+                console.log(`  ${k}: '${d.contact.before[snake] ?? ''}' -> '${v}'`);
+              }
+              console.log('(dry run — nothing written)');
+              return;
+            }
+            console.log(`contact #${d.contact.id} ${d.contact.name} updated (iban: ${d.contact.iban ?? 'none'})`);
+          });
         } finally {
           db.close();
         }
@@ -382,6 +403,7 @@ export function make(program) {
     .requiredOption('--date <yyyy-mm-dd>', 'payment date')
     .option('--amount <amount>', 'amount (default: full outstanding)')
     .option('--method <method>', 'bank|cash|other', 'bank')
+    .option('--dry-run', 'validate the payment without recording it')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
@@ -394,7 +416,14 @@ export function make(program) {
           const amountCents = opts.amount
             ? parseAmount(opts.amount)
             : inv.gross_cents - inv.paid_cents;
-          const paid = markPaid(db, { id: opts.id, date: opts.date, amountCents, method: opts.method, actor: ctx.actor });
+          const paid = markPaid(db, { id: opts.id, date: opts.date, amountCents, method: opts.method, actor: ctx.actor, dryRun: ctx.dryRun });
+          if (paid.dryRun) {
+            output(ctx, { plan: paid }, (d) => {
+              console.log(`plan: record payment of ${formatAmount(d.plan.amount_cents)} on invoice #${d.plan.invoice_id} (${formatAmount(d.plan.remaining_cents)} outstanding after)`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
           output(ctx, { invoice: fmtInvoice(paid) }, (d) => {
             console.log(`payment recorded: ${d.invoice.invoice_number} now ${d.invoice.status} (paid ${d.invoice.paid}/${d.invoice.gross})`);
           });

@@ -39,7 +39,7 @@ export function isFiled(db, type, period) {
   return Boolean(db.prepare('SELECT 1 FROM filings WHERE type = ? AND period = ?').get(type, period));
 }
 
-export function markFiled(db, { type, period, date = null, actor = 'human' }) {
+export function markFiled(db, { type, period, date = null, actor = 'human', dryRun = false }) {
   if (!['OB', 'ICP', 'JAARREKENING'].includes(type)) {
     throw complianceError('INVALID_TYPE', "type must be OB, ICP or JAARREKENING (OB uses 'vat readout --mark-filed')");
   }
@@ -49,6 +49,9 @@ export function markFiled(db, { type, period, date = null, actor = 'human' }) {
   if (type === 'ICP' && !/^\d{4}-Q[1-4]$/.test(period)) throw complianceError('INVALID_PERIOD', 'ICP period must be YYYY-Qn');
   if (type === 'JAARREKENING' && !/^\d{4}$/.test(period)) throw complianceError('INVALID_PERIOD', 'JAARREKENING period must be YYYY');
   const filedDate = date ?? new Date().toISOString().slice(0, 10);
+  if (dryRun) {
+    return { action: 'compliance.mark', type, period, filed_at: filedDate, dryRun: true };
+  }
   db.prepare(`
     INSERT INTO filings (type, period, filed_at, created_by)
     VALUES (?, ?, ?, ?)

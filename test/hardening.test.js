@@ -32,12 +32,12 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/core/db.js';
-import { seedDefaultChart } from '../src/core/accounts.js';
+import { seedDefaultChart, deactivateAccount, reactivateAccount } from '../src/core/accounts.js';
 import { createEntry, postEntry, reverseEntry, getEntry } from '../src/core/entries.js';
 import { parseAmount } from '../src/core/money.js';
 import {
@@ -45,13 +45,22 @@ import {
   parseVatPostingSpecs, expandVatPostings,
 } from '../src/vat/index.js';
 import { addAsset, disposeAsset, runDue, register, createScheme } from '../src/assets/index.js';
-import { createContact, createInvoice, finalizeInvoice } from '../src/invoice/index.js';
+import {
+  createContact, updateContact, getContact, getInvoice,
+  createInvoice, finalizeInvoice, markPaid,
+} from '../src/invoice/index.js';
 import { parseBankCsv } from '../src/bank/csv.js';
-import { importTransactions } from '../src/bank/index.js';
+import {
+  importTransactions, getOrCreateBankAccount, linkTransaction, postFromTransaction, autoMatch,
+} from '../src/bank/index.js';
 import { parseCamt053 } from '../src/bank/camt.js';
-import { toEurPostings } from '../src/fx/index.js';
-import { createPaymentBatchFromCsv, parseBatchCsv } from '../src/payments/index.js';
-import { buildDepreciationTemplate } from '../src/recurring/index.js';
+import { toEurPostings, setFxRate } from '../src/fx/index.js';
+import {
+  addPayable, createPaymentBatch, createPaymentBatchFromCsv,
+  deletePaymentBatch, exportPaymentBatch, parseBatchCsv,
+} from '../src/payments/index.js';
+import { buildDepreciationTemplate, createTemplate, getTemplate, setTemplateStatus } from '../src/recurring/index.js';
+import { markFiled } from '../src/compliance/index.js';
 
 const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
 
@@ -353,7 +362,162 @@ test('CLI: invoice pay rejects non-international amounts', () => {
   assert.equal(show.out.data.invoice.paid, '12.34');
 });
 
-// --- extra edge cases (trip but should not) ---------------------------------
+// --- follow-up pass (2026-08-07): dry-run uniformity + bank/payments edges ---
+
+test('dry-run: contact add/update/markPaid write nothing', () => {
+  const plan = createContact(db, { name: 'Nieuwe BV', iban: 'NL91ABNA0417164300', actor: 'agent:test', dryRun: true });
+  assert.equal(plan.dryRun, true);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM contacts WHERE name = 'Nieuwe BV'").get().c, 0);
+
+  const c = addContact();
+  const upd = updateContact(db, { id: c.id, name: 'Gewijzigd BV', dryRun: true, actor: 'agent:test' });
+  assert.equal(upd.dryRun, true);
+  assert.equal(upd.changes.name, 'Gewijzigd BV');
+  assert.equal(getContact(db, c.id).name, 'ACME BV');
+
+  // invoice pay dry-run: validated but not recorded
+  const inv = createInvoice(db, { contactId: c.id, lines: ['1x Werk @ 100.00 @21'], date: '2099-01-10', actor: 'agent:test' });
+  finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+  const payPlan = markPaid(db, { id: inv.id, date: '2099-02-01', amountCents: 5000, actor: 'agent:test', dryRun: true });
+  assert.equal(payPlan.dryRun, true);
+  assert.equal(payPlan.remaining_cents, 12100);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM invoice_payments').get().c, 0);
+  assert.equal(getInvoice(db, inv.id).status, 'sent');
+  // overpay is still rejected in dry-run — validation always runs
+  assert.throws(
+    () => markPaid(db, { id: inv.id, date: '2099-02-01', amountCents: 999999, actor: 'agent:test', dryRun: true }),
+    { code: 'OVERPAYMENT' },
+  );
+});
+
+test('dry-run: compliance mark / fx set / recurring pause / account reactivate write nothing', () => {
+  // compliance
+  const filed = markFiled(db, { type: 'ICP', period: '2026-Q1', actor: 'agent:test', dryRun: true });
+  assert.equal(filed.dryRun, true);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM filings WHERE type = 'ICP'").get().c, 0);
+  // the validation still runs
+  assert.throws(() => markFiled(db, { type: 'ICP', period: '2026-Q13', actor: 'agent:test', dryRun: true }), { code: 'INVALID_PERIOD' });
+
+  // fx
+  const rate = setFxRate(db, { currency: 'USD', date: '2026-01-10', rate: '1.0875', actor: 'agent:test', dryRun: true });
+  assert.equal(rate.dryRun, true);
+  assert.equal(rate.rate_x10000, 10875);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM fx_rates WHERE currency = 'USD'").get().c, 0);
+
+  // recurring pause/resume
+  const tpl = createTemplate(db, {
+    name: 'Huur', frequency: 'monthly', startDate: '2026-01-01',
+    postings: [{ code: '4300', amountCents: 100000 }, { code: '1100', amountCents: -100000 }],
+    actor: 'agent:test',
+  });
+  const pause = setTemplateStatus(db, { id: tpl.id, status: 'paused', actor: 'agent:test', dryRun: true });
+  assert.equal(pause.dryRun, true);
+  assert.equal(getTemplate(db, tpl.id).status, 'active');
+
+  // account reactivate
+  const acc = db.prepare("SELECT code FROM accounts WHERE active = 0 LIMIT 1").get();
+  if (!acc) {
+    deactivateAccount(db, '1200');
+  }
+  const inactiveCode = db.prepare("SELECT code FROM accounts WHERE active = 0 LIMIT 1").get().code;
+  const react = reactivateAccount(db, inactiveCode, { dryRun: true });
+  assert.equal(react.dryRun, true);
+  assert.equal(db.prepare('SELECT active FROM accounts WHERE code = ?').get(inactiveCode).active, 0);
+});
+
+test('dry-run: bank add + link write nothing', () => {
+  const plan = getOrCreateBankAccount(db, { iban: 'NL91ABNA0417164300', accountCode: '1100', dryRun: true });
+  assert.equal(plan.dryRun, true);
+  assert.equal(plan.would_create, true);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM bank_accounts").get().c, 0);
+
+  // link dry-run: tx stays unmatched
+  const e = post('2026-01-10', 'inkoop', [
+    { code: '1100', amountCents: -5000 },
+    { code: '4300', amountCents: 5000 },
+  ]);
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300', name: 'Zakelijk', accountCode: '1100',
+    transactions: [{ date: '2026-01-10', amount_cents: -5000, counterparty: 'ACME', description: 'factuur' }],
+    actor: 'agent:test',
+  });
+  const tx = db.prepare("SELECT * FROM bank_transactions WHERE state = 'unmatched'").get();
+  const linkPlan = linkTransaction(db, { txId: tx.id, entryId: e.id, actor: 'agent:test', dryRun: true });
+  assert.equal(linkPlan.dryRun, true);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM reconciliations').get().c, 0);
+  assert.equal(db.prepare('SELECT state FROM bank_transactions WHERE id = ?').get(tx.id).state, 'unmatched');
+});
+
+test('CLI: backup --dry-run writes no file', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  const outPath = path.join(path.dirname(dbPath), 'never.db');
+  const { code, out } = cli(dbPath, ['backup', '--out', outPath, '--dry-run']);
+  assert.equal(code, 0);
+  assert.equal(out.data.dryRun, true);
+  assert.equal(existsSync(outPath), false);
+});
+
+test('batch delete cascades lines and releases payables', () => {
+  setup({ vat: false });
+  const c = addContact('ACME BV');
+  db.prepare("UPDATE company SET iban = 'NL91ABNA0417164300' WHERE id = 1").run();
+  const payable = addPayable(db, {
+    contact: c.id, invoiceRef: 'F1', date: '2026-01-01', amountCents: 5000,
+    method: 'transfer', actor: 'agent:test',
+  });
+  const batch = createPaymentBatch(db, { payableIds: [payable.id], actor: 'agent:test' });
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM payment_batch_lines WHERE batch_id = ?').get(batch.id).c, 1);
+  deletePaymentBatch(db, { id: batch.id, actor: 'agent:test' });
+  // lines gone with the batch (ON DELETE CASCADE), payable back to unpaid
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM payment_batch_lines WHERE batch_id = ?').get(batch.id).c, 0);
+  assert.equal(db.prepare('SELECT status FROM payables WHERE id = ?').get(payable.id).status, 'unpaid');
+});
+
+test('autoMatch never crosses bank accounts that share a ledger code', () => {
+  setup({ vat: false });
+  // two bank accounts, both mapped to ledger 1100
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300', name: 'Rabo A', accountCode: '1100',
+    transactions: [{ date: '2026-01-10', amount_cents: -5000, counterparty: 'ACME', description: 'factuur A' }],
+    actor: 'agent:test',
+  });
+  importTransactions(db, {
+    iban: 'NL86INGB0002445588', name: 'ING B', accountCode: '1100',
+    transactions: [{ date: '2026-01-10', amount_cents: -5000, counterparty: 'ACME', description: 'factuur B' }],
+    actor: 'agent:test',
+  });
+  // book the expense for transaction A via the bank-post flow
+  const txA = db.prepare("SELECT * FROM bank_transactions WHERE iban_counter IS NULL AND description = 'factuur A'").get();
+  const posted = postFromTransaction(db, { txId: txA.id, accountCode: '4300', actor: 'agent:test' });
+  assert.ok(posted.entry.id);
+
+  // transaction B (same day, same amount, same ledger code) must NOT match A's entry
+  const txB = db.prepare("SELECT * FROM bank_transactions WHERE description = 'factuur B'").get();
+  const result = autoMatch(db, { windowDays: 5, actor: 'agent:test', dryRun: true });
+  const bMatch = result.matched.find((m) => m.tx_id === txB.id);
+  assert.equal(bMatch, undefined, 'tx B must not match an entry booked from account A');
+});
+
+test('SEPA MsgId stays within the 35-char limit even for huge batch ids', () => {
+  setup({ vat: false });
+  const c = addContact('ACME BV');
+  db.prepare("UPDATE company SET iban = 'NL91ABNA0417164300' WHERE id = 1").run();
+  // explicit id beyond any realistic AUTOINCREMENT range
+  db.prepare(`
+    INSERT INTO payment_batches (id, batch_date, debit_iban, debit_name, total_cents, created_by)
+    VALUES (?, '2026-01-10', 'NL91ABNA0417164300', 'Demo BV', 10000, 'agent:test')
+  `).run(99999999999999999);
+  db.prepare(`
+    INSERT INTO payment_batch_lines (batch_id, contact_id, name, iban, amount_cents, reference)
+    VALUES (?, ?, 'ACME BV', 'NL91ABNA0417164300', 10000, 'F1')
+  `).run(99999999999999999, c.id);
+  const r = exportPaymentBatch(db, { id: 99999999999999999, actor: 'agent:test' });
+  assert.ok(r.msg_id.length <= 35, `MsgId '${r.msg_id}' is ${r.msg_id.length} chars`);
+  // the 17-digit id exceeds 2^53 so JS rounds it to 100000000000000000; the
+  // slice(-16) still caps the MsgId at 35 chars — the exact digits don't matter
+  assert.match(r.msg_id, /^BUKIO\d{30}$/);
+});
 
 test('entry with the same account on both sides books the net', () => {
   const e = post('2026-01-10', 'partial same-code', [

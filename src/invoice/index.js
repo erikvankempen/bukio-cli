@@ -73,21 +73,28 @@ export function validateInvoiceLines(db, lines) {
 
 export function createContact(db, {
   name, address = null, postalCode = null, city = null, country = 'NL',
-  email = null, vatId = null, kvk = null, iban = null, actor = 'human',
+  email = null, vatId = null, kvk = null, iban = null, actor = 'human', dryRun = false,
 }) {
   if (!name || typeof name !== 'string') throw invoiceError('INVALID_NAME', 'contact needs a name');
   if (iban != null && !isValidIban(iban)) throw invoiceError('INVALID_IBAN', `'${iban}' is not a valid IBAN`);
+  const cleanIban = iban ? iban.trim().replace(/\s+/g, '') : null;
+  if (dryRun) {
+    return {
+      action: 'contact.add', name, address, postalCode, city, country, email,
+      vatId, kvk, iban: cleanIban, dryRun: true,
+    };
+  }
   const info = db.prepare(`
     INSERT INTO contacts (name, address, postal_code, city, country, email, vat_id, kvk, iban, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(name, address, postalCode, city, country, email, vatId, kvk, iban ? iban.trim().replace(/\s+/g, '') : null, actor);
+  `).run(name, address, postalCode, city, country, email, vatId, kvk, cleanIban, actor);
   record(db, { actor, action: 'contact.create', command: 'contact add', args: { name, iban: iban ? true : false }, outcome: 'ok' });
   return getContact(db, info.lastInsertRowid);
 }
 
 export function updateContact(db, {
   id, name = null, address = null, postalCode = null, city = null, country = null,
-  email = null, vatId = null, kvk = null, iban = null, actor = 'human',
+  email = null, vatId = null, kvk = null, iban = null, actor = 'human', dryRun = false,
 }) {
   const existing = getContact(db, id);
   if (!existing) throw invoiceError('CONTACT_NOT_FOUND', `contact ${id} does not exist`);
@@ -100,6 +107,9 @@ export function updateContact(db, {
   };
   if (changes.iban != null && !isValidIban(changes.iban)) throw invoiceError('INVALID_IBAN', `'${changes.iban}' is not a valid IBAN`);
   const before = { ...existing };
+  if (dryRun) {
+    return { action: 'contact.update', id, changes, before, dryRun: true };
+  }
   db.prepare(`
     UPDATE contacts SET name = ?, address = ?, postal_code = ?, city = ?, country = ?, email = ?, vat_id = ?, kvk = ?, iban = ?
     WHERE id = ?
@@ -431,7 +441,7 @@ export function creditInvoice(db, { id, date = null, reason = null, actor = 'hum
  * Record a payment (tracking only — the posting comes from the bank flow).
  * When fully paid, the invoice status becomes 'paid'.
  */
-export function markPaid(db, { id, date, amountCents, method = 'bank', bankTxId = null, actor = 'human' }) {
+export function markPaid(db, { id, date, amountCents, method = 'bank', bankTxId = null, actor = 'human', dryRun = false }) {
   const invoice = getInvoice(db, id);
   if (!invoice) throw invoiceError('NOT_FOUND', `invoice ${id} does not exist`);
   if (invoice.invoice_type === 'credit') throw invoiceError('CREDIT_NOT_PAYABLE', 'credit notes are not payable');
@@ -440,6 +450,13 @@ export function markPaid(db, { id, date, amountCents, method = 'bank', bankTxId 
 
   const remaining = invoice.gross_cents - invoice.paid_cents;
   if (amountCents > remaining) throw invoiceError('OVERPAYMENT', `payment ${amountCents} exceeds the outstanding ${remaining}`);
+
+  if (dryRun) {
+    return {
+      action: 'invoice.pay', invoice_id: id, date, amount_cents: amountCents,
+      method, remaining_cents: remaining, dryRun: true,
+    };
+  }
 
   db.prepare('INSERT INTO invoice_payments (invoice_id, date, amount_cents, method, bank_tx_id, created_by) VALUES (?, ?, ?, ?, ?, ?)')
     .run(id, date, amountCents, method, bankTxId, actor);

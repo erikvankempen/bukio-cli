@@ -41,12 +41,20 @@ export function make(program) {
     .requiredOption('--iban <iban>', 'IBAN')
     .option('--name <name>', 'account name')
     .option('--account-code <code>', 'linked ledger account', '1100')
+    .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
         try {
-          const account = getOrCreateBankAccount(db, { iban: opts.iban, name: opts.name ?? null, accountCode: opts.accountCode });
+          const account = getOrCreateBankAccount(db, { iban: opts.iban, name: opts.name ?? null, accountCode: opts.accountCode, dryRun: ctx.dryRun });
+          if (account.dryRun) {
+            output(ctx, { plan: account }, (d) => {
+              console.log(`plan: register bank account ${d.plan.iban} (${d.plan.name ?? '-'}) -> ledger ${d.plan.account_code}${d.plan.would_create ? '' : ' (already registered)'}`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
           output(ctx, { bank_account: { iban: account.iban, name: account.name, account_code: account.account_code, id: account.id } }, (d) => {
             console.log(`bank account ${d.bank_account.iban} (${d.bank_account.name ?? '-'}) -> ledger ${d.bank_account.account_code}`);
           });
@@ -246,12 +254,20 @@ export function make(program) {
     .requiredOption('--tx <id>', 'bank transaction id')
     .requiredOption('--entry <id>', 'entry id')
     .option('--method <method>', 'exact|fuzzy|rule|manual|agent', 'manual')
+    .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
         try {
-          const txRow = linkTransaction(db, { txId: opts.tx, entryId: opts.entry, method: opts.method, actor: ctx.actor });
+          const txRow = linkTransaction(db, { txId: opts.tx, entryId: opts.entry, method: opts.method, actor: ctx.actor, dryRun: ctx.dryRun });
+          if (txRow.dryRun) {
+            output(ctx, { plan: txRow }, (d) => {
+              console.log(`plan: link tx #${d.plan.tx_id} (${formatAmount(d.plan.amount_cents)} on ${d.plan.entry_date}) -> entry #${d.plan.entry_id}`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
           output(ctx, { transaction: fmtTx(txRow), entry_id: Number(opts.entry) }, (d) => {
             console.log(`linked tx #${d.transaction.id} -> entry #${d.entry_id}`);
           });

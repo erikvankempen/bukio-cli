@@ -32,11 +32,20 @@ export function make(program) {
     .command('backup')
     .description('create a consistent SQLite backup of the database')
     .option('--out <path>', 'backup file (default ~/.bukio/backups/bukio-<ts>.db)')
+    .option('--dry-run', 'show the plan without writing')
     .action(async (opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
         const dest = opts.out || defaultBackupPath();
+        if (ctx.dryRun) {
+          db.close();
+          output(ctx, { action: 'backup', from: ctx.dbPath, to: dest, dryRun: true }, (d) => {
+            console.log(`plan: backup ${d.from} -> ${d.to}`);
+            console.log('(dry run — nothing written)');
+          });
+          return;
+        }
         mkdirSync(path.dirname(path.resolve(dest)), { recursive: true });
         await db.backup(dest);
         db.close();
@@ -55,6 +64,7 @@ export function make(program) {
     .requiredOption('--from <file>', 'backup file to restore')
     .option('--to <path>', 'target database (default: the active --db)')
     .option('--force', 'overwrite an existing initialised database')
+    .option('--dry-run', 'validate and show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
@@ -78,6 +88,13 @@ export function make(program) {
           if (hasCompany && !opts.force) {
             throw dbError('RESTORE_EXISTS', `target ${target} already has a company — pass --force to overwrite`);
           }
+        }
+        if (ctx.dryRun) {
+          output(ctx, { action: 'restore', from: opts.from, to: target, dryRun: true }, (d) => {
+            console.log(`plan: restore ${d.from} -> ${d.to}`);
+            console.log('(dry run — nothing written)');
+          });
+          return;
         }
         copyFileSync(opts.from, target);
         output(ctx, { to: target, from: opts.from, restored: true }, (d) => {

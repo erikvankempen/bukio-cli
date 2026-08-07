@@ -24,7 +24,7 @@ export function validateIban(iban) {
   }
 }
 
-export function getOrCreateBankAccount(db, { iban, name = null, accountCode = '1100' }) {
+export function getOrCreateBankAccount(db, { iban, name = null, accountCode = '1100', dryRun = false }) {
   const ibanNorm = normalizeIban(iban);
   validateIban(ibanNorm);
   if (getAccountByCode(db, accountCode) == null) {
@@ -32,6 +32,9 @@ export function getOrCreateBankAccount(db, { iban, name = null, accountCode = '1
   }
   const existing = db.prepare('SELECT * FROM bank_accounts WHERE iban = ?').get(ibanNorm);
   if (existing) return existing;
+  if (dryRun) {
+    return { action: 'bank.add', iban: ibanNorm, name, account_code: accountCode, would_create: true, dryRun: true };
+  }
   const info = db.prepare(
     'INSERT INTO bank_accounts (iban, name, account_code) VALUES (?, ?, ?)',
   ).run(ibanNorm, name, accountCode);
@@ -139,7 +142,7 @@ export function setTransactionState(db, { id, state, actor = 'human' }) {
 }
 
 /** Link a transaction to an existing posted entry. */
-export function linkTransaction(db, { txId, entryId, method = 'manual', confidence = null, actor = 'human' }) {
+export function linkTransaction(db, { txId, entryId, method = 'manual', confidence = null, actor = 'human', dryRun = false }) {
   const txRow = getTransaction(db, txId);
   if (!txRow) throw bankError('NOT_FOUND', `bank transaction ${txId} does not exist`);
   if (txRow.state !== 'unmatched') {
@@ -148,6 +151,13 @@ export function linkTransaction(db, { txId, entryId, method = 'manual', confiden
   const entry = getEntry(db, entryId);
   if (!entry) throw bankError('NOT_FOUND', `entry ${entryId} does not exist`);
   if (entry.state !== 'posted') throw bankError('NOT_POSTED', `entry ${entryId} must be posted before linking`);
+
+  if (dryRun) {
+    return {
+      action: 'bank.link', tx_id: txId, entry_id: entryId, method, confidence,
+      entry_date: entry.date, amount_cents: txRow.amount_cents, dryRun: true,
+    };
+  }
 
   db.prepare(`
     INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
@@ -214,7 +224,11 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
 
   const matches = [];
   for (const txRow of unmatched) {
-    // 1) exact/fuzzy match against already-booked entries on the bank account
+    // 1) exact/fuzzy match against already-booked entries on the bank account.
+    // Bank-sourced entries (source='bank', source_ref 'tx:<id>') only match
+    // transactions from the SAME bank account — two accounts sharing a ledger
+    // code must not cross-match each other's postings. Manual entries (any
+    // other source) are fair game on the shared ledger code.
     const candidates = db.prepare(`
       SELECT e.id, e.date,
         ABS(julianday(e.date) - julianday(?)) AS day_diff
@@ -223,9 +237,17 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
       JOIN accounts a ON a.id = p.account_id
       WHERE a.code = ? AND p.amount_cents = ?
         AND e.id NOT IN (SELECT target_id FROM reconciliations WHERE target_type = 'entry')
+        AND (
+          e.source != 'bank'
+          OR EXISTS (
+            SELECT 1 FROM bank_transactions bt
+            WHERE bt.id = CAST(SUBSTR(e.source_ref, 4) AS INTEGER)
+              AND bt.bank_account_id = ?
+          )
+        )
       ORDER BY day_diff
       LIMIT 1
-    `).all(txRow.date, txRow.account_code, txRow.amount_cents);
+    `).all(txRow.date, txRow.account_code, txRow.amount_cents, txRow.bank_account_id);
 
     const best = candidates[0];
     if (best && best.day_diff <= windowDays) {

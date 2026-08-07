@@ -72,10 +72,13 @@ export function deactivateAccount(db, code) {
   return getAccount(db, account.id);
 }
 
-export function reactivateAccount(db, code) {
+export function reactivateAccount(db, code, { dryRun = false } = {}) {
   const account = getAccountByCode(db, code);
   if (!account) throw accountError('ACCOUNT_NOT_FOUND', `account ${code} does not exist`);
   if (account.active) throw accountError('ALREADY_ACTIVE', `account ${code} is already active`);
+  if (dryRun) {
+    return { action: 'account.reactivate', code, from: 'inactive', to: 'active', dryRun: true };
+  }
   db.prepare('UPDATE accounts SET active = 1 WHERE id = ?').run(account.id);
   return getAccount(db, account.id);
 }

@@ -308,7 +308,11 @@ export function exportPaymentBatch(db, { id, schema = '001.03', actor = 'human',
   if (!batch) throw paymentsError('BATCH_NOT_FOUND', `batch ${id} does not exist`);
   if (batch.status !== 'draft') throw paymentsError('BATCH_ALREADY_EXPORTED', `batch ${id} is already ${batch.status} — exporting again could double-pay; create a new batch instead`);
   const lines = db.prepare('SELECT * FROM payment_batch_lines WHERE batch_id = ? ORDER BY id').all(id);
-  const msgId = `BUKIO${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}${id}`;
+  // SEPA MsgId max 35 chars: BUKIO + 14-char timestamp + batch id (last 16
+  // digits — ids beyond 10^16 are not realistic, but the slice keeps the
+  // contract unconditional; the guard below would catch any future change)
+  const msgId = `BUKIO${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}${String(id).slice(-16)}`;
+  if (msgId.length > 35) throw paymentsError('MSGID_TOO_LONG', `generated MsgId '${msgId}' exceeds the SEPA 35-character limit`);
   const xml = buildPain001({
     msgId, createdIso: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
     debitName: batch.debit_name, debitIban: batch.debit_iban, batchDate: batch.batch_date,

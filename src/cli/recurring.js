@@ -157,13 +157,17 @@ export function make(program) {
     .command('pause')
     .description('pause a template')
     .requiredOption('--id <id>', 'template id')
+    .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
         try {
-          const tpl = setTemplateStatus(db, { id: opts.id, status: 'paused', actor: ctx.actor });
-          output(ctx, { template: fmtTemplate(tpl) }, (d) => console.log(`paused template #${d.template.id}`));
+          const tpl = setTemplateStatus(db, { id: opts.id, status: 'paused', actor: ctx.actor, dryRun: ctx.dryRun });
+          output(ctx, { template: fmtTemplate(tpl) }, (d) => {
+            if (tpl.dryRun) { console.log(`plan: pause template #${tpl.id} (${tpl.from} -> ${tpl.to})`); console.log('(dry run — nothing written)'); return; }
+            console.log(`paused template #${d.template.id}`);
+          });
         } finally {
           db.close();
         }
@@ -176,13 +180,17 @@ export function make(program) {
     .command('resume')
     .description('resume a paused template')
     .requiredOption('--id <id>', 'template id')
+    .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
         try {
-          const tpl = setTemplateStatus(db, { id: opts.id, status: 'active', actor: ctx.actor });
-          output(ctx, { template: fmtTemplate(tpl) }, (d) => console.log(`resumed template #${d.template.id}`));
+          const tpl = setTemplateStatus(db, { id: opts.id, status: 'active', actor: ctx.actor, dryRun: ctx.dryRun });
+          output(ctx, { template: fmtTemplate(tpl) }, (d) => {
+            if (tpl.dryRun) { console.log(`plan: resume template #${tpl.id} (${tpl.from} -> ${tpl.to})`); console.log('(dry run — nothing written)'); return; }
+            console.log(`resumed template #${d.template.id}`);
+          });
         } finally {
           db.close();
         }

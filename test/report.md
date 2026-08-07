@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-07 16:26:59 UTC — **✅ 331 passing · 0 failing (331 tests)**
+**Latest run:** 2026-08-07 16:42:25 UTC — **✅ 338 passing · 0 failing (338 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -195,7 +195,7 @@
 
 ### hardening.test.js — 
 
-20 passing · 0 failing
+27 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -212,6 +212,13 @@
     - ✅ FX+VAT: a range of amounts never trips UNBALANCED
     - ✅ CLI: vat book --json reports the vat_code on tagged postings
     - ✅ CLI: invoice pay rejects non-international amounts
+    - ✅ dry-run: contact add/update/markPaid write nothing
+    - ✅ dry-run: compliance mark / fx set / recurring pause / account reactivate write nothing
+    - ✅ dry-run: bank add + link write nothing
+    - ✅ CLI: backup --dry-run writes no file
+    - ✅ batch delete cascades lines and releases payables
+    - ✅ autoMatch never crosses bank accounts that share a ledger code
+    - ✅ SEPA MsgId stays within the 35-char limit even for huge batch ids
     - ✅ entry with the same account on both sides books the net
     - ✅ reversal of an FX entry negates the fx amounts
     - ✅ invoice finalize with a 0% line books a tagged zero-vat posting
