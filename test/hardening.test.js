@@ -1668,3 +1668,19 @@ test('report pnl / journal / trial-balance reject a garbage year (no abc-01-01 r
   const ok = cli(dbPath, ['report', 'pnl', '--year', '2026']);
   assert.equal(ok.code, 0);
 });
+
+test('entry list rejects garbage date bounds (--date-to garbage returned ALL entries before)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['entry', 'add', '--date', '2026-01-15', '--desc', 'x', '--postings', '1100:100.00,8000:-100.00', '--post']);
+  const badTo = cli(dbPath, ['entry', 'list', '--date-to', 'garbage']);
+  assert.equal(badTo.code, 1);
+  assert.equal(badTo.out.error.code, 'INVALID_DATE');
+  const badFrom = cli(dbPath, ['entry', 'list', '--date-from', '2026-02-30']);
+  assert.equal(badFrom.code, 1);
+  assert.equal(badFrom.out.error.code, 'INVALID_DATE');
+  // valid bounds still filter correctly
+  const ok = cli(dbPath, ['entry', 'list', '--date-from', '2026-01-01', '--date-to', '2026-01-31']);
+  assert.equal(ok.code, 0);
+  assert.equal(ok.out.data.entries.length, 1);
+});

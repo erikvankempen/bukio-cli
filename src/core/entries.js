@@ -224,6 +224,10 @@ export function listEntries(db, { state = null, dateFrom = null, dateTo = null, 
   if (!Number.isInteger(limit) || limit < 0) {
     throw entryError('INVALID_LIMIT', `limit must be a non-negative integer, got '${limit}'`);
   }
+  // garbage bounds would silently match everything/ nothing ('2026-01-15' <=
+  // 'garbage' is TRUE in string comparison) — same class as the balans as-of
+  if (dateFrom != null) validateDate(dateFrom);
+  if (dateTo != null) validateDate(dateTo);
   const clauses = [];
   const params = [];
   if (state) {
