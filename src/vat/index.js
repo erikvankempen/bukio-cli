@@ -11,6 +11,7 @@
 import { vatError } from './errors.js';
 import { createAccount, getAccountByCode } from '../core/accounts.js';
 import { createEntry, parsePostingSpecs, postEntry } from '../core/entries.js';
+import { formatAmount } from '../core/money.js';
 import { record } from '../audit/index.js';
 
 export const VAT_ACCOUNTS = [
@@ -289,4 +290,176 @@ export function markFiled(db, { period, actor = 'human' }) {
   `).run(label, JSON.stringify(readout.fields), new Date().toISOString());
   record(db, { actor, action: 'vat.filed', command: 'vat readout --mark-filed', args: { period: label }, outcome: 'ok' });
   return { period: label, from, to, status: 'filed' };
+}
+
+// --- Filing & settlement (af te dragen omzetbelasting) ----------------------
+// Dutch practice: at filing the net VAT position is reclassified from the
+// 1500/2500 clearing accounts to a separate liability account ('Af te dragen
+// omzetbelasting', default 2510); the later bank payment cancels that balance.
+// The OB-aangifte is filed in WHOLE euros rounded in your favour, so the
+// payment differs from the booked (exact-cents) liability by a few cents —
+// that rounding difference is booked to the P&L (difference account) at
+// settlement, per the Belastingdienst rule that amounts are rounded per line.
+export const VAT_FILE_ACCOUNT_DEFAULT = '2510';
+export const VAT_DIFFERENCE_ACCOUNT_DEFAULT = '4700';
+// per-line rounding is < €0.50 and the return has ~9 lines, so a legit
+// settlement difference is at most a few euros; beyond €5.00 something else
+// is wrong (wrong amount, wrong filing)
+export const VAT_SETTLE_MAX_DIFFERENCE_CENTS = 500;
+
+/** Signed balance of an account over POSTED postings (debit-positive convention). */
+function accountBalance(db, code) {
+  const row = db.prepare(`
+    SELECT COALESCE(SUM(p.amount_cents), 0) AS bal
+    FROM postings p
+    JOIN journal_entries e ON e.id = p.entry_id AND e.state = 'posted'
+    JOIN accounts a ON a.id = p.account_id
+    WHERE a.code = ?
+  `).get(code);
+  return row.bal;
+}
+
+/** Net VAT position: positive = you owe (2500 te betalen), negative = refund (1500 te vorderen). */
+export function vatNetPosition(db) {
+  requireVat(db);
+  return -(accountBalance(db, '2500') + accountBalance(db, '1500'));
+}
+
+/** Ensure the 'Af te dragen omzetbelasting' liability account exists (idempotent). */
+function ensureAfTeDragenAccount(db, account) {
+  if (!getAccountByCode(db, account)) {
+    createAccount(db, {
+      code: account, name: 'Af te dragen omzetbelasting', type: 'liability',
+      normalBalance: 'credit', rgsCode: 'BSCH.12',
+    });
+  }
+}
+
+/**
+ * Reclassify the outstanding VAT position to the af-te-dragen account at filing.
+ * The move uses the EXACT booked amounts — the OB form is filed in rounded
+ * whole euros, and the cent-level difference is settled to the P&L later
+ * (vatSettle), never by distorting the VAT clearing accounts.
+ */
+export function vatFile(db, { account = VAT_FILE_ACCOUNT_DEFAULT, period = null, desc = null, actor = 'human', dryRun = false }) {
+  requireVat(db);
+  const bal2500 = accountBalance(db, '2500');
+  const bal1500 = accountBalance(db, '1500');
+  const net = -(bal2500 + bal1500); // positive = owe
+  if (net === 0) {
+    throw vatError('VAT_NOTHING_TO_FILE', 'no outstanding VAT position to reclassify (2500/1500 net is zero)');
+  }
+  // The FULL clearing position moves to 2510: both clearing accounts are
+  // emptied (2500 te betalen holds the credit/output legs, 1500 te vorderen
+  // the debit/input legs) and the NET lands on 'af te dragen omzetbelasting'
+  // (credit when you owe, debit when you get a refund).
+  const postings = [
+    { code: '2500', amountCents: -bal2500 },
+    { code: '1500', amountCents: -bal1500 },
+    { code: account, amountCents: bal2500 + bal1500 },
+  ].filter((p) => p.amountCents !== 0);
+  const owe = net > 0;
+  const liability = Math.abs(net);
+  const description = desc ?? `OB-aangifte${period ? ` ${period}` : ''} verlegging naar ${account} (${owe ? 'te betalen' : 'te ontvangen'})`;
+
+  if (dryRun) {
+    return {
+      action: 'vat.file', dryRun: true, account, owe, liability_cents: liability,
+      postings: postings.map((p) => ({ code: p.code, amount_cents: p.amountCents })),
+    };
+  }
+
+  const entry = db.transaction(() => {
+    ensureAfTeDragenAccount(db, account);
+    const created = createEntry(db, {
+      date: new Date().toISOString().slice(0, 10), description,
+      postings, source: 'manual', actor,
+    });
+    postEntry(db, { id: created.id, actor });
+    record(db, {
+      actor, action: 'vat.file', command: 'vat file',
+      args: { account, period, owe, liability_cents: liability, description }, outcome: 'ok', entryIds: [created.id],
+    });
+    return created;
+  })();
+  return { action: 'vat.file', entry_id: entry.id, account, owe, liability_cents: liability, postings };
+}
+
+/**
+ * Book the bank payment that cancels the af-te-dragen balance. The bank
+ * transaction amount (the FILED, whole-euro amount) clears the exact-cents
+ * liability; the rounding difference goes to the difference account in the
+ * P&L (default 4700 Overige bedrijfskosten).
+ *
+ * `tx` carries the bank transaction's fields (amount_cents: outgoing negative,
+ * account_code: the bank's ledger code). The caller (CLI) fetches the
+ * transaction and links it to the booked entry.
+ */
+export function vatSettle(db, {
+  txAmountCents, txDate, bankAccountCode, differenceAccount = VAT_DIFFERENCE_ACCOUNT_DEFAULT,
+  period = null, desc = null, actor = 'human', dryRun = false,
+}) {
+  requireVat(db);
+  if (!Number.isInteger(txAmountCents)) throw vatError('INVALID_AMOUNT', 'tx amount must be an integer number of cents');
+  const balance = accountBalance(db, VAT_FILE_ACCOUNT_DEFAULT);
+  if (balance === 0) {
+    throw vatError('VAT_SETTLE_NOTHING', `no outstanding balance on ${VAT_FILE_ACCOUNT_DEFAULT} (af te dragen omzetbelasting) to settle`);
+  }
+  const owe = balance < 0; // 2510 credit (negative) = te betalen
+  const liability = Math.abs(balance);
+  const paid = Math.abs(txAmountCents);
+  if (owe && txAmountCents >= 0) {
+    throw vatError('VAT_SETTLE_DIRECTION', `paying ${VAT_FILE_ACCOUNT_DEFAULT} (te betalen) requires an OUTGOING bank transaction, got +${paid} cents`);
+  }
+  if (!owe && txAmountCents <= 0) {
+    throw vatError('VAT_SETTLE_DIRECTION', `receiving a refund on ${VAT_FILE_ACCOUNT_DEFAULT} (te ontvangen) requires an INCOMING bank transaction, got ${txAmountCents} cents`);
+  }
+  if (!getAccountByCode(db, differenceAccount)) {
+    throw vatError('INVALID_DIFFERENCE_ACCOUNT', `difference account ${differenceAccount} does not exist (pick an expense account, e.g. ${VAT_DIFFERENCE_ACCOUNT_DEFAULT})`);
+  }
+
+  // rounding difference: +debit (loss, paid more than booked) / -credit (gain,
+  // rounded in your favour). Legs: cancel 2510, book bank, difference -> P&L.
+  const difference = (owe ? 1 : -1) * (paid - liability);
+  if (Math.abs(difference) > VAT_SETTLE_MAX_DIFFERENCE_CENTS) {
+    throw vatError(
+      'VAT_SETTLE_DIFFERENCE_TOO_LARGE',
+      `settlement difference is ${Math.abs(difference)} cents vs liability ${liability} — a VAT filing rounds per line (< €0.50/line), so this looks like the wrong amount; max allowed is ${VAT_SETTLE_MAX_DIFFERENCE_CENTS} cents`,
+    );
+  }
+  const postings = [
+    { code: VAT_FILE_ACCOUNT_DEFAULT, amountCents: owe ? liability : -liability },
+    { code: bankAccountCode, amountCents: txAmountCents },
+  ];
+  if (difference !== 0) postings.push({ code: differenceAccount, amountCents: difference });
+  const description = desc ?? `Betaling OB-aangifte${period ? ` ${period}` : ''} — af te dragen omzetbelasting (afrondingsverschil ${formatAmount(difference)})`;
+
+  if (dryRun) {
+    return {
+      action: 'vat.settle', dryRun: true, owe, liability_cents: liability, paid_cents: paid,
+      difference_cents: difference, difference_account: differenceAccount, date: txDate,
+      postings: postings.map((p) => ({ code: p.code, amount_cents: p.amountCents })),
+    };
+  }
+
+  const entry = db.transaction(() => {
+    const created = createEntry(db, {
+      date: txDate ?? new Date().toISOString().slice(0, 10), description,
+      postings, source: 'manual', actor,
+    });
+    postEntry(db, { id: created.id, actor });
+    record(db, {
+      actor, action: 'vat.settle', command: 'vat settle',
+      args: {
+        period, owe, liability_cents: liability, paid_cents: paid, difference_cents: difference,
+        difference_account: differenceAccount, description,
+      },
+      outcome: 'ok', entryIds: [created.id],
+    });
+    return created;
+  })();
+  return {
+    action: 'vat.settle', entry_id: entry.id, owe, liability_cents: liability, paid_cents: paid,
+    difference_cents: difference, difference_account: differenceAccount, postings,
+  };
 }

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 18:25:24 UTC — **✅ 519 passing · 0 failing (519 tests)**
+**Latest run:** 2026-08-08 20:03:21 UTC — **✅ 534 passing · 0 failing (534 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -150,7 +150,7 @@
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
-23 passing · 0 failing
+24 passing · 0 failing
 
     - ✅ init --dry-run: shows plan, creates nothing
     - ✅ init: creates company + 30-account chart with VAT on
@@ -172,6 +172,7 @@
     - ✅ vat enable/book/readout/mark-filed end-to-end
     - ✅ vat: module off blocks book, enable works on existing company
     - ✅ account list: human mode renders without crashing (table import regression)
+    - ✅ vat file + vat settle end-to-end: filing moves the position, the payment cancels it with the rounding difference in the P&L
     - ✅ entry post --dry-run: rejects non-draft entries instead of a green plan
     - ✅ entry reverse --dry-run: rejects drafts (NOT_POSTED) and double reversals
     - ✅ vat book --dry-run: validates date and description like the execute path
@@ -631,6 +632,25 @@
     - ✅ trial balance: startkapitaal + expense, per-account totals
     - ✅ trial balance: year filter
     - ✅ trial balance: drafts are excluded, reversals net out
+
+### vat-settle.test.js — 
+
+14 passing · 0 failing
+
+    - ✅ vat file: owe — 2500 cleared, 2510 holds the exact-cents liability, audited
+    - ✅ vat file: refund position — 1500 cleared, 2510 debit (te ontvangen)
+    - ✅ vat file: nothing to file when the position is zero
+    - ✅ vat file: dry-run writes nothing and does not create the account
+    - ✅ vat settle: rounding in your favour (paid less than booked) books the gain to 4700
+    - ✅ vat settle: refund received in your favour (more than booked) books a gain
+    - ✅ vat settle: paying MORE than booked books a loss to the difference account
+    - ✅ vat settle: difference beyond €5 is rejected as the wrong amount
+    - ✅ vat settle: nothing to settle without a filed balance
+    - ✅ vat settle: direction guard — incoming tx cannot pay a te-betalen balance
+    - ✅ vat settle: invalid difference account is rejected
+    - ✅ vat settle: dry-run books nothing and leaves the tx unmatched
+    - ✅ vat settle: custom difference account (e.g. dedicated Afrondingsverschillen)
+    - ✅ vat file + settle round-trip: readout 5d agrees with the booked net position
 
 ### vat.test.js — optional VAT module: codes, vat book, OB readout 1a–5d
 

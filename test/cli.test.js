@@ -450,6 +450,59 @@ test('account list: human mode renders without crashing (table import regression
   assert.match(out, /1100/);
 });
 
+test('vat file + vat settle end-to-end: filing moves the position, the payment cancels it with the rounding difference in the P&L', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
+  run(dbPath, ['vat', 'book', '--date', '2026-07-01', '--desc', 'Omzet', '--postings', '1100:121.00,8000:-100.00@21', '--post', '--json']);
+  run(dbPath, ['vat', 'book', '--date', '2026-07-05', '--desc', 'Inkoop', '--postings', '1100:-60.50,4300:50.00@21', '--post', '--json']);
+
+  // dry-run file first — nothing written
+  const dry = run(dbPath, ['vat', 'file', '--period', '2026-Q3', '--dry-run', '--json']);
+  assert.equal(dry.out.data.dryRun, true);
+  assert.equal(dry.out.data.liability_cents, 1050);
+
+  const filed = run(dbPath, ['vat', 'file', '--period', '2026-Q3', '--json']);
+  assert.ok(filed.out.data.entry_id > 0);
+  assert.equal(filed.out.data.liability_cents, 1050);
+  assert.equal(filed.out.data.owe, true);
+
+  // the Belastingdienst payment arrives: €10.00 outgoing (filed 10.50 rounded down)
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-ob-'));
+  const camt = path.join(dir, 'ob.camt.xml');
+  writeFileSync(camt, `<?xml version="1.0"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt><Stmt><Acct><Id><IBAN>NL91ABNA0417164300</IBAN></Id></Acct>
+    <Ntry><Amt>10.00</Amt><CdtDbtInd>DBIT</CdtDbtInd><BookgDt><Dt>2026-07-25</Dt></BookgDt>
+      <NtryDtls><TxDtls><RltdPties><Dbtr><Nm>Belastingdienst</Nm></Dbtr></RltdPties>
+      <RmtInf><Ustrd>OB aangifte</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>
+  </Stmt></BkToCstmrStmt>
+</Document>`);
+  run(dbPath, ['bank', 'add', '--iban', 'NL91ABNA0417164300', '--name', 'Rabobank', '--json']);
+  run(dbPath, ['bank', 'import', '--file', camt, '--iban', 'NL91ABNA0417164300', '--json']);
+  const txId = run(dbPath, ['bank', 'transactions', '--json']).out.data.transactions[0].id;
+
+  // dry-run settle — tx stays unmatched
+  const settleDry = run(dbPath, ['vat', 'settle', '--tx', String(txId), '--period', '2026-Q3', '--dry-run', '--json']);
+  assert.equal(settleDry.out.data.dryRun, true);
+  assert.equal(settleDry.out.data.difference_cents, -50);
+  assert.equal(run(dbPath, ['bank', 'transactions', '--json']).out.data.transactions[0].state, 'unmatched');
+
+  const settled = run(dbPath, ['vat', 'settle', '--tx', String(txId), '--period', '2026-Q3', '--json']);
+  assert.equal(settled.out.data.difference_cents, -50); // paid 50 cents less -> P&L gain
+  assert.equal(settled.out.data.tx.state, 'matched'); // payment tx reconciled to the entry
+
+  // the matched tx cannot be settled again
+  const again = run(dbPath, ['vat', 'settle', '--tx', String(txId), '--json'], { expectFail: true });
+  assert.equal(again.code, 1);
+  assert.equal(again.out.error.code, 'ALREADY_MATCHED');
+
+  // books stay balanced and the P&L carries the rounding gain
+  const tb = run(dbPath, ['report', 'trial-balance', '--json']);
+  assert.equal(tb.out.data.balanced, true);
+  const pnl = run(dbPath, ['report', 'pnl', '--year', '2026', '--json']);
+  assert.equal(pnl.out.data.sections.some((s) => s.accounts.some((r) => r.code === '4700' && r.amount_cents === -50)), true);
+});
+
 test('entry post --dry-run: rejects non-draft entries instead of a green plan', () => {
   const dbPath = tmpDb();
   run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'off', '--json']);
