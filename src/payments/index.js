@@ -445,8 +445,11 @@ export function buildPain008({ msgId, createdIso, debitName, debitIban, batchDat
     const subTotal = schemeLines.reduce((s, l) => s + l.amount_cents, 0);
     const subCtrl = (subTotal / 100).toFixed(2);
     const txs = schemeLines.map((l, i) => txInf(l, i)).join('\n');
+    // PmtInfId is Max35Text: msgId alone may reach 35 chars — reserve one
+    // for the scheme-split suffix so the id never exceeds the limit
+    const pmtInfId = `${String(msgId).slice(0, 34)}${idx}`;
     return `    <PmtInf>
-      <PmtInfId>${esc(msgId)}${idx}</PmtInfId>
+      <PmtInfId>${esc(pmtInfId)}</PmtInfId>
       <PmtMtd>DD</PmtMtd>
       <BtchBookg>true</BtchBookg>
       <NbOfTxs>${schemeLines.length}</NbOfTxs>

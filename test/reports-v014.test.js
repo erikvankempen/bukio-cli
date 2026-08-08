@@ -130,6 +130,24 @@ test('aging debtors: buckets, totals, paid excluded, contacts sorted by total', 
   assert.equal(r.debtors.totals.current, 10000);
 });
 
+test('aging debtors: finalized credit notes reduce the outstanding, drafts do not', () => {
+  // Acme: €1000 invoice due 2026-06-01 (d90)
+  makeFinalized(t.contacts.acme.id, { date: '2026-05-01', dueDays: 31, lines: ['Ding @ 1000.00'] });
+  const cred = creditInvoice(db, { id: 1, date: '2026-07-01', reason: 'retour', actor: 'agent:test' });
+  // a DRAFT credit note must not reduce anything yet
+  let r = aging(db, { asOf: '2026-08-08', kind: 'debtors' });
+  let acme = r.debtors.contacts.find((c) => c.contact_id === t.contacts.acme.id);
+  assert.equal(acme.buckets.d90, 100000);
+  assert.equal(acme.total_cents, 100000);
+  // finalize the (full) credit note -> the outstanding is netted to zero
+  finalizeInvoice(db, { id: cred.id, actor: 'agent:test' });
+  r = aging(db, { asOf: '2026-08-08', kind: 'debtors' });
+  acme = r.debtors.contacts.find((c) => c.contact_id === t.contacts.acme.id);
+  assert.equal(acme.buckets.d90, 0);
+  assert.equal(acme.total_cents, 0);
+  assert.equal(r.debtors.totals.total_cents, 0);
+});
+
 test('aging creditors: buckets + in_batch shown separately', () => {
   addPayable(db, {
     contact: t.contacts.supplier.id, invoiceRef: 'F-1', date: '2026-05-01', dueDate: '2026-06-01',

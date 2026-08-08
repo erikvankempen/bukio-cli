@@ -77,6 +77,26 @@ function debtorsAging(db, asOf) {
     });
   }
 
+  // Net finalized credit notes against the outstanding: the ledger already
+  // reduced Debiteuren when the credit note was booked, so a debtor with a
+  // €1000 invoice and a €400 credit note owes €600 — the aging must not
+  // overstate the dunning amount. Credits offset the OLDEST debt first
+  // (FIFO), so bucket sums keep reconciling with each contact's total.
+  const credits = listInvoices(db)
+    .filter((i) => i.invoice_type === 'credit' && !['draft', 'void'].includes(i.status));
+  for (const cr of credits) {
+    const c = byContact.get(cr.contact_id);
+    if (!c || c.total_cents <= 0) continue;
+    let remaining = cr.gross_cents;
+    for (const b of ['d90plus', 'd90', 'd60', 'd30', 'current']) {
+      if (remaining <= 0) break;
+      const take = Math.min(c.buckets[b], remaining);
+      c.buckets[b] -= take;
+      remaining -= take;
+    }
+    c.total_cents = Object.values(c.buckets).reduce((s, v) => s + v, 0);
+  }
+
   const contacts = [...byContact.values()].sort((a, b) => b.total_cents - a.total_cents);
   const totals = emptyTotals();
   for (const c of contacts) {

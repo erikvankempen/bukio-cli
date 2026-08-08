@@ -21,9 +21,15 @@
 //
 // Read-only: nothing is written to the DB except one audit-log row recording
 // that the export happened (who, when, which file).
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { formatAmount } from '../core/money.js';
 import { record } from '../audit/index.js';
+
+// single source of truth for the version stamped into the audit file —
+// a hardcoded string here silently drifted from package.json on every bump
+const PACKAGE_VERSION = JSON.parse(
+  readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+).version;
 
 function esc(s) {
   return String(s ?? '')
@@ -145,7 +151,7 @@ export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
   parts.push(`    <StartDate>${year}-01-01</StartDate>`);
   parts.push(`    <EndDate>${year}-12-31</EndDate>`);
   parts.push('    <SoftwareName>bukio-cli</SoftwareName>');
-  parts.push(`    <SoftwareVersion>${esc('0.14.0')}</SoftwareVersion>`);
+  parts.push(`    <SoftwareVersion>${esc(PACKAGE_VERSION)}</SoftwareVersion>`);
   parts.push('  </XafHeader>');
 
   parts.push('  <Rekeningen>');

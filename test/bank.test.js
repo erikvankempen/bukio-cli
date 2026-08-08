@@ -211,6 +211,35 @@ test('autoMatch: exact and fuzzy matching, dry-run writes nothing', () => {
   assert.equal(fuzzy.matched[0].method, 'fuzzy');
 });
 
+test('autoMatch: two same-amount transactions never claim the same entry in one run', () => {
+  // two incoming €100 transfers within the window, one €100 entry — the
+  // first transaction claims it; the second must stay unmatched instead of
+  // reconciling the same entry twice (books €100, bank €200)
+  importTransactions(db, {
+    iban: IBAN,
+    transactions: [
+      { date: '2026-06-01', amount_cents: 10000, counterparty: 'A', description: 'p1', iban_counter: null },
+      { date: '2026-06-02', amount_cents: 10000, counterparty: 'B', description: 'p2', iban_counter: null },
+    ],
+  });
+  const entry = createEntry(db, {
+    date: '2026-06-01', description: 'Factuur',
+    postings: [{ code: '1100', amountCents: 10000 }, { code: '8000', amountCents: -10000 }],
+  });
+  postEntry(db, { id: entry.id });
+
+  const r = autoMatch(db, { actor: 'agent:test' });
+  assert.equal(r.matched.length, 1);
+  assert.equal(r.matched[0].kind, 'entry');
+  assert.equal(r.matched[0].entry_id, entry.id);
+  assert.equal(r.unmatched_remaining, 1);
+  // the entry has exactly ONE reconciliation, one transaction stays unmatched
+  const recs = db.prepare("SELECT * FROM reconciliations WHERE target_type = 'entry' AND target_id = ?").all(entry.id);
+  assert.equal(recs.length, 1);
+  assert.equal(listTransactions(db, { state: 'matched' }).length, 1);
+  assert.equal(listTransactions(db, { state: 'unmatched' }).length, 1);
+});
+
 test('autoMatch: outside the window stays unmatched', () => {
   importTransactions(db, { iban: IBAN, transactions: parseCamt053(CAMT) });
   createEntry(db, {

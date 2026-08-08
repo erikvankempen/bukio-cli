@@ -13,6 +13,7 @@ import { enableVatModule, bookVatEntry, parseVatPostingSpecs } from '../src/vat/
 import { getOrCreateBankAccount, importTransactions } from '../src/bank/index.js';
 import { createContact, createInvoice, finalizeInvoice } from '../src/invoice/index.js';
 import { monthEnd } from '../src/month-end/index.js';
+import { yearEndClose } from '../src/year-end/index.js';
 
 let db;
 
@@ -86,6 +87,18 @@ test('month-end: profit = income - expense for the period', () => {
   assert.equal(r.totals.balanced, true);
   assert.equal(r.totals.debit_cents, 100000);
   assert.equal(r.totals.credit_cents, 100000);
+});
+
+test('month-end: December totals exclude year-end closing entries', () => {
+  // year-end close posts source='closing' entries dated 12-31 — they must
+  // not zero December's profit or inflate the debit/credit totals
+  post('2026-12-05', 'Verkoop', [{ code: '1100', amountCents: 12100 }, { code: '8000', amountCents: -10000 }, { code: '2500', amountCents: -2100 }]);
+  yearEndClose(db, { year: 2026, actor: 'agent:test' });
+  const r = monthEnd(db, { period: '2026-12' });
+  assert.equal(r.totals.profit_cents, 10000); // still the December profit
+  assert.equal(r.totals.balanced, true);
+  assert.equal(r.totals.debit_cents, 12100); // only the sale, not the closing flow
+  assert.equal(r.totals.credit_cents, 12100);
 });
 
 test('month-end: overdue invoice warning with outstanding total', () => {

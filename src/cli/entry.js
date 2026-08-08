@@ -226,12 +226,20 @@ function postAction(ctx, opts) {
   try {
     const entry = getEntry(db, opts.id);
     if (!entry) throw Object.assign(new Error(`entry ${opts.id} does not exist`), { code: 'NOT_FOUND' });
+    // state validation BEFORE the dry-run branch — a green plan for an
+    // already-posted/reversed entry made agents execute into an error
+    if (entry.state !== 'draft') {
+      throw Object.assign(
+        new Error(entry.state === 'reversed' ? `entry ${opts.id} is reversed` : `entry ${opts.id} is already posted`),
+        { code: entry.state === 'reversed' ? 'ALREADY_REVERSED' : 'ALREADY_POSTED' },
+      );
+    }
     if (ctx.dryRun) {
       output(ctx, {
         action: 'post entry',
         id: Number(opts.id),
         current_state: entry.state,
-        target_state: entry.state === 'draft' ? 'posted' : '(no change)',
+        target_state: 'posted',
         dryRun: true,
       }, (d) => {
         console.log(`plan: post entry #${d.id} (${d.current_state} -> ${d.target_state})`);
@@ -251,6 +259,23 @@ function reverseAction(ctx, opts) {
   try {
     const entry = getEntry(db, opts.id);
     if (!entry) throw Object.assign(new Error(`entry ${opts.id} does not exist`), { code: 'NOT_FOUND' });
+    // state validation BEFORE the dry-run branch — the reversal plan was
+    // shown even for drafts (NOT_POSTED) and already-reversed entries
+    if (entry.state !== 'posted') {
+      throw Object.assign(
+        new Error(entry.state === 'draft' ? `entry ${opts.id} must be posted before it can be reversed` : `entry ${opts.id} is already reversed`),
+        { code: entry.state === 'draft' ? 'NOT_POSTED' : 'ALREADY_REVERSED' },
+      );
+    }
+    // a reversal already exists for this entry (the original stays 'posted'
+    // — the contra-entry cancels it) — same guard as reverseEntry, so the
+    // dry-run plan never promises a reversal the execute path rejects
+    const existingReversal = db.prepare(
+      "SELECT COUNT(*) AS c FROM journal_entries WHERE reversed_from_id = ? AND state = 'posted'",
+    ).get(Number(opts.id));
+    if (existingReversal.c > 0) {
+      throw Object.assign(new Error(`entry ${opts.id} is already reversed`), { code: 'ALREADY_REVERSED' });
+    }
     if (ctx.dryRun) {
       output(ctx, {
         action: 'reverse entry (create linked contra-entry)',

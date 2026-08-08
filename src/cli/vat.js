@@ -10,7 +10,8 @@ import {
   bookVatEntry, enableVatModule, expandVatPostings, isVatEnabled, listVatCodes,
   markFiled, obReadout, parseVatPostingSpecs,
 } from '../vat/index.js';
-import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, dbError } from './util.js';
+import { validateDate } from '../core/entries.js';
 
 import { getFxRate, parseRate, toEurPostings, resolveRate } from '../fx/index.js';
 
@@ -123,6 +124,13 @@ export function make(program) {
             ? await applyFxToSpecs(db, specs, { ...opts, actor: ctx.actor })
             : specs;
           if (ctx.dryRun) {
+            // validate exactly what the execute path validates (createEntry
+            // rejects bad dates and empty descriptions) — a green dry-run
+            // plan must never execute into an error
+            validateDate(opts.date);
+            if (!opts.desc || !String(opts.desc).trim()) {
+              throw dbError('INVALID_DESCRIPTION', 'description is required');
+            }
             const expanded = expandVatPostings(db, converted);
             output(ctx, {
               action: 'book VAT entry (expanded)',

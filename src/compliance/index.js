@@ -28,7 +28,11 @@ export function quarterDeadline(period) {
 
 export function jaarrekeningDeadline(company, year) {
   // last day of the month that is 13 months after the fiscal-year-end month
-  // (art. 2:394 BW: deposit within 13 months after the balance sheet date)
+  // (art. 2:394 BW: deposit within 13 months after the balance sheet date).
+  // Interpretation: the 13th MONTH's last day (common KvK/Belastingdienst
+  // practice, and the calendar-friendly reading) — not the exact
+  // calendar-13-months date, which for a 06-30 FY would be 07-30, one day
+  // earlier than the 07-31 used here.
   const fy = company.fiscal_year_end || '12-31';
   const [mm] = fy.split('-').map(Number);
   const total = mm + 13;

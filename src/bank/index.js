@@ -262,12 +262,21 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
   `).all();
 
   const matches = [];
+  // within-run consumption tracking: the candidate SQL excludes entries
+  // already reconciled in PRIOR runs, but nothing stopped two same-amount
+  // transactions in THIS run from matching the same posted entry — one entry
+  // got two bank legs and the books stopped matching the statement. Track
+  // claimed targets so each entry/invoice reconciles at most once per run.
+  const usedEntryIds = new Set();
+  const usedInvoiceIds = new Set();
   for (const txRow of unmatched) {
     // 1) exact/fuzzy match against already-booked entries on the bank account.
     // Bank-sourced entries (source='bank', source_ref 'tx:<id>') only match
     // transactions from the SAME bank account — two accounts sharing a ledger
     // code must not cross-match each other's postings. Manual entries (any
     // other source) are fair game on the shared ledger code.
+    const used = [...usedEntryIds];
+    const exclusion = used.length ? `AND e.id NOT IN (${used.map(() => '?').join(',')})` : '';
     const candidates = db.prepare(`
       SELECT e.id, e.date,
         ABS(julianday(e.date) - julianday(?)) AS day_diff
@@ -276,6 +285,7 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
       JOIN accounts a ON a.id = p.account_id
       WHERE a.code = ? AND p.amount_cents = ?
         AND e.id NOT IN (SELECT target_id FROM reconciliations WHERE target_type = 'entry')
+        ${exclusion}
         AND (
           e.source != 'bank'
           OR EXISTS (
@@ -286,7 +296,7 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
         )
       ORDER BY day_diff, e.id
       LIMIT 1
-    `).all(txRow.date, txRow.account_code, txRow.amount_cents, txRow.bank_account_id);
+    `).all(txRow.date, txRow.account_code, txRow.amount_cents, txRow.bank_account_id, ...used);
 
     const best = candidates[0];
     if (best && best.day_diff <= windowDays) {
@@ -303,6 +313,7 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
         method: best.day_diff <= 2 ? 'exact' : 'fuzzy',
         confidence: best.day_diff <= 2 ? 0.99 : 0.8,
       });
+      usedEntryIds.add(best.id);
       continue;
     }
 
@@ -325,6 +336,7 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
       `).all();
       let best = null;
       for (const row of invoiceRows) {
+        if (usedInvoiceIds.has(row.id)) continue; // already claimed this run
         const full = getInvoice(db, row.id);
         const outstanding = full.gross_cents - full.paid_cents;
         if (outstanding <= 0) continue;
@@ -349,6 +361,7 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
           method: 'invoice',
           confidence: 0.95,
         });
+        usedInvoiceIds.add(best.id);
       }
     }
   }

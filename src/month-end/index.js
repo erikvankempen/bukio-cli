@@ -76,13 +76,16 @@ export function monthEnd(db, { period }) {
     };
   }
 
-  // period totals over posted entries
+  // period totals over posted entries — EXCLUDING source='closing' (year-end
+  // close entries are dated 12-31 and would zero December's profit and
+  // inflate the debit/credit totals; pnl() and the year-end module apply the
+  // same exclusion)
   const rows = db.prepare(`
     SELECT a.code, a.type, SUM(p.amount_cents) AS net
     FROM postings p
     JOIN journal_entries e ON e.id = p.entry_id AND e.state = 'posted'
     JOIN accounts a ON a.id = p.account_id
-    WHERE e.date >= ? AND e.date <= ?
+    WHERE e.date >= ? AND e.date <= ? AND e.source != 'closing'
     GROUP BY a.id
   `).all(from, to);
   const debit = rows.filter((r) => r.net > 0).reduce((acc, r) => acc + r.net, 0);

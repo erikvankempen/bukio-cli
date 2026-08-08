@@ -64,6 +64,12 @@ function runFile(file) {
         const m = line.match(/^(ok|not ok) \d+ - (.+)$/);
         if (m) tests.push({ name: m[2].trim(), ok: m[1] === 'ok' });
       }
+      // a test file that crashed (syntax error, uncaught exception, runner
+      // abort) exits non-zero with no TAP output — without this it silently
+      // vanished from the suite and `npm test` reported green
+      if (code !== 0 && tests.length === 0) {
+        tests.push({ name: `file crashed — process exited ${code} (no test output)`, ok: false });
+      }
       const pass = tests.filter((t) => t.ok).length;
       const fail = tests.filter((t) => !t.ok).length;
       resolve({ file, tests, pass, fail, exitCode: code });

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 16:55:09 UTC — **✅ 509 passing · 0 failing (509 tests)**
+**Latest run:** 2026-08-08 17:09:02 UTC — **✅ 515 passing · 0 failing (515 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -127,7 +127,7 @@
 
 ### bank.test.js — CAMT.053/CSV import, idempotency, matching/reconciliation
 
-16 passing · 0 failing
+17 passing · 0 failing
 
     - ✅ parseCamt053: CRDT positive, DBIT negative, counterparty + description
     - ✅ parseCamt053: rejects non-CAMT input
@@ -142,13 +142,14 @@
     - ✅ postFromTransaction: refuses already-matched transactions
     - ✅ linkTransaction: links a posted entry and guards
     - ✅ autoMatch: exact and fuzzy matching, dry-run writes nothing
+    - ✅ autoMatch: two same-amount transactions never claim the same entry in one run
     - ✅ autoMatch: outside the window stays unmatched
     - ✅ setTransactionState: ignore and re-open
     - ✅ suggestUnmatched: proposes expense/income accounts
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
-19 passing · 0 failing
+22 passing · 0 failing
 
     - ✅ init --dry-run: shows plan, creates nothing
     - ✅ init: creates company + 30-account chart with VAT on
@@ -169,6 +170,9 @@
     - ✅ bank match --auto links posted entries (exact)
     - ✅ vat enable/book/readout/mark-filed end-to-end
     - ✅ vat: module off blocks book, enable works on existing company
+    - ✅ entry post --dry-run: rejects non-draft entries instead of a green plan
+    - ✅ entry reverse --dry-run: rejects drafts (NOT_POSTED) and double reversals
+    - ✅ vat book --dry-run: validates date and description like the execute path
 
 ### company.test.js — company show/update
 
@@ -496,12 +500,13 @@
 
 ### month-end.test.js — month-end close check
 
-7 passing · 0 failing
+8 passing · 0 failing
 
     - ✅ month-end: clean month -> all clear, zero totals
     - ✅ month-end: drafts and unmatched bank transactions are flagged
     - ✅ month-end: VAT quarter readout when module on
     - ✅ month-end: profit = income - expense for the period
+    - ✅ month-end: December totals exclude year-end closing entries
     - ✅ month-end: overdue invoice warning with outstanding total
     - ✅ month-end: invalid period rejected
     - ✅ month-end: draft invoices are warned (booked revenue may be uninvoiced)
@@ -569,9 +574,10 @@
 
 ### reports-v014.test.js — aging buckets, contact statements, sales analytics (by contact/item)
 
-9 passing · 0 failing
+10 passing · 0 failing
 
     - ✅ aging debtors: buckets, totals, paid excluded, contacts sorted by total
+    - ✅ aging debtors: finalized credit notes reduce the outstanding, drafts do not
     - ✅ aging creditors: buckets + in_batch shown separately
     - ✅ aging validation: bad as-of and kind rejected
     - ✅ contact statement: running balance ends at outstanding; supplier side negative

@@ -438,3 +438,39 @@ test('vat: module off blocks book, enable works on existing company', () => {
   assert.equal(run(dbPath, ['vat', 'codes', '--json']).out.data.codes.length, 8);
   run(dbPath, ['vat', 'book', '--date', '2026-04-10', '--desc', 'x', '--postings', '1100:121.00,8000:-100.00@21', '--post', '--json']);
 });
+
+test('entry post --dry-run: rejects non-draft entries instead of a green plan', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'off', '--json']);
+  const { out } = run(dbPath, ['entry', 'add', '--date', '2026-01-01', '--desc', 'x', '--postings', '1100:100.00,3000:-100.00', '--post', '--json']);
+  const id = out.data.id;
+  // already posted -> dry-run must fail with ALREADY_POSTED, not "(no change)"
+  const r = run(dbPath, ['entry', 'post', '--id', String(id), '--dry-run', '--json'], { expectFail: true });
+  assert.equal(r.code, 1);
+  assert.equal(r.out.error.code, 'ALREADY_POSTED');
+});
+
+test('entry reverse --dry-run: rejects drafts (NOT_POSTED) and double reversals', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'off', '--json']);
+  // draft entry -> reversal plan must NOT be shown
+  const { out } = run(dbPath, ['entry', 'add', '--date', '2026-01-01', '--desc', 'x', '--postings', '1100:100.00,3000:-100.00', '--json']);
+  const draftId = out.data.id;
+  const r1 = run(dbPath, ['entry', 'reverse', '--id', String(draftId), '--dry-run', '--json'], { expectFail: true });
+  assert.equal(r1.code, 1);
+  assert.equal(r1.out.error.code, 'NOT_POSTED');
+  // posted then reversed -> second reversal dry-run fails ALREADY_REVERSED
+  run(dbPath, ['entry', 'post', '--id', String(draftId), '--json']);
+  run(dbPath, ['entry', 'reverse', '--id', String(draftId), '--reason', 'correctie', '--json']);
+  const r2 = run(dbPath, ['entry', 'reverse', '--id', String(draftId), '--dry-run', '--json'], { expectFail: true });
+  assert.equal(r2.code, 1);
+  assert.equal(r2.out.error.code, 'ALREADY_REVERSED');
+});
+
+test('vat book --dry-run: validates date and description like the execute path', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
+  const r = run(dbPath, ['vat', 'book', '--date', '2026-99-99', '--desc', 'x', '--postings', '1100:121.00,8000:-100.00@21', '--dry-run', '--json'], { expectFail: true });
+  assert.equal(r.code, 1);
+  assert.equal(r.out.error.code, 'INVALID_DATE');
+});
