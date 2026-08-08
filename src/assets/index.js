@@ -48,7 +48,9 @@ function addMonths(dateStr, n) {
   const total = y * 12 + (m - 1) + n;
   const yy = Math.floor(total / 12);
   const mm = (total % 12) + 1;
-  return `${yy}-${String(mm).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  // clamp the day to the target month's last day (Jan 31 + 1 = Feb 28/29)
+  const lastDay = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
+  return `${yy}-${String(mm).padStart(2, '0')}-${String(Math.min(d, lastDay)).padStart(2, '0')}`;
 }
 
 /** Next period string after 'YYYY-MM'. */

@@ -51,6 +51,8 @@ export function parseBankAmount(value) {
   if (s.startsWith('-') || s.startsWith('(')) negative = true;
   if (s.endsWith(')') || s.endsWith('-')) { negative = s.endsWith('-') ? true : negative; s = s.slice(0, -1); }
   s = s.replace(/^-/, '').replace(/[()]/g, '');
+  // '.50' → '0.50' (leading-dot amounts)
+  if (/^\.[\d]+$/.test(s)) s = `0${s}`;
   if (!/^[\d.,]+$/.test(s)) return null;
 
   let cents;

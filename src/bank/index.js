@@ -275,7 +275,7 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
               AND bt.bank_account_id = ?
           )
         )
-      ORDER BY day_diff
+      ORDER BY day_diff, e.id
       LIMIT 1
     `).all(txRow.date, txRow.account_code, txRow.amount_cents, txRow.bank_account_id);
 

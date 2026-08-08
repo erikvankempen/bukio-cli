@@ -79,6 +79,9 @@ export function addAttachment(db, {
   if (size > MAX_ATTACHMENT_BYTES) {
     throw attachmentError('ATTACHMENT_TOO_LARGE', `file is ${size} bytes — the cap is ${MAX_ATTACHMENT_BYTES} (25 MB)`);
   }
+  if (size < 1) {
+    throw attachmentError('ATTACHMENT_EMPTY', 'file is empty — nothing to attach');
+  }
   const bytes = readFileSync(filePath);
   const sha256 = createHash('sha256').update(bytes).digest('hex');
   const dup = db.prepare('SELECT id FROM attachments WHERE kind = ? AND ref_id = ? AND sha256 = ?').get(kind, refId, sha256);

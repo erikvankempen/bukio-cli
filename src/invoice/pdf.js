@@ -25,7 +25,7 @@ function esc(s) {
 /** Base64 data-URI of the stored company logo, or null. */
 function logoDataUri(company) {
   if (!company?.logo || !company.logo_mime) return null;
-  return `data:${company.logo_mime};base64,${Buffer.from(company.logo).toString('base64')}`;
+  return `data:${esc(company.logo_mime)};base64,${Buffer.from(company.logo).toString('base64')}`;
 }
 
 /**

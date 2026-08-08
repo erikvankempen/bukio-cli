@@ -83,6 +83,8 @@ test('parseBankAmount: Dutch and international formats', () => {
   assert.equal(parseBankAmount('-12,50'), -1250);
   assert.equal(parseBankAmount('€ 12,50'), 1250);
   assert.equal(parseBankAmount('0,50'), 50);
+  assert.equal(parseBankAmount('.50'), 50); // leading-dot amounts
+  assert.equal(parseBankAmount('-5.00'), -500);
   assert.equal(parseBankAmount('abc'), null);
 });
 

@@ -248,6 +248,10 @@ test('UBL: Peppol BIS 3.0 structure', () => {
   const buyerVat = root['AccountingCustomerParty']['Party']['PartyTaxScheme']['CompanyID'];
   assert.equal(buyerVat['#text'], 'NL999999999B01');
   assert.equal(buyerVat['@_schemeID'], 'VAT');
+  // BT-48: the supplier party must carry its VAT identifier too
+  const sellerVat = root['AccountingSupplierParty']['Party']['PartyTaxScheme']['CompanyID'];
+  assert.equal(sellerVat['#text'], 'NL123456789B01');
+  assert.equal(sellerVat['@_schemeID'], 'VAT');
   assert.equal(root['TaxTotal']['TaxAmount']['#text'], '63.00');
   assert.equal(root['LegalMonetaryTotal']['PayableAmount']['#text'], '363.00');
   const line = root['InvoiceLine'];
@@ -257,7 +261,7 @@ test('UBL: Peppol BIS 3.0 structure', () => {
   assert.equal(line['Item']['ClassifiedTaxCategory']['Percent'], '21.00');
 });
 
-test('UBL: credit note uses type 381', () => {
+test('UBL: credit note uses CreditNote root + type 381 (Peppol BIS 3.0)', () => {
   addContact();
   const inv = mkInvoice();
   finalizeInvoice(db, { id: inv.id });
@@ -266,8 +270,27 @@ test('UBL: credit note uses type 381', () => {
   const xml = invoiceToUbl(db, getInvoice(db, credit.id));
   const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true, parseTagValue: false });
   const doc = parser.parse(xml);
-  assert.equal(doc['Invoice']['InvoiceTypeCode'], '381');
-  assert.equal(doc['Invoice']['ID'], '2026-0002');
+  assert.ok(doc['CreditNote'], 'credit notes must use the CreditNote root element');
+  assert.equal(doc['Invoice'], undefined);
+  const root = doc['CreditNote'];
+  assert.equal(root['CreditNoteTypeCode'], '381');
+  assert.equal(root['ID'], '2026-0002');
+  assert.ok(root['CreditNoteLine'], 'credit notes use cac:CreditNoteLine');
+  assert.equal(root['CreditNoteLine']['CreditNoteLineQuantity']['#text'], '2');
+});
+
+test('UBL: XML control characters in descriptions are stripped (Peppol-safe)', () => {
+  addContact();
+  // a description containing a NUL byte must not corrupt the XML document
+  const inv = createInvoice(db, {
+    contactId: 1, date: '2026-07-10', lines: ['2x Consultancy\u0000\u0001Ding @ 150.00 @21'],
+    actor: 'agent:test',
+  });
+  finalizeInvoice(db, { id: inv.id });
+  const xml = invoiceToUbl(db, getInvoice(db, inv.id));
+  assert.ok(!xml.includes('\u0000'), 'NUL byte must be stripped');
+  assert.ok(!xml.includes('\u0001'), 'SOH byte must be stripped');
+  assert.ok(xml.includes('ConsultancyDing'), 'the rest of the description survives');
 });
 
 test('bank auto-match: incoming payment pays the invoice and posts Bank/Debiteuren', () => {

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 15:14:53 UTC — **✅ 500 passing · 0 failing (500 tests)**
+**Latest run:** 2026-08-08 15:39:49 UTC — **✅ 504 passing · 0 failing (504 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -456,7 +456,7 @@
 
 ### invoice.test.js — invoicing: lifecycle, 12-vereisten, credit notes, payments, reminders
 
-20 passing · 0 failing
+21 passing · 0 failing
 
     - ✅ parseLineSpec: qty, description, price, vat
     - ✅ createInvoice: draft with line math (2x 150 @21 = 300 net, 63 vat)
@@ -470,7 +470,8 @@
     - ✅ payments: partial then full -> paid; overpayment rejected
     - ✅ nextInvoiceNumber: year-scoped sequence
     - ✅ UBL: Peppol BIS 3.0 structure
-    - ✅ UBL: credit note uses type 381
+    - ✅ UBL: credit note uses CreditNote root + type 381 (Peppol BIS 3.0)
+    - ✅ UBL: XML control characters in descriptions are stripped (Peppol-safe)
     - ✅ bank auto-match: incoming payment pays the invoice and posts Bank/Debiteuren
     - ✅ buildInvoicePostings: sales vs credit sign flip
     - ✅ invoiceReminders: overdue + due-soon, excludes paid and far-future
@@ -491,7 +492,7 @@
 
 ### month-end.test.js — month-end close check
 
-6 passing · 0 failing
+7 passing · 0 failing
 
     - ✅ month-end: clean month -> all clear, zero totals
     - ✅ month-end: drafts and unmatched bank transactions are flagged
@@ -499,6 +500,7 @@
     - ✅ month-end: profit = income - expense for the period
     - ✅ month-end: overdue invoice warning with outstanding total
     - ✅ month-end: invalid period rejected
+    - ✅ month-end: draft invoices are warned (booked revenue may be uninvoiced)
 
 ### payments.test.js — SEPA payment batches: payables, pain.001 export
 
@@ -591,7 +593,7 @@
 
 ### smtp.test.js — zero-dependency SMTP client + invoice email: auth, STARTTLS, MIME/PDF attachment, dry-run, audit
 
-13 passing · 0 failing
+15 passing · 0 failing
 
     - ✅ sendMail: happy path delivers, captures the MIME with the PDF attachment
     - ✅ sendMail: auth failure → SMTP_AUTH_FAILED
@@ -600,6 +602,8 @@
     - ✅ sendMail: connection refused → SMTP_CONNECT_FAILED; bad greeting → SMTP_CONNECT_FAILED
     - ✅ smtpConfig/smtpValidate: env-driven; missing host/from → SMTP_NOT_CONFIGURED
     - ✅ buildMime: non-ASCII subject → UTF-8 encoded-word; attachment boundary present
+    - ✅ buildMime: CR/LF in to/subject/filename cannot inject headers
+    - ✅ sendMail: dot-stuffed payload — a body line starting with "." survives
     - ✅ emailInvoice: delivers to the contact email and audits
     - ✅ emailInvoice: guards — draft, missing email, unconfigured SMTP
     - ✅ emailInvoice: dry-run renders the plan, makes no connection, audits nothing

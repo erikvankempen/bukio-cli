@@ -244,6 +244,37 @@ test('buildMime: non-ASCII subject → UTF-8 encoded-word; attachment boundary p
   assert.match(plain, /^Subject: Factuur 2026-0001/m);
 });
 
+test('buildMime: CR/LF in to/subject/filename cannot inject headers', () => {
+  const mime = buildMime({
+    from: 'a@b.c\r\nBcc: victim@evil.example', to: 'x@y.z\r\nX-Evil: 1',
+    subject: 'Factuur\r\nBcc: victim@evil.example', text: 'hallo',
+    attachment: { filename: 'a.pdf\r\nX-Evil: 1', mime: 'application/pdf', dataBase64: 'YQ==' },
+  });
+  // no header may contain a raw line break
+  for (const line of mime.split('\r\n')) {
+    assert.ok(!/[\r\n]/.test(line), `header line must be single-line: ${JSON.stringify(line)}`);
+  }
+  // the injected text stays INSIDE the header value (stripped, merged) — it
+  // never becomes its own header line
+  assert.ok(mime.includes('a@b.cBcc: victim@evil.example'));
+  const headerLines = mime.split('\r\n').filter((l) => !l.startsWith('--') && l.includes(':'));
+  assert.ok(!headerLines.some((l) => l.startsWith('Bcc:')), 'no standalone Bcc: header may appear');
+  assert.ok(!headerLines.some((l) => l.startsWith('X-Evil:')), 'no standalone X-Evil: header may appear');
+});
+
+test('sendMail: dot-stuffed payload — a body line starting with "." survives', async () => {
+  const mock = await smtpMock();
+  try {
+    await sendMail({
+      host: '127.0.0.1', port: mock.port, secure: false, user: 'u', pass: 'p',
+      from: 'a@b.c', to: 'x@y.z', subject: 'T', text: 'Hallo\n.een aparte regel\nEinde',
+    });
+    assert.ok(mock.lastData.includes('..een aparte regel'), 'dot-stuffed line must be doubled in the DATA payload');
+  } finally {
+    mock.close();
+  }
+});
+
 test('emailInvoice: delivers to the contact email and audits', async () => {
   const invoice = seedInvoice();
   const mock = await smtpMock();

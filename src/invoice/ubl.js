@@ -13,7 +13,11 @@
 import { computeInvoiceTotals, formatQty } from './index.js';
 
 function esc(s) {
+  // XML 1.0 valid chars: strip control chars (0x00-0x08, 0x0B, 0x0C,
+  // 0x0E-0x1F) that would make the document invalid — Peppol validation
+  // rejects them; then escape the five special characters.
   return String(s ?? '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -30,7 +34,7 @@ const UNIT_CODE_MAP = {
   session: 'C62', km: 'KMT', kg: 'KGM', project: 'C62',
 };
 
-function addressBlock(partyName, p) {
+function addressBlock(partyName, p, taxId = null) {
   // the supplier row is snake_case (postal_code); contacts are camelCase —
   // read both so the postal code is never silently dropped
   const postal = p.postalCode ?? p.postal_code ?? '';
@@ -43,6 +47,7 @@ function addressBlock(partyName, p) {
             <cbc:PostalZone>${esc(postal)}</cbc:PostalZone>
             <cac:Country><cbc:IdentificationCode>${esc(p.country ?? 'NL')}</cbc:IdentificationCode></cac:Country>
           </cac:PostalAddress>
+          ${taxId ? `<cac:PartyTaxScheme><cbc:CompanyID schemeID="VAT">${esc(taxId)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
         </cac:Party>`;
 }
 
@@ -66,7 +71,7 @@ export function invoiceToUbl(db, invoice) {
     computeInvoiceTotals(invoice.lines, invoice.discount_type, invoice.discount_value);
 
   const taxSubtotals = breakdown.map((g) => {
-    const code = g.rate_bp === 2100 ? 'S' : 'S'; // standard rate category; R/RE never carry VAT
+    const code = 'S'; // standard rate category; R/RE never carry VAT
     return `
       <cac:TaxSubtotal>
         <cbc:TaxableAmount currencyID="${currency}">${moneyAmount(g.base_cents)}</cbc:TaxableAmount>
@@ -111,10 +116,15 @@ export function invoiceToUbl(db, invoice) {
           : (l.vat_code ? 'S' : 'E');
     const percent = (l.vat_code === 'R' || l.vat_code === 'RE') ? '21.00' : (l.vat_rate_bp / 100).toFixed(2);
     const unitCode = UNIT_CODE_MAP[l.unit] ?? 'C62';
+    // Peppol BIS 3.0: credit notes use cac:CreditNoteLine +
+    // cbc:CreditNoteLineQuantity, invoices use cac:InvoiceLine +
+    // cbc:InvoicedQuantity
+    const lineTag = isCredit ? 'CreditNoteLine' : 'InvoiceLine';
+    const qtyTag = isCredit ? 'CreditNoteLineQuantity' : 'InvoicedQuantity';
     return `
-    <cac:InvoiceLine>
+    <cac:${lineTag}>
       <cbc:ID>${i + 1}</cbc:ID>
-      <cbc:InvoicedQuantity unitCode="${unitCode}">${formatQty(l.quantity)}</cbc:InvoicedQuantity>
+      <cbc:${qtyTag} unitCode="${unitCode}">${formatQty(l.quantity)}</cbc:${qtyTag}>
       <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(l.amount_cents)}</cbc:LineExtensionAmount>${lineAllowance(l)}
       <cac:Item>
         <cbc:Name>${esc(l.description)}</cbc:Name>
@@ -127,7 +137,7 @@ export function invoiceToUbl(db, invoice) {
       <cac:Price>
         <cbc:PriceAmount currencyID="${currency}">${moneyAmount(l.unit_price_cents)}</cbc:PriceAmount>
       </cac:Price>
-    </cac:InvoiceLine>`;
+    </cac:${lineTag}>`;
   }).join('');
 
   const buyerTax = contact.vat_id
@@ -142,7 +152,7 @@ export function invoiceToUbl(db, invoice) {
     : '';
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
-<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+<${isCredit ? 'CreditNote' : 'Invoice'} xmlns="${isCredit ? 'urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2' : 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2'}"
          xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
          xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
   <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0</cbc:CustomizationID>
@@ -150,10 +160,10 @@ export function invoiceToUbl(db, invoice) {
   <cbc:ID>${esc(invoice.invoice_number)}</cbc:ID>
   <cbc:IssueDate>${invoice.date}</cbc:IssueDate>
   ${invoice.due_date ? `<cbc:DueDate>${invoice.due_date}</cbc:DueDate>` : ''}
-  <cbc:InvoiceTypeCode>${typeCode}</cbc:InvoiceTypeCode>
+  <cbc:${isCredit ? 'CreditNoteTypeCode' : 'InvoiceTypeCode'}>${typeCode}</cbc:${isCredit ? 'CreditNoteTypeCode' : 'InvoiceTypeCode'}>
   <cbc:LanguageID>${language === 'en' ? 'en' : 'nl-NL'}</cbc:LanguageID>
   ${invoice.notes ? `<cbc:Note>${esc(invoice.notes)}</cbc:Note>` : ''}
-  <cac:AccountingSupplierParty>${addressBlock(company.name, company)}</cac:AccountingSupplierParty>
+  <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.btw_id)}</cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
     <cac:Party>
       <cac:PartyName><cbc:Name>${esc(contact.name)}</cbc:Name></cac:PartyName>
@@ -179,6 +189,6 @@ export function invoiceToUbl(db, invoice) {
     <cbc:TaxInclusiveAmount currencyID="${currency}">${moneyAmount(gross_cents)}</cbc:TaxInclusiveAmount>
     <cbc:PayableAmount currencyID="${currency}">${moneyAmount(gross_cents)}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>${linesXml}
-</Invoice>`;
+</${isCredit ? 'CreditNote' : 'Invoice'}>`;
   return xml;
 }

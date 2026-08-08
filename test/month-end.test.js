@@ -106,3 +106,14 @@ test('month-end: overdue invoice warning with outstanding total', () => {
 test('month-end: invalid period rejected', () => {
   assert.throws(() => monthEnd(db, { period: '2026-13' }), { code: 'INVALID_PERIOD' });
 });
+
+test('month-end: draft invoices are warned (booked revenue may be uninvoiced)', () => {
+  createContact(db, { name: 'Klant', address: 'Straat 1', city: 'Amsterdam', actor: 'agent:test' });
+  const inv = createInvoice(db, {
+    contactId: 1, date: '2026-01-10', lines: ['1x Ding @ 100.00 @21'], dueDays: 30,
+  });
+  assert.equal(inv.status, 'draft'); // never finalised
+  const r = monthEnd(db, { period: '2026-01' });
+  assert.equal(r.invoices.draft, 1);
+  assert.ok(r.warnings.some((w) => w.includes('1 draft invoice not finalised')));
+});

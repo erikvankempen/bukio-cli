@@ -130,6 +130,10 @@ test('attach add: validation errors', () => {
     const big = path.join(t.dir, 'big.pdf');
     writeFileSync(big, Buffer.alloc(MAX_ATTACHMENT_BYTES + 1));
     assert.throws(() => addAttachment(db, { kind: 'invoice', refId: invId, filePath: big }), (e) => e.code === 'ATTACHMENT_TOO_LARGE');
+    // empty file → friendly error, not a raw CHECK-constraint failure
+    const empty = path.join(t.dir, 'empty.pdf');
+    writeFileSync(empty, '');
+    assert.throws(() => addAttachment(db, { kind: 'invoice', refId: invId, filePath: empty }), (e) => e.code === 'ATTACHMENT_EMPTY');
   } finally {
     db.close();
   }

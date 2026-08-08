@@ -61,16 +61,25 @@ function wrapBase64(b64) {
   return out.join('\r\n');
 }
 
+/** CR/LF sanitisation — a header or SMTP envelope must never carry a
+ *  line break (header/command injection). */
+function cleanHeader(value) {
+  return String(value ?? '').replace(/[\r\n]+/g, '').trim();
+}
+
 /**
  * Build a multipart/mixed MIME message: text part + optional attachment.
  * attachment: { filename, mime, dataBase64 }.
  */
 export function buildMime({ from, to, subject, text, attachment = null }) {
   const boundary = `BUKIO-${randomBytes(12).toString('hex')}`;
+  const fromH = cleanHeader(from);
+  const toH = cleanHeader(to);
+  const subjectH = cleanHeader(subject);
   const lines = [
-    `From: ${encodeWord(from)}`,
-    `To: ${to}`,
-    `Subject: ${encodeWord(subject)}`,
+    `From: ${encodeWord(fromH)}`,
+    `To: ${encodeWord(toH)}`,
+    `Subject: ${encodeWord(subjectH)}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     '',
@@ -200,6 +209,10 @@ function connectSocket(raw, host, port, secure) {
 export async function sendMail({ host, port, secure, user, pass, from, to, subject, text, attachment = null }) {
   smtpValidate({ host, port, secure, user, pass, from });
   if (!to) throw smtpError('SMTP_SEND_FAILED', 'no recipient');
+  // envelope + headers must be single-line (CR/LF stripped) — header/command
+  // injection guard; the MIME builder sanitises again for defense in depth
+  const envFrom = cleanHeader(from);
+  const envTo = cleanHeader(to);
 
   let socket = null;
   let usedTls = secure;
@@ -245,13 +258,17 @@ export async function sendMail({ host, port, secure, user, pass, from, to, subje
       if (!/^235/.test(reply)) throw failAuth(reply.slice(0, 3), reply.slice(4));
     }
 
-    await writeLine(socket, `MAIL FROM:<${from}>`);
+    await writeLine(socket, `MAIL FROM:<${envFrom}>`);
     await expectReply(line, [250], failSend);
-    await writeLine(socket, `RCPT TO:<${to}>`);
+    await writeLine(socket, `RCPT TO:<${envTo}>`);
     await expectReply(line, [250, 251], failSend); // 251 = will forward
     await writeLine(socket, 'DATA');
     await expectReply(line, [354], failSend);
-    await writeLine(socket, buildMime({ from, to, subject, text, attachment }));
+    // dot-stuffing: a body line starting with '.' must be doubled, or the
+    // server treats it as the end-of-data marker (RFC 5321 §4.5.2)
+    const payload = buildMime({ from: envFrom, to: envTo, subject, text, attachment })
+      .replace(/^[.]/gm, '..');
+    await writeLine(socket, payload);
     await writeLine(socket, '.');
     await expectReply(line, [250], failSend);
     await writeLine(socket, 'QUIT');

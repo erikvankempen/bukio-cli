@@ -93,6 +93,7 @@ export function monthEnd(db, { period }) {
 
   const warnings = [];
   if (drafts.length) warnings.push(`${drafts.length} draft entr${drafts.length === 1 ? 'y' : 'ies'} not posted`);
+  if (draftInvoices.length) warnings.push(`${draftInvoices.length} draft invoice${draftInvoices.length === 1 ? '' : 's'} not finalised — booked revenue may be uninvoiced`);
   if (bankUnmatched.length) warnings.push(`${bankUnmatched.length} unmatched bank transaction${bankUnmatched.length === 1 ? '' : 's'}`);
   if (overdueInvoices.length) warnings.push(`${overdueInvoices.length} overdue invoice${overdueInvoices.length === 1 ? '' : 's'}`);
   if (recurring.length) warnings.push(`${recurring.length} recurring template${recurring.length === 1 ? '' : 's'} due by ${to}`);

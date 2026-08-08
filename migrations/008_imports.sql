@@ -18,6 +18,12 @@ DROP TRIGGER IF EXISTS trg_entries_post_requires_balance;
 DROP TRIGGER IF EXISTS trg_entries_post_not_reversed;
 DROP TRIGGER IF EXISTS trg_entries_posted_immutable;
 
+-- stale `journal_entries_new` from a previously failed attempt (the rebuild
+-- runs OUTSIDE a transaction — PRAGMA foreign_keys is a no-op inside one — so
+-- a crash mid-migration could leave the table behind; drop it so a retry
+-- starts clean instead of failing on CREATE TABLE)
+DROP TABLE IF EXISTS journal_entries_new;
+
 CREATE TABLE journal_entries_new (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   date            TEXT NOT NULL,  -- ISO yyyy-mm-dd
