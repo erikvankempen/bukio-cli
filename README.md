@@ -37,8 +37,7 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 
 ## Quick start
 
-Let your agent do it. Paste this prompt to any agentic assistant (the example
-from [agentic.bukio.nl](https://agentic.bukio.nl/?lang=en)) — the agent
+Let your agent do it. Paste this prompt to any agentic assistant — the agent
 installs from source and stops before touching any financial data:
 
 ```
