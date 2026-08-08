@@ -4,13 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// bukio import — opening balances, journal CSV, XML Auditfile (XAF) 4.0.
+// bukio import — opening balances, journal CSV, XML Auditfile (XAF) 4.0,
+// and inbound e-invoices (EN 16931/Peppol UBL → payables).
 // All importers validate the ENTIRE file before writing anything; a file with
 // any problem is rejected with IMPORT_VALIDATION_FAILED + per-line details.
 import { formatAmount } from '../core/money.js';
 import {
   importJournalCsv, importOpeningBalances, importXaf, importContacts, readImportFile,
 } from '../import/index.js';
+import { importUblInvoice } from '../import/ubl-invoice.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 
 export function make(program) {
@@ -176,6 +178,49 @@ export function make(program) {
         }
       } catch (err) {
         fail(ctx, err); // fail() already prints per-line details in human mode
+      }
+    });
+
+  imp
+    .command('invoice')
+    .description('import an inbound e-invoice (EN 16931 / Peppol BIS 3.0 UBL) into the payables register')
+    .requiredOption('--file <path>', 'UBL invoice XML file')
+    .option('--contact <id>', 'explicit contact id (otherwise matched by btw-id / name)')
+    .option('--create-missing', 'create the supplier contact from the file when no match exists')
+    .option('--dry-run', 'validate the whole file and show the plan without writing')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const xmlText = readImportFile(opts.file);
+          const result = importUblInvoice(db, {
+            xmlText, contact: opts.contact != null ? Number(opts.contact) : null,
+            createMissing: Boolean(opts.createMissing), actor: ctx.actor, dryRun: ctx.dryRun,
+          });
+          if (ctx.dryRun) {
+            output(ctx, result, (d) => {
+              console.log(`plan: import invoice ${d.invoice_ref} from ${d.supplier} (${formatAmount(d.amount_cents)} incl. btw)`);
+              console.log(`  date ${d.date} — due ${d.due_date}`);
+              if (Object.keys(d.vat_by_rate).length) {
+                console.log(`  btw: ${Object.entries(d.vat_by_rate).map(([r, c]) => `${r}% = ${formatAmount(c)}`).join(', ')}`);
+              }
+              console.log(`  contact: ${d.contact.name}${d.contact.created ? ' (will be created)' : ''}`);
+              console.log('(dry run — nothing written — no journal entry is created; book it via the normal workflow)');
+            });
+            return;
+          }
+          output(ctx, result, (d) => {
+            console.log(`imported invoice ${d.invoice_ref} from ${d.supplier} as payable (${formatAmount(d.amount_cents)} incl. btw, due ${d.due_date})`);
+            if (d.duplicates) console.log(`(${d.duplicates} duplicate skipped)`);
+            if (d.contacts_created) console.log(`created contact #${d.contact.id} ${d.contact.name}`);
+            console.log('note: no journal entry was created — book the invoice via the normal workflow');
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
       }
     });
 }

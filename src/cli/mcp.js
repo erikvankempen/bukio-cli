@@ -10,7 +10,7 @@
 // plans — an agent executes only after a human approves the plan.
 // Env: BUKIO_MCP_READONLY=1 turns every mutation into a plan-only call.
 import { createInterface } from 'node:readline';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { trialBalance } from '../report/trial-balance.js';
 import { balans } from '../report/balans.js';
 import { pnl } from '../report/pnl.js';
@@ -40,6 +40,7 @@ import { createItem, listItems, updateItem } from '../items/index.js';
 import { addAttachment, listAttachments, removeAttachment } from '../core/attachments.js';
 import { aging } from '../report/aging.js';
 import { sales } from '../report/sales.js';
+import { importUblInvoice } from '../import/ubl-invoice.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -490,6 +491,38 @@ tool({
     required: ['year'],
   },
   handler: (db, args) => sales(db, { year: args.year, by: args?.by ?? 'contact' }),
+});
+
+// --- inbound e-invoices ------------------------------------------------------
+
+tool({
+  name: 'invoice_import', mutating: true,
+  description: 'import an inbound e-invoice (EN 16931 / Peppol BIS 3.0 UBL XML) into the payables register — no journal entry is created; book it via the normal workflow',
+  schema: {
+    type: 'object', properties: {
+      file_path: { type: 'string' }, contact: { type: 'number' },
+      create_missing: { type: 'boolean' },
+      actor: { type: 'string' }, mode: { type: 'string' },
+    }, required: ['file_path'],
+  },
+  handler: (db, args, ctx) => {
+    guardExecute(ctx, args);
+    if (!args.file_path || !existsSync(args.file_path)) {
+      throw new McpError('FILE_NOT_FOUND', `file '${args.file_path}' does not exist`);
+    }
+    const base = {
+      xmlText: readFileSync(args.file_path, 'utf8'),
+      contact: args.contact != null ? Number(args.contact) : null,
+      createMissing: args.create_missing === true,
+      actor: args.actor ?? ctx.actor,
+    };
+    if (modeOf(args) === 'dry-run') {
+      // module dryRun validates like execute (UBL structure, contact resolution)
+      return { ...importUblInvoice(db, { ...base, dryRun: true }), mode: 'dry-run', note: 'plan only — re-run with mode=execute to write' };
+    }
+    const r = importUblInvoice(db, base);
+    return { action: 'invoice.import', mode: 'execute', imported: r.imported, duplicates: r.duplicates, payable_ref: r.invoice_ref, supplier: r.supplier, amount_cents: r.amount_cents };
+  },
 });
 tool({
   name: 'invoice_finalize', mutating: true,

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 13:42:11 UTC — **✅ 465 passing · 0 failing (465 tests)**
+**Latest run:** 2026-08-08 13:52:21 UTC — **✅ 474 passing · 0 failing (474 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -341,6 +341,20 @@
     - ✅ account add/deactivate/reactivate/import are audited (they mutated silently before)
     - ✅ every emitted error code in src/ is documented in AGENTS.md §7
     - ✅ MCP on a missing database errors NO_DATABASE instead of silently creating an empty company
+
+### import-invoice.test.js — 
+
+9 passing · 0 failing
+
+    - ✅ importUblInvoice: registers a payable, matches contact by vat-id, parses VAT
+    - ✅ importUblInvoice: idempotent re-import → duplicate skipped
+    - ✅ importUblInvoice: --create-missing creates the supplier contact with address + vat-id
+    - ✅ importUblInvoice: explicit --contact wins; no match and no flag → CONTACT_NOT_FOUND
+    - ✅ importUblInvoice: validation failures write nothing
+    - ✅ importUblInvoice: due date defaults to issue + 30 days
+    - ✅ importUblInvoice: dry-run validates like execute but writes nothing
+    - ✅ cli: import invoice end-to-end → payable in the register, dry-run plan
+    - ✅ mcp: invoice_import dry-run parity + execute
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 

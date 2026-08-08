@@ -705,7 +705,14 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
 }
 
 export function readImportFile(filePath) {
-  return readFileSync(filePath, 'utf8');
+  try {
+    return readFileSync(filePath, 'utf8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') {
+      throw importError('FILE_NOT_FOUND', `file '${filePath}' does not exist`);
+    }
+    throw importError('IMPORT_VALIDATION_FAILED', `cannot read '${filePath}': ${err.message}`);
+  }
 }
 
 // --- contacts from audit files (Suppliers/Customers) ------------------------
