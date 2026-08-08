@@ -1058,32 +1058,31 @@ calls across all development sessions).
 
 ### Owner time (contributed, unpaid)
 
-Beyond API spend, the project consumed the owner's review-and-direction time:
-five evenings after work (Aug 4–7, 2026), ≈ 1 hour of effective time per
+Beyond API spend, this project took my review-and-direction time: five
+evenings after work (Aug 4–7, 2026), ≈ 1 hour of effective time per
 evening — plus Saturday (Aug 8, 2026), ≈ 2.5 clock hours of review and
-direction — i.e. roughly **7.5 hours total**.
+direction — i.e. roughly **7.5 hours total**, all contributed unpaid.
 
 At a **senior** Dutch software-developer rate of **≈ €45/hour** (Amsterdam
 senior average, 2026: €45/h
 [Glassdoor](https://www.glassdoor.com/Salaries/amsterdam-netherlands-senior-software-engineer-salary-SRCH_IL.0,21_IM1112_KO22,46.htm),
 €45.50/h
 [SalaryExpert](https://www.salaryexpert.com/salary/job/software-developer/netherlands/amsterdam);
-the national average is lower), the owner's time is valued at **≈ €338**.
+the national average is lower), my time is worth **≈ €338**.
 
 Stated plainly, so nothing is hidden:
 
-- **Compliance:** all work was done in the owner's free time, outside working
+- **Compliance:** all of this work happened in my free time, outside working
   hours — no employer time, equipment, or other resources were used.
-- **Deliberately conservative:** the owner is an amateur developer, and a
-  senior professional rate overstates the market value of his review time by a
-  wide margin. It is included high on purpose: every cost of this project is
+- **Deliberately conservative:** I am an amateur developer, and a senior
+  professional rate overstates the market value of my review time by a wide
+  margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
 - **It was free:** the ≈ €338 is an imputed opportunity cost, not money paid.
-  Out-of-pocket spend remains **$6.18** in API costs.
+  My out-of-pocket spend remains **$6.18** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
   conventional code review of a 22.5 KLOC codebase would take; treat them as
-  the owner's direction-and-check time, not a substitute for professional
-  review.
+  my direction-and-check time, not a substitute for professional review.
 
 ### COCOMO benchmark
 
@@ -1102,7 +1101,7 @@ across 101 files (12,942 in `src/`, 9,525 in `test/`), i.e. **22.47 KLOC**
 
 **Comparison:** a conventional team building this would estimate **≈ 63–151
 person-months (≈ €567K–€1,356K)**; the AI-assisted build consumed **$6.18 in
-API costs plus ≈ €338 of owner review-and-direction time (contributed, unpaid
+API costs plus ≈ €338 of my review-and-direction time (contributed, unpaid
 — see above)** over five evenings and a Saturday — still a tiny fraction of
 the conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
