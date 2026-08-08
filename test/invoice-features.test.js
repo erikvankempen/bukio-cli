@@ -23,6 +23,8 @@ import { createTemplate, runDue } from '../src/recurring/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { invoiceHtml, invoiceToPdf } from '../src/invoice/pdf.js';
 import { unitLabel } from '../src/invoice/i18n.js';
+import { autoMatch, getOrCreateBankAccount, importTransactions } from '../src/bank/index.js';
+import { trialBalance } from '../src/report/trial-balance.js';
 
 let db;
 
@@ -640,6 +642,50 @@ test('MCP: item_add/item_list/item_update + invoice_create with items/discount/l
   const check = openDb(dbPath);
   assert.equal(check.prepare('SELECT COUNT(*) c FROM items').get().c, 1); // dry-run wrote nothing
   check.close();
+});
+
+test('bank autoMatch: incoming payment matches a DISCOUNTED invoice at its discounted gross', () => {
+  const c = addContact();
+  // 2x 100 @21, 10% total discount -> gross 217.80 (line sums would say 242.00)
+  const inv = createInvoice(db, {
+    contactId: c.id, lines: ['2x Dienst @ 100.00 @21'], date: '2026-08-01',
+    discountType: 'pct', discountValue: 1000, actor: 'agent:test',
+  });
+  finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+  assert.equal(getInvoice(db, inv.id).gross_cents, 21780);
+  getOrCreateBankAccount(db, { iban: 'NL91ABNA0417164300' });
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300',
+    transactions: [{ date: '2026-08-05', amount_cents: 21780, counterparty: 'ACME B.V.', description: 'betaling factuur' }],
+    actor: 'agent:test',
+  });
+  const dry = autoMatch(db, { actor: 'agent:test', dryRun: true });
+  assert.equal(dry.matched.length, 1);
+  assert.equal(dry.matched[0].kind, 'invoice');
+  assert.equal(dry.matched[0].fx_delta_cents, 0);
+  // execute: marks paid, posts Bank/Debiteuren, balances
+  autoMatch(db, { actor: 'agent:test' });
+  const paid = getInvoice(db, inv.id);
+  assert.equal(paid.status, 'paid');
+  assert.equal(paid.paid_cents, 21780);
+  assert.equal(trialBalance(db).balanced, true);
+});
+
+test('bank autoMatch: discounted invoice does NOT match a partial/off payment', () => {
+  const c = addContact();
+  const inv = createInvoice(db, {
+    contactId: c.id, lines: ['2x Dienst @ 100.00 @21'], date: '2026-08-01',
+    discountType: 'pct', discountValue: 1000, actor: 'agent:test',
+  });
+  finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+  getOrCreateBankAccount(db, { iban: 'NL91ABNA0417164300' });
+  importTransactions(db, {
+    iban: 'NL91ABNA0417164300',
+    transactions: [{ date: '2026-08-05', amount_cents: 24200, counterparty: 'ACME B.V.', description: 'pre-discount amount' }],
+    actor: 'agent:test',
+  });
+  const dry = autoMatch(db, { actor: 'agent:test', dryRun: true });
+  assert.equal(dry.matched.length, 0); // 242.00 != 217.80 and outside tolerance
 });
 
 // --- company logo ---------------------------------------------------------

@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { bankError } from './camt.js';
 import { getAccountByCode } from '../core/accounts.js';
 import { createEntry, getEntry, postEntry } from '../core/entries.js';
-import { paymentFromBank, FX_MATCH_TOLERANCE_BP, FX_MATCH_FLOOR_CENTS } from '../invoice/index.js';
+import { paymentFromBank, getInvoice, FX_MATCH_TOLERANCE_BP, FX_MATCH_FLOOR_CENTS } from '../invoice/index.js';
 import { record } from '../audit/index.js';
 
 function txHash(iban, tx) {
@@ -301,22 +301,31 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
     // amount within the FX sanity bound (FX_MATCH_TOLERANCE_BP, floor
     // FX_MATCH_FLOOR_CENTS): a foreign-currency invoice is EUR-translated at
     // invoice date, the payment arrives converted at payment date, so a small
-    // difference is an FX move, not an error. Must stay in sync with the
-    // paymentFromBank tolerance or autoMatch matches what posting rejects.
+    // difference is an FX move, not an error. Outstanding comes from the
+    // DISCOUNTED totals (getInvoice derives net/vat/gross in one place) — a
+    // line-sum query would ignore v0.13 discounts and never match. Must stay
+    // in sync with the paymentFromBank tolerance or autoMatch matches what
+    // posting rejects.
     if (txRow.amount_cents > 0) {
-      const invoiceHits = db.prepare(`
-        SELECT i.id, i.invoice_number, i.date, i.due_date, i.contact_id, c.name AS contact_name,
-          (SELECT COALESCE(SUM(l.amount_cents + l.vat_amount_cents), 0) FROM invoice_lines l WHERE l.invoice_id = i.id)
-            - (SELECT COALESCE(SUM(p.amount_cents), 0) FROM invoice_payments p WHERE p.invoice_id = i.id) AS outstanding_cents
+      const invoiceRows = db.prepare(`
+        SELECT i.id, i.invoice_number, i.date, i.due_date, i.contact_id, c.name AS contact_name
         FROM invoices i
         LEFT JOIN contacts c ON c.id = i.contact_id
         WHERE i.invoice_type = 'sales' AND i.status IN ('sent','overdue')
-          AND ABS(outstanding_cents - ?) <= MAX(ROUND(outstanding_cents * ? / 10000.0), ?)
-        ORDER BY ABS(outstanding_cents - ?), i.due_date IS NULL, i.due_date, i.id
-        LIMIT 1
-      `).all(txRow.amount_cents, FX_MATCH_TOLERANCE_BP, FX_MATCH_FLOOR_CENTS, txRow.amount_cents);
-      const inv = invoiceHits[0];
-      if (inv) {
+        ORDER BY i.due_date IS NULL, i.due_date, i.id
+      `).all();
+      let best = null;
+      for (const row of invoiceRows) {
+        const full = getInvoice(db, row.id);
+        const outstanding = full.gross_cents - full.paid_cents;
+        if (outstanding <= 0) continue;
+        const tolerance = Math.max(Math.round(outstanding * FX_MATCH_TOLERANCE_BP / 10000), FX_MATCH_FLOOR_CENTS);
+        const delta = Math.abs(outstanding - txRow.amount_cents);
+        if (delta <= tolerance && (!best || delta < best.delta)) {
+          best = { ...row, outstanding, delta };
+        }
+      }
+      if (best) {
         matches.push({
           kind: 'invoice',
           tx_id: txRow.id,
@@ -324,10 +333,10 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
           amount_cents: txRow.amount_cents,
           description: txRow.description,
           counterparty: txRow.counterparty,
-          invoice_id: inv.id,
-          invoice_number: inv.invoice_number,
-          contact_name: inv.contact_name,
-          fx_delta_cents: txRow.amount_cents - inv.outstanding_cents,
+          invoice_id: best.id,
+          invoice_number: best.invoice_number,
+          contact_name: best.contact_name,
+          fx_delta_cents: txRow.amount_cents - best.outstanding,
           method: 'invoice',
           confidence: 0.95,
         });
