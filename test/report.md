@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 13:29:18 UTC — **✅ 448 passing · 0 failing (448 tests)**
+**Latest run:** 2026-08-08 13:33:40 UTC — **✅ 457 passing · 0 failing (457 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -108,6 +108,20 @@
     - ✅ record + list with filters
     - ✅ audit log is append-only: UPDATE and DELETE are blocked
     - ✅ args null is stored and read back as null
+
+### backup.test.js — 
+
+9 passing · 0 failing
+
+    - ✅ backup --encrypt: magic header, round-trips byte-identical via restore
+    - ✅ restore: encrypted file without passphrase → BACKUP_PASSPHRASE_REQUIRED; wrong → BACKUP_PASSPHRASE_WRONG
+    - ✅ restore: passphrase from BUKIO_BACKUP_PASSPHRASE env works
+    - ✅ tampered encrypted backup → BACKUP_PASSPHRASE_WRONG
+    - ✅ unit: encrypt/decrypt round-trip and wrong key
+    - ✅ --keep N prunes oldest backups in the default folder; dry-run deletes nothing
+    - ✅ --keep validation: non-integer, zero, and with --out all rejected
+    - ✅ plain backup/restore still works (regression) + both actions audited
+    - ✅ pruneBackups: empty/missing folder is a no-op
 
 ### bank.test.js — CAMT.053/CSV import, idempotency, matching/reconciliation
 
