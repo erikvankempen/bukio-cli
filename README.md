@@ -1033,7 +1033,7 @@ is the measured token consumption and its cost at **official DeepSeek API list
 prices** (`deepseek-v4-flash`, per 1M tokens): **$0.14** input (cache miss),
 **$0.0028** input (cache hit), **$0.28** output. Reasoning tokens are billed
 at the output rate. Data is captured by the `bukio-token-track` tool from the
-agent's session telemetry (snapshot 2026-08-08, 18:12).
+agent's session telemetry (snapshot 2026-08-08, 20:27).
 
 **Proven stack:** bukio-cli is developed and operated end-to-end with
 **Hermes Agent** (Nous Research) running **DeepSeek V4 Flash** via OpenCode
@@ -1045,13 +1045,13 @@ checks) run on the same stack against this same codebase.
 
 | Token type | Tokens | Est. cost |
 |---|---|---|
-| Input (cache miss) | 12.51M | $1.75 |
-| Cached input (cache hit) | 874.01M | $2.45 |
-| Output | 3.19M | $0.89 |
-| Reasoning (at output rate) | 1.41M | $0.40 |
-| **Total** | **891.12M** | **$5.49** |
+| Input (cache miss) | 12.66M | $1.77 |
+| Cached input (cache hit) | 880.57M | $2.47 |
+| Output | 3.21M | $0.90 |
+| Reasoning (at output rate) | 1.43M | $0.40 |
+| **Total** | **897.87M** | **$5.54** |
 
-**$5.49 total** at DeepSeek list prices for the entire project (3,867 API
+**$5.54 total** at DeepSeek list prices for the entire project (3,901 API
 calls across all development sessions).
 
 ### Owner time (contributed, unpaid)
@@ -1077,29 +1077,29 @@ Stated plainly, so nothing is hidden:
   wide margin. It is included high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
 - **It was free:** the ≈ €338 is an imputed opportunity cost, not money paid.
-  Out-of-pocket spend remains **$5.49** in API costs.
+  Out-of-pocket spend remains **$5.54** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
-  conventional code review of a 21.0 KLOC codebase would take; treat them as
+  conventional code review of a 21.4 KLOC codebase would take; treat them as
   the owner's direction-and-check time, not a substitute for professional
   review.
 
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **20,956 non-blank, non-comment lines of JavaScript**
-across 99 files (12,554 in `src/`, 8,402 in `test/`), i.e. **20.96 KLOC**
+model (Boehm, 1981): **21,375 non-blank, non-comment lines of JavaScript**
+across 99 files (12,725 in `src/`, 8,650 in `test/`), i.e. **21.38 KLOC**
 (measured with `scc` v3.7.0).
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 58.6 PM | 11.7 months | ~5 developers | ≈ €527K |
-| Semi-detached | 90.6 PM | 12.1 months | ~8 developers | ≈ €815K |
-| Embedded | 138.6 PM | 12.1 months | ~11 developers | ≈ €1,248K |
+| Organic | 59.8 PM | 11.8 months | ~5 developers | ≈ €538K |
+| Semi-detached | 92.6 PM | 12.2 months | ~8 developers | ≈ €833K |
+| Embedded | 142.0 PM | 12.2 months | ~12 developers | ≈ €1,278K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 59–139
-person-months (≈ €527K–€1,248K)**; the AI-assisted build consumed **$5.49 in API
+**Comparison:** a conventional team building this would estimate **≈ 60–142
+person-months (≈ €538K–€1,278K)**; the AI-assisted build consumed **$5.54 in API
 costs plus ≈ €338 of owner review-and-direction time (contributed, unpaid —
 see above)** over five evenings and a Saturday — still a tiny fraction of the
 conventional estimate.
