@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // bukio year-end + jaarrekening + icp — annual close and statutory reports (Phase 4).
 import { writeFileSync } from 'node:fs';
 import { formatAmount } from '../core/money.js';

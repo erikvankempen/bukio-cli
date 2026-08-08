@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Jaarrekening (Phase 4) — statutory annual accounts for micro (art. 2:395a)
 // and klein (art. 2:396) BVs, in the Dutch prescribed layout. Built from the
 // RGS-mapped chart via the balans/pnl engines, with an Overig catch-all so

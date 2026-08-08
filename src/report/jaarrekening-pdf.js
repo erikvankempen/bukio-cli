@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Jaarrekening PDF — the KVK deposit package in the statutory Dutch layout,
 // rendered via headless Chromium (same engine as the invoice PDF).
 // chromium is lazy-loaded inside jaarrekeningToPdf (playwright-core costs

@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // CLI wiring — commander program with global --json/--db/--actor flags.
 import { Command } from 'commander';
 import os from 'node:os';

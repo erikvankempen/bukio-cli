@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Edge cases across the whole surface — guards, rounding, boundaries,
 // lifecycle violations, idempotency. Each test asserts real behaviour only.
 import { test, beforeEach } from 'node:test';

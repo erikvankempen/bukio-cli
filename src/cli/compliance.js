@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // bukio compliance — filing deadlines calendar (Phase 5)
 import { complianceStatus, markFiled } from '../compliance/index.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';

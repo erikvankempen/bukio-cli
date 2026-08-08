@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Bank module — accounts, idempotent import, matching, reconciliation.
 import { createHash } from 'node:crypto';
 import { bankError } from './camt.js';

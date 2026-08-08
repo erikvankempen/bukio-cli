@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Hardening pass (2026-08-07): regression tests for the review-pass bug fixes
 // plus edge cases that trip the behavior but should not.
 //

@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Audit log — append-only record of every mutation (human or agent).
 
 export function record(db, { actor, action, command = null, args = null, outcome = 'ok', entryIds = [] }) {

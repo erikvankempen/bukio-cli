@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Invoice PDF via Playwright (headless Chromium) from an HTML template.
 // Uses the locally installed Playwright browsers (see /root/.cache/ms-playwright).
 // chromium is lazy-loaded inside invoiceToPdf: playwright-core costs ~1.2s to

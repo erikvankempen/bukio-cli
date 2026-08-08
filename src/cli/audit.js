@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // bukio audit — append-only audit log reader (JSON | csv | xlsx | human).
 import { writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';

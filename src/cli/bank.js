@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // bukio bank — accounts, import (CAMT.053/CSV), matching, reconciliation.
 import { readFileSync } from 'node:fs';
 import { parseCamt053 } from '../bank/camt.js';

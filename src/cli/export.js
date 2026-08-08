@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // bukio export — Auditfile Financieel (XAF) 4.0 export for external advisors.
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';

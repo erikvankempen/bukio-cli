@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Year-end close (Phase 4) — afsluiting van het boekjaar.
 // Two posted entries, both source='closing' with source_ref='fy:YYYY':
 //   1. Afsluiting boekjaar: every income/expense account reversed into

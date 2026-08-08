@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Compliance calendar (Phase 5) — the Dutch SME filing deadlines:
 //   OB quarterly (Q1 30 Apr, Q2 31 Jul, Q3 31 Oct, Q4 31 Jan next year),
 //   ICP quarterly (same deadlines), jaarrekening deposit within 13 months of

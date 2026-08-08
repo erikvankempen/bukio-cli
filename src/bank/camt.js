@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // CAMT.053 (ISO 20022 bank statement) parser.
 import { XMLParser } from 'fast-xml-parser';
 

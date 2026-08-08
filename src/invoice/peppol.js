@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Peppol send (FR3.8): POST the UBL 2.1 / Peppol BIS 3.0 document to an
 // access-point provider (e.g. Storecove-class). The provider contract is
 // deliberately thin: POST the XML with a bearer token, expect 2xx.

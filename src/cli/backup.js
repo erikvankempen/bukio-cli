@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // bukio backup / restore — SQLite backup API + validated restore.
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import os from 'node:os';

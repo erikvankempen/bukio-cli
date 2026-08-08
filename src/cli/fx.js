@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // bukio fx — foreign currency rates (Phase 5, FR5.X)
 import { setFxRate, listFxRates } from '../fx/index.js';
 import { fetchEcbRate } from '../fx/ecb.js';

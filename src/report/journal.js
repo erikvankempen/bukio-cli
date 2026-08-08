@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Journal export — every posting in a date range, with account info.
 // One row per posting (entries without postings appear as a single row).
 // `limit` is optional: when set, the query is capped (used by the MCP journal

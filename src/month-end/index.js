@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Month-end close check — the "is the month ready to close?" report.
 // Read-only: unposted drafts, unmatched bank transactions, the OB readout for
 // the quarter containing the month, draft + overdue invoices, due recurring

@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Default chart of accounts (Phase 1 — expanded, RGS-mapped).
 // VAT-agnostic by design: no BTW accounts here — the VAT module (Phase 2)
 // adds them when enabled.

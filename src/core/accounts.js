@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Accounts — chart of accounts CRUD, CSV import, default chart seeding.
 import { readFileSync } from 'node:fs';
 import { DEFAULT_CHART, inferRgs } from './chart.js';

@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // FX translation (Phase 5, FR5.X) — vreemde valuta purchase invoices.
 // Rates are stored per currency per date as rate_x10000 (1 EUR = N units of
 // foreign currency, scaled by 10000). Conversion is integer math,

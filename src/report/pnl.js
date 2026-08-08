@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Winst- en verliesrekening (profit & loss) for a period, grouped by RGS hoofdgroep.
 import { rgsLabel } from '../core/chart.js';
 

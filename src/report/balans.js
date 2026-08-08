@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Balans (balance sheet) as of a date, grouped by RGS hoofdgroep.
 // Integrity invariant: total assets == total liabilities + equity + result.
 import { rgsLabel } from '../core/chart.js';

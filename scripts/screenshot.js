@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Regenerate the README screenshot from scripts/screenshot-template.html.
 // The template contains a verbatim capture of a real bukio demo session
 // (init → opening balances → journal import → month-end → activastaat →

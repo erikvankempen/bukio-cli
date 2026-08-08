@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Recurring entries & period automation (FR3A).
 // Templates are validated at creation; generation replays resolved postings.
 // Deterministic, dry-run friendly, fully audited — bukio never generates

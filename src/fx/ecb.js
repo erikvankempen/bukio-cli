@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // ECB reference-rate fetch (Phase 5 extension, user-requested).
 // The ECB publishes daily euro reference rates: 1 EUR = N units of foreign
 // currency — exactly bukio's convention. Endpoint: SDMX 2.1 data API

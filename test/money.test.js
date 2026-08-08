@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parseAmount, formatAmount } from '../src/core/money.js';

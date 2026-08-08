@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // bukio import — opening balances, journal CSV, XML Auditfile (XAF) 4.0.
 // All importers validate the ENTIRE file before writing anything; a file with
 // any problem is rejected with IMPORT_VALIDATION_FAILED + per-line details.

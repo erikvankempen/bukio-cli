@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // bukio payments — SEPA payment batches (pain.001 export for bank-portal
 // upload), payables (purchase invoices: transfer vs direct debit).
 import { writeFileSync, mkdirSync } from 'node:fs';

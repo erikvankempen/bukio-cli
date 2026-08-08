@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Payment batches — SEPA credit transfer initiation (pain.001) files that the
 // user uploads to the bank's portal. Bank-agnostic: one format, two schema
 // versions (pain.001.001.03 legacy / pain.001.001.09 SCT2), accepted by all

@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // DB layer — open, pragmas, migrations.
 import Database from 'better-sqlite3';
 import { readdirSync, readFileSync } from 'node:fs';

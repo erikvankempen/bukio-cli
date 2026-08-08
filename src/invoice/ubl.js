@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // UBL 2.1 / Peppol BIS 3.0 (EN 16931) invoice XML export.
 // Hand-rolled, deterministic, no dependencies. Covers the core BIS 3.0
 // structure: seller/buyer parties, VAT breakdown, monetary totals, lines.

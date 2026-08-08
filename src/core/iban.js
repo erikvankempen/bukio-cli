@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // IBAN validation (ISO 13616): country prefix + mod-97 check.
 // Used for the company's own account, contact accounts, and payment batches.
 

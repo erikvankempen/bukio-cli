@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Agent-layer tests — FX translation, MCP server (real child process), compliance.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';

@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // bukio assets — fixed assets: depreciation schemes, asset register with
 // mid-life adoption, monthly depreciation runs, disposal, activastaat.
 import { mkdirSync, writeFileSync } from 'node:fs';

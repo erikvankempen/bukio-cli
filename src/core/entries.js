@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Posting engine — the heart of bukio-cli.
 // Lifecycle: draft -> posted -> reversed. Posted entries are never deleted.
 import { parseAmount } from './money.js';

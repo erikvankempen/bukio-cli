@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Money handling — integer cents everywhere, no floats in financial code paths.
 
 const AMOUNT_RE = /^-?\d+(\.\d{1,2})?$/;

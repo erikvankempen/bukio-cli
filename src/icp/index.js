@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // ICP readout (Phase 4) — Intracommunautaire prestaties listing.
 // Per EU customer (contact with a foreign VAT id), the total value of
 // btw-verlegde EU supplies (invoice lines with vat_code 'RE') in a quarter.

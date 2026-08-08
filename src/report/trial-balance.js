@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Trial balance — per-account debit/credit/net from posted entries.
 export function trialBalance(db, { year = null } = {}) {
   if (year != null && !/^\d{4}$/.test(String(year))) {

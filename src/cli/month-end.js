@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // bukio month-end — month-end close check (read-only, wraps the module).
 import { formatAmount } from '../core/money.js';
 import { monthEnd } from '../month-end/index.js';

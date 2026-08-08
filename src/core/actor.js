@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Actor identity: '<role>:<name>' — required on every CLI and MCP action so
 // the audit trail always names who acted (agent:bartholomeus, human:erik).
 // A bare 'human' or 'agent' without a name is rejected: anonymous actors

@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // MCP server (Phase 5) — Model Context Protocol over stdio (JSON-RPC 2.0,
 // newline-delimited). Lets agents (Hermes, Claude, ...) drive bukio natively:
 // read-only introspection tools plus mutation tools that default to dry-run

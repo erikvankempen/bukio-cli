@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Dutch bank CSV parser — tolerant of Rabo / ING / ABN AMRO / generic exports.
 import { bankError } from './camt.js';
 

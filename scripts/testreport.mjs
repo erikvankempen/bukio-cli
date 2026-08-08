@@ -1,4 +1,11 @@
 #!/usr/bin/env node
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+
 // Runs the full bukio-cli test suite (each file in its own process, like
 // `node --test` does) and regenerates test/report.md: every test with its
 // pass/fail status, a one-line description per file, and the latest result.

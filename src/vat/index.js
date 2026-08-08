@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // VAT module (optional) — codes, VAT-aware booking, OB manual-filing readout.
 // Only active when company.vat_module = 1. The core ledger stays VAT-agnostic:
 // this module expands "@code" posting specs into full entries (including the

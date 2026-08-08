@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // bukio invoice + contact — outgoing invoicing (Phase 3, FR3).
 import { writeFileSync } from 'node:fs';
 import { formatAmount, parseAmount } from '../core/money.js';

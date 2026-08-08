@@ -1,3 +1,9 @@
+/**
+ * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * Copyright (c) 2026 Erik van Kempen.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // Export helpers — CSV (hand-rolled, zero deps) and XLSX (exceljs).
 // ExcelJS is lazy-loaded inside writeXlsx: it costs ~500ms to import, and
 // keeping it out of the static graph keeps every CLI invocation fast
