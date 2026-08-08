@@ -37,30 +37,16 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 
 ## Quick start
 
-```bash
-# install
-git clone https://github.com/erikvankempen/bukio-cli.git
-cd bukio-cli && npm install && npm link        # exposes `bukio` on PATH
+Let your agent do it. Paste this prompt to any agentic assistant (the example
+from [agentic.bukio.nl](https://agentic.bukio.nl/?lang=en)) — the agent
+installs from source and stops before touching any financial data:
 
-# create a company (dry-run first — it writes nothing)
-bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on --dry-run
-bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on
-
-# post the opening capital, book an expense, check the books
-bukio entry add --date 2026-08-04 --desc "Startkapitaal" \
-  --postings "1100:10000.00,3000:-10000.00" --post
-bukio entry add --date 2026-08-05 --desc "Kantoorartikelen" \
-  --postings "4300:250.00,1100:-250.00" --post
-bukio report trial-balance        # → balanced: true
 ```
+Install bukio-cli from github.com/erikvankempen/bukio-cli.
 
-Or let an agent do it — `bukio mcp` speaks the Model Context Protocol over stdio:
+Verify Node.js 20+ and a Linux or macOS environment, then clone the repository, run npm install and npm link, and confirm with bukio --version.
 
-```bash
-printf '%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"trial_balance","arguments":{}}}' \
-| bukio mcp
+Read the repository README.md and AGENTS.md files, configure `bukio mcp` as a local stdio MCP server, and explain the setup you made. Do not create a company or book real transactions yet. When we start, use named actors, preview every mutation with --dry-run, and ask for confirmation before writing.
 ```
 
 ## Screenshot
@@ -104,18 +90,6 @@ cd bukio-cli
 npm install          # deps: better-sqlite3, commander
 npm link             # exposes `bukio` on PATH (or: npm install -g .)
 bukio --version
-```
-
-**Or let your agent install it.** Paste this prompt to any agentic assistant
-(the example from [agentic.bukio.nl](https://agentic.bukio.nl/?lang=en)) —
-the agent installs from source and stops before touching any financial data:
-
-```
-Install bukio-cli from github.com/erikvankempen/bukio-cli.
-
-Verify Node.js 20+ and a Linux or macOS environment, then clone the repository, run npm install and npm link, and confirm with bukio --version.
-
-Read the repository README.md and AGENTS.md files, configure `bukio mcp` as a local stdio MCP server, and explain the setup you made. Do not create a company or book real transactions yet. When we start, use named actors, preview every mutation with --dry-run, and ask for confirmation before writing.
 ```
 
 Uninstall: `npm unlink -g bukio-cli` (or `npm uninstall -g bukio-cli`).
