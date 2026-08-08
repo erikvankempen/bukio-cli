@@ -18,6 +18,8 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
 bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a VPS, stores everything in one local SQLite file, and is designed so AI agents — not just humans — can operate it safely and auditably. It is built for the Dutch B2B e-invoicing mandate: every invoice ends as a compliant PDF, a Peppol BIS 3.0 UBL document, and a sendable Peppol message.
 
+**Proven in production:** bukio-cli currently runs a live Dutch company's books, operated end-to-end by [Hermes Agent](https://hermes-agent.nousresearch.com) (Nous Research) running **DeepSeek V4 Flash** via OpenCode Go on a Linux VPS — the same stack every day: bank imports, invoice booking, month-end close checks and statutory reports, every action attributable in the audit log. The full stack disclosure is in [AI Development Cost & Token Usage](#ai-development-cost--token-usage).
+
 ## Features
 
 - **Agent-native** — every command emits deterministic `--json`; every mutation supports `--dry-run` (plan mode); every action lands in an append-only audit log with named-actor attribution (`--actor agent:bartholomeus` / `human:erik`).
@@ -100,6 +102,18 @@ cd bukio-cli
 npm install          # deps: better-sqlite3, commander
 npm link             # exposes `bukio` on PATH (or: npm install -g .)
 bukio --version
+```
+
+**Or let your agent install it.** Paste this prompt to any agentic assistant
+(the example from [agentic.bukio.nl](https://agentic.bukio.nl/?lang=en)) —
+the agent installs from source and stops before touching any financial data:
+
+```
+Install bukio-cli from github.com/erikvankempen/bukio-cli.
+
+Verify Node.js 20+ and a Linux or macOS environment, then clone the repository, run npm install and npm link, and confirm with bukio --version.
+
+Read the repository README.md and AGENTS.md files, configure `bukio mcp` as a local stdio MCP server, and explain the setup you made. Do not create a company or book real transactions yet. When we start, use named actors, preview every mutation with --dry-run, and ask for confirmation before writing.
 ```
 
 Uninstall: `npm unlink -g bukio-cli` (or `npm uninstall -g bukio-cli`).
