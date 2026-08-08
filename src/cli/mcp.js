@@ -41,6 +41,7 @@ import { addAttachment, listAttachments, removeAttachment } from '../core/attach
 import { aging } from '../report/aging.js';
 import { sales } from '../report/sales.js';
 import { importUblInvoice } from '../import/ubl-invoice.js';
+import { emailInvoice } from '../invoice/email.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -522,6 +523,33 @@ tool({
     }
     const r = importUblInvoice(db, base);
     return { action: 'invoice.import', mode: 'execute', imported: r.imported, duplicates: r.duplicates, payable_ref: r.invoice_ref, supplier: r.supplier, amount_cents: r.amount_cents };
+  },
+});
+tool({
+  name: 'invoice_email', mutating: true,
+  description: 'email a finalized invoice (PDF attached) to the contact — SMTP config via BUKIO_SMTP_* env; dry-run renders the PDF but sends nothing',
+  schema: {
+    type: 'object', properties: {
+      id: { type: 'number' }, to: { type: 'string' }, subject: { type: 'string' },
+      body: { type: 'string' }, attach_pdf: { type: 'boolean' },
+      actor: { type: 'string' }, mode: { type: 'string' },
+    }, required: ['id'],
+  },
+  handler: async (db, args, ctx) => {
+    guardExecute(ctx, args);
+    const base = {
+      id: args.id, to: args.to ?? null, subject: args.subject ?? null,
+      body: args.body ?? null, attachPdf: args.attach_pdf !== false,
+      actor: args.actor ?? ctx.actor,
+    };
+    if (modeOf(args) === 'dry-run') {
+      // module dryRun validates like execute (invoice exists/finalized,
+      // recipient, SMTP config) and renders the PDF — no network call
+      const plan = await emailInvoice(db, { ...base, dryRun: true });
+      return { ...plan, mode: 'dry-run', note: 'plan only — re-run with mode=execute to send' };
+    }
+    const r = await emailInvoice(db, base);
+    return { action: 'invoice.email', mode: 'execute', invoice_id: r.id, invoice_number: r.invoice_number, to: r.to, delivered: r.delivered };
   },
 });
 tool({

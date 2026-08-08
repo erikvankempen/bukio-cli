@@ -14,6 +14,7 @@ import {
 import { invoiceToPdf } from '../invoice/pdf.js';
 import { invoiceToUbl } from '../invoice/ubl.js';
 import { sendPeppolInvoice } from '../invoice/peppol.js';
+import { emailInvoice } from '../invoice/email.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 import { emitReport } from './report.js';
 
@@ -522,6 +523,43 @@ export function make(program) {
           }
           output(ctx, { invoice: fmtInvoice(paid) }, (d) => {
             console.log(`payment recorded: ${d.invoice.invoice_number} now ${d.invoice.status} (paid ${d.invoice.paid}/${d.invoice.gross})`);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  invoice
+    .command('email')
+    .description('email a finalized invoice (PDF attached) — SMTP config via BUKIO_SMTP_* env')
+    .requiredOption('--id <id>', 'invoice id')
+    .option('--to <email>', 'recipient (default: the contact email)')
+    .option('--subject <text>', 'subject (default: "Factuur <nr> — <company>")')
+    .option('--body <text>', 'plain-text body (default: a short Dutch/English intro)')
+    .option('--no-pdf', "don't attach the PDF")
+    .option('--dry-run', 'render and validate without sending')
+    .action(async (opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const result = await emailInvoice(db, {
+            id: Number(opts.id), to: opts.to ?? null, subject: opts.subject ?? null,
+            body: opts.body ?? null, attachPdf: opts.pdf !== false,
+            actor: ctx.actor, dryRun: ctx.dryRun,
+          });
+          output(ctx, result, (d) => {
+            if (d.dryRun) {
+              console.log(`plan: email invoice ${d.invoice_number} to ${d.to}`);
+              console.log(`  subject: ${d.subject}`);
+              if (d.attachment) console.log(`  attachment: ${d.attachment.filename} (${d.attachment.bytes} bytes)`);
+              console.log('(dry run — nothing sent)');
+              return;
+            }
+            console.log(`sent invoice ${d.invoice_number} to ${d.to} via ${d.server}`);
           });
         } finally {
           db.close();

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 13:52:21 UTC — **✅ 474 passing · 0 failing (474 tests)**
+**Latest run:** 2026-08-08 14:23:48 UTC — **✅ 487 passing · 0 failing (487 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -571,6 +571,24 @@
     - ✅ pnl: legacy chart without RGS codes still splits revenue/costs by type
     - ✅ pnl: catch-all section for accounts with unknown rgs_code
     - ✅ journal: one row per posting, ordered by date
+
+### smtp.test.js — 
+
+13 passing · 0 failing
+
+    - ✅ sendMail: happy path delivers, captures the MIME with the PDF attachment
+    - ✅ sendMail: auth failure → SMTP_AUTH_FAILED
+    - ✅ sendMail: rcpt rejection → SMTP_SEND_FAILED with server text
+    - ✅ sendMail: STARTTLS advertised but rejected → SMTP_CONNECT_FAILED (branch exercised)
+    - ✅ sendMail: connection refused → SMTP_CONNECT_FAILED; bad greeting → SMTP_CONNECT_FAILED
+    - ✅ smtpConfig/smtpValidate: env-driven; missing host/from → SMTP_NOT_CONFIGURED
+    - ✅ buildMime: non-ASCII subject → UTF-8 encoded-word; attachment boundary present
+    - ✅ emailInvoice: delivers to the contact email and audits
+    - ✅ emailInvoice: guards — draft, missing email, unconfigured SMTP
+    - ✅ emailInvoice: dry-run renders the plan, makes no connection, audits nothing
+    - ✅ emailInvoice: PDF attachment is rendered and decodes to %PDF
+    - ✅ cli: invoice email e2e with SMTP env + audit row
+    - ✅ mcp: invoice_email dry-run parity (no connection) + execute
 
 ### trial-balance.test.js — trial balance invariants
 

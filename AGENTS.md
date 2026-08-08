@@ -71,6 +71,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio invoice create --contact N --lines "2x DESC @ PRICE @21" --date D` | Draft invoice (12-vereisten validated at finalize). |
 | `bukio invoice finalize --id N [--dry-run]` | Sequential number + booking entry (Debiteuren/Omzet/btw). |
 | `bukio invoice pdf --id N` / `ubl --id N` / `credit --id N` / `pay --id N --date` | PDF (Chromium), Peppol BIS 3.0 XML, credit notes, payments. |
+| `bukio invoice email --id N [--to X] [--subject] [--body] [--no-pdf] [--dry-run]` | Email the finalized invoice PDF via SMTP (`BUKIO_SMTP_*` env — host/port/user/pass/from). Delivery is audited; status is `sent` from finalize onward. |
 | `bukio invoice peppol-send --id N [--endpoint URL] [--dry-run]` | POST the UBL to a Peppol access-point provider (env `BUKIO_PEPPOL_ENDPOINT` + `BUKIO_PEPPOL_TOKEN`). |
 | `bukio year-end status --year YYYY` / `close --year YYYY [--dry-run]` | Annual close: result -> 9900 -> 3000 (source 'closing'; P&L stays visible). |
 | `bukio jaarrekening report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx]` | Statutory annual accounts (KVK deposit package as PDF). |
@@ -621,6 +622,7 @@ tar -czf ~/exports/bukio-documenten-2026.tar.gz -C ~/.bukio invoices/
 | `VAT_MODULE_OFF` / `VAT_CODE_NOT_FOUND` / `INVALID_VAT_AMOUNT` / `VAT_MARGIN_NOT_SUPPORTED` / `KOR_ACTIVE` | VAT module off / unknown `@CODE` / bad VAT amount / margin on an unsupported line / KOR blocks `vat book` | `vat enable` first; use the codes `vat enable` creates; `@M` is unsupported for some paths |
 | `NOT_FINALIZED` / `CONTACT_NOT_FOUND` / `INVOICE_REF_REQUIRED` / `PDF_UNAVAILABLE` | Invoice not finalized, unknown contact, missing invoice reference, PDF engine unavailable | Finalize first; fix the contact; `PDF_UNAVAILABLE` means headless Chromium isn't installed |
 | `PEPPOL_NOT_CONFIGURED` / `PEPPOL_SEND_FAILED` | No Peppol endpoint, or the provider rejected/unreachable | Set `BUKIO_PEPPOL_ENDPOINT`/`BUKIO_PEPPOL_TOKEN`; check the provider response |
+| `SMTP_NOT_CONFIGURED` / `SMTP_CONNECT_FAILED` / `SMTP_AUTH_FAILED` / `SMTP_SEND_FAILED` / `CONTACT_EMAIL_MISSING` | `invoice email`: SMTP env vars missing, server unreachable/TLS failed, auth rejected, send rejected, or the contact has no email (and no `--to`) | Set `BUKIO_SMTP_HOST`/`PORT`/`USER`/`PASS`/`FROM`; add the contact email or pass `--to` |
 | `INVALID_CAMT` / `INVALID_CSV_HEADER` / `EMPTY_STATEMENT` / `ALREADY_MATCHED` | Bank file unparsable, bad header, empty statement, or a matched transaction re-linked | Use a real CAMT.053/CSV export; unmatch first |
 | `INVALID_XAF` / `EMPTY_CSV` / `IMPORT_VALIDATION_FAILED` / `FILE_NOT_FOUND` | Import file unreadable/empty/structurally invalid, or validation failed with per-line details | The error lists every offending line — fix and re-run |
 | `INVALID_UBL_INVOICE` / `UNSUPPORTED_UBL_DOCUMENT` | Inbound e-invoice not an EN 16931 `<Invoice>` (or missing ID/dates/amount), or a document type bukio won't import (credit notes 381 — payables are positive-only) | Import a real 380 invoice UBL; credit notes are booked manually for now |
