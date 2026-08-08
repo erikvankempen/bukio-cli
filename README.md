@@ -952,7 +952,7 @@ principle for AI-generated content:
 | Aspect | Disclosure |
 |---|---|
 | Development method | All source, tests and documentation were generated with an AI coding assistant (Hermes Agent, running `deepseek-v4-flash`), then reviewed, verified and accepted by the repository owner. |
-| Human oversight | Every commit is reviewed by the owner before it lands; the automated test suite (395 tests, `npm test`) must pass; money paths additionally require a balanced trial balance. Nothing is accepted blind. |
+| Human oversight | Every commit is reviewed by the owner before it lands; the automated test suite (433 tests, `npm test`) must pass; money paths additionally require a balanced trial balance. Nothing is accepted blind. |
 | Synthetic content | Code, tests and docs are AI-generated output; this README section and the commit history serve as the disclosure that the content is machine-generated. |
 | Model provider obligations | The underlying general-purpose AI model is provided by DeepSeek; its obligations under the AI Act (e.g. Article 53 documentation, copyright policy, training-data summary) sit with the provider, not with this repository. |
 | No prohibited practices | The project involves none of the Article 5 prohibited practices (no social scoring, no biometric identification, no manipulation). |
@@ -974,34 +974,40 @@ is the measured token consumption and its cost at **official DeepSeek API list
 prices** (`deepseek-v4-flash`, per 1M tokens): **$0.14** input (cache miss),
 **$0.0028** input (cache hit), **$0.28** output. Reasoning tokens are billed
 at the output rate. Data is captured by the `bukio-token-track` tool from the
-agent's session telemetry (snapshot 2026-08-08).
+agent's session telemetry (snapshot 2026-08-08, 14:37).
+
+**Proven stack:** bukio-cli is developed and operated end-to-end with
+**Hermes Agent** (Nous Research) running **DeepSeek V4 Flash** via OpenCode
+Go — every development session in the tracker below ran on that model, and
+the live day-to-day operations (bank imports, invoice booking, month-end
+checks) run on the same stack against this same codebase.
 
 ### Token usage — totals per token type
 
 | Token type | Tokens | Est. cost |
 |---|---|---|
-| Input (cache miss) | 10.19M | $1.43 |
-| Cached input (cache hit) | 643.47M | $1.80 |
-| Output | 2.46M | $0.69 |
-| Reasoning (at output rate) | 1.14M | $0.32 |
-| **Total** | **657.26M** | **$4.24** |
+| Input (cache miss) | 10.98M | $1.54 |
+| Cached input (cache hit) | 717.96M | $2.01 |
+| Output | 2.71M | $0.76 |
+| Reasoning (at output rate) | 1.27M | $0.36 |
+| **Total** | **732.92M** | **$4.66** |
 
-**$4.24 total** at DeepSeek list prices for the entire project (2,900 API
+**$4.66 total** at DeepSeek list prices for the entire project (3,190 API
 calls across all development sessions).
 
 ### Owner time (contributed, unpaid)
 
 Beyond API spend, the project consumed the owner's review-and-direction time:
-five evenings after work (Aug 4–8, 2026), ≈ 2 clock hours per evening — but
-only during the moments the agent needed review or input — i.e. roughly
-**1 hour of effective time per evening, ≈ 5 hours total**.
+five evenings after work (Aug 4–7, 2026), ≈ 1 hour of effective time per
+evening — plus Saturday (Aug 8, 2026), ≈ 2.5 clock hours of review and
+direction — i.e. roughly **7.5 hours total**.
 
 At a **senior** Dutch software-developer rate of **≈ €45/hour** (Amsterdam
 senior average, 2026: €45/h
 [Glassdoor](https://www.glassdoor.com/Salaries/amsterdam-netherlands-senior-software-engineer-salary-SRCH_IL.0,21_IM1112_KO22,46.htm),
 €45.50/h
 [SalaryExpert](https://www.salaryexpert.com/salary/job/software-developer/netherlands/amsterdam);
-the national average is lower), the owner's time is valued at **≈ €225**.
+the national average is lower), the owner's time is valued at **≈ €338**.
 
 Stated plainly, so nothing is hidden:
 
@@ -1011,32 +1017,32 @@ Stated plainly, so nothing is hidden:
   senior professional rate overstates the market value of his review time by a
   wide margin. It is included high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
-- **It was free:** the ≈ €225 is an imputed opportunity cost, not money paid.
-  Out-of-pocket spend remains **$4.24** in API costs.
+- **It was free:** the ≈ €338 is an imputed opportunity cost, not money paid.
+  Out-of-pocket spend remains **$4.66** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
-  conventional code review of a 15.8 KLOC codebase would take; treat them as
+  conventional code review of a 17.3 KLOC codebase would take; treat them as
   the owner's direction-and-check time, not a substitute for professional
   review.
 
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **15,760 non-blank, non-comment lines of JavaScript**
-across 84 files (9,809 in `src/`, 5,827 in `test/`), i.e. **15.76 KLOC**.
+model (Boehm, 1981): **17,268 non-blank, non-comment lines of JavaScript**
+across 85 files (10,694 in `src/`, 6,574 in `test/`), i.e. **17.27 KLOC**.
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 43.4 PM | 10.5 months | ~4 developers | ≈ €391K |
-| Semi-detached | 65.8 PM | 10.8 months | ~6 developers | ≈ €592K |
-| Embedded | 98.5 PM | 10.9 months | ~9 developers | ≈ €886K |
+| Organic | 47.8 PM | 10.9 months | ~4 developers | ≈ €430K |
+| Semi-detached | 72.9 PM | 11.2 months | ~7 developers | ≈ €656K |
+| Embedded | 109.9 PM | 11.2 months | ~10 developers | ≈ €989K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 43–99
-person-months (≈ €391K–€887K)**; the AI-assisted build consumed **$4.24 in API
-costs plus ≈ €225 of owner review-and-direction time (contributed, unpaid —
-see above)** over five evenings — still a tiny fraction of the conventional
-estimate.
+**Comparison:** a conventional team building this would estimate **≈ 48–110
+person-months (≈ €430K–€989K)**; the AI-assisted build consumed **$4.66 in API
+costs plus ≈ €338 of owner review-and-direction time (contributed, unpaid —
+see above)** over five evenings and a Saturday — still a tiny fraction of the
+conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.
 
