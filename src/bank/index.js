@@ -296,7 +296,7 @@ export function autoMatch(db, { windowDays = 5, actor = 'human', dryRun = false 
         )
       ORDER BY day_diff, e.id
       LIMIT 1
-    `).all(txRow.date, txRow.account_code, txRow.amount_cents, txRow.bank_account_id, ...used);
+    `).all(txRow.date, txRow.account_code, txRow.amount_cents, ...used, txRow.bank_account_id);
 
     const best = candidates[0];
     if (best && best.day_diff <= windowDays) {

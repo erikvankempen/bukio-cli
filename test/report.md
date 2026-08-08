@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 21:54:28 UTC — **✅ 563 passing · 0 failing (563 tests)**
+**Latest run:** 2026-08-08 22:18:54 UTC — **✅ 568 passing · 0 failing (568 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -129,7 +129,7 @@
 
 ### bank.test.js — CAMT.053/CSV import, idempotency, matching/reconciliation
 
-17 passing · 0 failing
+18 passing · 0 failing
 
     - ✅ parseCamt053: CRDT positive, DBIT negative, counterparty + description
     - ✅ parseCamt053: rejects non-CAMT input
@@ -145,6 +145,7 @@
     - ✅ linkTransaction: links a posted entry and guards
     - ✅ autoMatch: exact and fuzzy matching, dry-run writes nothing
     - ✅ autoMatch: two same-amount transactions never claim the same entry in one run
+    - ✅ autoMatch: two same-amount transactions match TWO distinct entries (param order regression)
     - ✅ autoMatch: outside the window stays unmatched
     - ✅ setTransactionState: ignore and re-open
     - ✅ suggestUnmatched: proposes expense/income accounts
@@ -385,7 +386,7 @@
 
 ### import-invoice.test.js — inbound UBL (EN 16931/Peppol) invoice import into payables: idempotent, VAT reported not booked
 
-10 passing · 0 failing
+11 passing · 0 failing
 
     - ✅ importUblInvoice: registers a payable, matches contact by vat-id, parses VAT
     - ✅ importUblInvoice: idempotent re-import → duplicate skipped
@@ -397,6 +398,7 @@
     - ✅ importUblInvoice: dry-run validates like execute but writes nothing
     - ✅ cli: import invoice end-to-end → payable in the register, dry-run plan
     - ✅ mcp: invoice_import dry-run parity + execute
+    - ✅ importUblInvoice: multiple PartyTaxScheme entries — VAT number still extracted
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 
@@ -623,6 +625,14 @@
     - ✅ pnl: legacy chart without RGS codes still splits revenue/costs by type
     - ✅ pnl: catch-all section for accounts with unknown rgs_code
     - ✅ journal: one row per posting, ordered by date
+
+### review-round3.test.js — 
+
+3 passing · 0 failing
+
+    - ✅ recurring pause --dry-run and resume --dry-run render a plan (no fmtTemplate crash)
+    - ✅ audit --format json prints JSON even without the global --json flag
+    - ✅ bank match post --dry-run rejects an already-matched transaction and a missing account
 
 ### smtp.test.js — zero-dependency SMTP client + invoice email: auth, STARTTLS, MIME/PDF attachment, dry-run, audit
 

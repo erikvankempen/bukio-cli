@@ -401,7 +401,17 @@ test('UBL: formatted quantity, unit code, language, discounted tax bases', () =>
   finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
   const xml = invoiceToUbl(db, getInvoice(db, inv.id));
   assert.match(xml, /<cbc:InvoicedQuantity unitCode="C62">1.5<\/cbc:InvoicedQuantity>/);
-  assert.match(xml, /<cbc:LanguageID>en<\/cbc:LanguageID>/);
+  // Peppol BIS 3.0 has NO top-level cbc:LanguageID child (per the UBL 2.1
+  // Invoice/CreditNote XSD content model) — language affects PDF/i18n only
+  assert.ok(!/<cbc:LanguageID>/.test(xml), 'UBL must not carry a top-level cbc:LanguageID (not a valid Invoice child)');
+  // element order: InvoiceTypeCode → Note → DocumentCurrencyCode (UBL 2.1 XSD)
+  const noteIdx = xml.indexOf('<cbc:Note>');
+  const docCurIdx = xml.indexOf('<cbc:DocumentCurrencyCode>');
+  if (noteIdx === -1) {
+    assert.ok(docCurIdx > 0, 'DocumentCurrencyCode present');
+  } else {
+    assert.ok(noteIdx < docCurIdx, 'cbc:Note must precede cbc:DocumentCurrencyCode in the UBL sequence');
+  }
   // line allowance for the 10% line discount: 15.00
   assert.match(xml, /<cac:AllowanceCharge>[\s\S]*?<cbc:ChargeIndicator>false<\/cbc:ChargeIndicator>[\s\S]*?<cbc:Amount currencyID="EUR">15.00<\/cbc:Amount>/);
   // EN 16931 BT-131: LineExtensionAmount is net of the line allowance (BR-26)

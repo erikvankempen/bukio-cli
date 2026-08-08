@@ -300,12 +300,22 @@ export function addAsset(db, {
 
   // GL reconciliation warnings (never blockers — migration must stay frictionless)
   const warnings = [];
-  const assetBalance = db.prepare('SELECT COALESCE(SUM(amount_cents),0) AS t FROM postings WHERE account_id = ?').get(assetAccountRow.id).t;
+  // posted entries only — a draft (source not posted) would inflate the
+  // balance and silently suppress a real warning
+  const assetBalance = db.prepare(`
+    SELECT COALESCE(SUM(p.amount_cents),0) AS t FROM postings p
+    JOIN journal_entries e ON e.id = p.entry_id AND e.state = 'posted'
+    WHERE p.account_id = ?
+  `).get(assetAccountRow.id).t;
   if (assetBalance < purchasePriceCents) {
     warnings.push(`asset account ${assetAccountRow.code} carries ${assetBalance} on the ledger, less than the purchase price ${purchasePriceCents} — verify the purchase was booked there`);
   }
   if (cumDepAccountRow) {
-    const cumBalance = db.prepare('SELECT COALESCE(SUM(amount_cents),0) AS t FROM postings WHERE account_id = ?').get(cumDepAccountRow.id).t;
+    const cumBalance = db.prepare(`
+      SELECT COALESCE(SUM(p.amount_cents),0) AS t FROM postings p
+      JOIN journal_entries e ON e.id = p.entry_id AND e.state = 'posted'
+      WHERE p.account_id = ?
+    `).get(cumDepAccountRow.id).t;
     if (Math.abs(cumBalance) < cumDepAtRecognitionCents) {
       warnings.push(`cumulative-depreciation account ${cumDepAccountRow.code} carries ${cumBalance} on the ledger, less than the recognised ${cumDepAtRecognitionCents}`);
     }

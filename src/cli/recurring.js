@@ -24,6 +24,10 @@ function fmtPostings(postings) {
 
 function fmtTemplate(t) {
   return {
+    ...(t.action ? { action: t.action } : {}),
+    ...(t.from ? { from: t.from } : {}),
+    ...(t.to ? { to: t.to } : {}),
+    ...(t.dryRun !== undefined ? { dryRun: t.dryRun } : {}),
     id: t.id, name: t.name, description: t.description,
     kind: t.kind ?? 'entry', contact_id: t.contact_id ?? null,
     invoice_lines: t.invoice_lines ?? null,
@@ -32,7 +36,9 @@ function fmtTemplate(t) {
     status: t.status, next_run_date: t.next_run_date, last_run_date: t.last_run_date,
     runs_done: t.runs_done, reverse_previous: Boolean(t.reverse_previous),
     vat_aware: Boolean(t.vat_aware),
-    postings: fmtPostings(t.postings),
+    // a dry-run plan ({action,id,from,to,dryRun}) has no template body —
+    // render what exists instead of crashing on undefined postings
+    postings: t.postings ? fmtPostings(t.postings) : null,
     final_postings: t.final_postings ? fmtPostings(t.final_postings) : null,
   };
 }

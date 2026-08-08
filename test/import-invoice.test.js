@@ -323,3 +323,27 @@ test('mcp: invoice_import dry-run parity + execute', async () => {
     mcp.close();
   }
 });
+
+test('importUblInvoice: multiple PartyTaxScheme entries — VAT number still extracted', () => {
+  // A supplier with BOTH a local tax number and a USt-IdNr (two
+  // cac:PartyTaxScheme siblings, per UBL 0..n) — fast-xml-parser yields an
+  // ARRAY; the vat-id extraction must pick the 'VAT' scheme and not drop it.
+  const existing = createContact(db, {
+    name: 'Acme BV', address: 'Leverstraat 3', city: 'Rotterdam',
+    vatId: 'NL123456789B01', actor: 'agent:test',
+  });
+  const xml = ublInvoice().replace(
+    '</cac:PartyTaxScheme>',
+    `</cac:PartyTaxScheme>
+      <cac:PartyTaxScheme>
+        <cbc:CompanyID schemeID="TIN">DE123456789</cbc:CompanyID>
+        <cac:TaxScheme><cbc:ID>TIN</cbc:ID></cac:TaxScheme>
+      </cac:PartyTaxScheme>`,
+  );
+  const r = importUblInvoice(db, { xmlText: xml, actor: 'agent:test' });
+  assert.equal(r.imported, 1);
+  assert.equal(r.contact.id, existing.id); // matched by vat-id, not name fallback
+  const rows = payables();
+  assert.equal(rows[0].source_ref, 'nl123456789b01:F2026-123'); // vat-id key preserved
+  assert.equal(rows[0].contact_id, existing.id);
+});

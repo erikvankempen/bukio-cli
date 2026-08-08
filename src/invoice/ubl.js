@@ -64,7 +64,6 @@ export function invoiceToUbl(db, invoice) {
   const typeCode = isCredit ? '381' : '380';
   // the invoices table has no currency column — always EUR (the ledger is EUR)
   const currency = invoice.currency ?? 'EUR';
-  const language = invoice.language ?? 'nl';
 
   // VAT breakdown per rate, on the DISCOUNTED bases (one source of truth).
   // EN 16931 (Peppol BIS 3.0): TaxSubtotal is 1..n MANDATORY and must cover
@@ -189,9 +188,8 @@ export function invoiceToUbl(db, invoice) {
   <cbc:IssueDate>${invoice.date}</cbc:IssueDate>
   ${invoice.due_date ? `<cbc:DueDate>${invoice.due_date}</cbc:DueDate>` : ''}
   <cbc:${isCredit ? 'CreditNoteTypeCode' : 'InvoiceTypeCode'}>${typeCode}</cbc:${isCredit ? 'CreditNoteTypeCode' : 'InvoiceTypeCode'}>
-  <cbc:DocumentCurrencyCode>${currency}</cbc:DocumentCurrencyCode>
-  <cbc:LanguageID>${language === 'en' ? 'en' : 'nl-NL'}</cbc:LanguageID>
   ${invoice.notes ? `<cbc:Note>${esc(invoice.notes)}</cbc:Note>` : ''}
+  <cbc:DocumentCurrencyCode>${currency}</cbc:DocumentCurrencyCode>
   ${isCredit && invoice.reference ? `
   <cac:BillingReference>
     <cac:InvoiceDocumentReference>

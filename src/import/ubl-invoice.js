@@ -114,14 +114,24 @@ export function importUblInvoice(db, {
   // idempotency key (vat:<invoiceRef>) and the vat-id contact match
   // across all vendors into one.
   const vatId = (() => {
-    // pickPath stringifies — grab the PartyTaxScheme OBJECT directly
-    const scheme = sup?.['cac:PartyTaxScheme'];
-    if (!scheme || typeof scheme !== 'object') return null;
-    const id = pickPath(scheme, ['cbc:CompanyID']);
-    if (!id) return null;
-    const schemeId = pickPath(scheme, ['cac:TaxScheme', 'cbc:ID']);
-    if (schemeId && schemeId.toUpperCase() !== 'VAT') return null;
-    return id;
+    // pickPath stringifies — grab the PartyTaxScheme OBJECT(s) directly. UBL
+    // allows 0..n PartyTaxScheme (e.g. a German supplier with a local
+    // Steuernummer AND a USt-IdNr); fast-xml-parser yields an ARRAY for
+    // repeats, and pickPath on an array returns undefined. Take the entry
+    // whose TaxScheme/cbc:ID is 'VAT' (the tax SCHEME identifier — the
+    // literal 'VAT', not the number) and read its CompanyID.
+    const schemes = asArray(sup?.['cac:PartyTaxScheme']);
+    if (schemes.length === 0) return null;
+    // prefer the scheme explicitly marked VAT; fall back to a lone scheme
+    // with NO TaxScheme id (lenient real-world shape), but never trust a
+    // scheme carrying a different tax identifier (e.g. a German Steuernummer)
+    const target = schemes.find((s) => {
+      const schemeId = pickPath(s, ['cac:TaxScheme', 'cbc:ID']);
+      return schemeId && schemeId.toUpperCase() === 'VAT';
+    }) ?? (schemes.length === 1 && !pickPath(schemes[0], ['cac:TaxScheme', 'cbc:ID']) ? schemes[0] : null);
+    if (!target) return null;
+    const id = pickPath(target, ['cbc:CompanyID']);
+    return id || null;
   })();
   const email = pick(sup, ['cac:Contact', 'cbc:ElectronicMail']) || null;
   const street = pick(sup, ['cac:PostalAddress', 'cbc:StreetName']) || null;

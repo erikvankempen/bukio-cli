@@ -14,6 +14,7 @@ import {
   previewImport, setTransactionState, suggestUnmatched,
 } from '../bank/index.js';
 import { formatAmount } from '../core/money.js';
+import { getAccountByCode } from '../core/accounts.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 
 function parseBankFile(filePath, format, iban) {
@@ -299,6 +300,14 @@ export function make(program) {
         try {
           const txRow = getTransaction(db, opts.tx);
           if (!txRow) throw Object.assign(new Error(`bank transaction ${opts.tx} does not exist`), { code: 'NOT_FOUND' });
+          // validate like the execute path BEFORE the dry-run branch — a plan
+          // must not look green for an already-matched tx or a bad account
+          if (txRow.state !== 'unmatched') {
+            throw Object.assign(new Error(`bank transaction ${opts.tx} is already ${txRow.state}`), { code: 'ALREADY_MATCHED' });
+          }
+          if (getAccountByCode(db, opts.account) == null) {
+            throw Object.assign(new Error(`account ${opts.account} does not exist`), { code: 'ACCOUNT_NOT_FOUND' });
+          }
           if (ctx.dryRun) {
             output(ctx, {
               action: 'post entry from bank transaction',

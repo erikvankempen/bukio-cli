@@ -54,7 +54,9 @@ export function make(program) {
           });
           const format = opts.format || (ctx.json ? 'json' : 'human');
           if (format === 'json') {
-            output(ctx, { entries: rows }, () => {});
+            // --format json must print JSON even without the global --json
+            // (output() with an empty render would print nothing)
+            console.log(JSON.stringify({ ok: true, data: { entries: rows } }, null, 2));
             return;
           }
           if (format === 'csv') {

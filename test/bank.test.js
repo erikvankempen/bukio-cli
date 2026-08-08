@@ -240,6 +240,36 @@ test('autoMatch: two same-amount transactions never claim the same entry in one 
   assert.equal(listTransactions(db, { state: 'unmatched' }).length, 1);
 });
 
+test('autoMatch: two same-amount transactions match TWO distinct entries (param order regression)', () => {
+  // regression for the usedEntryIds parameter-order bug: with the exclusion
+  // active, .all() passed (bank_account_id, ...used) against SQL placeholders
+  // (...used, bank_account_id), so the NOT IN got the bank account id and the
+  // bank filter got a used entry id — the second same-amount transaction then
+  // double-matched the first entry. Only visible when entry ids differ from
+  // the bank account id (the older test had both == 1 and masked it).
+  importTransactions(db, {
+    iban: IBAN,
+    transactions: [
+      { date: '2026-07-01', amount_cents: -50000, counterparty: 'Leverancier', description: 'F1', bank_ref: 'REF-A', iban_counter: null },
+      { date: '2026-07-02', amount_cents: -50000, counterparty: 'Leverancier', description: 'F2', bank_ref: 'REF-B', iban_counter: null },
+    ],
+  });
+  for (const [date, desc] of [['2026-06-25', 'Betaling A'], ['2026-06-26', 'Betaling B']]) {
+    const e = createEntry(db, {
+      date, description: desc,
+      postings: [{ code: '1100', amountCents: -50000 }, { code: '4300', amountCents: 50000 }],
+    });
+    postEntry(db, { id: e.id });
+  }
+  const r = autoMatch(db, { actor: 'agent:test', windowDays: 10 });
+  assert.equal(r.matched.length, 2);
+  const targets = r.matched.map((m) => m.entry_id);
+  assert.equal(new Set(targets).size, 2, `each transaction must match a DISTINCT entry, got ${targets}`);
+  // each entry reconciled exactly once
+  const recs = db.prepare("SELECT target_id, COUNT(*) c FROM reconciliations WHERE target_type='entry' GROUP BY target_id").all();
+  assert.ok(recs.every((x) => x.c === 1), `no entry may carry two bank legs: ${JSON.stringify(recs)}`);
+});
+
 test('autoMatch: outside the window stays unmatched', () => {
   importTransactions(db, { iban: IBAN, transactions: parseCamt053(CAMT) });
   createEntry(db, {
