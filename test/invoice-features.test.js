@@ -427,6 +427,16 @@ test('UBL: formatted quantity, unit code, language, discounted tax bases', () =>
   const order = ['LineExtensionAmount', 'TaxExclusiveAmount', 'TaxInclusiveAmount', 'AllowanceTotalAmount', 'PayableAmount']
     .map((t) => lmt.indexOf(`<cbc:${t}`));
   assert.ok(order.every((i, n) => i > -1 && (n === 0 || i > order[n - 1])), `LegalMonetaryTotal children out of order: ${order}`);
+  // BR-CO-11 (fatal): when AllowanceTotalAmount is present, a document-level
+  // cac:AllowanceCharge must exist between PaymentTerms and TaxTotal, and its
+  // Amount must equal AllowanceTotalAmount (13.50)
+  const docAllowance = xml.match(/<cac:AllowanceCharge>\s*<cbc:ChargeIndicator>false<\/cbc:ChargeIndicator>\s*<cbc:AllowanceChargeReasonCode>95<\/cbc:AllowanceChargeReasonCode>\s*<cbc:Amount currencyID="EUR">13.50<\/cbc:Amount>\s*<cbc:BaseAmount currencyID="EUR">135.00<\/cbc:BaseAmount>\s*<\/cac:AllowanceCharge>/);
+  assert.ok(docAllowance, 'document-level AllowanceCharge (BR-CO-11) missing for the 13.50 discount');
+  // it sits between PaymentTerms and TaxTotal
+  const ptIdx = xml.indexOf('<cac:PaymentTerms>');
+  const acIdx = xml.indexOf('<cac:AllowanceCharge>');
+  const ttIdx = xml.indexOf('<cac:TaxTotal>');
+  assert.ok(ptIdx > -1 && acIdx > ptIdx && acIdx < ttIdx, 'document AllowanceCharge must come after PaymentTerms, before TaxTotal');
   // TaxExclusiveAmount = discounted net 121.50
   assert.match(xml, /<cbc:TaxExclusiveAmount currencyID="EUR">121.50<\/cbc:TaxExclusiveAmount>/);
   // taxable base in the TaxSubtotal is the discounted base

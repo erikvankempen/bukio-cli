@@ -12,6 +12,7 @@ import { seedDefaultChart } from '../src/core/accounts.js';
 import { enableVatModule } from '../src/vat/index.js';
 import { createTemplate, runDue, getTemplate } from '../src/recurring/index.js';
 import { createContact, createInvoice, finalizeInvoice, getInvoice } from '../src/invoice/index.js';
+import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { sendPeppolInvoice } from '../src/invoice/peppol.js';
 
 let db;
@@ -164,6 +165,7 @@ test('peppol send: posts the UBL to the provider (mock server)', async () => {
   const c = addContact();
   const inv = createInvoice(db, {
     contactId: c.id, date: '2026-08-01', lines: ['1x Premium @ 99.00 @21'],
+    reference: 'PO-2026-001',
   });
   finalizeInvoice(db, { id: inv.id });
 
@@ -202,7 +204,7 @@ test('peppol send: posts the UBL to the provider (mock server)', async () => {
 
 test('peppol send: not configured / provider error / dry-run', async () => {
   const c = addContact();
-  const inv = createInvoice(db, { contactId: c.id, date: '2026-08-01', lines: ['1x A @ 10.00 @21'] });
+  const inv = createInvoice(db, { contactId: c.id, date: '2026-08-01', lines: ['1x A @ 10.00 @21'], reference: 'REF-1' });
   finalizeInvoice(db, { id: inv.id });
 
   const oldEndpoint = process.env.BUKIO_PEPPOL_ENDPOINT;
@@ -247,7 +249,7 @@ test('peppol send: buyer without a KVK number is rejected up front (BT-49)', asy
     name: 'Geen KVK B.V.', address: 'Straat 1', postalCode: '1000 AA', city: 'Amsterdam',
     vatId: 'NL888888888B01', actor: 'agent:test', // no kvk
   });
-  const inv = createInvoice(db, { contactId: c.id, date: '2026-08-01', lines: ['1x A @ 10.00 @21'] });
+  const inv = createInvoice(db, { contactId: c.id, date: '2026-08-01', lines: ['1x A @ 10.00 @21'], reference: 'REF-1' });
   finalizeInvoice(db, { id: inv.id });
   const oldEndpoint = process.env.BUKIO_PEPPOL_ENDPOINT;
   const oldToken = process.env.BUKIO_PEPPOL_TOKEN;
@@ -261,4 +263,35 @@ test('peppol send: buyer without a KVK number is rejected up front (BT-49)', asy
     if (oldEndpoint === undefined) delete process.env.BUKIO_PEPPOL_ENDPOINT; else process.env.BUKIO_PEPPOL_ENDPOINT = oldEndpoint;
     if (oldToken === undefined) delete process.env.BUKIO_PEPPOL_TOKEN; else process.env.BUKIO_PEPPOL_TOKEN = oldToken;
   }
+});
+
+test('peppol send: invoice without a buyer reference is rejected up front (BT-10)', async () => {
+  const c = addContact(); // has kvk via fixture
+  const inv = createInvoice(db, { contactId: c.id, date: '2026-08-01', lines: ['1x A @ 10.00 @21'] }); // no reference
+  finalizeInvoice(db, { id: inv.id });
+  const oldEndpoint = process.env.BUKIO_PEPPOL_ENDPOINT;
+  const oldToken = process.env.BUKIO_PEPPOL_TOKEN;
+  process.env.BUKIO_PEPPOL_ENDPOINT = 'http://127.0.0.1:9';
+  process.env.BUKIO_PEPPOL_TOKEN = 'tok';
+  try {
+    await assert.rejects(() => sendPeppolInvoice(db, getInvoice(db, inv.id)), { code: 'PEPPOL_BUYER_REFERENCE_MISSING' });
+    await assert.rejects(() => sendPeppolInvoice(db, getInvoice(db, inv.id), { dryRun: true }), { code: 'PEPPOL_BUYER_REFERENCE_MISSING' });
+  } finally {
+    if (oldEndpoint === undefined) delete process.env.BUKIO_PEPPOL_ENDPOINT; else process.env.BUKIO_PEPPOL_ENDPOINT = oldEndpoint;
+    if (oldToken === undefined) delete process.env.BUKIO_PEPPOL_TOKEN; else process.env.BUKIO_PEPPOL_TOKEN = oldToken;
+  }
+});
+
+test('UBL: BuyerReference (BT-10) emitted when the invoice has a reference', async () => {
+  const c = addContact();
+  const inv = createInvoice(db, {
+    contactId: c.id, date: '2026-08-01', lines: ['1x A @ 10.00 @21'], reference: 'PO-2026-007',
+  });
+  finalizeInvoice(db, { id: inv.id });
+  const xml = invoiceToUbl(db, getInvoice(db, inv.id));
+  assert.match(xml, /<cbc:BuyerReference>PO-2026-007<\/cbc:BuyerReference>/);
+  // element order: DocumentCurrencyCode → BuyerReference → (BillingReference)
+  const docIdx = xml.indexOf('<cbc:DocumentCurrencyCode>');
+  const refIdx = xml.indexOf('<cbc:BuyerReference>');
+  assert.ok(docIdx > -1 && refIdx > docIdx, 'BuyerReference must follow DocumentCurrencyCode');
 });

@@ -137,6 +137,13 @@ export function make(program) {
               throw dbError('INVALID_DESCRIPTION', 'description is required');
             }
             const expanded = expandVatPostings(db, converted);
+            // parity with entry add: the execute path rejects an unbalanced
+            // entry (createEntry sums postings) — a green dry-run must not
+            // precede a failing execute, so check the balance here too
+            const sum = expanded.reduce((s, p) => s + p.amountCents, 0);
+            if (sum !== 0) {
+              throw Object.assign(new Error(`postings do not sum to zero (sum = ${sum})`), { code: 'UNBALANCED' });
+            }
             output(ctx, {
               action: 'book VAT entry (expanded)',
               date: opts.date, description: opts.desc,

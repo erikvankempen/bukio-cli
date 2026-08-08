@@ -102,3 +102,12 @@ test('bank match post --dry-run rejects an already-matched transaction and a mis
   assert.equal(r2.code, 1);
   assert.equal(r2.out.error.code, 'ACCOUNT_NOT_FOUND');
 });
+
+test('vat book --dry-run rejects unbalanced postings (parity with entry add)', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
+  // a spec that cannot balance: 100 debit with no contra leg
+  const r = run(dbPath, ['vat', 'book', '--date', '2026-01-10', '--desc', 'x', '--postings', '8000:-100.00@21', '--dry-run', '--json'], { expectFail: true });
+  assert.equal(r.code, 1);
+  assert.equal(r.out.error.code, 'UNBALANCED');
+});

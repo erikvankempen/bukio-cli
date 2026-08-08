@@ -43,6 +43,12 @@ export async function sendPeppolInvoice(db, invoice, { endpoint = null, dryRun =
   if (!invoice.contact?.kvk) {
     throw peppolError('PEPPOL_BUYER_MISSING_ID', `buyer '${invoice.contact?.name ?? 'unknown'}' has no KVK number — Peppol BIS 3.0 requires the buyer electronic address (BT-49); set it via 'contact update --id <id> --kvk <number>'`);
   }
+  // Peppol BIS 3.0 BT-10 (PEPPOL-EN16931-R003, fatal; DE-R-015 for NL): the
+  // buyer reference must be provided (there is no order-reference element in
+  // this document). The invoice 'reference' field (klantkenmerk) is it.
+  if (!invoice.reference) {
+    throw peppolError('PEPPOL_BUYER_REFERENCE_MISSING', `invoice ${invoice.invoice_number} has no buyer reference — Peppol BIS 3.0 requires cbc:BuyerReference (BT-10); set it at creation with 'invoice create ... --reference <text>' or recreate the invoice`);
+  }
   if (dryRun) {
     return {
       dryRun: true,

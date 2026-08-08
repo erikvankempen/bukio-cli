@@ -79,7 +79,7 @@ export function invoiceToUbl(db, invoice) {
   // charge, Z 0%, E exempt) whose TaxAmount is 0.00. Using only the
   // vat>0 `breakdown` produced an empty breakdown (schema violation) for
   // verlegd-only, 0%-only and VAT-less invoices.
-  const { groups, net_cents, vat_cents, gross_cents, discount_cents } =
+  const { groups, net_cents, vat_cents, gross_cents, discount_cents, net_before_cents } =
     computeInvoiceTotals(invoice.lines, invoice.discount_type, invoice.discount_value);
 
   const categoryOf = (code) => (code === 'R' || code === 'RE') ? 'AE'
@@ -194,6 +194,7 @@ export function invoiceToUbl(db, invoice) {
   <cbc:${isCredit ? 'CreditNoteTypeCode' : 'InvoiceTypeCode'}>${typeCode}</cbc:${isCredit ? 'CreditNoteTypeCode' : 'InvoiceTypeCode'}>
   ${invoice.notes ? `<cbc:Note>${esc(invoice.notes)}</cbc:Note>` : ''}
   <cbc:DocumentCurrencyCode>${currency}</cbc:DocumentCurrencyCode>
+  ${invoice.reference ? `<cbc:BuyerReference>${esc(invoice.reference)}</cbc:BuyerReference>` : ''}
   ${isCredit && invoice.reference ? `
   <cac:BillingReference>
     <cac:InvoiceDocumentReference>
@@ -218,6 +219,13 @@ export function invoiceToUbl(db, invoice) {
     <cac:PayeeFinancialAccount><cbc:ID>${esc(company.iban ?? '')}</cbc:ID></cac:PayeeFinancialAccount>
   </cac:PaymentMeans>
   ${invoice.due_date ? `<cac:PaymentTerms><cbc:PaymentDueDate>${invoice.due_date}</cbc:PaymentDueDate></cac:PaymentTerms>` : ''}
+  ${discount_cents > 0 ? `
+  <cac:AllowanceCharge>
+    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+    <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>
+    <cbc:Amount currencyID="${currency}">${moneyAmount(discount_cents)}</cbc:Amount>
+    <cbc:BaseAmount currencyID="${currency}">${moneyAmount(net_before_cents)}</cbc:BaseAmount>
+  </cac:AllowanceCharge>` : ''}
   <cac:TaxTotal>
     <cbc:TaxAmount currencyID="${currency}">${moneyAmount(vat_cents)}</cbc:TaxAmount>${taxSubtotals}
   </cac:TaxTotal>

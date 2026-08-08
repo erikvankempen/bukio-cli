@@ -294,6 +294,12 @@ tool({
     if (expanded.length < 2) {
       throw new McpError('TOO_FEW_POSTINGS', 'an entry needs at least 2 postings');
     }
+    // parity with entry_add: execute rejects an unbalanced entry — a green
+    // dry-run must not precede a failing execute
+    const sum = expanded.reduce((s, p) => s + p.amountCents, 0);
+    if (sum !== 0) {
+      throw new McpError('UNBALANCED', `postings do not sum to zero (sum = ${sum})`);
+    }
     const plan = {
       action: 'vat.book', date: args.date, description: args.description, currency: args.currency ?? null,
       postings: expanded.map((p) => ({

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 23:22:53 UTC — **✅ 574 passing · 0 failing (574 tests)**
+**Latest run:** 2026-08-08 23:36:38 UTC — **✅ 577 passing · 0 failing (577 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -565,7 +565,7 @@
 
 ### recurring-invoice.test.js — subscription invoice templates
 
-9 passing · 0 failing
+11 passing · 0 failing
 
     - ✅ invoice template: generates draft invoices on schedule (never auto-finalizes)
     - ✅ invoice template: generated drafts finalize normally (compliance + number)
@@ -576,6 +576,8 @@
     - ✅ peppol send: posts the UBL to the provider (mock server)
     - ✅ peppol send: not configured / provider error / dry-run
     - ✅ peppol send: buyer without a KVK number is rejected up front (BT-49)
+    - ✅ peppol send: invoice without a buyer reference is rejected up front (BT-10)
+    - ✅ UBL: BuyerReference (BT-10) emitted when the invoice has a reference
 
 ### recurring.test.js — recurring entries engine: schedules, depreciation, accruals
 
@@ -634,11 +636,12 @@
 
 ### review-round3.test.js — 
 
-3 passing · 0 failing
+4 passing · 0 failing
 
     - ✅ recurring pause --dry-run and resume --dry-run render a plan (no fmtTemplate crash)
     - ✅ audit --format json prints JSON even without the global --json flag
     - ✅ bank match post --dry-run rejects an already-matched transaction and a missing account
+    - ✅ vat book --dry-run rejects unbalanced postings (parity with entry add)
 
 ### smtp.test.js — zero-dependency SMTP client + invoice email: auth, STARTTLS, MIME/PDF attachment, dry-run, audit
 
