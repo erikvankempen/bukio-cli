@@ -65,7 +65,8 @@ function readLogo(file) {
   } else if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
     mime = 'image/jpeg';
   } else {
-    const head = bytes.subarray(0, 200).toString('utf8').replace(/^\uFEFF/, '').trimStart();
+    // scan a wide window: XML declarations and comment blocks push <svg deep
+    const head = bytes.subarray(0, 4096).toString('utf8').replace(/^\uFEFF/, '').trimStart();
     const svgish = head.startsWith('<svg') || (head.startsWith('<?xml') && head.includes('<svg'));
     if (svgish) mime = 'image/svg+xml';
   }

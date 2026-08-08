@@ -748,6 +748,13 @@ test('company logo: format, size and dimension guards', () => {
   const setSvg = runCli(['company', 'update', '--logo', svg], dbPath);
   assert.equal(setSvg.data.company.logo_mime, 'image/svg+xml');
 
+  // SVG with XML declaration + comment before <svg (real-world logo files)
+  const commented = path.join(dir, 'commented.svg');
+  writeFileSync(commented,
+    '<?xml version="1.0" encoding="UTF-8"?>\n<!-- a long comment block that pushes <svg far past the first 200 bytes of the file -->\n<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"></svg>');
+  const setC = runCli(['company', 'update', '--logo', commented], dbPath);
+  assert.equal(setC.data.company.logo_mime, 'image/svg+xml');
+
   const got = runCli(['company', 'logo', '--out', path.join(dir, 'x.png')], dbPath);
   assert.equal(got.data.mime, 'image/svg+xml');
 });
