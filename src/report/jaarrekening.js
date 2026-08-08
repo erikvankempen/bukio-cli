@@ -137,7 +137,21 @@ export function jaarrekening(db, { year, model = 'klein' }) {
   };
 
   if (model === 'klein') {
-    const p = pnl(db, { from: `${year}-01-01`, to: `${year}-12-31` });
+    // The P&L covers the FISCAL year, not the calendar year: a company with
+    // fiscal_year_end 03-31 must report 2025-04-01..2026-03-31 for year
+    // 2026 — the same period the balans peildatum closes. Calendar-year
+    // hardcoding showed 9 wrong months and missed 3 months of the FY.
+    const fy = company.fiscal_year_end || '12-31';
+    const [fyMonth, fyDay] = fy.split('-').map(Number);
+    let pnlFrom;
+    let pnlTo = asOf;
+    if (fyMonth === 12 && fyDay === 31) {
+      pnlFrom = `${year}-01-01`;
+    } else {
+      // start = day after the previous fiscal year end
+      pnlFrom = new Date(Date.UTC(Number(year) - 1, fyMonth - 1, fyDay + 1)).toISOString().slice(0, 10);
+    }
+    const p = pnl(db, { from: pnlFrom, to: pnlTo });
     const pnlLines = groupSections(p.sections, PNL_LINES);
     const omzet = pnlLines.find((l) => l.rgs_code === 'WOMZ.80')?.total_cents ?? 0;
     const overige = pnlLines.find((l) => l.rgs_code === 'WOVB.82')?.total_cents ?? 0;

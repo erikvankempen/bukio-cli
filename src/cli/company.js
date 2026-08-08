@@ -6,7 +6,7 @@
 
 // bukio company — show the company record, update company details.
 import { readFileSync, writeFileSync } from 'node:fs';
-import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, dbError } from './util.js';
 import { isValidIban } from '../core/iban.js';
 import { record } from '../audit/index.js';
 

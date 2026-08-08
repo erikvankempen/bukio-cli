@@ -135,7 +135,13 @@ export function make(program) {
           const rows = listMandates(db, { contactId: opts.contact ? Number(opts.contact) : null });
           output(ctx, { mandates: rows }, (d) => {
             if (!d.mandates.length) { console.log('no mandates'); return; }
-            table(d.mandates.map((m) => ({ id: m.id, contact: m.contact_name, ref: m.mandate_ref, scheme: m.scheme, signed: m.mandate_date })), ['id', 'contact', 'ref', 'scheme', 'signed']);
+            table(d.mandates.map((m) => ({ id: m.id, contact: m.contact_name, ref: m.mandate_ref, scheme: m.scheme, signed: m.mandate_date })), [
+              { key: 'id', label: 'id' },
+              { key: 'contact', label: 'contact' },
+              { key: 'ref', label: 'ref' },
+              { key: 'scheme', label: 'scheme' },
+              { key: 'signed', label: 'signed' },
+            ]);
           });
         } finally { db.close(); }
       } catch (err) { fail(ctx, err); }

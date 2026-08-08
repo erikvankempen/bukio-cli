@@ -404,15 +404,18 @@ test('UBL: formatted quantity, unit code, language, discounted tax bases', () =>
   assert.match(xml, /<cbc:LanguageID>en<\/cbc:LanguageID>/);
   // line allowance for the 10% line discount: 15.00
   assert.match(xml, /<cac:AllowanceCharge>[\s\S]*?<cbc:ChargeIndicator>false<\/cbc:ChargeIndicator>[\s\S]*?<cbc:Amount currencyID="EUR">15.00<\/cbc:Amount>/);
-  // AllowanceTotalAmount covers ALL allowances (EN 16931 BT-108): line 15.00 + total 13.50
-  assert.match(xml, /<cbc:AllowanceTotalAmount currencyID="EUR">28.50<\/cbc:AllowanceTotalAmount>/);
+  // EN 16931 BT-131: LineExtensionAmount is net of the line allowance (BR-26)
+  assert.match(xml, /<cbc:LineExtensionAmount currencyID="EUR">135.00<\/cbc:LineExtensionAmount>/);
+  // BT-107 covers ONLY the document-level allowance (13.50) — line discounts
+  // are folded into the line net amounts
+  assert.match(xml, /<cbc:AllowanceTotalAmount currencyID="EUR">13.50<\/cbc:AllowanceTotalAmount>/);
   // TaxExclusiveAmount = discounted net 121.50
   assert.match(xml, /<cbc:TaxExclusiveAmount currencyID="EUR">121.50<\/cbc:TaxExclusiveAmount>/);
   // taxable base in the TaxSubtotal is the discounted base
   assert.match(xml, /<cbc:TaxableAmount currencyID="EUR">121.50<\/cbc:TaxableAmount>/);
 });
 
-test('UBL: line-only discounts still emit AllowanceTotalAmount; @V maps to E, @0 to Z', () => {
+test('UBL: line-only discounts net LineExtensionAmount (BR-26); no doc allowance emitted; @V maps to E, @0 to Z', () => {
   const c = addContact();
   // line discount 10% (15.00) but NO total discount
   const inv = createInvoice(db, {
@@ -421,7 +424,10 @@ test('UBL: line-only discounts still emit AllowanceTotalAmount; @V maps to E, @0
   });
   finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
   const xml = invoiceToUbl(db, getInvoice(db, inv.id));
-  assert.match(xml, /<cbc:AllowanceTotalAmount currencyID="EUR">15.00<\/cbc:AllowanceTotalAmount>/);
+  // line discount folds into the line net amount: 150 − 15 = 135
+  assert.match(xml, /<cbc:LineExtensionAmount currencyID="EUR">135.00<\/cbc:LineExtensionAmount>/);
+  // no document-level allowance -> no AllowanceTotalAmount element
+  assert.doesNotMatch(xml, /<cbc:AllowanceTotalAmount/);
   assert.match(xml, /<cbc:TaxExclusiveAmount currencyID="EUR">135.00<\/cbc:TaxExclusiveAmount>/);
 
   // category mapping: @0 zero-rated -> Z, @V vrijgesteld -> E, @21 -> S
@@ -436,6 +442,24 @@ test('UBL: line-only discounts still emit AllowanceTotalAmount; @V maps to E, @0
   assert.match(xml2, /<cbc:ID>Z<\/cbc:ID>/);
   assert.match(xml2, /<cbc:ID>E<\/cbc:ID>/);
   assert.match(xml2, /<cbc:ID>S<\/cbc:ID>/);
+});
+
+test('UBL: zero-VAT categories (RE/V) still emit TaxSubtotal — EN 16931 1..n', () => {
+  const c = addContact();
+  const inv = createInvoice(db, {
+    contactId: c.id,
+    lines: ['1x Dienst @ 500.00 @RE', '1x Vrij @ 100.00 @V'],
+    date: '2026-08-10', actor: 'agent:test',
+  });
+  finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+  const xml = invoiceToUbl(db, getInvoice(db, inv.id));
+  // AE subtotal: verlegd base 500.00 with zero VAT
+  assert.match(xml, /<cac:TaxSubtotal>[\s\S]*?<cbc:TaxableAmount currencyID="EUR">500\.00<\/cbc:TaxableAmount>[\s\S]*?<cbc:TaxAmount currencyID="EUR">0\.00<\/cbc:TaxAmount>[\s\S]*?<cbc:ID>AE<\/cbc:ID>/);
+  // E subtotal: vrijgesteld base 100.00 with zero VAT
+  assert.match(xml, /<cac:TaxSubtotal>[\s\S]*?<cbc:TaxableAmount currencyID="EUR">100\.00<\/cbc:TaxableAmount>[\s\S]*?<cbc:TaxAmount currencyID="EUR">0\.00<\/cbc:TaxAmount>[\s\S]*?<cbc:ID>E<\/cbc:ID>/);
+  // totals unchanged and reconcile: 500 + 100, no VAT
+  assert.match(xml, /<cbc:TaxExclusiveAmount currencyID="EUR">600\.00<\/cbc:TaxExclusiveAmount>/);
+  assert.match(xml, /<cbc:TaxInclusiveAmount currencyID="EUR">600\.00<\/cbc:TaxInclusiveAmount>/);
 });
 
 test('UBL: hour unit maps to HUR', () => {

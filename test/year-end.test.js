@@ -165,6 +165,26 @@ test('jaarrekening: after closing, result sits in equity (no onverdeeld)', () =>
   assert.equal(r.pnl, undefined); // micro has no W&V
 });
 
+test('jaarrekening: klein P&L follows the FISCAL year, not the calendar year', () => {
+  // fiscal year ends 06-30 -> for year 2026 the P&L window is 2025-07-01
+  // .. 2026-06-30 (the same period the balans peildatum closes)
+  db.prepare("UPDATE company SET fiscal_year_end = '06-30'").run();
+  entry('2025-06-15', 'Omzet te vroeg', [{ code: '1100', amountCents: 1000 }, { code: '8000', amountCents: -1000 }]); // before window
+  entry('2025-09-01', 'Omzet 1', [{ code: '1100', amountCents: 2000 }, { code: '8000', amountCents: -2000 }]); // inside
+  entry('2026-06-30', 'Omzet 2', [{ code: '1100', amountCents: 3000 }, { code: '8000', amountCents: -3000 }]); // inside (boundary)
+  entry('2026-07-15', 'Omzet te laat', [{ code: '1100', amountCents: 4000 }, { code: '8000', amountCents: -4000 }]); // after window
+
+  const r = jaarrekening(db, { year: 2026, model: 'klein' });
+  assert.equal(r.as_of, '2026-06-30');
+  // balans peildatum closes 2026-06-30: the July entry is after as-of and
+  // off the balans; the cumulative result position still balances
+  assert.ok(r.balans.balanced);
+  // P&L includes ONLY the fiscal window: 2000 + 3000, NOT the 1000 before
+  // or the 4000 after
+  assert.equal(r.pnl.omzet_cents, 5000);
+  assert.equal(r.pnl.resultaat_cents, 5000);
+});
+
 test('jaarrekening: invalid model rejected', () => {
   assert.throws(() => jaarrekening(db, { year: 2026, model: 'groot' }), { code: 'INVALID_MODEL' });
 });

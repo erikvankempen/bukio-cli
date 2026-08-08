@@ -63,14 +63,15 @@ export async function emailInvoice(db, {
   let attachment = null;
   if (attachPdf) {
     const pdf = await invoiceToPdf(db, invoice);
-    attachment = { filename: `${invoice.invoice_number}.pdf`, mime: 'application/pdf', dataBase64: pdf.data };
+    attachment = { filename: `${invoice.invoice_number}.pdf`, mime: 'application/pdf', dataBase64: pdf.data, pdfBytes: pdf.bytes };
   }
 
   if (dryRun) {
     return {
       action: 'invoice.email', invoice_id: id, invoice_number: invoice.invoice_number,
       to: recipient, subject: finalSubject, body: finalBody,
-      attachment: attachPdf ? { filename: attachment.filename, mime: attachment.mime, bytes: attachment.dataBase64.length } : null,
+      // report the real PDF byte count, not the base64 string length
+      attachment: attachPdf ? { filename: attachment.filename, mime: attachment.mime, bytes: attachment.pdfBytes } : null,
       dryRun: true,
     };
   }

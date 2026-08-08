@@ -23,16 +23,19 @@ export function make(program) {
           output(ctx, { compliance: r }, (d) => {
             const c = d.compliance;
             console.log(`COMPLIANCE ${c.year} — ${c.company} (as of ${c.as_of})`);
-            table(c.obligations, [
+            // table() takes (rows, cols) — the annotation must be applied to
+            // the rows BEFORE rendering (a third callback argument was
+            // silently ignored and the note never showed)
+            const obligations = c.obligations.map((row) => {
+              const extra = row.books_closed === false && row.type === 'JAARREKENING' ? ' (books not closed)' : '';
+              return extra ? { ...row, status: `${row.status}${extra}` } : row;
+            });
+            table(obligations, [
               { key: 'type', label: 'type' },
               { key: 'period', label: 'periode' },
               { key: 'deadline', label: 'deadline' },
               { key: 'status', label: 'status' },
-            ], (row) => {
-              const extra = row.books_closed === false && row.type === 'JAARREKENING' ? ' (books not closed)' : '';
-              row.status = `${row.status}${extra}`;
-              return row;
-            });
+            ]);
             console.log(`summary: ${c.summary.filed} filed, ${c.summary.open} open, ${c.summary.overdue} overdue`);
             console.log(c.note);
           });

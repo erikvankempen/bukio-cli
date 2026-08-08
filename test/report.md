@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 16:10:12 UTC — **✅ 504 passing · 0 failing (504 tests)**
+**Latest run:** 2026-08-08 16:50:08 UTC — **✅ 508 passing · 0 failing (508 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -171,13 +171,14 @@
 
 ### company.test.js — company show/update
 
-5 passing · 0 failing
+6 passing · 0 failing
 
     - ✅ company update: sets address/iban/city and audits
     - ✅ company update: dry-run writes nothing
     - ✅ company update: no options -> NOTHING_TO_UPDATE
     - ✅ company update: invalid IBAN rejected
     - ✅ company show: returns the company record
+    - ✅ company show: NO_COMPANY on a database without a company row
 
 ### direct-debit.test.js — SEPA direct debit: mandate register, pain.008.001.02 export, FRST/RCUR, CORE/B2B split
 
@@ -360,11 +361,12 @@
 
 ### import-invoice.test.js — inbound UBL (EN 16931/Peppol) invoice import into payables: idempotent, VAT reported not booked
 
-9 passing · 0 failing
+10 passing · 0 failing
 
     - ✅ importUblInvoice: registers a payable, matches contact by vat-id, parses VAT
     - ✅ importUblInvoice: idempotent re-import → duplicate skipped
     - ✅ importUblInvoice: --create-missing creates the supplier contact with address + vat-id
+    - ✅ importUblInvoice: TaxScheme/cbc:ID is the literal scheme id, not the VAT number
     - ✅ importUblInvoice: explicit --contact wins; no match and no flag → CONTACT_NOT_FOUND
     - ✅ importUblInvoice: validation failures write nothing
     - ✅ importUblInvoice: due date defaults to issue + 30 days
@@ -416,7 +418,7 @@
 
 ### invoice-features.test.js — 
 
-35 passing · 0 failing
+36 passing · 0 failing
 
     - ✅ fractional quantities parse to milli-units
     - ✅ line discounts parse (pct and amount)
@@ -441,7 +443,8 @@
     - ✅ CLI: --discount-pct and --discount-amount together are rejected
     - ✅ credit note inherits language, total discount and line discounts
     - ✅ UBL: formatted quantity, unit code, language, discounted tax bases
-    - ✅ UBL: line-only discounts still emit AllowanceTotalAmount; @V maps to E, @0 to Z
+    - ✅ UBL: line-only discounts net LineExtensionAmount (BR-26); no doc allowance emitted; @V maps to E, @0 to Z
+    - ✅ UBL: zero-VAT categories (RE/V) still emit TaxSubtotal — EN 16931 1..n
     - ✅ UBL: hour unit maps to HUR
     - ✅ PDF: Dutch labels, unit column, VAT breakdown, discount row
     - ✅ PDF: English labels + reverse-charge wording
@@ -639,7 +642,7 @@
 
 ### year-end.test.js — annual close, jaarrekening micro/klein, ICP
 
-17 passing · 0 failing
+18 passing · 0 failing
 
     - ✅ year-end close: posts closing + appropriation, balanced, source closing
     - ✅ year-end close: guards — drafts block, empty year reports
@@ -648,6 +651,7 @@
     - ✅ jaarrekening: klein model — statutory balans + W&V, balanced
     - ✅ jaarrekening: klein model — resultaat counts inkoop ONCE and adds overige bedrijfsopbrengsten
     - ✅ jaarrekening: after closing, result sits in equity (no onverdeeld)
+    - ✅ jaarrekening: klein P&L follows the FISCAL year, not the calendar year
     - ✅ jaarrekening: invalid model rejected
     - ✅ jaarrekening: account-level amounts are numbers, never NaN
     - ✅ jaarrekening: PDF html renders account detail without NaN

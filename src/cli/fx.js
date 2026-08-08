@@ -28,9 +28,10 @@ export function make(program) {
             throw Object.assign(new Error(`no ECB reference rate for ${opts.currency} on/before ${date} (not in the ECB set, or before 1999)`), { code: 'ECB_RATE_NOT_AVAILABLE' });
           }
           if (ctx.dryRun) {
-            output(ctx, { rate: { currency: opts.currency, date: r.date, rate: (r.rateX10000 / 10000).toFixed(4), source: 'ECB' }, fetched_for: date, dryRun: true }, (d) =>
-              console.log(`plan: store 1 EUR = ${d.rate.rate} ${d.rate.currency} on ${d.rate.date} (ECB, fetched for ${d.fetched_for})`));
-            console.log('(dry run — nothing written)');
+            output(ctx, { rate: { currency: opts.currency, date: r.date, rate: (r.rateX10000 / 10000).toFixed(4), source: 'ECB' }, fetched_for: date, dryRun: true }, (d) => {
+              console.log(`plan: store 1 EUR = ${d.rate.rate} ${d.rate.currency} on ${d.rate.date} (ECB, fetched for ${d.fetched_for})`);
+              console.log('(dry run — nothing written)');
+            });
             return;
           }
           const stored = setFxRate(db, { currency: opts.currency, date: r.date, rate: r.rateX10000, source: 'ECB', actor: ctx.actor });

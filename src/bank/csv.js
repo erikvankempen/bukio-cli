@@ -74,7 +74,7 @@ export function parseBankAmount(value) {
   } else {
     cents = parseInt(s, 10) * 100;
   }
-  return negative ? -cents : cents;
+  return negative && cents !== 0 ? -cents : cents;
 }
 
 function findColumn(header, aliases) {

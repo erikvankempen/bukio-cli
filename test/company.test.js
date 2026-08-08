@@ -98,3 +98,15 @@ test('company show: returns the company record', () => {
   assert.equal(r.out.data.company.kvk, '12345678');
   assert.equal(r.out.data.company.city, 'Amsterdam');
 });
+
+test('company show: NO_COMPANY on a database without a company row', () => {
+  // schema present, company row absent (e.g. an init that was interrupted)
+  const db = openDb(t.file);
+  db.prepare('DELETE FROM company').run();
+  db.close();
+  const r = cli(t.file, ['company', 'show'], { expectFail: true });
+  assert.equal(r.code, 1);
+  assert.equal(r.out.ok, false);
+  assert.equal(r.out.error.code, 'NO_COMPANY');
+  assert.match(r.out.error.message, /run bukio init/);
+});

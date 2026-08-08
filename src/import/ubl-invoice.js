@@ -107,7 +107,22 @@ export function importUblInvoice(db, {
   // --- supplier -------------------------------------------------------------
   const sup = inv['cac:AccountingSupplierParty']?.['cac:Party'];
   const supName = pick(sup, ['cac:PartyName', 'cbc:Name'], ['cac:PartyLegalEntity', 'cbc:RegistrationName']);
-  const vatId = pick(sup, ['cac:PartyTaxScheme', 'cac:TaxScheme', 'cbc:ID']) || null;
+  // The supplier's VAT number lives in PartyTaxScheme/cbc:CompanyID (the
+  // outgoing UBL writes it there too). PartyTaxScheme/TaxScheme/cbc:ID is
+  // the tax SCHEME identifier — always the literal 'VAT' — and reading it
+  // here would store 'VAT' as every supplier's vat_id, collapsing the
+  // idempotency key (vat:<invoiceRef>) and the vat-id contact match
+  // across all vendors into one.
+  const vatId = (() => {
+    // pickPath stringifies — grab the PartyTaxScheme OBJECT directly
+    const scheme = sup?.['cac:PartyTaxScheme'];
+    if (!scheme || typeof scheme !== 'object') return null;
+    const id = pickPath(scheme, ['cbc:CompanyID']);
+    if (!id) return null;
+    const schemeId = pickPath(scheme, ['cac:TaxScheme', 'cbc:ID']);
+    if (schemeId && schemeId.toUpperCase() !== 'VAT') return null;
+    return id;
+  })();
   const email = pick(sup, ['cac:Contact', 'cbc:ElectronicMail']) || null;
   const street = pick(sup, ['cac:PostalAddress', 'cbc:StreetName']) || null;
   const city = pick(sup, ['cac:PostalAddress', 'cbc:CityName']) || null;

@@ -13,13 +13,24 @@ export function bankError(code, message) {
   return e;
 }
 
-/** Parse a decimal string to integer cents (CAMT uses '.' decimals). */
+/**
+ * Parse a decimal string to integer cents (CAMT uses '.' decimals).
+ * Integer-only (house rule: no float money math). ISO 20022 amounts allow
+ * up to 5 fraction digits; a third+ digit rounds half-up, exactly matching
+ * the old parseFloat(x)*100+Math.round semantics without the float path.
+ */
 function cents(value) {
   const s = String(value ?? '').trim();
   if (!s) return null;
-  const n = parseFloat(s);
-  if (!Number.isFinite(n)) return null;
-  return Math.round(n * 100);
+  const m = s.match(/^(-?)(\d+)(?:\.(\d+))?$/);
+  if (!m) return null; // not a plain decimal (rejects '1e5', '1.2.3', '€ 5')
+  const negative = m[1] === '-';
+  const whole = parseInt(m[2], 10);
+  const frac = (m[3] ?? '').padEnd(2, '0').slice(0, 2);
+  let c = whole * 100 + parseInt(frac || '0', 10);
+  const rest = (m[3] ?? '').slice(2);
+  if (rest && parseInt(rest[0], 10) >= 5) c += 1; // half-up on the 3rd decimal
+  return negative && c !== 0 ? -c : c;
 }
 
 function text(node) {

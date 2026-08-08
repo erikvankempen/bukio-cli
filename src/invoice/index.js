@@ -315,9 +315,16 @@ export function updateContact(db, {
     UPDATE contacts SET name = ?, address = ?, postal_code = ?, city = ?, country = ?, email = ?, vat_id = ?, kvk = ?, iban = ?
     WHERE id = ?
   `).run(changes.name, changes.address, changes.postalCode, changes.city, changes.country, changes.email, changes.vatId, changes.kvk, changes.iban ? String(changes.iban).replace(/\s+/g, '') : null, id);
-  const changed = Object.entries({ name: before.name, address: before.address, postal_code: before.postal_code, city: before.city, iban: before.iban })
-    .filter(([k]) => changes[k === 'postal_code' ? 'postalCode' : k] !== before[k])
-    .map(([k]) => k);
+  // audit which fields actually changed (all 9 — email/vat_id/kvk/country
+  // used to be silently absent from the audit trail)
+  const FIELD_MAP = [
+    ['name', 'name'], ['address', 'address'], ['postal_code', 'postalCode'],
+    ['city', 'city'], ['country', 'country'], ['email', 'email'],
+    ['vat_id', 'vatId'], ['kvk', 'kvk'], ['iban', 'iban'],
+  ];
+  const changed = FIELD_MAP
+    .filter(([dbKey, camelKey]) => changes[camelKey] !== before[dbKey])
+    .map(([dbKey]) => dbKey);
   record(db, {
     actor, action: 'contact.update', command: 'contact update',
     args: { contact_id: id, changed },

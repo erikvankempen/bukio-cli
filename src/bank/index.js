@@ -10,6 +10,7 @@ import { bankError } from './camt.js';
 import { getAccountByCode } from '../core/accounts.js';
 import { createEntry, getEntry, postEntry } from '../core/entries.js';
 import { paymentFromBank, getInvoice, FX_MATCH_TOLERANCE_BP, FX_MATCH_FLOOR_CENTS } from '../invoice/index.js';
+import { isValidIban as ibanMod97Valid } from '../core/iban.js';
 import { record } from '../audit/index.js';
 
 function txHash(iban, tx) {
@@ -25,7 +26,10 @@ export function normalizeIban(iban) {
 }
 
 export function validateIban(iban) {
-  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{10,30}$/.test(iban)) {
+  // full ISO 13616 validity (format + mod-97), same as every other module —
+  // a regex-only check accepted typo'd IBANs that could never match a real
+  // CAMT statement, silently creating a second bank account on re-import
+  if (!ibanMod97Valid(iban)) {
     throw bankError('INVALID_IBAN', `'${iban}' is not a valid IBAN`);
   }
 }
@@ -153,9 +157,14 @@ export function getTransaction(db, id) {
   `).get(id) ?? null;
 }
 
+const VALID_TX_STATES = new Set(['unmatched', 'matched', 'ignored']);
+
 export function setTransactionState(db, { id, state, actor = 'human', dryRun = false }) {
   const txRow = getTransaction(db, id);
   if (!txRow) throw bankError('NOT_FOUND', `bank transaction ${id} does not exist`);
+  if (!VALID_TX_STATES.has(state)) {
+    throw bankError('INVALID_STATE', `transaction state '${state}' must be one of ${[...VALID_TX_STATES].join(', ')}`);
+  }
   if (dryRun) {
     return { action: `bank.${state}`, id, from: txRow.state, to: state, dryRun: true };
   }

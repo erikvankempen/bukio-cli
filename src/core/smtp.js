@@ -106,9 +106,12 @@ export function buildMime({ from, to, subject, text, attachment = null }) {
   return lines.join('\r\n');
 }
 
-/** Line reader over a socket: complete \r\n lines, queueing early arrivals. */
+/** Line reader over a socket: complete \r\n lines, queueing early arrivals.
+ *  Fails fast when the server closes the connection — the timeout alone
+ *  would leave every pending read hanging for SMTP_TIMEOUT_MS. */
 function makeLineReader(socket) {
   let buf = '';
+  let closed = false;
   const waiters = [];
   const pending = [];
   socket.on('data', (chunk) => {
@@ -122,8 +125,14 @@ function makeLineReader(socket) {
       else pending.push(line);
     }
   });
+  const closedError = () => smtpError('SMTP_CONNECT_FAILED', 'SMTP connection closed unexpectedly');
+  socket.on('close', () => {
+    closed = true;
+    for (const done of waiters.splice(0)) done(closedError());
+  });
   return () => {
     if (pending.length) return Promise.resolve(pending.shift());
+    if (closed) return Promise.reject(closedError());
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         const i = waiters.indexOf(done);
@@ -132,7 +141,8 @@ function makeLineReader(socket) {
       }, SMTP_TIMEOUT_MS);
       function done(line) {
         clearTimeout(timer);
-        resolve(line);
+        if (line instanceof Error) reject(line);
+        else resolve(line);
       }
       waiters.push(done);
     });

@@ -91,7 +91,10 @@ function ublInvoice({
         <cbc:CityName>Rotterdam</cbc:CityName>
         <cbc:PostalZone>3000 AA</cbc:PostalZone>
       </cac:PostalAddress>
-      <cac:PartyTaxScheme><cac:TaxScheme><cbc:ID>${vatId}</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>
+      <cac:PartyTaxScheme>
+        <cbc:CompanyID schemeID="VAT">${vatId}</cbc:CompanyID>
+        <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
+      </cac:PartyTaxScheme>
       <cac:Contact><cbc:ElectronicMail>billing@acme.example</cbc:ElectronicMail></cac:Contact>
     </cac:Party>
   </cac:AccountingSupplierParty>
@@ -192,6 +195,25 @@ test('importUblInvoice: --create-missing creates the supplier contact with addre
   const r2 = importUblInvoice(db, { xmlText: ublInvoice(), createMissing: true, actor: 'agent:test' });
   assert.equal(r2.duplicates, 1);
   assert.equal(r2.contacts_created, 0);
+});
+
+test('importUblInvoice: TaxScheme/cbc:ID is the literal scheme id, not the VAT number', () => {
+  // Real-world UBL: the number lives in PartyTaxScheme/cbc:CompanyID;
+  // TaxScheme/cbc:ID is always the string 'VAT'. A supplier block with
+  // only the scheme id (no CompanyID) must NOT store 'VAT' as vat_id —
+  // that would collapse the idempotency key and vat-id contact matching
+  // across every vendor that carries a PartyTaxScheme.
+  const noNumber = ublInvoice().replace(
+    /<cac:PartyTaxScheme>[\s\S]*?<\/cac:PartyTaxScheme>/,
+    '<cac:PartyTaxScheme><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>',
+  );
+  const r = importUblInvoice(db, { xmlText: noNumber, createMissing: true, actor: 'agent:test' });
+  assert.equal(r.imported, 1);
+  const contact = db.prepare('SELECT * FROM contacts WHERE id = ?').get(r.contact.id);
+  assert.equal(contact.name, 'Acme BV');
+  assert.equal(contact.vat_id, null);
+  // idempotency key falls back to the normalized name — not 'vat:...'
+  assert.equal(payables()[0].source_ref, 'acmebv:F2026-123');
 });
 
 test('importUblInvoice: explicit --contact wins; no match and no flag → CONTACT_NOT_FOUND', () => {

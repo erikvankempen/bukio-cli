@@ -19,7 +19,8 @@ export function pdfError(code, message) {
 }
 
 function esc(s) {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // quotes too: the logo MIME type is interpolated into a src="..." attribute
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 /** Base64 data-URI of the stored company logo, or null. */

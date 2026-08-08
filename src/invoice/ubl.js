@@ -66,24 +66,51 @@ export function invoiceToUbl(db, invoice) {
   const currency = invoice.currency ?? 'EUR';
   const language = invoice.language ?? 'nl';
 
-  // VAT breakdown per rate, on the DISCOUNTED bases (one source of truth)
-  const { breakdown, net_cents, vat_cents, gross_cents, discount_cents } =
+  // VAT breakdown per rate, on the DISCOUNTED bases (one source of truth).
+  // EN 16931 (Peppol BIS 3.0): TaxSubtotal is 1..n MANDATORY and must cover
+  // EVERY VAT category used — including zero-VAT categories (AE reverse
+  // charge, Z 0%, E exempt) whose TaxAmount is 0.00. Using only the
+  // vat>0 `breakdown` produced an empty breakdown (schema violation) for
+  // verlegd-only, 0%-only and VAT-less invoices.
+  const { groups, net_cents, vat_cents, gross_cents, discount_cents } =
     computeInvoiceTotals(invoice.lines, invoice.discount_type, invoice.discount_value);
 
-  const taxSubtotals = breakdown.map((g) => {
-    const code = 'S'; // standard rate category; R/RE never carry VAT
+  const categoryOf = (code) => (code === 'R' || code === 'RE') ? 'AE'
+    : code === '0' ? 'Z'
+      : (code === 'V' || code === 'M') ? 'E'
+        : (code ? 'S' : 'E');
+
+  // one TaxSubtotal per (category, rate) — merge groups that share both
+  const subtotalMap = new Map();
+  for (const g of groups) {
+    if (g.discountedNet === 0) continue;
+    const cat = categoryOf(g.code);
+    const key = `${cat}|${g.rateBp}`;
+    if (!subtotalMap.has(key)) subtotalMap.set(key, { cat, rateBp: g.rateBp, baseCents: 0, vatCents: 0 });
+    const s = subtotalMap.get(key);
+    s.baseCents += g.discountedNet;
+    s.vatCents += g.vat;
+  }
+  const taxSubtotals = [...subtotalMap.values()].map((s) => {
+    const percent = s.cat === 'AE' ? '21.00' : (s.rateBp / 100).toFixed(2);
     return `
       <cac:TaxSubtotal>
-        <cbc:TaxableAmount currencyID="${currency}">${moneyAmount(g.base_cents)}</cbc:TaxableAmount>
-        <cbc:TaxAmount currencyID="${currency}">${moneyAmount(g.vat_cents)}</cbc:TaxAmount>
+        <cbc:TaxableAmount currencyID="${currency}">${moneyAmount(s.baseCents)}</cbc:TaxableAmount>
+        <cbc:TaxAmount currencyID="${currency}">${moneyAmount(s.vatCents)}</cbc:TaxAmount>
         <cac:TaxCategory>
-          <cbc:ID>${code}</cbc:ID>
-          <cbc:Percent>${(g.rate_bp / 100).toFixed(2)}</cbc:Percent>
+          <cbc:ID>${s.cat}</cbc:ID>
+          <cbc:Percent>${percent}</cbc:Percent>
           <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
         </cac:TaxCategory>
       </cac:TaxSubtotal>`;
   }).join('');
 
+  // EN 16931 BT-131: the line net amount is AFTER per-line allowances, and
+  // BR-26 checks LineExtensionAmount == qty × PriceAmount − allowance. The
+  // gross line amount minus the line discount satisfies it; the document
+  // allowance total (BT-107) covers ONLY document-level discounts — line
+  // discounts are already folded into BT-106 (sum of line net amounts), so
+  // BT-106 − BT-107 == TaxExclusiveAmount still reconciles exactly.
   const lineAllowance = (l) => {
     const disc = l.discount_type === 'pct'
       ? Math.round(l.amount_cents * l.discount_value / 10000)
@@ -97,15 +124,13 @@ export function invoiceToUbl(db, invoice) {
       </cac:AllowanceCharge>` : '';
   };
 
-  // EN 16931 BT-108: AllowanceTotalAmount must cover ALL allowances (line +
-  // document level) whenever any exist
-  const lineAllowanceTotal = invoice.lines.reduce((s, l) => {
-    const disc = l.discount_type === 'pct'
-      ? Math.round(l.amount_cents * l.discount_value / 10000)
-      : l.discount_type === 'amount' ? Math.min(l.discount_value, l.amount_cents) : 0;
-    return s + disc;
-  }, 0);
-  const allowanceTotal = lineAllowanceTotal + discount_cents;
+  // line net amount = gross − line discount (BT-131)
+  const lineNet = (l) => l.amount_cents - (l.discount_type === 'pct'
+    ? Math.round(l.amount_cents * l.discount_value / 10000)
+    : l.discount_type === 'amount' ? Math.min(l.discount_value, l.amount_cents) : 0);
+
+  // document-level allowance total (BT-107): doc discount ONLY
+  const allowanceTotal = discount_cents;
 
   const linesXml = invoice.lines.map((l, i) => {
     // EN 16931 category: AE reverse charge, S standard, Z zero-rated (@0),
@@ -125,7 +150,7 @@ export function invoiceToUbl(db, invoice) {
     <cac:${lineTag}>
       <cbc:ID>${i + 1}</cbc:ID>
       <cbc:${qtyTag} unitCode="${unitCode}">${formatQty(l.quantity)}</cbc:${qtyTag}>
-      <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(l.amount_cents)}</cbc:LineExtensionAmount>${lineAllowance(l)}
+      <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(lineNet(l))}</cbc:LineExtensionAmount>${lineAllowance(l)}
       <cac:Item>
         <cbc:Name>${esc(l.description)}</cbc:Name>
         <cac:ClassifiedTaxCategory>
@@ -145,7 +170,7 @@ export function invoiceToUbl(db, invoice) {
         <cac:PartyTaxScheme><cbc:CompanyID schemeID="VAT">${esc(contact.vat_id)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>`
     : '';
 
-  const lineExtensionTotal = invoice.lines.reduce((s, l) => s + l.amount_cents, 0);
+  const lineExtensionTotal = invoice.lines.reduce((s, l) => s + lineNet(l), 0);
   const allowanceTotalXml = allowanceTotal > 0
     ? `
     <cbc:AllowanceTotalAmount currencyID="${currency}">${moneyAmount(allowanceTotal)}</cbc:AllowanceTotalAmount>`

@@ -40,14 +40,17 @@ function fmtAssetRow(r) {
 }
 
 function sheets(data) {
-  const header = ASSET_COLUMNS.map((c) => c.label);
-  const rows = data.assets.map((r) => {
-    const f = fmtAssetRow(r);
-    return ASSET_COLUMNS.map((c) => f[c.key]);
+  // writeXlsx expects [{ name, columns: [{header,key}], rows: [{key: value}] }]
+  // — a {header} flat-array shape crashed every `assets register --format xlsx`
+  const columns = ASSET_COLUMNS.map((c) => ({ header: c.label, key: c.key }));
+  const rows = data.assets.map(fmtAssetRow);
+  rows.push({
+    id: 'TOTAAL', name: '', category: '', status: '', purchase_date: '',
+    purchase_price: formatAmount(data.totals.purchase_price_cents),
+    total_cum_dep: formatAmount(data.totals.total_cum_dep_cents),
+    book_value: formatAmount(data.totals.book_value_cents),
   });
-  rows.push([]);
-  rows.push(['TOTAAL', '', '', '', '', formatAmount(data.totals.purchase_price_cents), formatAmount(data.totals.total_cum_dep_cents), formatAmount(data.totals.book_value_cents)]);
-  return [{ name: 'Activastaat', header, rows }];
+  return [{ name: 'Activastaat', columns, rows }];
 }
 
 export function make(program) {
