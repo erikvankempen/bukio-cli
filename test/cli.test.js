@@ -145,6 +145,27 @@ test('entry reverse: contra-entry keeps the trial balance balanced', () => {
   assert.equal(tb.accounts.find((a) => a.code === '8000').net, '0.00');
 });
 
+test('report trial-balance csv: TOTAAL row net is 0.00 for a balanced ledger (regression)', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'A', '--json']);
+  run(dbPath, [
+    'entry', 'add', '--desc', 'Startkapitaal', '--postings', '1100:10000.00,3000:-10000.00', '--post', '--json',
+  ]);
+  const csvPath = path.join(path.dirname(dbPath), 'tb.csv');
+  execFileSync(process.execPath, [BIN, '--json', 'report', 'trial-balance', '--format', 'csv', '--out', csvPath], {
+    env: { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' },
+    encoding: 'utf8',
+  });
+  const csv = readFileSync(csvPath, 'utf8');
+  const totalRow = csv.split('\n').find((l) => l.includes('TOTAAL'));
+  assert.ok(totalRow, 'TOTAAL row must be present');
+  // columns: code,account,type,debit,credit,net — net must be the difference, not the debit
+  const cols = totalRow.split(',');
+  assert.equal(cols[3], '10000.00'); // debit
+  assert.equal(cols[4], '10000.00'); // credit
+  assert.equal(cols[5], '0.00');     // net — used to wrongly show 10000.00
+});
+
 test('commands fail cleanly when no database exists', () => {
   const dbPath = tmpDb();
   const { code, out } = run(dbPath, ['report', 'trial-balance', '--json'], { expectFail: true });

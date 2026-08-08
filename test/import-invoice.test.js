@@ -71,7 +71,7 @@ function mcpSession(dbPath) {
 function ublInvoice({
   id = 'F2026-123', typeCode = '380', issueDate = '2026-08-01', dueDate = '2026-08-31',
   supplierName = 'Acme BV', vatId = 'NL123456789B01', payable = '121.00',
-  taxExclusive = '100.00', taxAmount = '21.00', percent = '21',
+  taxExclusive = '100.00', taxAmount = '21.00', percent = '21', currency = 'EUR',
 } = {}) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
@@ -82,6 +82,7 @@ function ublInvoice({
   <cbc:IssueDate>${issueDate}</cbc:IssueDate>
   ${dueDate ? `<cbc:DueDate>${dueDate}</cbc:DueDate>` : ''}
   <cbc:InvoiceTypeCode>${typeCode}</cbc:InvoiceTypeCode>
+  <cbc:DocumentCurrencyCode>${currency}</cbc:DocumentCurrencyCode>
   <cac:AccountingSupplierParty>
     <cac:Party>
       <cac:PartyName><cbc:Name>${supplierName}</cbc:Name></cac:PartyName>
@@ -217,6 +218,7 @@ test('importUblInvoice: validation failures write nothing', () => {
     ['bad date', ublInvoice({ issueDate: '2026-02-30' }), 'IMPORT_VALIDATION_FAILED'],
     ['negative amount', ublInvoice({ payable: '-5.00' }), 'IMPORT_VALIDATION_FAILED'],
     ['credit note', ublInvoice({ typeCode: '381' }), 'UNSUPPORTED_UBL_DOCUMENT'],
+    ['non-EUR currency', ublInvoice({ currency: 'USD' }), 'IMPORT_VALIDATION_FAILED'],
   ];
   for (const [label, xml, code] of cases) {
     assert.throws(() => importUblInvoice(db, { xmlText: xml, createMissing: true, actor: 'agent:test' }), (e) => {

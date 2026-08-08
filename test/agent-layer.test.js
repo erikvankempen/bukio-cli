@@ -442,6 +442,48 @@ test('MCP: mutations are plan-only by default; execute books with the actor', as
   }
 });
 
+test('MCP: contact_add preserves postal_code and vat_id (regression)', async () => {
+  const tmp = await import('node:fs/promises');
+  const dir = await tmp.mkdtemp('/tmp/mcp-test-');
+  const dbPath = `${dir}/x.db`;
+  const fileDb = openDb(dbPath);
+  seedDefaultChart(fileDb);
+  fileDb.prepare(`
+    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
+            'Industrieweg 12', '2712 CD', 'Zoetermeer', 0)
+  `).run();
+  fileDb.close();
+
+  const mcp = mcpSession(dbPath);
+  try {
+    await mcp.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const r = await mcp.call('tools/call', {
+      name: 'contact_add',
+      arguments: {
+        name: 'Acme GmbH', address: 'Leverstrasse 1', postal_code: '80331',
+        city: 'München', country: 'DE', vat_id: 'DE123456789', mode: 'execute', actor: 'agent:mcp-test',
+      },
+    });
+    assert.equal(r.result.isError, false);
+  } finally {
+    await mcp.close();
+  }
+
+  const check = openDb(dbPath);
+  try {
+    const row = check.prepare('SELECT name, address, postal_code, city, country, vat_id FROM contacts WHERE name = ?').get('Acme GmbH');
+    assert.ok(row, 'contact must exist');
+    assert.equal(row.address, 'Leverstrasse 1');
+    assert.equal(row.postal_code, '80331');
+    assert.equal(row.city, 'München');
+    assert.equal(row.country, 'DE');
+    assert.equal(row.vat_id, 'DE123456789');
+  } finally {
+    check.close();
+  }
+});
+
 test('MCP: BUKIO_MCP_READONLY blocks execution', async () => {
   const tmp = await import('node:fs/promises');
   const dir = await tmp.mkdtemp('/tmp/mcp-test-');

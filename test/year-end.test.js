@@ -136,6 +136,25 @@ test('jaarrekening: klein model — statutory balans + W&V, balanced', () => {
   assert.equal(r.pnl.resultaat_cents, 7000);
 });
 
+test('jaarrekening: klein model — resultaat counts inkoop ONCE and adds overige bedrijfsopbrengsten', () => {
+  // omzet (8000/WOMZ.80), inkoopwaarde (4000/WKPR.70), overige opbrengsten
+  // (8100/WOVB.82) and bedrijfskosten (4300) — regression: WKPR.70 used to be
+  // counted twice (once as inkoop, once inside kosten) and WOVB.82 was dropped
+  entry('2026-03-01', 'Omzet', [{ code: '1100', amountCents: 12100 }, { code: '8000', amountCents: -10000 }, { code: '2500', amountCents: -2100 }]);
+  entry('2026-04-01', 'Inkoop', [{ code: '4000', amountCents: 4000 }, { code: '1100', amountCents: -4000 }]);
+  entry('2026-05-01', 'Overige opbrengst', [{ code: '8100', amountCents: -500 }, { code: '1100', amountCents: 500 }]);
+  entry('2026-06-01', 'Kosten', [{ code: '4300', amountCents: 2000 }, { code: '1100', amountCents: -2000 }]);
+
+  const r = jaarrekening(db, { year: 2026, model: 'klein' });
+  assert.equal(r.pnl.omzet_cents, 10000);
+  assert.equal(r.pnl.overige_opbrengsten_cents, 500);
+  assert.equal(r.pnl.inkoop_cents, 4000);
+  assert.equal(r.pnl.bruto_marge_cents, 6000);
+  assert.equal(r.pnl.kosten_cents, 2000); // pure operating costs — NOT incl. inkoop
+  assert.equal(r.pnl.resultaat_cents, 4500); // 10000 + 500 - 4000 - 2000
+  assert.equal(r.pnl.resultaat, '45.00');
+});
+
 test('jaarrekening: after closing, result sits in equity (no onverdeeld)', () => {
   entry('2026-03-01', 'Omzet', [{ code: '1100', amountCents: 12100 }, { code: '8000', amountCents: -10000 }, { code: '2500', amountCents: -2100 }]);
   yearEndClose(db, { year: 2026 });

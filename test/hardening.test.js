@@ -715,7 +715,7 @@ test('MCP: vat_book execute leaves a draft unless post=true; invoice_pay default
         depreciation_start: '2026-01-01', recognition_date: '2026-01-01', mode: 'execute', actor: 'agent:mcp-test',
       },
     });
-    assert.ok(dutch.result.content[0].text.includes('"action": "asset.add"'), 'Dutch comma amount must book');
+    assert.ok(dutch.result.content[0].text.includes('"action": "assets.add"'), 'Dutch comma amount must book');
     const bad = await mcp.call('tools/call', {
       name: 'asset_add', arguments: {
         name: 'Laptop2', purchase_date: '2026-01-01', purchase_price: 'abc',

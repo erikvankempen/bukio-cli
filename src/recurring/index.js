@@ -179,7 +179,7 @@ export function createTemplate(db, {
     // validate-everything-first, write nothing: same checks as the real path
     // (all thrown above), returns the plan for the CLI to render.
     return {
-      action: 'recurring.create', kind, name, description, frequency,
+      action: 'recurring.template_add', kind, name, description, frequency,
       day_of_period: dayOfPeriod, start_date: startDate, end_date: endDate, runs,
       due_days: dueDays, reverse_previous: reversePrevious, contact_id: contactId,
       vat_aware: vatAware,

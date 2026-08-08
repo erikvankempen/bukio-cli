@@ -114,6 +114,17 @@ test('invoice: line parser — Dutch comma price, @ inside description', () => {
   assert.deepEqual(parseLineSpec('1000x Zeer lange omschrijving met @ tekens erin @ 0.99 @9'), { qtyMilli: 1000000, qty: 1000, description: 'Zeer lange omschrijving met@tekens erin', priceCents: 99, vatCode: '9', discountType: null, discountValue: null });
 });
 
+test('invoice: line parser — price-only integer price, lowercase vat codes, negative qty (regression)', () => {
+  // "DESC @ 100" used to fail: "100" was misread as a VAT code
+  assert.deepEqual(parseLineSpec('Consultancy @ 100'), { qtyMilli: 1000, qty: 1, description: 'Consultancy', priceCents: 10000, vatCode: null, discountType: null, discountValue: null });
+  // lowercase vat codes are normalised (and recognised as codes, not prices)
+  assert.deepEqual(parseLineSpec('Uren @ 75.00 @re'), { qtyMilli: 1000, qty: 1, description: 'Uren', priceCents: 7500, vatCode: 'RE', discountType: null, discountValue: null });
+  // a non-vat-code word stays a price (fails cleanly, not silently as a code)
+  assert.throws(() => parseLineSpec('Uren @ 75.00 @nope'), { code: 'INVALID_LINE' });
+  // negative quantity is rejected, not silently booked as qty 1
+  assert.throws(() => parseLineSpec('-2x Uren @ 75.00'), { code: 'INVALID_LINE' });
+});
+
 test('invoice: per-line rounding edge — 3x 0.01 @21 has 1 cent VAT (line-total rounding)', () => {
   addContact();
   const inv = createInvoice(db, { contactId: 1, date: '2026-07-10', lines: ['3x Pennen @ 0.01 @21'] });

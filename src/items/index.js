@@ -68,7 +68,7 @@ export function createItem(db, {
   assertAccount(db, glAccount);
   if (dryRun) {
     return {
-      action: 'item.add', name, description, unit, unit_price_cents: unitPriceCents,
+      action: 'item.create', name, description, unit, unit_price_cents: unitPriceCents,
       vat_code: vatCode, gl_account: glAccount, dryRun: true,
     };
   }

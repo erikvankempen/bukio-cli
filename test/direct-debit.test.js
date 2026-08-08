@@ -149,6 +149,13 @@ test('direct-debit batch: FRST then RCUR, mandate snapshot on the line', () => {
   const p2 = seedPayable(c.id, { ref: 'INV-2' });
   const batch2 = createPaymentBatch(db, { date: '2026-09-10', payableIds: [p2.id], kind: 'direct_debit', actor: 'agent:test' });
   assert.equal(batch2.lines[0].mandate_seq, 'RCUR');
+
+  // NEW mandate (after revocation) starts at FRST again — SEPA per-mandate rule
+  addMandate(db, { contactId: c.id, mandateRef: 'NL01ZZZ888', mandateDate: '2026-10-01', actor: 'agent:test' });
+  const p3 = seedPayable(c.id, { ref: 'INV-3' });
+  const batch3 = createPaymentBatch(db, { date: '2026-11-10', payableIds: [p3.id], kind: 'direct_debit', actor: 'agent:test' });
+  assert.equal(batch3.lines[0].mandate_ref, 'NL01ZZZ888');
+  assert.equal(batch3.lines[0].mandate_seq, 'FRST', 'a brand-new mandate must start at FRST, not RCUR');
 });
 
 test('direct-debit batch without a mandate → MANDATE_REQUIRED', () => {

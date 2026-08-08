@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 14:39:13 UTC — **✅ 495 passing · 0 failing (495 tests)**
+**Latest run:** 2026-08-08 15:14:53 UTC — **✅ 500 passing · 0 failing (500 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -31,7 +31,7 @@
 
 ### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar
 
-18 passing · 0 failing
+19 passing · 0 failing
 
     - ✅ fx: parseRate and convertFx — integer math, round-half-up
     - ✅ fx: setFxRate upsert + audit; getFxRate exact then latest-on/before
@@ -50,6 +50,7 @@
     - ✅ compliance: closed books show on the jaarrekening obligation
     - ✅ MCP: initialize + tools/list + read-only calls work end-to-end
     - ✅ MCP: mutations are plan-only by default; execute books with the actor
+    - ✅ MCP: contact_add preserves postal_code and vat_id (regression)
     - ✅ MCP: BUKIO_MCP_READONLY blocks execution
 
 ### assets.test.js — fixed assets: schemes, mid-life adoption, runs, disposal, activastaat
@@ -81,7 +82,7 @@
     - ✅ register: disposal dates and proceeds surface in the register
     - ✅ trial balance stays balanced through the whole lifecycle
 
-### attachments.test.js — 
+### attachments.test.js — in-DB/file document attachments: add/list/show/remove, 25 MB cap, dedupe, metadata-only lists, audit
 
 15 passing · 0 failing
 
@@ -109,7 +110,7 @@
     - ✅ audit log is append-only: UPDATE and DELETE are blocked
     - ✅ args null is stored and read back as null
 
-### backup.test.js — 
+### backup.test.js — encrypted backups (AES-256-GCM), keep-N rotation, tamper detection, audited restore
 
 9 passing · 0 failing
 
@@ -146,7 +147,7 @@
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
-18 passing · 0 failing
+19 passing · 0 failing
 
     - ✅ init --dry-run: shows plan, creates nothing
     - ✅ init: creates company + 30-account chart with VAT on
@@ -155,6 +156,7 @@
     - ✅ entry add: rejects malformed posting spec and unknown account
     - ✅ entry add --post + trial balance + audit end-to-end
     - ✅ entry reverse: contra-entry keeps the trial balance balanced
+    - ✅ report trial-balance csv: TOTAAL row net is 0.00 for a balanced ledger (regression)
     - ✅ commands fail cleanly when no database exists
     - ✅ --actor is recorded on entries and audit
     - ✅ account add/list/show/deactivate flow
@@ -177,7 +179,7 @@
     - ✅ company update: invalid IBAN rejected
     - ✅ company show: returns the company record
 
-### direct-debit.test.js — 
+### direct-debit.test.js — SEPA direct debit: mandate register, pain.008.001.02 export, FRST/RCUR, CORE/B2B split
 
 8 passing · 0 failing
 
@@ -192,7 +194,7 @@
 
 ### edge-cases.test.js — rounding, boundaries, idempotency, lifecycle violations, dry-run hygiene
 
-34 passing · 0 failing
+35 passing · 0 failing
 
     - ✅ ledger: unbalanced, zero-amount, too-few postings rejected
     - ✅ ledger: same account on both sides is legal
@@ -201,6 +203,7 @@
     - ✅ ledger: drafts excluded from balans and P&L
     - ✅ invoice: quantity and price guards
     - ✅ invoice: line parser — Dutch comma price, @ inside description
+    - ✅ invoice: line parser — price-only integer price, lowercase vat codes, negative qty (regression)
     - ✅ invoice: per-line rounding edge — 3x 0.01 @21 has 1 cent VAT (line-total rounding)
     - ✅ invoice: 0% and exempt (V) lines book without VAT
     - ✅ invoice: credit note of a paid invoice; credit of a credit rejected
@@ -355,7 +358,7 @@
     - ✅ every emitted error code in src/ is documented in AGENTS.md §7
     - ✅ MCP on a missing database errors NO_DATABASE instead of silently creating an empty company
 
-### import-invoice.test.js — 
+### import-invoice.test.js — inbound UBL (EN 16931/Peppol) invoice import into payables: idempotent, VAT reported not booked
 
 9 passing · 0 failing
 
@@ -558,14 +561,15 @@
     - ✅ listTemplates: status filter
     - ✅ generated entries are immutable + trial balance stays balanced
 
-### reports-v014.test.js — 
+### reports-v014.test.js — aging buckets, contact statements, sales analytics (by contact/item)
 
-8 passing · 0 failing
+9 passing · 0 failing
 
     - ✅ aging debtors: buckets, totals, paid excluded, contacts sorted by total
     - ✅ aging creditors: buckets + in_batch shown separately
     - ✅ aging validation: bad as-of and kind rejected
     - ✅ contact statement: running balance ends at outstanding; supplier side negative
+    - ✅ contact statement: credit notes reduce the balance (regression)
     - ✅ sales by contact: net/vat/gross from the totals engine; credit notes excluded
     - ✅ sales by item: catalog items group by item_id, ad-hoc lines by description
     - ✅ cli: report aging + sales + contact statement e2e with csv export
@@ -585,7 +589,7 @@
     - ✅ pnl: catch-all section for accounts with unknown rgs_code
     - ✅ journal: one row per posting, ordered by date
 
-### smtp.test.js — 
+### smtp.test.js — zero-dependency SMTP client + invoice email: auth, STARTTLS, MIME/PDF attachment, dry-run, audit
 
 13 passing · 0 failing
 
@@ -631,13 +635,14 @@
 
 ### year-end.test.js — annual close, jaarrekening micro/klein, ICP
 
-16 passing · 0 failing
+17 passing · 0 failing
 
     - ✅ year-end close: posts closing + appropriation, balanced, source closing
     - ✅ year-end close: guards — drafts block, empty year reports
     - ✅ year-end close: dry-run writes nothing
     - ✅ P&L still shows the year result after closing
     - ✅ jaarrekening: klein model — statutory balans + W&V, balanced
+    - ✅ jaarrekening: klein model — resultaat counts inkoop ONCE and adds overige bedrijfsopbrengsten
     - ✅ jaarrekening: after closing, result sits in equity (no onverdeeld)
     - ✅ jaarrekening: invalid model rejected
     - ✅ jaarrekening: account-level amounts are numbers, never NaN

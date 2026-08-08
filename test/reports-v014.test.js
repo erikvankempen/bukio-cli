@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/core/db.js';
 import {
-  createContact, createInvoice, finalizeInvoice, markPaid, contactStatement,
+  createContact, createInvoice, finalizeInvoice, markPaid, contactStatement, creditInvoice,
 } from '../src/invoice/index.js';
 import { addPayable } from '../src/payments/index.js';
 import { createItem } from '../src/items/index.js';
@@ -183,6 +183,21 @@ test('contact statement: running balance ends at outstanding; supplier side nega
   const s = contactStatement(db, { contactId: t.contacts.supplier.id, asOf: '2026-08-08' });
   assert.equal(s.rows[0].kind, 'payable');
   assert.equal(s.balance_cents, -12345);
+});
+
+test('contact statement: credit notes reduce the balance (regression)', () => {
+  const inv = makeFinalized(t.contacts.acme.id, { date: '2026-07-01', lines: ['Ding @ 100.00'] });
+  let st = contactStatement(db, { contactId: t.contacts.acme.id, asOf: '2026-08-08' });
+  assert.equal(st.balance_cents, 10000); // they owe us 100.00
+
+  const credit = creditInvoice(db, { id: inv.invoice.id, date: '2026-07-15', actor: 'agent:test' });
+  finalizeInvoice(db, { id: credit.id, actor: 'agent:test' });
+
+  st = contactStatement(db, { contactId: t.contacts.acme.id, asOf: '2026-08-08' });
+  const creditRow = st.rows.find((r) => r.kind === 'credit');
+  assert.ok(creditRow, 'credit note must appear on the opgave');
+  assert.equal(creditRow.credit_cents, 10000);
+  assert.equal(st.balance_cents, 0); // 100.00 invoice − 100.00 creditnote
 });
 
 test('sales by contact: net/vat/gross from the totals engine; credit notes excluded', () => {

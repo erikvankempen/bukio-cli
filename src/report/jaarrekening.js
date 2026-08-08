@@ -140,17 +140,22 @@ export function jaarrekening(db, { year, model = 'klein' }) {
     const p = pnl(db, { from: `${year}-01-01`, to: `${year}-12-31` });
     const pnlLines = groupSections(p.sections, PNL_LINES);
     const omzet = pnlLines.find((l) => l.rgs_code === 'WOMZ.80')?.total_cents ?? 0;
+    const overige = pnlLines.find((l) => l.rgs_code === 'WOVB.82')?.total_cents ?? 0;
     const inkoop = pnlLines.find((l) => l.rgs_code === 'WKPR.70')?.total_cents ?? 0;
-    const kosten = pnlLines.filter((l) => !['WOMZ.80', 'WOVB.82'].includes(l.rgs_code))
+    // pure operating costs: everything except omzet (80), inkoopwaarde (70)
+    // and overige bedrijfsopbrengsten (82) — WKPR.70 must NOT be inside
+    // kosten or resultaat would subtract it twice
+    const kosten = pnlLines.filter((l) => !['WOMZ.80', 'WKPR.70', 'WOVB.82'].includes(l.rgs_code))
       .reduce((s, l) => s + l.total_cents, 0);
     report.pnl = {
       lines: pnlLines,
       omzet_cents: omzet,
+      overige_opbrengsten_cents: overige,
       inkoop_cents: inkoop,
       bruto_marge_cents: omzet - inkoop,
       kosten_cents: kosten,
-      resultaat_cents: omzet - inkoop - kosten,
-      resultaat: formatAmount(omzet - inkoop - kosten),
+      resultaat_cents: omzet + overige - inkoop - kosten,
+      resultaat: formatAmount(omzet + overige - inkoop - kosten),
     };
   }
   return report;

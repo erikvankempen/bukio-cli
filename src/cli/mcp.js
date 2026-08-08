@@ -207,7 +207,7 @@ tool({
       throw new McpError('UNBALANCED', `postings do not sum to zero (sum = ${sum} cents)`);
     }
     const plan = {
-      action: 'entry.add', date: args.date, description: args.description,
+      action: 'entry.create', date: args.date, description: args.description,
       currency: args.currency ?? null,
       postings: resolved.map((p) => ({
         code: p.code, amount_cents: p.amountCents, amount: fmtMoney(p.amountCents),
@@ -269,6 +269,7 @@ tool({
       date: { type: 'string' }, description: { type: 'string' },
       postings: { type: 'array', items: { type: 'string' }, description: 'CODE:AMOUNT[@VATCODE]' },
       currency: { type: 'string' }, rate: { type: 'string' },
+      source_ref: { type: 'string', description: 'boekstuk reference (source_ref on the entry)' },
       post: { type: 'boolean' }, actor: { type: 'string' }, mode: { type: 'string' },
     }, required: ['date', 'description', 'postings'],
   },
@@ -450,7 +451,7 @@ tool({
       return { ...addAttachment(db, { ...base, dryRun: true }), mode: 'dry-run', note: 'plan only — re-run with mode=execute to write' };
     }
     const a = addAttachment(db, base);
-    return { action: 'attachment.add', mode: 'execute', attachment_id: a.id, kind: a.kind, ref_id: a.ref_id, file_name: a.file_name, size: a.size, store: a.mode };
+    return { action: 'attachments.add', mode: 'execute', attachment_id: a.id, kind: a.kind, ref_id: a.ref_id, file_name: a.file_name, size: a.size, store: a.mode };
   },
 });
 tool({
@@ -741,10 +742,14 @@ tool({
       if (!args.name || !String(args.name).trim()) {
         throw new McpError('INVALID_NAME', 'contact needs a name');
       }
-      return { action: 'contact.add', name: args.name, mode: 'dry-run' };
+      return { action: 'contact.create', name: args.name, mode: 'dry-run' };
     }
-    const c = createContact(db, { ...args, actor: args.actor ?? ctx.actor });
-    return { action: 'contact.add', id: c.id, name: c.name, mode: 'execute' };
+    const c = createContact(db, {
+      name: args.name, address: args.address, postalCode: args.postal_code, city: args.city,
+      country: args.country ?? 'NL', email: args.email, vatId: args.vat_id, kvk: args.kvk,
+      iban: args.iban, actor: args.actor ?? ctx.actor,
+    });
+    return { action: 'contact.create', id: c.id, name: c.name, mode: 'execute' };
   },
 });
 
@@ -790,10 +795,10 @@ tool({
     };
     if (modeOf(args) === 'dry-run') {
       const r = addAsset(db, { ...common, actor: args.actor ?? ctx.actor, dryRun: true });
-      return { action: 'asset.add', mode: 'dry-run', asset: r.asset };
+      return { action: 'assets.add', mode: 'dry-run', asset: r.asset };
     }
     const r = addAsset(db, { ...common, actor: args.actor ?? ctx.actor, dryRun: false });
-    return { action: 'asset.add', id: r.asset.id, name: r.asset.name, warnings: r.warnings, mode: 'execute' };
+    return { action: 'assets.add', id: r.asset.id, name: r.asset.name, warnings: r.warnings, mode: 'execute' };
   },
 });
 
@@ -818,7 +823,7 @@ tool({
   description: 'dispose of an asset (sale or scrap): books the full entry, status -> disposed',
   schema: {
     type: 'object', properties: {
-      id: { type: 'string' }, date: { type: 'string' }, proceeds: { type: 'string' },
+      id: { type: 'number' }, date: { type: 'string' }, proceeds: { type: 'string' },
       bank_account: { type: 'string' }, result_account: { type: 'string' },
       actor: { type: 'string' }, mode: { type: 'string' },
     }, required: ['id', 'date'],

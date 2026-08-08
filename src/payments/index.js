@@ -124,11 +124,13 @@ function latestMandate(db, contactId) {
   return db.prepare('SELECT * FROM sepa_mandates WHERE contact_id = ? ORDER BY id DESC LIMIT 1').get(contactId);
 }
 
-/** FRST on a contact's first direct-debit batch, RCUR afterwards. */
-function mandateSeqFor(db, contactId) {
+/** FRST on a mandate's first direct-debit batch, RCUR afterwards. SEPA:
+ *  FRST is per-mandate — a NEW mandate (after revocation) starts at FRST
+ *  again, even for a contact that has older direct-debit history. */
+function mandateSeqFor(db, contactId, mandateRef) {
   const used = db.prepare(
-    "SELECT COUNT(*) c FROM payment_batch_lines l JOIN payment_batches b ON b.id = l.batch_id WHERE l.contact_id = ? AND b.batch_kind = 'direct_debit'",
-  ).get(contactId);
+    "SELECT COUNT(*) c FROM payment_batch_lines l JOIN payment_batches b ON b.id = l.batch_id WHERE l.contact_id = ? AND l.mandate_ref = ? AND b.batch_kind = 'direct_debit'",
+  ).get(contactId, mandateRef);
   return used.c > 0 ? 'RCUR' : 'FRST';
 }
 
@@ -263,7 +265,7 @@ export function createPaymentBatch(db, {
         payable_id: p.id, contact_id: p.contact_id, name: c.name, iban, amount_cents: p.amount_cents,
         reference: `Factuur ${p.invoice_ref}`,
         mandate_ref: mandate.mandate_ref, mandate_date: mandate.mandate_date,
-        mandate_seq: mandateSeqFor(db, p.contact_id), scheme: mandate.scheme,
+        mandate_seq: mandateSeqFor(db, p.contact_id, mandate.mandate_ref), scheme: mandate.scheme,
       });
       continue;
     }

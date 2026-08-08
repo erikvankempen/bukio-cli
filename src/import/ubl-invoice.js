@@ -120,6 +120,11 @@ export function importUblInvoice(db, {
 
   // --- monetary totals ------------------------------------------------------
   const totals = inv['cac:LegalMonetaryTotal'];
+  const currencyRaw = inv['cbc:DocumentCurrencyCode'];
+  const currency = currencyRaw ? String(currencyRaw).trim().toUpperCase() : 'EUR';
+  if (currency !== 'EUR') {
+    errors.push({ line: 0, error: `INVALID_UBL_INVOICE: cbc:DocumentCurrencyCode '${currency}' — only EUR invoices can be imported (payables are EUR-only)` });
+  }
   const payableRaw = pick(totals, ['cbc:PayableAmount']);
   let payableCents = null;
   if (!payableRaw) {

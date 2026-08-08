@@ -88,7 +88,7 @@ export function make(program) {
             ],
             csvRows: (d) => [
               ...d.accounts.map((a) => ({ ...a })),
-              { code: '', name: 'TOTAAL', type: '', debit: d.total_debit, credit: d.total_credit, net: d.total_debit },
+              { code: '', name: 'TOTAAL', type: '', debit: d.total_debit, credit: d.total_credit, net: formatAmount(d.total_debit_cents - d.total_credit_cents) },
             ],
             sheets: (d) => [{
               name: 'Trial balance',

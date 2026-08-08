@@ -24,8 +24,19 @@ export function invoiceError(code, message) {
 
 // --- line spec parsing ----------------------------------------------------
 
-const QTY_RE = /^(\d+(?:\.\d{1,3})?)\s*x\s+(.+)$/;
+const QTY_RE = /^(-?)(\d+(?:\.\d{1,3})?)\s*x\s+(.+)$/;
 const DISC_RE = /^-(\d+(?:\.\d{1,2})?)(%?)$/;
+// The 8 known VAT codes (src/vat/index.js VAT_CODES). A trailing token is a
+// VAT code when it is one of these, or looks like a code (1-2 letters, or a
+// 1-2 digit number like '9'/'21'); anything else — e.g. '100' or 'nope' — is
+// the price, so price-only lines ("DESC @ 100") parse correctly while
+// unknown codes ('@99') still fail validation with VAT_CODE_NOT_FOUND.
+const KNOWN_VAT_CODES = new Set(['21', '9', '0', 'V', 'R', 'RE', 'M', 'P']);
+function isVatCodeToken(token) {
+  const t = token.toUpperCase();
+  if (KNOWN_VAT_CODES.has(t)) return true;
+  return /^[A-Z]{1,2}$/.test(t) || /^\d{1,2}$/.test(t);
+}
 
 /** Format a milli-quantity for humans: 2000 -> '2', 1500 -> '1.5'. */
 export function formatQty(milli) {
@@ -45,11 +56,14 @@ export function formatQty(milli) {
 export function parseLineSpec(spec) {
   const s = String(spec).trim();
   const qtyMatch = s.match(QTY_RE);
-  const qtyMilli = qtyMatch ? Math.round(parseFloat(qtyMatch[1]) * 1000) : 1000;
+  if (qtyMatch && qtyMatch[1] === '-') {
+    throw invoiceError('INVALID_LINE', `line '${spec}': quantity must be a positive number`);
+  }
+  const qtyMilli = qtyMatch ? Math.round(parseFloat(qtyMatch[2]) * 1000) : 1000;
   if (!Number.isInteger(qtyMilli) || qtyMilli < 1) {
     throw invoiceError('INVALID_LINE', `line '${spec}': quantity must be a positive number`);
   }
-  const rest = qtyMatch ? qtyMatch[2] : s;
+  const rest = qtyMatch ? qtyMatch[3] : s;
   const parts = rest.split('@').map((p) => p.trim());
   let discountType = null;
   let discountValue = null;
@@ -63,8 +77,8 @@ export function parseLineSpec(spec) {
   }
   let vatCode = null;
   let pricePart = last;
-  if (/^[A-Z0-9]+$/.test(last)) {
-    vatCode = last;
+  if (isVatCodeToken(last)) {
+    vatCode = last.toUpperCase();
     pricePart = parts[parts.length - 2];
   }
   const description = parts.slice(0, parts.length - (vatCode ? 2 : 1)).join('@').trim();
@@ -113,8 +127,8 @@ export function parseItemSpec(spec) {
       parts.pop();
       last = parts[parts.length - 1];
     }
-    if (parts.length && /^[A-Z0-9]+$/.test(last)) {
-      vatCode = last;
+    if (parts.length && isVatCodeToken(last)) {
+      vatCode = last.toUpperCase();
       parts.pop();
       last = parts[parts.length - 1];
     }
@@ -267,7 +281,7 @@ export function createContact(db, {
   const cleanIban = iban ? iban.trim().replace(/\s+/g, '') : null;
   if (dryRun) {
     return {
-      action: 'contact.add', name, address, postalCode, city, country, email,
+      action: 'contact.create', name, address, postalCode, city, country, email,
       vatId, kvk, iban: cleanIban, dryRun: true,
     };
   }
@@ -380,20 +394,24 @@ export function contactStatement(db, { contactId, asOf = null }) {
 
   const rows = [];
   const invoices = listInvoices(db).filter((i) =>
-    i.contact_id === contactId && i.invoice_type === 'sales'
+    i.contact_id === contactId && ['sales', 'credit'].includes(i.invoice_type)
     && i.status !== 'draft' && i.status !== 'void'
     && i.date <= asOfDate);
   for (const i of invoices) {
+    // credit notes (invoice_type='credit') reduce what the contact owes:
+    // their gross books as a credit row instead of a debit
+    const isCredit = i.invoice_type === 'credit';
     rows.push({
-      date: i.date, kind: 'invoice', ref: i.invoice_number ?? `#${i.id}`,
-      description: i.description ?? `Factuur ${i.invoice_number}`,
-      debit_cents: i.gross_cents, credit_cents: 0, balance_cents: 0,
+      date: i.date, kind: isCredit ? 'credit' : 'invoice', ref: i.invoice_number ?? `#${i.id}`,
+      description: isCredit ? `Creditnota ${i.invoice_number ?? ''}`.trim() : (i.description ?? `Factuur ${i.invoice_number}`),
+      debit_cents: isCredit ? 0 : i.gross_cents, credit_cents: isCredit ? i.gross_cents : 0, balance_cents: 0,
     });
     for (const p of i.payments) {
+      // payments on a credit note are refunds we paid — reversed polarity
       rows.push({
         date: p.date, kind: 'payment', ref: i.invoice_number,
-        description: `Betaling ${i.invoice_number}`,
-        debit_cents: 0, credit_cents: p.amount_cents, balance_cents: 0,
+        description: isCredit ? `Restitutie ${i.invoice_number}` : `Betaling ${i.invoice_number}`,
+        debit_cents: isCredit ? p.amount_cents : 0, credit_cents: isCredit ? 0 : p.amount_cents, balance_cents: 0,
       });
     }
   }
@@ -427,7 +445,9 @@ export function invoiceReminders(db, { withinDays = 7 } = {}) {
     throw invoiceError('INVALID_WINDOW', `within-days must be a non-negative integer, got '${withinDays}'`);
   }
   const today = new Date().toISOString().slice(0, 10);
-  const dueSoon = new Date(Date.now() + withinDays * 86400000).toISOString().slice(0, 10);
+  // UTC day arithmetic — Date.now() + N*86400000 would drift across DST
+  const now = new Date();
+  const dueSoon = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + withinDays)).toISOString().slice(0, 10);
   const reminders = listInvoices(db)
     .filter((i) => i.invoice_type === 'sales')
     .filter((i) => i.status === 'overdue' || (i.status === 'sent' && i.due_date && i.due_date <= dueSoon))
