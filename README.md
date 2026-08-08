@@ -988,25 +988,32 @@ calls across all development sessions).
 
 ### Owner time (contributed, unpaid)
 
-Beyond API spend, the project consumed **≈ 10 hours of the owner's own time**:
-five evenings after work (Aug 4–8, 2026, ~1.5–2 h per evening, taken at the
-maximum 2 h). At the average Dutch **junior** software-developer rate of
-**≈ €20/hour** gross-equivalent (Jul 2026: €20.03/h
-[Jooble](https://nl.jooble.org/salary/junior-software-engineer-hbo),
-€3,747/mo [Indeed](https://nl.indeed.com/career/junior-software-developer/salaries),
-€35,146/yr [PayScale](https://www.payscale.com/research/NL/Job=Junior_Software_Engineer/Salary)),
-the owner's time is valued at **≈ €200**.
+Beyond API spend, the project consumed the owner's review-and-direction time:
+five evenings after work (Aug 4–8, 2026), ≈ 2 clock hours per evening — but
+only during the moments the agent needed review or input — i.e. roughly
+**1 hour of effective time per evening, ≈ 5 hours total**.
+
+At a **senior** Dutch software-developer rate of **≈ €45/hour** (Amsterdam
+senior average, 2026: €45/h
+[Glassdoor](https://www.glassdoor.com/Salaries/amsterdam-netherlands-senior-software-engineer-salary-SRCH_IL.0,21_IM1112_KO22,46.htm),
+€45.50/h
+[SalaryExpert](https://www.salaryexpert.com/salary/job/software-developer/netherlands/amsterdam);
+the national average is lower), the owner's time is valued at **≈ €225**.
 
 Stated plainly, so nothing is hidden:
 
 - **Compliance:** all work was done in the owner's free time, outside working
   hours — no employer time, equipment, or other resources were used.
-- **Deliberately conservative:** the owner is an amateur developer, not a
-  junior professional, so the junior rate likely *overstates* the market value
-  of his hours. It is included high on purpose: every cost of this project is
+- **Deliberately conservative:** the owner is an amateur developer, and a
+  senior professional rate overstates the market value of his review time by a
+  wide margin. It is included high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
-- **It was free:** the ≈ €200 is an imputed opportunity cost, not money paid.
+- **It was free:** the ≈ €225 is an imputed opportunity cost, not money paid.
   Out-of-pocket spend remains **$4.24** in API costs.
+- **Not a full review:** these hours do not come close to the effort a
+  conventional code review of a 15.8 KLOC codebase would take; treat them as
+  the owner's direction-and-check time, not a substitute for professional
+  review.
 
 ### COCOMO benchmark
 
@@ -1024,8 +1031,9 @@ across 84 files (9,809 in `src/`, 5,827 in `test/`), i.e. **15.76 KLOC**.
 
 **Comparison:** a conventional team building this would estimate **≈ 43–99
 person-months (≈ €391K–€887K)**; the AI-assisted build consumed **$4.24 in API
-costs plus ≈ €200 of owner time (contributed, unpaid — see above)** over five
-evenings — before the owner's review time.
+costs plus ≈ €225 of owner review-and-direction time (contributed, unpaid —
+see above)** over five evenings — still a tiny fraction of the conventional
+estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.
 
