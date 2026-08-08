@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 18:03:40 UTC — **✅ 519 passing · 0 failing (519 tests)**
+**Latest run:** 2026-08-08 18:15:32 UTC — **✅ 519 passing · 0 failing (519 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -229,7 +229,7 @@
     - ✅ bank: partial payment does not auto-match the invoice
     - ✅ vat: mixed rates in one entry, monthly period readout
     - ✅ vat: private use (P) -> 1d/5a at the standard rate (21%)
-    - ✅ vat: R income (verlegd binnenland sale) is not double-counted
+    - ✅ vat: R income (verlegd binnenland sale) reports the base in 1c, no VAT due
     - ✅ year-end: loss year closes with negative result into equity
     - ✅ year-end: fiscal year end 06-30 drives the jaarrekening as-of date
     - ✅ jaarrekening: custom account lands in Overig, totals still balance

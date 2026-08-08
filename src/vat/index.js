@@ -244,6 +244,11 @@ export function obReadout(db, { period }) {
       if (r.account_type === 'income' && r.eu_reverse) {
         // uitgaande verlegde EU levering (0%): base naar 2a, geen btw
         f['2a'] += -r.amount_cents;
+      } else if (r.account_type === 'income') {
+        // uitgaande verlegde BINNENLANDSE levering (R, zeldzaam maar legaal):
+        // de base blijft een belaste levering in NL -> 1c (0%-tarief valt in
+        // 'andere tarieven'); de btw is niet verschuldigd door ons (geen 5a)
+        f['1c'] += -r.amount_cents;
       } else if (r.account_type === 'expense') {
         // inkoop met verlegde btw: base naar 3a (binnenland) / 3b (EU),
         // btw verschuldigd naar 4a/4b — and claimed back as voorbelasting
@@ -252,7 +257,6 @@ export function obReadout(db, { period }) {
         f[r.eu_reverse ? '4b' : '4a'] += r.vat_amount_cents;
         f['5b'] += r.vat_amount_cents;
       }
-      // uitgaande verlegde binnenlandse levering (R, zeldzaam): niet gevolgd
     } else if (r.type === 'private') {
       f['1d'] += -r.amount_cents;
       f['5a'] += -r.vat_amount_cents;

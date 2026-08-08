@@ -334,12 +334,15 @@ test('vat: private use (P) -> 1d/5a at the standard rate (21%)', () => {
   assert.equal(r.fields['5d'], 1050);
 });
 
-test('vat: R income (verlegd binnenland sale) is not double-counted', () => {
+test('vat: R income (verlegd binnenland sale) reports the base in 1c, no VAT due', () => {
   bookVatEntry(db, {
     date: '2026-07-01', description: 'Verlegd binnenland uitgaand',
     postings: parseVatPostingSpecs(['1100:121.00,8000:-100.00@R']), post: true,
   });
   const r = obReadout(db, { period: '2026-07' });
+  // the supply remains taxable in NL — the base goes to 1c ('andere
+  // tarieven' incl. 0%), the VAT itself is reversed to the customer
+  assert.equal(r.fields['1c'], 10000);
   assert.equal(r.fields['1a'], 0);
   assert.equal(r.fields['2a'], 0);
   assert.equal(r.fields['5a'], 0);

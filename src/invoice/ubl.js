@@ -92,7 +92,10 @@ export function invoiceToUbl(db, invoice) {
     s.vatCents += g.vat;
   }
   const taxSubtotals = [...subtotalMap.values()].map((s) => {
-    const percent = s.cat === 'AE' ? '21.00' : (s.rateBp / 100).toFixed(2);
+    // AE (reverse charge): emit the code's configured rate when one exists
+    // (e.g. 9% verlegd constructiewerk); the default R/RE codes carry 0%
+    // (reverse charge has no VAT) and fall back to the NL standard rate 21.00
+    const percent = s.cat === 'AE' ? (s.rateBp > 0 ? (s.rateBp / 100).toFixed(2) : '21.00') : (s.rateBp / 100).toFixed(2);
     return `
       <cac:TaxSubtotal>
         <cbc:TaxableAmount currencyID="${currency}">${moneyAmount(s.baseCents)}</cbc:TaxableAmount>
@@ -139,7 +142,7 @@ export function invoiceToUbl(db, invoice) {
       : l.vat_code === '0' ? 'Z'
         : (l.vat_code === 'V' || l.vat_code === 'M') ? 'E'
           : (l.vat_code ? 'S' : 'E');
-    const percent = (l.vat_code === 'R' || l.vat_code === 'RE') ? '21.00' : (l.vat_rate_bp / 100).toFixed(2);
+    const percent = (l.vat_code === 'R' || l.vat_code === 'RE') ? (l.vat_rate_bp > 0 ? (l.vat_rate_bp / 100).toFixed(2) : '21.00') : (l.vat_rate_bp / 100).toFixed(2);
     const unitCode = UNIT_CODE_MAP[l.unit] ?? 'C62';
     // Peppol BIS 3.0: credit notes use cac:CreditNoteLine +
     // cbc:CreditNoteLineQuantity, invoices use cac:InvoiceLine +
