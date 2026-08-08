@@ -126,11 +126,13 @@ function latestMandate(db, contactId) {
 
 /** FRST on a mandate's first direct-debit batch, RCUR afterwards. SEPA:
  *  FRST is per-mandate — a NEW mandate (after revocation) starts at FRST
- *  again, even for a contact that has older direct-debit history. */
-function mandateSeqFor(db, contactId, mandateRef) {
+ *  again, even for a contact that has older direct-debit history. Counting
+ *  by mandate_id (not the ref snapshot) is what makes a re-created mandate
+ *  with the SAME ref start at FRST: it is a different mandate row. */
+function mandateSeqFor(db, mandateId) {
   const used = db.prepare(
-    "SELECT COUNT(*) c FROM payment_batch_lines l JOIN payment_batches b ON b.id = l.batch_id WHERE l.contact_id = ? AND l.mandate_ref = ? AND b.batch_kind = 'direct_debit'",
-  ).get(contactId, mandateRef);
+    'SELECT COUNT(*) c FROM payment_batch_lines WHERE mandate_id = ?',
+  ).get(mandateId);
   return used.c > 0 ? 'RCUR' : 'FRST';
 }
 
@@ -264,8 +266,8 @@ export function createPaymentBatch(db, {
       items.push({
         payable_id: p.id, contact_id: p.contact_id, name: c.name, iban, amount_cents: p.amount_cents,
         reference: `Factuur ${p.invoice_ref}`,
-        mandate_ref: mandate.mandate_ref, mandate_date: mandate.mandate_date,
-        mandate_seq: mandateSeqFor(db, p.contact_id, mandate.mandate_ref), scheme: mandate.scheme,
+        mandate_id: mandate.id, mandate_ref: mandate.mandate_ref, mandate_date: mandate.mandate_date,
+        mandate_seq: mandateSeqFor(db, mandate.id), scheme: mandate.scheme,
       });
       continue;
     }
@@ -293,12 +295,12 @@ export function createPaymentBatch(db, {
     ).run(batchDate, debit, company.name, totalCents, kind, actor);
     const batchId = Number(info.lastInsertRowid);
     const insertLine = db.prepare(
-      'INSERT INTO payment_batch_lines (batch_id, contact_id, name, iban, amount_cents, reference, mandate_ref, mandate_seq, mandate_date, scheme) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO payment_batch_lines (batch_id, contact_id, name, iban, amount_cents, reference, mandate_id, mandate_ref, mandate_seq, mandate_date, scheme) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     );
     for (const l of items) {
       const li = insertLine.run(
         batchId, l.contact_id, l.name, l.iban, l.amount_cents, l.reference,
-        l.mandate_ref ?? null, l.mandate_seq ?? null, l.mandate_date ?? null, l.scheme ?? null,
+        l.mandate_id ?? null, l.mandate_ref ?? null, l.mandate_seq ?? null, l.mandate_date ?? null, l.scheme ?? null,
       );
       if (l.payable_id) {
         db.prepare("UPDATE payables SET status = 'in_batch', batch_line_id = ? WHERE id = ?").run(Number(li.lastInsertRowid), l.payable_id);

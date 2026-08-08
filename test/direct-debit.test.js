@@ -156,6 +156,17 @@ test('direct-debit batch: FRST then RCUR, mandate snapshot on the line', () => {
   const batch3 = createPaymentBatch(db, { date: '2026-11-10', payableIds: [p3.id], kind: 'direct_debit', actor: 'agent:test' });
   assert.equal(batch3.lines[0].mandate_ref, 'NL01ZZZ888');
   assert.equal(batch3.lines[0].mandate_seq, 'FRST', 'a brand-new mandate must start at FRST, not RCUR');
+
+  // mandate REMOVED and RE-ADDED with the same ref = a NEW mandate (SEPA) —
+  // its first batch must be FRST, not RCUR. Regression: counting by the ref
+  // snapshot alone used to see the old lines and emit RCUR here.
+  const m1 = listMandates(db, { contactId: c.id }).find((m) => m.mandate_ref === 'NL01ZZZ999');
+  removeMandate(db, { id: m1.id, actor: 'agent:test' });
+  addMandate(db, { contactId: c.id, mandateRef: 'NL01ZZZ999', mandateDate: '2026-12-01', actor: 'agent:test' });
+  const p4 = seedPayable(c.id, { ref: 'INV-4' });
+  const batch4 = createPaymentBatch(db, { date: '2026-12-10', payableIds: [p4.id], kind: 'direct_debit', actor: 'agent:test' });
+  assert.equal(batch4.lines[0].mandate_ref, 'NL01ZZZ999');
+  assert.equal(batch4.lines[0].mandate_seq, 'FRST', 'a re-created mandate with the same ref must start at FRST (SEPA per-mandate rule)');
 });
 
 test('direct-debit batch without a mandate → MANDATE_REQUIRED', () => {

@@ -163,7 +163,7 @@ test('reverseEntry: posts linked contra-entry; original stays posted', () => {
   // The original stays posted — the contra-entry cancels it (net effect zero).
   const original = getEntry(db, e.id);
   assert.equal(original.state, 'posted');
-  assert.equal(original.reversed_at, null);
+  assert.equal(original.reversed_from_id, null);
 });
 
 test('reverseEntry: guards', () => {

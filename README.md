@@ -275,7 +275,7 @@ List journal entries (newest first).
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--state <state>` | all | `draft` \| `posted` \| `reversed` |
+| `--state <state>` | all | `draft` \| `posted` |
 | `--date-from <yyyy-mm-dd>` | — | Earliest date (inclusive) |
 | `--date-to <yyyy-mm-dd>` | — | Latest date (inclusive) |
 | `--limit <n>` | `100` | Max rows |

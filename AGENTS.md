@@ -151,7 +151,6 @@ the booked amounts.
   "created_by": "agent:bartholomeus",
   "created_at": "2026-08-04T19:09:10.067Z",
   "posted_at": "2026-08-04T19:09:10.068Z",
-  "reversed_at": null,
   "postings": [
     { "id": 1, "account_code": "1100", "account_name": "Bank", "account_type": "asset",
       "amount_cents": 1000000, "amount": "10000.00" },
