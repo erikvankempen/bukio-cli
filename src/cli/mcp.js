@@ -28,7 +28,7 @@ import {
 import { runDue, previewDue } from '../recurring/index.js';
 import { register, addAsset, runDue as assetsRunDue, disposeAsset } from '../assets/index.js';
 import { yearEndClose, yearEndStatus } from '../year-end/index.js';
-import { setFxRate, getFxRate, parseRate, toEurPostings, resolveRate } from '../fx/index.js';
+import { setFxRate, parseRate, toEurPostings, resolveRate } from '../fx/index.js';
 import { icpReadout } from '../icp/index.js';
 import { list as auditList } from '../audit/index.js';
 import { complianceStatus } from '../compliance/index.js';
@@ -731,7 +731,8 @@ tool({
   schema: {
     type: 'object', properties: {
       name: { type: 'string' }, address: { type: 'string' }, postal_code: { type: 'string' },
-      city: { type: 'string' }, country: { type: 'string' }, vat_id: { type: 'string' },
+      city: { type: 'string' }, country: { type: 'string' }, email: { type: 'string' },
+      vat_id: { type: 'string' }, kvk: { type: 'string' }, iban: { type: 'string' },
       actor: { type: 'string' }, mode: { type: 'string' },
     }, required: ['name'],
   },
@@ -809,11 +810,14 @@ tool({
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);
     const actor = args.actor ?? ctx.actor;
+    // assetsRunDue — the bare `runDue` name collides with the RECURRING
+    // module's runDue (same import name); calling that here would book due
+    // recurring entries instead of depreciation runs
     if (modeOf(args) === 'dry-run') {
-      const r = runDue(db, { period: args.period, asOf: args.as_of, actor, dryRun: true });
+      const r = assetsRunDue(db, { period: args.period, asOf: args.as_of, actor, dryRun: true });
       return { action: 'assets.run', mode: 'dry-run', plan: r.plan };
     }
-    const r = runDue(db, { period: args.period, asOf: args.as_of, actor, dryRun: false });
+    const r = assetsRunDue(db, { period: args.period, asOf: args.as_of, actor, dryRun: false });
     return { action: 'assets.run', booked: r.booked, mode: 'execute' };
   },
 });

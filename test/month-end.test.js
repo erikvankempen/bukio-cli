@@ -129,4 +129,6 @@ test('month-end: draft invoices are warned (booked revenue may be uninvoiced)', 
   const r = monthEnd(db, { period: '2026-01' });
   assert.equal(r.invoices.draft, 1);
   assert.ok(r.warnings.some((w) => w.includes('1 draft invoice not finalised')));
+  // draft invoices must NOT trigger the contradictory 'all clear'
+  assert.ok(!r.warnings.some((w) => w.includes('all clear')));
 });

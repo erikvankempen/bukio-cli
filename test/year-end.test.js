@@ -185,6 +185,33 @@ test('jaarrekening: klein P&L follows the FISCAL year, not the calendar year', (
   assert.equal(r.pnl.resultaat_cents, 5000);
 });
 
+test('year-end close: follows the FISCAL year for non-calendar fiscal years', () => {
+  // FY ends 06-30 -> closing year 2026 covers 2025-07-01..2026-06-30
+  db.prepare("UPDATE company SET fiscal_year_end = '06-30'").run();
+  entry('2025-06-15', 'Te vroeg', [{ code: '1100', amountCents: 1000 }, { code: '8000', amountCents: -1000 }]); // before window
+  entry('2025-09-01', 'Omzet 1', [{ code: '1100', amountCents: 2000 }, { code: '8000', amountCents: -2000 }]); // inside
+  entry('2026-06-30', 'Omzet 2', [{ code: '1100', amountCents: 3000 }, { code: '8000', amountCents: -3000 }]); // inside (FY end)
+  entry('2026-07-15', 'Te laat', [{ code: '1100', amountCents: 4000 }, { code: '8000', amountCents: -4000 }]); // after window
+
+  yearEndClose(db, { year: 2026, actor: 'agent:test' });
+  const closing = db.prepare("SELECT * FROM journal_entries WHERE source = 'closing' ORDER BY id").all();
+  assert.ok(closing.length >= 1);
+  // closing entries are dated at the FISCAL year end, not 12-31
+  assert.equal(closing[0].date, '2026-06-30');
+  // the closed result is the in-window one: 2000 + 3000 = 5000
+  const status = yearEndStatus(db, { year: 2026 });
+  assert.equal(status.result_cents, 5000);
+  // the outside-window entries (1000 before, 4000 after) were NOT closed —
+  // the closing entries negate only the in-window 8000 balance, and the
+  // P&L accounts still carry the untouched 10000 of original postings
+  const leftover = db.prepare(`
+    SELECT COALESCE(SUM(p.amount_cents), 0) AS net FROM postings p
+    JOIN journal_entries e ON e.id = p.entry_id AND e.state = 'posted' AND e.source != 'closing'
+    JOIN accounts a ON a.id = p.account_id WHERE a.code = '8000'
+  `).get();
+  assert.equal(leftover.net, -10000);
+});
+
 test('jaarrekening: invalid model rejected', () => {
   assert.throws(() => jaarrekening(db, { year: 2026, model: 'groot' }), { code: 'INVALID_MODEL' });
 });

@@ -141,16 +141,17 @@ test('--keep N prunes oldest backups in the default folder; dry-run deletes noth
   assert.equal(dry.out.data.pruned.length, 2);
   assert.equal(readdirSync(backupDir).length, 5);
 
-  // real run: prunes to the 2 newest + the new backup
+  // real run: prunes AFTER the new backup exists — keep N TOTAL, not N+1
   const real = cli(dbPath, ['backup', '--keep', '2']);
   assert.equal(real.code, 0);
-  assert.equal(real.out.data.pruned.length, 2);
+  assert.equal(real.out.data.pruned.length, 3); // 4 old + 1 new = 5 -> keep 2
   const remaining = readdirSync(backupDir).sort();
   assert.ok(!remaining.includes('bukio-2026-08-01T00-00-00.db'));
   assert.ok(!remaining.includes('bukio-2026-08-02T00-00-00.db'));
-  assert.ok(remaining.includes('bukio-2026-08-03T00-00-00.db'));
+  assert.ok(!remaining.includes('bukio-2026-08-03T00-00-00.db'));
   assert.ok(remaining.includes('bukio-2026-08-04T00-00-00.db'));
-  assert.ok(remaining.some((f) => f.startsWith('bukio-') && f !== names[0] && f !== names[1] && f.endsWith('.db')));
+  // exactly the 2 newest remain (08-04 + the new backup)
+  assert.equal(remaining.filter((f) => f.startsWith('bukio-') && f.endsWith('.db')).length, 2);
   assert.ok(remaining.includes('notes.txt'));
 });
 

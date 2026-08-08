@@ -185,7 +185,7 @@ function syncAccountFromFile(db, code, name, typeHint, createdList, updatedList,
     warnings.push(`account ${code} stays '${existing.name}' — it already has postings (file calls it '${cleanName}')`);
     return;
   }
-  const { type, normalBalance } = typeHint ?? { type: existing.type, normal_balance: existing.normal_balance };
+  const { type, normalBalance } = typeHint ?? { type: existing.type, normalBalance: existing.normal_balance };
   const before = existing.name;
   // a chart-authoritative rename also realigns the RGS code (the name/type
   // usually change together, e.g. 1100 Bank -> 1100 Gebouwen: BLIM.10 -> BMVA.02)

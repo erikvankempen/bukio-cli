@@ -24,6 +24,7 @@ export function yearEndError(code, message) {
 
 /** Net per income/expense account in the year (posted, excluding closing). */
 export function resultAccounts(db, year) {
+  const [from, to] = fiscalYearWindow(db, year);
   return db.prepare(`
     SELECT a.code, a.name, a.type,
       COALESCE(SUM(p.amount_cents), 0) AS net_cents
@@ -39,7 +40,26 @@ export function resultAccounts(db, year) {
     GROUP BY a.id
     HAVING net_cents != 0
     ORDER BY a.code
-  `).all(`${year}-01-01`, `${year}-12-31`);
+  `).all(from, to);
+}
+
+/**
+ * The fiscal-year window a closing year refers to: [start, end] ISO dates.
+ * Default fiscal year 12-31 -> the calendar year; anything else (e.g. 06-30)
+ * -> the 12 months ending in that year (year 2026, FY 06-30 ->
+ * 2025-07-01..2026-06-30). The year parameter is the year the FY ENDS in,
+ * matching compliance/jaarrekening and the balans peildatum.
+ */
+export function fiscalYearWindow(db, year) {
+  const fy = db.prepare('SELECT fiscal_year_end FROM company WHERE id = 1').get()?.fiscal_year_end || '12-31';
+  // tolerant parse: '12-31' (canonical) or a full '2026-12-31' value
+  const parts = String(fy).split('-');
+  const mm = Number(parts[parts.length - 2]);
+  const dd = Number(parts[parts.length - 1]);
+  if (mm === 12 && dd === 31) return [`${year}-01-01`, `${year}-12-31`];
+  const end = `${year}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+  const start = new Date(Date.UTC(Number(year) - 1, mm - 1, dd + 1)).toISOString().slice(0, 10);
+  return [start, end];
 }
 
 export function isYearClosed(db, year) {
@@ -74,9 +94,10 @@ export function yearEndClose(db, { year, actor = 'human', dryRun = false }) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   if (!company) throw yearEndError('NOT_INITIALISED', 'company database not initialised');
 
+  const [fyFrom, fyTo] = fiscalYearWindow(db, year);
   const drafts = db.prepare(
     "SELECT COUNT(*) c FROM journal_entries WHERE state = 'draft' AND date >= ? AND date <= ?",
-  ).get(`${year}-01-01`, `${year}-12-31`).c;
+  ).get(fyFrom, fyTo).c;
   if (drafts > 0) throw yearEndError('INCOMPLETE_YEAR', `${drafts} draft entry/entries in ${year} — post or reverse them before closing`);
 
   if (isYearClosed(db, year)) throw yearEndError('ALREADY_CLOSED', `${year} is already closed (undo with entry reverse on the closing entries)`);
@@ -117,7 +138,9 @@ export function yearEndClose(db, { year, actor = 'human', dryRun = false }) {
     };
   }
 
-  const closeDate = `${year}-12-31`;
+  // closing entries are dated at the FISCAL year end (12-31 default, or the
+  // company's fiscal_year_end) — not hardcoded to 12-31
+  const closeDate = fyTo;
   const tx = db.transaction(() => {
     if (resultCents !== 0 && !getAccountByCode(db, '9900')) {
       createAccount(db, { code: '9900', name: 'Resultaat boekjaar', type: 'equity', normalBalance: 'credit', rgsCode: 'BEIV.05' });

@@ -44,7 +44,7 @@ function post(date, description, postings, extra = {}) {
 function seedCompany() {
   db.prepare(
     'INSERT INTO company (id, name, kvk, legal_form, vat_module, kor_flag, fiscal_year_end) VALUES (1, ?, ?, ?, 0, 0, ?)',
-  ).run('Test Coaching', '12345678', 'eenmanszaak', '2026-12-31');
+  ).run('Test Coaching', '12345678', 'eenmanszaak', '12-31');
 }
 
 function seedScenario() {
@@ -118,13 +118,32 @@ test('export xaf: 3-leg entry round-trips through the importer losslessly', () =
   db2.close();
 });
 
+test('export xaf: follows the FISCAL year for non-calendar fiscal years', () => {
+  // FY ends 06-30 -> exporting year 2026 covers 2025-07-01..2026-06-30
+  db.prepare("UPDATE company SET fiscal_year_end = '06-30'").run();
+  post('2025-06-15', 'Te vroeg', [{ code: '1100', amountCents: 1000 }, { code: '8000', amountCents: -1000 }]); // before
+  post('2025-09-01', 'Binnen', [{ code: '1100', amountCents: 2000 }, { code: '8000', amountCents: -2000 }]); // inside
+  post('2026-06-30', 'Laatste', [{ code: '1100', amountCents: 3000 }, { code: '8000', amountCents: -3000 }]); // inside (FY end)
+  post('2026-07-15', 'Te laat', [{ code: '1100', amountCents: 4000 }, { code: '8000', amountCents: -4000 }]); // after
+
+  const out = path.join(tmpDir, 'fiscaal-2026.xaf');
+  const res = exportXaf(db, { year: '2026', out, actor: 'agent:test' });
+  assert.equal(res.mutaties, 2); // only the in-window entries
+
+  const xml = readFileSync(out, 'utf8');
+  assert.match(xml, /<StartDate>2025-07-01<\/StartDate>/);
+  assert.match(xml, /<EndDate>2026-06-30<\/EndDate>/);
+  assert.doesNotMatch(xml, /Te vroeg/);
+  assert.doesNotMatch(xml, /Te laat/);
+});
+
 test('export xaf: records an export.xaf audit row', () => {
   seedScenario();
   const out = path.join(tmpDir, 'audited.xaf');
   exportXaf(db, { year: '2026', out, actor: 'agent:test' });
   const rows = list(db, {});
   const row = rows.find((r) => r.action === 'export.xaf');
-  assert.ok(row, 'export.xaf audit row exists');
+  assert.ok(row, 'export.xaf audit row expected');
   assert.equal(row.actor, 'agent:test');
   assert.equal(row.args.year, '2026');
   assert.equal(row.args.out, out);

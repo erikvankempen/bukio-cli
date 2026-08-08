@@ -146,15 +146,16 @@ export function make(program) {
         }
         const dest = opts.out || defaultBackupPath(encrypted);
         const finalDest = encrypted && !dest.endsWith('.enc') ? `${dest}.enc` : dest;
-        const rotation = keep !== null ? pruneBackups(keep, { dryRun: ctx.dryRun }) : null;
+        // dry-run: report what the rotation WOULD prune (nothing written)
+        const dryRunRotation = ctx.dryRun && keep !== null ? pruneBackups(keep, { dryRun: true }) : null;
         if (ctx.dryRun) {
           output(ctx, {
             action: 'backup', from: ctx.dbPath, to: finalDest, encrypted,
-            pruned: rotation ? rotation.pruned : [],
+            pruned: dryRunRotation ? dryRunRotation.pruned : [],
             dryRun: true,
           }, (d) => {
             console.log(`plan: backup ${d.from} -> ${d.to}${d.encrypted ? ' (encrypted)' : ''}`);
-            if (d.pruned.length) console.log(`plan: prune ${d.pruned.length} old backup(s) in ${rotation.dir}`);
+            if (d.pruned.length) console.log(`plan: prune ${d.pruned.length} old backup(s) in ${dryRunRotation.dir}`);
             console.log('(dry run — nothing written)');
           });
           return;
@@ -179,6 +180,9 @@ export function make(program) {
           args: { to: finalDest, bytes, encrypted }, outcome: 'ok',
         });
         db.close();
+        // prune AFTER the new backup exists — pruning first always left
+        // N+1 files (N kept + the one just created)
+        const rotation = keep !== null ? pruneBackups(keep) : null;
         output(ctx, { path: finalDest, bytes, source: ctx.dbPath, encrypted, pruned: rotation ? rotation.pruned : [] }, (d) => {
           console.log(`backup written: ${d.path} (${d.bytes} bytes${d.encrypted ? ', encrypted' : ''})`);
           if (d.pruned.length) console.log(`pruned ${d.pruned.length} old backup(s)`);

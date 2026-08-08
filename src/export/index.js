@@ -24,6 +24,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { formatAmount } from '../core/money.js';
 import { record } from '../audit/index.js';
+import { fiscalYearWindow } from '../year-end/index.js';
 
 // single source of truth for the version stamped into the audit file —
 // a hardcoded string here silently drifted from package.json on every bump
@@ -101,23 +102,27 @@ export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
     throw e;
   }
 
+  // the export covers the FISCAL year the closing year refers to — the
+  // same window as year-end close / jaarrekening (default: calendar year)
+  const [fyFrom, fyTo] = fiscalYearWindow(db, year);
+
   const accounts = db.prepare('SELECT * FROM accounts ORDER BY code').all();
   const entries = db.prepare(`
     SELECT e.id, e.date, e.description, e.source, e.state, e.source_ref,
            e.created_by, e.posted_at
     FROM journal_entries e
-    WHERE substr(e.date, 1, 4) = ?
+    WHERE e.date >= ? AND e.date <= ?
     ORDER BY e.date, e.id
-  `).all(year);
+  `).all(fyFrom, fyTo);
   const postings = db.prepare(`
     SELECT p.entry_id, p.amount_cents, p.fx_currency, p.fx_amount_cents,
            a.code AS account_code
     FROM postings p
     JOIN accounts a ON a.id = p.account_id
     JOIN journal_entries e ON e.id = p.entry_id
-    WHERE substr(e.date, 1, 4) = ?
+    WHERE e.date >= ? AND e.date <= ?
     ORDER BY p.id
-  `).all(year);
+  `).all(fyFrom, fyTo);
   const byEntry = new Map();
   for (const p of postings) {
     if (!byEntry.has(p.entry_id)) byEntry.set(p.entry_id, []);
@@ -148,8 +153,8 @@ export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
   parts.push(`    <CompanyName>${esc(company.name)}</CompanyName>`);
   parts.push(`    <CompanyID>${esc(company.kvk || '')}</CompanyID>`);
   parts.push(`    <FiscalYear>${esc(year)}</FiscalYear>`);
-  parts.push(`    <StartDate>${year}-01-01</StartDate>`);
-  parts.push(`    <EndDate>${year}-12-31</EndDate>`);
+  parts.push(`    <StartDate>${fyFrom}</StartDate>`);
+  parts.push(`    <EndDate>${fyTo}</EndDate>`);
   parts.push('    <SoftwareName>bukio-cli</SoftwareName>');
   parts.push(`    <SoftwareVersion>${esc(PACKAGE_VERSION)}</SoftwareVersion>`);
   parts.push('  </XafHeader>');

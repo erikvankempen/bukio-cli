@@ -101,7 +101,7 @@ export function monthEnd(db, { period }) {
   if (overdueInvoices.length) warnings.push(`${overdueInvoices.length} overdue invoice${overdueInvoices.length === 1 ? '' : 's'}`);
   if (recurring.length) warnings.push(`${recurring.length} recurring template${recurring.length === 1 ? '' : 's'} due by ${to}`);
   if (assetsDue) warnings.push(`${assetsDue} depreciation run${assetsDue === 1 ? '' : 's'} due — run 'assets run --period ${period}'`);
-  if (!drafts.length && !bankUnmatched.length && !overdueInvoices.length && !recurring.length && !assetsDue) {
+  if (!drafts.length && !draftInvoices.length && !bankUnmatched.length && !overdueInvoices.length && !recurring.length && !assetsDue) {
     warnings.push('all clear — the month can be closed');
   }
 

@@ -10,18 +10,12 @@
 // after per-line discounts; invoice-level discounts are NOT allocated down to
 // lines — documented approximation). Credit notes are excluded.
 // Read-only. `report sales` is the agent's weekly-briefing number.
-import { listInvoices } from '../invoice/index.js';
+import { listInvoices, lineDiscountCents } from '../invoice/index.js';
 
 export function salesError(code, message) {
   const e = new Error(message);
   e.code = code;
   return e;
-}
-
-function lineDiscountCents(line) {
-  if (line.discount_type === 'pct') return Math.round(line.amount_cents * line.discount_value / 10000);
-  if (line.discount_type === 'amount') return Math.min(line.discount_value, line.amount_cents);
-  return 0;
 }
 
 /**

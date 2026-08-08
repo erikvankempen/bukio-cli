@@ -17,6 +17,7 @@ import {
 } from '../src/fx/index.js';
 import { complianceStatus, markFiled, quarterDeadline, jaarrekeningDeadline } from '../src/compliance/index.js';
 import { fetchEcbRate, parseSdmxObservations, setEcbFetcher, clearEcbFetcher } from '../src/fx/ecb.js';
+import { addAsset } from '../src/assets/index.js';
 
 const SDMX_USD = `<?xml version="1.0" encoding="UTF-8"?>
 <message:GenericData xmlns:message="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message" xmlns:generic="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/generic">
@@ -476,6 +477,50 @@ test('MCP: mutations are plan-only by default; execute books with the actor', as
     // invalid call -> isError
     const bad = await mcp.call('tools/call', { name: 'entry_add', arguments: { date: '2026-07-05', description: 'x', postings: ['1100:1.00'], mode: 'execute' } });
     assert.equal(bad.result.isError, true);
+  } finally {
+    await mcp.close();
+  }
+});
+
+test('MCP: assets_run books DEPRECIATION, not recurring entries (import-collision regression)', async () => {
+  const tmp = await import('node:fs/promises');
+  const dir = await tmp.mkdtemp('/tmp/mcp-test-');
+  const dbPath = `${dir}/x.db`;
+  const fileDb = openDb(dbPath);
+  seedDefaultChart(fileDb);
+  fileDb.prepare(`
+    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
+            'Industrieweg 12', '2712 CD', 'Zoetermeer', 0)
+  `).run();
+  // asset with depreciation due for 2026-01 (5y linear on 120000 = 2000/mo)
+  addAsset(fileDb, {
+    name: 'Laptop', purchaseDate: '2025-12-15', purchasePriceCents: 120000,
+    depreciationStartDate: '2026-01-01', recognitionDate: '2026-01-01',
+    assetAccount: '1800', expenseAccount: '4600', actor: 'agent:test',
+  });
+  fileDb.close();
+
+  const mcp = mcpSession(dbPath);
+  try {
+    await mcp.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const r = await mcp.call('tools/call', {
+      name: 'assets_run',
+      arguments: { period: '2026-01', mode: 'execute', actor: 'agent:mcp-test' },
+    });
+    assert.equal(r.result.isError, false);
+    const data = JSON.parse(r.result.content[0].text);
+    assert.equal(data.mode, 'execute');
+    assert.equal(data.booked.length, 1);
+
+    const db2 = openDb(dbPath);
+    try {
+      const sources = db2.prepare('SELECT DISTINCT source FROM journal_entries').all().map((x) => x.source);
+      assert.ok(sources.includes('assets'), 'a depreciation entry (source=assets) must be booked');
+      assert.ok(!sources.includes('recurring'), 'assets_run must NOT generate recurring entries');
+    } finally {
+      db2.close();
+    }
   } finally {
     await mcp.close();
   }

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 17:09:02 UTC — **✅ 515 passing · 0 failing (515 tests)**
+**Latest run:** 2026-08-08 17:26:59 UTC — **✅ 518 passing · 0 failing (518 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -31,7 +31,7 @@
 
 ### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar
 
-20 passing · 0 failing
+21 passing · 0 failing
 
     - ✅ fx: parseRate and convertFx — integer math, round-half-up
     - ✅ fx: setFxRate upsert + audit; getFxRate exact then latest-on/before
@@ -51,6 +51,7 @@
     - ✅ MCP: initialize + tools/list + read-only calls work end-to-end
     - ✅ MCP: non-object JSON-RPC messages get Invalid Request, server survives
     - ✅ MCP: mutations are plan-only by default; execute books with the actor
+    - ✅ MCP: assets_run books DEPRECIATION, not recurring entries (import-collision regression)
     - ✅ MCP: contact_add preserves postal_code and vat_id (regression)
     - ✅ MCP: BUKIO_MCP_READONLY blocks execution
 
@@ -262,10 +263,11 @@
 
 ### export.test.js — export xaf (Auditfile 4.0, round-trips through the importer) + audit csv/xlsx
 
-9 passing · 0 failing
+10 passing · 0 failing
 
     - ✅ export xaf: writes a 4.0 file with header, chart and one Mutatie per posted entry
     - ✅ export xaf: 3-leg entry round-trips through the importer losslessly
+    - ✅ export xaf: follows the FISCAL year for non-calendar fiscal years
     - ✅ export xaf: records an export.xaf audit row
     - ✅ export xaf: throws EXPORT_EMPTY_YEAR for a year with no posted entries
     - ✅ export xaf: escaping — ampersands and < in descriptions survive XML
@@ -649,7 +651,7 @@
 
 ### year-end.test.js — annual close, jaarrekening micro/klein, ICP
 
-18 passing · 0 failing
+19 passing · 0 failing
 
     - ✅ year-end close: posts closing + appropriation, balanced, source closing
     - ✅ year-end close: guards — drafts block, empty year reports
@@ -659,6 +661,7 @@
     - ✅ jaarrekening: klein model — resultaat counts inkoop ONCE and adds overige bedrijfsopbrengsten
     - ✅ jaarrekening: after closing, result sits in equity (no onverdeeld)
     - ✅ jaarrekening: klein P&L follows the FISCAL year, not the calendar year
+    - ✅ year-end close: follows the FISCAL year for non-calendar fiscal years
     - ✅ jaarrekening: invalid model rejected
     - ✅ jaarrekening: account-level amounts are numbers, never NaN
     - ✅ jaarrekening: PDF html renders account detail without NaN
