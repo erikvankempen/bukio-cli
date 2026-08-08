@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 12:16:27 UTC — **✅ 432 passing · 0 failing (432 tests)**
+**Latest run:** 2026-08-08 12:21:20 UTC — **✅ 433 passing · 0 failing (433 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -220,7 +220,7 @@
 
 ### hardening.test.js — 
 
-84 passing · 0 failing
+85 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -246,6 +246,7 @@
     - ✅ SEPA MsgId stays within the 35-char limit even for huge batch ids
     - ✅ UBL uses EUR currencyID and carries the supplier postal code
     - ✅ CSV and XLSX exports neuter formula injection
+    - ✅ jaarrekening XLSX guards formula injection in account and company names
     - ✅ invoice list --status overdue filters the derived status
     - ✅ MCP: vat_book execute leaves a draft unless post=true; invoice_pay defaults to outstanding
     - ✅ entry with the same account on both sides books the net

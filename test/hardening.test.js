@@ -88,6 +88,7 @@ import { buildDepreciationTemplate, createTemplate, getTemplate, setTemplateStat
 import { yearEndStatus, yearEndClose } from '../src/year-end/index.js';
 import { markFiled } from '../src/compliance/index.js';
 import { toCsv, writeXlsx } from '../src/report/export.js';
+import { renderJaarrekeningXlsx } from '../src/report/jaarrekening-xlsx.js';
 
 const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
 
@@ -627,6 +628,33 @@ test('CSV and XLSX exports neuter formula injection', async () => {
   await wb.xlsx.readFile(file);
   const cell = wb.getWorksheet('S').getCell('A3');
   assert.equal(cell.value, "'=HYPERLINK(\"https://evil\",\"x\")");
+});
+
+test('jaarrekening XLSX guards formula injection in account and company names', async () => {
+  // hostile company name + hostile account name must be stored as TEXT cells
+  db.prepare("UPDATE company SET name = '=HYPERLINK(\"https://evil\",\"x\")' WHERE id = 1").run();
+  db.prepare("INSERT INTO accounts (code, name, type, normal_balance, rgs_code) VALUES ('9999', '=SUM(A1:A2)', 'expense', 'debit', 'WBED.42')").run();
+  const e = createEntry(db, {
+    date: '2026-06-01', description: 'kost',
+    postings: [{ code: '1100', amountCents: 1000 }, { code: '9999', amountCents: -1000 }],
+  });
+  postEntry(db, { id: e.id });
+  const report = jaarrekening(db, { year: 2026, model: 'klein' });
+  const file = path.join(mkdtempSync(path.join(os.tmpdir(), 'bukio-jrk-inj-')), 'jrk.xlsx');
+  await renderJaarrekeningXlsx(report, { outPath: file });
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(file);
+  // company name (Balans!A3 — A1 is the column header row, A2 the title) must be guarded text, not a formula
+  const nameCell = wb.getWorksheet('Balans').getCell('A3');
+  assert.ok(String(nameCell.value).startsWith("'=HYPERLINK"), `company name must be guarded, got: ${nameCell.value}`);
+  // hostile account name in the W&V sheet must be guarded too
+  const wv = wb.getWorksheet('Winst en verlies');
+  let guarded = false;
+  wv.eachRow((row) => {
+    const v = String(row.getCell(1).value ?? '');
+    if (v.includes('=SUM(A1:A2)')) guarded = v.startsWith("'");
+  });
+  assert.ok(guarded, 'account name must be guarded in the W&V sheet');
 });
 
 test('invoice list --status overdue filters the derived status', () => {

@@ -10,7 +10,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-428%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-433%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -1057,7 +1057,7 @@ three standard modes); treat the ratios, not the decimals, as the point.
 | 8 | SEPA payment batches: payables register (transfer vs direct-debit), pain.001 export for bank-portal upload | Prepare vendor payments in bukio, upload the file in the bank, close the loop via the CAMT import — **✅ done (v0.11.0, 295 tests green)** | planned |
 | 9 | External handover: `export xaf` (Auditfile Financieel 4.0) + audit log as csv/xlsx | The year as a file your boekhouder/tax advisor/auditor imports directly — **✅ done (v0.12.0, 342 tests green)** | planned |
 | 10 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
-| 11 | Items catalog + discounts + invoice languages: `item` CRUD, `invoice create --items/--discount-*/--language`, fractional quantities, per-line + total discounts with per-rate VAT allocation, VAT breakdown per rate on PDF/UBL, company logo on the PDF | Invoice from a reusable catalog with discounts, in Dutch or English, with the company logo — **✅ done (v0.13.0, 428 tests green)** | planned |
+| 11 | Items catalog + discounts + invoice languages: `item` CRUD, `invoice create --items/--discount-*/--language`, fractional quantities, per-line + total discounts with per-rate VAT allocation, VAT breakdown per rate on PDF/UBL, company logo on the PDF | Invoice from a reusable catalog with discounts, in Dutch or English, with the company logo — **✅ done (v0.13.0, 433 tests green)** | planned |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 

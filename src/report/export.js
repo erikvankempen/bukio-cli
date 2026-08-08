@@ -16,7 +16,7 @@
  * Prefix those cells with a single quote — Excel then shows them as text.
  * Negative amounts ('-12.34') are left untouched: they are valid numbers.
  */
-function guardFormula(s) {
+export function guardFormula(s) {
   return /^\s*[=+@]/.test(s) ? `'${s}` : s;
 }
 
