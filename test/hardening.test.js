@@ -49,6 +49,7 @@ import { seedDefaultChart, deactivateAccount, reactivateAccount, getAccountByCod
 import { createEntry, postEntry, reverseEntry, getEntry, listEntries } from '../src/core/entries.js';
 import { parseAmount } from '../src/core/money.js';
 import { trialBalance } from '../src/report/trial-balance.js';
+import { balans } from '../src/report/balans.js';
 import {
   enableVatModule, bookVatEntry, obReadout, parsePeriod,
   parseVatPostingSpecs, expandVatPostings,
@@ -1588,4 +1589,82 @@ test('entry add --dry-run validates like the real run (garbage date/desc/unbalan
   const check = openDb(dbPath);
   assert.equal(check.prepare('SELECT COUNT(*) c FROM journal_entries').get().c, 0, 'dry-run must not write');
   check.close();
+});
+
+// --- F22: day-overflow calendar dates rejected at EVERY money boundary ------
+// (pre-release pass 8): validateDate/validDate only checked Number.isNaN, but
+// JS rolls 2026-02-30 -> Mar 2 with a valid getTime() — impossible dates were
+// POSTED into the ledger (verified: entry add --date 2026-02-30 --post and
+// import opening-balances --date 2026-02-30 both wrote 2026-02-30 rows).
+
+test('entry add rejects day-overflow dates (2026-02-30 was posted before)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  const bad = cli(dbPath, ['entry', 'add', '--date', '2026-02-30', '--desc', 'x', '--postings', '1100:100.00,8000:-100.00']);
+  assert.equal(bad.code, 1);
+  assert.equal(bad.out.error.code, 'INVALID_DATE');
+  // module boundary too
+  setup();
+  assert.throws(
+    () => createEntry(db, { date: '2026-04-31', description: 'x', postings: [{ code: '1100', amountCents: 100 }, { code: '8000', amountCents: -100 }], actor: 'agent:test' }),
+    (e) => e.code === 'INVALID_DATE',
+  );
+  // valid dates (incl. leap day) still pass
+  const ok = createEntry(db, { date: '2024-02-29', description: 'leap', postings: [{ code: '1100', amountCents: 100 }, { code: '8000', amountCents: -100 }], actor: 'agent:test' });
+  assert.ok(ok.id);
+});
+
+test('import opening-balances rejects a day-overflow --date', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-ob-'));
+  const csvPath = path.join(dir, 'ob.csv');
+  writeFileSync(csvPath, '1100,10000.00\n3000,-10000.00\n');
+  const bad = cli(dbPath, ['import', 'opening-balances', '--file', csvPath, '--date', '2026-02-30']);
+  assert.equal(bad.code, 1);
+  assert.equal(bad.out.error.code, 'INVALID_DATE');
+  // nothing was written
+  const check = openDb(dbPath);
+  assert.equal(check.prepare('SELECT COUNT(*) c FROM journal_entries').get().c, 0, 'a rejected opening-balances import writes nothing');
+  check.close();
+});
+
+test('fx set rejects a day-overflow date (it used to store 2026-02-30 in fx_rates)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  const bad = cli(dbPath, ['fx', 'set', '--currency', 'USD', '--date', '2026-02-30', '--rate', '1.0875']);
+  assert.equal(bad.code, 1);
+  assert.equal(bad.out.error.code, 'INVALID_DATE');
+  // and the module boundary
+  setup();
+  assert.throws(() => setFxRate(db, { currency: 'USD', date: '2026-02-30', rate: '1.0875', actor: 'agent:test' }), (e) => e.code === 'INVALID_DATE');
+});
+
+test('report balans rejects a garbage as-of (it silently read as "forever" before)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  const bad = cli(dbPath, ['report', 'balans', '--as-of', 'garbage']);
+  assert.equal(bad.code, 1);
+  assert.equal(bad.out.error.code, 'INVALID_DATE');
+  // module boundary too
+  setup();
+  assert.throws(() => balans(db, { asOf: 'garbage' }), (e) => e.code === 'INVALID_DATE');
+  assert.throws(() => balans(db, { asOf: '2026-02-30' }), (e) => e.code === 'INVALID_DATE');
+});
+
+test('report pnl / journal / trial-balance reject a garbage year (no abc-01-01 ranges)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  const pnlBad = cli(dbPath, ['report', 'pnl', '--year', 'abc']);
+  assert.equal(pnlBad.code, 1);
+  assert.equal(pnlBad.out.error.code, 'INVALID_DATE');
+  const journalBad = cli(dbPath, ['report', 'journal', '--year', 'abc']);
+  assert.equal(journalBad.code, 1);
+  assert.equal(journalBad.out.error.code, 'INVALID_DATE');
+  const tbBad = cli(dbPath, ['report', 'trial-balance', '--year', 'abc']);
+  assert.equal(tbBad.code, 1);
+  assert.equal(tbBad.out.error.code, 'INVALID_YEAR');
+  // valid years still work
+  const ok = cli(dbPath, ['report', 'pnl', '--year', '2026']);
+  assert.equal(ok.code, 0);
 });

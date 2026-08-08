@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 05:14:22 UTC — **✅ 382 passing · 0 failing (382 tests)**
+**Latest run:** 2026-08-08 05:24:31 UTC — **✅ 387 passing · 0 failing (387 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -218,7 +218,7 @@
 
 ### hardening.test.js — 
 
-71 passing · 0 failing
+76 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -291,6 +291,11 @@
     - ✅ invoice create --dry-run validates like the real run (garbage date/contact rejected, nothing written)
     - ✅ creditInvoice dry-run validates like the real run (no plan for nonexistent/unfinalized invoices)
     - ✅ entry add --dry-run validates like the real run (garbage date/desc/unbalanced rejected, nothing written)
+    - ✅ entry add rejects day-overflow dates (2026-02-30 was posted before)
+    - ✅ import opening-balances rejects a day-overflow --date
+    - ✅ fx set rejects a day-overflow date (it used to store 2026-02-30 in fx_rates)
+    - ✅ report balans rejects a garbage as-of (it silently read as "forever" before)
+    - ✅ report pnl / journal / trial-balance reject a garbage year (no abc-01-01 ranges)
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 

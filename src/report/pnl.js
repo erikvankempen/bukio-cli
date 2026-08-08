@@ -10,6 +10,21 @@ const PNL_GROUPS = ['WOMZ.80', 'WOVB.82', 'WKPR.70', 'WPER.40', 'WAFS.41', 'WBED
  * sections show positive cost (net). result = revenue - costs.
  */
 export function pnl(db, { from, to }) {
+  // a garbage year builds ranges like 'abc-01-01' — reject before the query
+  // (same class as the exportXaf/jaarrekening year fix)
+  for (const [label, v] of [['from', from], ['to', to]]) {
+    if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      const e = new Error(`'${label}' '${v}' must be YYYY-MM-DD`);
+      e.code = 'INVALID_DATE';
+      throw e;
+    }
+    const d = new Date(`${v}T00:00:00Z`);
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v) {
+      const e = new Error(`'${label}' '${v}' is not a valid calendar date`);
+      e.code = 'INVALID_DATE';
+      throw e;
+    }
+  }
   const rows = db.prepare(`
     SELECT a.id, a.code, a.name, a.type, a.rgs_code,
       COALESCE(SUM(p.amount_cents), 0) AS net_cents

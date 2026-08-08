@@ -1,5 +1,10 @@
 // Trial balance — per-account debit/credit/net from posted entries.
 export function trialBalance(db, { year = null } = {}) {
+  if (year != null && !/^\d{4}$/.test(String(year))) {
+    const e = new Error(`year '${year}' must be YYYY`);
+    e.code = 'INVALID_YEAR';
+    throw e;
+  }
   const rows = db.prepare(`
     SELECT a.code, a.name, a.type,
       SUM(CASE WHEN p.amount_cents > 0 THEN p.amount_cents ELSE 0 END) AS debit_cents,

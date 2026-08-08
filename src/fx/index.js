@@ -38,6 +38,14 @@ export function convertFx(fxCents, rateX10000) {
 export function setFxRate(db, { currency, date, rate, source = 'manual', actor = 'human', dryRun = false }) {
   if (!ISO4217.test(currency)) throw fxError('INVALID_CURRENCY', `currency '${currency}' must be ISO 4217 (3 letters)`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw fxError('INVALID_DATE', `date '${date}' must be YYYY-MM-DD`);
+  {
+    // ISO round-trip: JS rolls day-overflow (2026-02-30 -> Mar 2) — an
+    // impossible rate date would never be found by a real booking lookup
+    const d = new Date(`${date}T00:00:00Z`);
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) {
+      throw fxError('INVALID_DATE', `date '${date}' is not a valid calendar date`);
+    }
+  }
   const rateX10000 = typeof rate === 'number' ? rate : parseRate(rate);
   if (dryRun) {
     return { action: 'fx.set', currency, date, rate: (rateX10000 / 10000).toFixed(4), rate_x10000: rateX10000, dryRun: true };

@@ -27,8 +27,11 @@ export function importError(code, message, details = null) {
 }
 
 function validDate(s) {
-  return typeof s === 'string' && DATE_RE.test(s)
-    && !Number.isNaN(new Date(`${s}T00:00:00Z`).getTime());
+  if (typeof s !== 'string' || !DATE_RE.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  // ISO round-trip: JS rolls day-overflow (2026-02-30 -> Mar 2) with a valid
+  // getTime() — only exact calendar dates may enter the books
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
 
 function todayIso() {

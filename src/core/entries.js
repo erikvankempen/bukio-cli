@@ -15,7 +15,11 @@ export function entryError(code, message) {
 export function validateDate(date) {
   if (!DATE_RE.test(date)) throw entryError('INVALID_DATE', `date '${date}' must be yyyy-mm-dd`);
   const d = new Date(`${date}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) throw entryError('INVALID_DATE', `date '${date}' is not a valid calendar date`);
+  // ISO round-trip: JS rolls day-overflow (2026-02-30 -> Mar 2) with a valid
+  // getTime() — only exact calendar dates may reach the ledger
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) {
+    throw entryError('INVALID_DATE', `date '${date}' is not a valid calendar date`);
+  }
 }
 
 export function nowIso() {

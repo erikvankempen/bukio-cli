@@ -33,6 +33,22 @@ function netPerAccount(db, { asOf, types }) {
  *   inception; the balans always balances either way).
  */
 export function balans(db, { asOf }) {
+  // validate asOf: a garbage date would silently read as "as of forever"
+  // ('2026-01-15' <= 'garbage' is TRUE in string comparison) and return the
+  // all-time balans with a misleading as_of label
+  if (typeof asOf !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) {
+    const e = new Error(`as-of '${asOf}' must be YYYY-MM-DD`);
+    e.code = 'INVALID_DATE';
+    throw e;
+  }
+  {
+    const d = new Date(`${asOf}T00:00:00Z`);
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== asOf) {
+      const e = new Error(`as-of '${asOf}' is not a valid calendar date`);
+      e.code = 'INVALID_DATE';
+      throw e;
+    }
+  }
   const rows = netPerAccount(db, { asOf, types: BALANCE_TYPES });
 
   const resultRow = db.prepare(`
