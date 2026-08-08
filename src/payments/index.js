@@ -237,6 +237,7 @@ export function createPaymentBatch(db, {
     }
     if (!Number.isInteger(amountCents) || amountCents <= 0) { fail(lineNo, 'INVALID_AMOUNT', 'amount must be a positive amount in cents'); return; }
     if (!name) { fail(lineNo, 'NAME_REQUIRED', 'beneficiary name is required'); return; }
+    if (name.length > 70) { fail(lineNo, 'SEPA_NAME_TOO_LONG', 'beneficiary name max 70 characters (SEPA Max70Text)'); return; }
     if (!isValidIban(iban)) { fail(lineNo, 'INVALID_IBAN', `'${iban}' is not a valid IBAN`); return; }
     if (reference && reference.length > 140) { fail(lineNo, 'REFERENCE_TOO_LONG', 'reference max 140 characters'); return; }
     items.push({ contact_id: l.contact_id ?? null, name, iban, amount_cents: amountCents, reference });
@@ -269,8 +270,13 @@ export function createPaymentBatch(db, {
         mandate_id: mandate.id, mandate_ref: mandate.mandate_ref, mandate_date: mandate.mandate_date,
         mandate_seq: mandateSeqFor(db, mandate.id), scheme: mandate.scheme,
       });
+      if (c.name.length > 70) {
+        fail(lineNo, 'SEPA_NAME_TOO_LONG', `contact ${c.name.slice(0, 40)}… name max 70 characters (SEPA Max70Text)`);
+        items.pop();
+      }
       continue;
     }
+    if (c.name.length > 70) { fail(lineNo, 'SEPA_NAME_TOO_LONG', `contact ${c.name.slice(0, 40)}… name max 70 characters (SEPA Max70Text)`); continue; }
     items.push({ payable_id: p.id, contact_id: p.contact_id, name: c.name, iban, amount_cents: p.amount_cents, reference: `Factuur ${p.invoice_ref}` });
   }
 
@@ -282,6 +288,9 @@ export function createPaymentBatch(db, {
   }
 
   const totalCents = items.reduce((s, l) => s + l.amount_cents, 0);
+  if (company.name.length > 70) {
+    throw paymentsError('SEPA_NAME_TOO_LONG', `company name max 70 characters for SEPA (Max70Text) — got ${company.name.length}`);
+  }
   const plan = {
     action: 'payments.batch.create',
     batch_date: batchDate, debit_iban: debit, debit_name: company.name, batch_kind: kind,

@@ -16,7 +16,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { record } from '../audit/index.js';
 
-export const OFFICIAL_REMOTE = /github\.com[:\/]erikvankempen\/bukio-cli(\.git)?$/;
+// Anchored: the official remote is github.com/erikvankempen/bukio-cli with an
+// optional scheme (https://) or scp-like user@ prefix (git@github.com:...).
+// An unanchored regex let any URL embedding the path as a substring pass
+// (e.g. https://evil.com/github.com:erikvankempen/bukio-cli.git) — the
+// reset --hard would then fetch and apply attacker code.
+export const OFFICIAL_REMOTE = /^(?:[a-z][a-z0-9+.-]*:\/\/)?(?:[^@\s/]+@)?github\.com[:/]erikvankempen\/bukio-cli(?:\.git)?$/i;
 
 function updateError(code, message) {
   const e = new Error(message);

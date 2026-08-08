@@ -15,6 +15,7 @@ import { journal } from '../report/journal.js';
 import { aging } from '../report/aging.js';
 import { sales } from '../report/sales.js';
 import { toCsv, writeXlsx } from '../report/export.js';
+import { fiscalYearWindow } from '../year-end/index.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 
 function todayIso() {
@@ -207,8 +208,9 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const year = opts.year || currentYear();
-          const from = opts.from || `${year}-01-01`;
-          const to = opts.to || `${year}-12-31`;
+          const [fyFrom, fyTo] = fiscalYearWindow(db, year);
+          const from = opts.from || fyFrom;
+          const to = opts.to || fyTo;
           const p = pnl(db, { from, to });
           const fmt = (c) => formatAmount(c);
           const data = {
@@ -272,8 +274,9 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const year = opts.year || currentYear();
-          const from = opts.from || `${year}-01-01`;
-          const to = opts.to || `${year}-12-31`;
+          const [fyFrom, fyTo] = fiscalYearWindow(db, year);
+          const from = opts.from || fyFrom;
+          const to = opts.to || fyTo;
           const rows = journal(db, { from, to });
           const data = {
             from, to,

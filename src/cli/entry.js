@@ -109,7 +109,7 @@ export function make(program) {
   entry
     .command('list')
     .description('list journal entries')
-    .option('--state <state>', 'draft|posted|reversed')
+    .option('--state <state>', 'draft|posted')
     .option('--date-from <yyyy-mm-dd>', 'earliest date (inclusive)')
     .option('--date-to <yyyy-mm-dd>', 'latest date (inclusive)')
     .option('--limit <n>', 'max rows', '100')

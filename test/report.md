@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 20:52:30 UTC — **✅ 550 passing · 0 failing (550 tests)**
+**Latest run:** 2026-08-08 21:26:16 UTC — **✅ 562 passing · 0 failing (562 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -57,7 +57,7 @@
 
 ### assets.test.js — fixed assets: schemes, mid-life adoption, runs, disposal, activastaat
 
-24 passing · 0 failing
+25 passing · 0 failing
 
     - ✅ ensureDefaultScheme: creates the standard 5y linear scheme lazily
     - ✅ createScheme: rejects duplicate names and bad methods
@@ -83,6 +83,7 @@
     - ✅ register: book values and totals as of a date
     - ✅ register: disposal dates and proceeds surface in the register
     - ✅ trial balance stays balanced through the whole lifecycle
+    - ✅ disposeAsset: entry + asset status are atomic (no orphaned entry on rollback)
 
 ### attachments.test.js — in-DB/file document attachments: add/list/show/remove, 25 MB cap, dedupe, metadata-only lists, audit
 
@@ -279,6 +280,18 @@
     - ✅ audit: csv format exports rows with headers
     - ✅ audit: xlsx format requires --out and writes a workbook
     - ✅ export xaf: unknown-year-only drafts → EXPORT_EMPTY_YEAR via CLI
+
+### fiscal-year.test.js — 
+
+7 passing · 0 failing
+
+    - ✅ fiscalYearWindow: year 2026 for FYE 03-31 spans 2025-04-01..2026-03-31
+    - ✅ report pnl --year uses the fiscal window (jan prev-FY in, nov this-FY out)
+    - ✅ report journal --year uses the fiscal window
+    - ✅ report trial-balance --year uses the fiscal window
+    - ✅ pnl() module with explicit from/to is untouched by the fiscal change
+    - ✅ sales() uses the fiscal window for --year
+    - ✅ MCP pnl tool reports the fiscal window
 
 ### hardening.test.js — 
 
@@ -519,7 +532,7 @@
 
 ### payments.test.js — SEPA payment batches: payables, pain.001 export
 
-18 passing · 0 failing
+21 passing · 0 failing
 
     - ✅ isValidIban: mod-97 check with normalization
     - ✅ payables: add transfer + direct-debit, audit, list filters
@@ -530,6 +543,9 @@
     - ✅ batch: company without IBAN fails with a hint
     - ✅ batch: contact without IBAN fails with a hint and details
     - ✅ batch: invalid iban, zero amount, missing name, long reference all collected
+    - ✅ batch: SEPA names longer than 70 chars are rejected (Max70Text)
+    - ✅ batch: payables path rejects a contact name longer than 70 chars
+    - ✅ batch: company name longer than 70 chars is rejected
     - ✅ batch: from payables excludes direct-debit and marks payables in_batch
     - ✅ batch: dry-run writes nothing; empty batch rejected
     - ✅ batch CSV: comma and semicolon delimiters, Dutch amounts
@@ -637,10 +653,11 @@
 
 ### update.test.js — 
 
-10 passing · 0 failing
+11 passing · 0 failing
 
     - ✅ update plan: a non-clone directory is refused
     - ✅ update plan: a non-official remote is refused
+    - ✅ update plan: a URL embedding the official path as substring is refused (anchored regex)
     - ✅ update plan: shows the incoming commit and current version without warning
     - ✅ update plan: local modifications are reported as overwrite warnings
     - ✅ update: refuses to run without --yes

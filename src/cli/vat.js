@@ -15,7 +15,7 @@ import { getTransaction, linkTransaction } from '../bank/index.js';
 import { ensureDb, makeCtx, output, fail, table, dbError } from './util.js';
 import { validateDate } from '../core/entries.js';
 
-import { getFxRate, parseRate, toEurPostings, resolveRate } from '../fx/index.js';
+import { toEurPostings, resolveRate } from '../fx/index.js';
 
 /** Convert posting specs to EUR when --currency given; auto rate lookup + ECB fallback. */
 async function applyFxToSpecs(db, specs, { currency, rate, date, actor }) {

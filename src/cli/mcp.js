@@ -27,7 +27,7 @@ import {
 } from '../invoice/index.js';
 import { runDue, previewDue } from '../recurring/index.js';
 import { register, addAsset, runDue as assetsRunDue, disposeAsset } from '../assets/index.js';
-import { yearEndClose, yearEndStatus } from '../year-end/index.js';
+import { yearEndClose, yearEndStatus, fiscalYearWindow } from '../year-end/index.js';
 import { setFxRate, parseRate, toEurPostings, resolveRate } from '../fx/index.js';
 import { icpReadout } from '../icp/index.js';
 import { list as auditList } from '../audit/index.js';
@@ -110,7 +110,8 @@ tool({
   handler: (db, args) => {
     const year = String(args.year ?? '');
     if (!/^\d{4}$/.test(year)) throw new McpError('INVALID_YEAR', `year '${args.year}' must be YYYY`);
-    return pnl(db, { from: `${year}-01-01`, to: `${year}-12-31` });
+    const [from, to] = fiscalYearWindow(db, year);
+    return pnl(db, { from, to });
   },
 });
 tool({
@@ -122,7 +123,8 @@ tool({
     if (!/^\d{4}$/.test(year)) throw new McpError('INVALID_YEAR', `year '${args.year}' must be YYYY`);
     const limit = args.limit ?? 500;
     if (!Number.isInteger(limit) || limit < 0) throw new McpError('INVALID_LIMIT', `limit must be a non-negative integer, got '${limit}'`);
-    const rows = journal(db, { from: `${year}-01-01`, to: `${year}-12-31`, limit: limit + 1 });
+    const [from, to] = fiscalYearWindow(db, year);
+    const rows = journal(db, { from, to, limit: limit + 1 });
     const truncated = rows.length > limit;
     return { rows: truncated ? rows.slice(0, limit) : rows, truncated, limit };
   },
@@ -869,7 +871,7 @@ function dispatch(db, ctx, msg) {
       return Promise.resolve(rpcResponse(id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: 'bukio-cli', version: '0.14.0' },
+        serverInfo: { name: 'bukio-cli', version: '0.14.1' },
       }));
     case 'notifications/initialized':
     case 'initialized':

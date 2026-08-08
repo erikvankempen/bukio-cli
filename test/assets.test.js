@@ -339,3 +339,26 @@ test('trial balance stays balanced through the whole lifecycle', () => {
   `).get();
   assert.equal(tb.d, tb.c);
 });
+
+test('disposeAsset: entry + asset status are atomic (no orphaned entry on rollback)', () => {
+  const { asset } = addAsset(db, {
+    name: 'Atomic', purchaseDate: '2024-01-01', purchasePriceCents: 50000,
+    depreciationStartDate: '2024-02-01', recognitionDate: '2024-02-01',
+    assetAccount: '1800', expenseAccount: '4600',
+  });
+  const before = listEntries(db, { state: 'posted' }).length;
+  // force the UPDATE assets step (inside the disposal transaction) to fail:
+  // a trigger error on the status update rolls the whole tx back
+  assert.throws(() => {
+    db.prepare(`
+      CREATE TRIGGER IF NOT EXISTS trg_fail_disposal BEFORE UPDATE OF status ON assets
+      WHEN NEW.status = 'disposed' AND OLD.name = 'Atomic'
+      BEGIN SELECT RAISE(ABORT, 'boom'); END
+    `).run();
+    disposeAsset(db, { id: asset.id, date: '2024-06-01', proceedsCents: 0 });
+  }, /boom/);
+  db.prepare('DROP TRIGGER trg_fail_disposal').run();
+  // nothing persisted: no new posted entry, asset still active
+  assert.equal(listEntries(db, { state: 'posted' }).length, before);
+  assert.equal(listAssets(db)[0].status, 'active');
+});

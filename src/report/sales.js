@@ -11,6 +11,7 @@
 // lines — documented approximation). Credit notes are excluded.
 // Read-only. `report sales` is the agent's weekly-briefing number.
 import { listInvoices, lineDiscountCents } from '../invoice/index.js';
+import { fiscalYearWindow } from '../year-end/index.js';
 
 export function salesError(code, message) {
   const e = new Error(message);
@@ -30,8 +31,7 @@ export function sales(db, { year, by = 'contact' } = {}) {
   if (!['contact', 'item'].includes(by)) {
     throw salesError('INVALID_KIND', `by must be 'contact' or 'item', got '${by}'`);
   }
-  const from = `${year}-01-01`;
-  const to = `${year}-12-31`;
+  const [from, to] = fiscalYearWindow(db, year);
   const invoices = listInvoices(db)
     .filter((i) => i.invoice_type === 'sales')
     .filter((i) => i.status !== 'draft' && i.status !== 'void')

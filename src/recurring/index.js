@@ -44,6 +44,9 @@ function addDays(dateStr, days) {
 }
 
 export function addPeriod(dateStr, frequency, dayOfPeriod) {
+  if (!Number.isInteger(dayOfPeriod) || dayOfPeriod < 1 || dayOfPeriod > 28) {
+    throw recurringError('INVALID_DAY', `day-of-period must be an integer 1-28 (29-31 clamp to the next month), got '${dayOfPeriod}'`);
+  }
   const [y, m] = dateStr.split('-').map(Number);
   const months = frequency === 'monthly' ? 1 : frequency === 'quarterly' ? 3 : 12;
   const total = y * 12 + (m - 1) + months;

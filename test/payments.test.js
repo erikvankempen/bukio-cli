@@ -134,6 +134,37 @@ test('batch: invalid iban, zero amount, missing name, long reference all collect
   assert.equal(c.id > 0, true);
 });
 
+test('batch: SEPA names longer than 70 chars are rejected (Max70Text)', () => {
+  vendor();
+  const longName = 'Stichting Voor Het Behoud Van Historische Monumenten In De Provincie Noord-Holland'; // 76 chars
+  assert.throws(
+    () => createPaymentBatch(db, { lines: [{ name: longName, iban: IBAN, amountCents: 100 }] }),
+    (e) => e.code === 'BATCH_VALIDATION_FAILED' && e.details.some((d) => d.error.includes('SEPA_NAME_TOO_LONG')),
+  );
+  // exactly 70 chars is fine
+  const ok = createPaymentBatch(db, { lines: [{ name: longName.slice(0, 70), iban: IBAN, amountCents: 100 }] });
+  assert.equal(ok.lines[0].name.length, 70);
+});
+
+test('batch: payables path rejects a contact name longer than 70 chars', () => {
+  const longName = 'Stichting Voor Het Behoud Van Historische Monumenten In De Provincie Noord-Holland';
+  const c = createContact(db, { name: longName, iban: IBAN });
+  addPayable(db, { contact: c.id, invoiceRef: 'LONG', date: '2026-07-01', amountCents: 12100 });
+  assert.throws(
+    () => createPaymentBatch(db, { payableIds: [1], actor: 'agent:test' }),
+    (e) => e.code === 'BATCH_VALIDATION_FAILED' && e.details.some((d) => d.error.includes('SEPA_NAME_TOO_LONG')),
+  );
+});
+
+test('batch: company name longer than 70 chars is rejected', () => {
+  vendor();
+  db.prepare('UPDATE company SET name = ?').run('Naamloze Vennootschap Voor Het Beheer Van Onroerende Zaken En Effecten In Amsterdam Zuidoost'); // > 70
+  assert.throws(
+    () => createPaymentBatch(db, { lines: [{ name: 'Vimexx', iban: IBAN, amountCents: 100 }] }),
+    (e) => e.code === 'SEPA_NAME_TOO_LONG' && e.message.includes('company name'),
+  );
+});
+
 test('batch: from payables excludes direct-debit and marks payables in_batch', () => {
   vendor();
   addPayable(db, { contact: 'Vimexx', invoiceRef: 'A1', date: '2026-07-01', amountCents: 12100 });

@@ -500,13 +500,19 @@ export function disposeAsset(db, {
   }
 
   const description = `Afstoting ${asset.name} (${date})`;
-  const entry = createEntry(db, {
-    date, description, postings, source: 'assets',
-    sourceRef: `dispose:${asset.id}:${date}`, actor,
-  });
-  const posted = postEntry(db, { id: entry.id, actor });
-  db.prepare('UPDATE assets SET status = ?, disposed_date = ?, disposed_proceeds_cents = ?, disposal_entry_id = ? WHERE id = ?')
-    .run('disposed', date, proceedsCents, posted.id, id);
+  // Atomic: entry + asset-status change commit together. A crash between
+  // postEntry's commit and the UPDATE assets left the entry posted with the
+  // asset still active — a retry then booked the disposal twice.
+  let posted = null;
+  db.transaction(() => {
+    const entry = createEntry(db, {
+      date, description, postings, source: 'assets',
+      sourceRef: `dispose:${asset.id}:${date}`, actor,
+    });
+    posted = postEntry(db, { id: entry.id, actor });
+    db.prepare('UPDATE assets SET status = ?, disposed_date = ?, disposed_proceeds_cents = ?, disposal_entry_id = ? WHERE id = ?')
+      .run('disposed', date, proceedsCents, posted.id, id);
+  })();
   record(db, {
     actor, action: 'assets.dispose', command: 'assets dispose',
     args: { asset_id: id, date, proceeds_cents: proceedsCents, result_cents: result },

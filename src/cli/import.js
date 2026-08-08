@@ -13,7 +13,7 @@ import {
   importJournalCsv, importOpeningBalances, importXaf, importContacts, readImportFile,
 } from '../import/index.js';
 import { importUblInvoice } from '../import/ubl-invoice.js';
-import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { ensureDb, makeCtx, output, fail } from './util.js';
 
 export function make(program) {
   const imp = program.command('import').description('import data: opening balances, journal CSV, XAF 4.0 audit file');

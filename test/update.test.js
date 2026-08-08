@@ -70,6 +70,15 @@ test('update plan: a non-official remote is refused', () => {
   );
 });
 
+test('update plan: a URL embedding the official path as substring is refused (anchored regex)', () => {
+  const { work1 } = setupFixture();
+  sh(work1, ['remote', 'set-url', 'origin', 'https://evil.com/github.com:erikvankempen/bukio-cli.git']);
+  assert.throws(
+    () => planUpdate({ repoPath: work1 }),
+    (err) => err.code === 'UPDATE_WRONG_REMOTE',
+  );
+});
+
 test('update plan: shows the incoming commit and current version without warning', () => {
   const { work1 } = setupFixture();
   const plan = planUpdate({ repoPath: work1, verifyRemote: false });
