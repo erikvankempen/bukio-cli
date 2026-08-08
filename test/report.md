@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 11:33:04 UTC — **✅ 420 passing · 0 failing (420 tests)**
+**Latest run:** 2026-08-08 11:38:33 UTC — **✅ 424 passing · 0 failing (424 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -349,7 +349,7 @@
 
 ### invoice-features.test.js — 
 
-25 passing · 0 failing
+29 passing · 0 failing
 
     - ✅ fractional quantities parse to milli-units
     - ✅ line discounts parse (pct and amount)
@@ -374,6 +374,10 @@
     - ✅ credit note inherits language, total discount and line discounts
     - ✅ UBL: formatted quantity, unit code, language, discounted tax bases
     - ✅ UBL: hour unit maps to HUR
+    - ✅ PDF: Dutch labels, unit column, VAT breakdown, discount row
+    - ✅ PDF: English labels + reverse-charge wording
+    - ✅ PDF: company logo renders as a data URI in the header
+    - ✅ PDF: renders through Chromium (skipped when no browser installed)
     - ✅ company logo: set (PNG), extract round-trip, remove; audits
     - ✅ company logo: format, size and dimension guards
 

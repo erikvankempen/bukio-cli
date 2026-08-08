@@ -5,11 +5,12 @@
  */
 
 // Invoice PDF via Playwright (headless Chromium) from an HTML template.
-// Uses the locally installed Playwright browsers (see /root/.cache/ms-playwright).
 // chromium is lazy-loaded inside invoiceToPdf: playwright-core costs ~1.2s to
 // import, and keeping it out of the static graph keeps every CLI invocation
 // fast (cli/index.js pulls this module in eagerly via cli/invoice.js).
 import { formatAmount } from '../core/money.js';
+import { computeInvoiceTotals, formatQty } from './index.js';
+import { label, unitLabel } from './i18n.js';
 
 export function pdfError(code, message) {
   const e = new Error(message);
@@ -21,29 +22,66 @@ function esc(s) {
   return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function invoiceHtml(db, invoice) {
+/** Base64 data-URI of the stored company logo, or null. */
+function logoDataUri(company) {
+  if (!company?.logo || !company.logo_mime) return null;
+  return `data:${company.logo_mime};base64,${Buffer.from(company.logo).toString('base64')}`;
+}
+
+/**
+ * Build the invoice HTML. Exported for layout tests; rendered to PDF by
+ * invoiceToPdf. Language (nl|en) localizes labels and unit names; the VAT
+ * breakdown per rate is shown between subtotal and total; the company logo
+ * (if stored) renders in the header.
+ */
+export function invoiceHtml(db, invoice) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   const contact = invoice.contact;
   const isCredit = invoice.invoice_type === 'credit';
-  const vatOn = invoice.vat_cents > 0;
+  const lang = invoice.language ?? 'nl';
+  const L = (k) => label(k, lang);
 
-  const rows = invoice.lines.map((l, i) => `
+  const totals = computeInvoiceTotals(invoice.lines, invoice.discount_type, invoice.discount_value);
+  const logo = logoDataUri(company);
+
+  const rows = invoice.lines.map((l, i) => {
+    const disc = l.discount_type === 'pct'
+      ? Math.round(l.amount_cents * l.discount_value / 10000)
+      : l.discount_type === 'amount' ? Math.min(l.discount_value, l.amount_cents) : 0;
+    const vatTxt = l.vat_rate_bp ? `${(l.vat_rate_bp / 100).toFixed(1)}%`
+      : (l.vat_code === 'R' || l.vat_code === 'RE') ? (lang === 'en' ? 'reverse charge' : 'verlegd') : '-';
+    return `
       <tr>
         <td>${i + 1}</td>
-        <td>${esc(l.description)}</td>
-        <td class="num">${l.quantity}</td>
+        <td>${esc(l.description)}${disc > 0 ? `<div class="disc">${L('discount')}: −${formatAmount(disc)}</div>` : ''}</td>
+        <td class="num">${formatQty(l.quantity)}</td>
+        <td>${esc(unitLabel(l.unit, lang) || '')}</td>
         <td class="num">${formatAmount(l.unit_price_cents)}</td>
-        <td class="num">${l.vat_rate_bp ? (l.vat_rate_bp / 100).toFixed(1) + '%' : (l.vat_code === 'R' || l.vat_code === 'RE' ? 'verlegd' : '-')}</td>
+        <td class="num">${vatTxt}</td>
         <td class="num">${formatAmount(l.amount_cents)}</td>
-      </tr>`).join('');
+      </tr>`;
+  }).join('');
+
+  const vatRows = totals.breakdown.map((b) => `
+      <tr><td>${L('vatOn')} ${(b.rate_bp / 100).toFixed(0)}%</td><td class="num">${formatAmount(b.base_cents)}</td><td class="num">${formatAmount(b.vat_cents)}</td></tr>`).join('');
+
+  const footerTerm = invoice.due_date
+    ? L('dueDateTerm').replace('{date}', invoice.due_date)
+    : L('defaultTerm');
+  const footerPay = L('footerPay')
+    .replace('{term}', footerTerm)
+    .replace('{iban}', esc(company.iban ?? ''))
+    .replace('{name}', esc(company.name));
 
   return `<!DOCTYPE html>
-<html lang="nl">
+<html lang="${lang}">
 <head>
 <meta charset="utf-8">
 <style>
   body { font-family: 'DejaVu Sans', sans-serif; font-size: 11px; color: #1a1a1a; margin: 0; }
   .header { display: flex; justify-content: space-between; margin-bottom: 28px; }
+  .supplier { display: flex; align-items: flex-start; gap: 12px; }
+  .supplier img.logo { max-height: 60px; max-width: 160px; object-fit: contain; }
   .supplier h1 { font-size: 18px; margin: 0 0 4px 0; }
   .supplier p { margin: 1px 0; color: #444; }
   .title { text-align: right; }
@@ -55,8 +93,9 @@ function invoiceHtml(db, invoice) {
   table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
   th { text-align: left; border-bottom: 2px solid #333; padding: 4px 6px; font-size: 10px; text-transform: uppercase; color: #555; }
   td { border-bottom: 1px solid #ddd; padding: 6px; }
+  .disc { font-size: 10px; color: #777; }
   .num { text-align: right; }
-  .totals { width: 260px; margin-left: auto; }
+  .totals { width: 300px; margin-left: auto; }
   .totals td { border-bottom: none; padding: 3px 6px; }
   .totals .grand td { border-top: 2px solid #333; font-weight: bold; font-size: 13px; }
   .footer { margin-top: 40px; font-size: 10px; color: #666; }
@@ -66,39 +105,48 @@ function invoiceHtml(db, invoice) {
 <body>
   <div class="header">
     <div class="supplier">
-      <h1>${esc(company.name)}</h1>
-      <p>${esc(company.address)}</p>
-      <p>${esc(company.postal_code)} ${esc(company.city)}</p>
-      <p>KvK ${esc(company.kvk)} · BTW ${esc(company.btw_id)}</p>
+      ${logo ? `<img class="logo" src="${logo}" alt="logo">` : ''}
+      <div>
+        <h1>${esc(company.name)}</h1>
+        <p>${esc(company.address)}</p>
+        <p>${esc(company.postal_code)} ${esc(company.city)}</p>
+        <p>${L('kvk')} ${esc(company.kvk)} · ${L('btw')} ${esc(company.btw_id)}</p>
+      </div>
     </div>
     <div class="title">
-      <h2>${isCredit ? 'CREDITFACTUUR' : 'FACTUUR'}</h2>
+      <h2>${isCredit ? L('credit') : L('invoice')}</h2>
       <p><strong>${esc(invoice.invoice_number ?? 'concept')}</strong></p>
-      <p>Datum: ${invoice.date}</p>
-      ${invoice.due_date ? `<p>Vervaldatum: ${invoice.due_date}</p>` : ''}
-      ${invoice.reference ? `<p>Referentie: ${esc(invoice.reference)}</p>` : ''}
+      <p>${L('date')}: ${invoice.date}</p>
+      ${invoice.due_date ? `<p>${L('dueDate')}: ${invoice.due_date}</p>` : ''}
+      ${invoice.reference ? `<p>${L('reference')}: ${esc(invoice.reference)}</p>` : ''}
     </div>
   </div>
   <div class="parties">
     <div>
-      <h3>Factuur aan</h3>
+      <h3>${L('billedTo')}</h3>
       <p><strong>${esc(contact.name)}</strong></p>
       <p>${esc(contact.address ?? '')}</p>
       <p>${esc(contact.postal_code ?? '')} ${esc(contact.city ?? '')}</p>
-      ${contact.vat_id ? `<p>BTW ${esc(contact.vat_id)}</p>` : ''}
+      ${contact.vat_id ? `<p>${L('btw')} ${esc(contact.vat_id)}</p>` : ''}
     </div>
   </div>
   <table>
-    <thead><tr><th>#</th><th>Omschrijving</th><th class="num">Aantal</th><th class="num">Prijs</th><th class="num">Btw</th><th class="num">Bedrag</th></tr></thead>
+    <thead><tr>
+      <th>#</th><th>${L('description')}</th>
+      <th class="num">${L('qty')}</th><th>${L('unit')}</th>
+      <th class="num">${L('price')}</th><th class="num">${L('vat')}</th><th class="num">${L('amount')}</th>
+    </tr></thead>
     <tbody>${rows}</tbody>
   </table>
   <table class="totals">
-    <tr><td>Subtotaal excl. btw</td><td class="num">${formatAmount(invoice.net_cents)}</td></tr>
-    ${vatOn ? `<tr><td>Btw</td><td class="num">${formatAmount(invoice.vat_cents)}</td></tr>` : ''}
-    <tr class="grand"><td>Totaal</td><td class="num">${formatAmount(invoice.gross_cents)}</td></tr>
+    <tr><td>${L('subtotal')}</td><td></td><td class="num">${formatAmount(totals.net_before_cents)}</td></tr>
+    ${totals.discount_cents > 0 ? `<tr><td>${L('discount')}</td><td></td><td class="num">−${formatAmount(totals.discount_cents)}</td></tr>` : ''}
+    ${vatRows}
+    ${totals.vat_cents > 0 ? `<tr><td>${L('vatTotal')}</td><td></td><td class="num">${formatAmount(totals.vat_cents)}</td></tr>` : ''}
+    <tr class="grand"><td>${L('total')} (${L('inclVat')})</td><td></td><td class="num">${formatAmount(invoice.gross_cents)}</td></tr>
   </table>
   <div class="footer">
-    <p>Gelieve het bedrag binnen ${invoice.due_date ? `${invoice.due_date}` : 'de gestelde termijn'} over te maken op IBAN ${esc(company.iban ?? '')} t.n.v. ${esc(company.name)}.</p>
+    <p>${footerPay}</p>
     ${invoice.notes ? `<p>${esc(invoice.notes)}</p>` : ''}
   </div>
 </body>

@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { openDb } from '../src/core/db.js';
 import { seedDefaultChart } from '../src/core/accounts.js';
 import { enableVatModule } from '../src/vat/index.js';
+import { formatAmount } from '../src/core/money.js';
 import {
   allocateLargestRemainder, buildInvoicePostings, computeInvoiceTotals, createContact,
   createInvoice, creditInvoice, finalizeInvoice, formatQty, getInvoice, parseItemSpec,
@@ -19,6 +20,7 @@ import {
 } from '../src/invoice/index.js';
 import { createItem, getItem, listItems, updateItem } from '../src/items/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
+import { invoiceHtml, invoiceToPdf } from '../src/invoice/pdf.js';
 import { unitLabel } from '../src/invoice/i18n.js';
 
 let db;
@@ -405,6 +407,84 @@ test('UBL: hour unit maps to HUR', () => {
   db.prepare('UPDATE invoice_lines SET unit = ? WHERE invoice_id = ?').run('h', inv.id);
   const xml = invoiceToUbl(db, getInvoice(db, inv.id));
   assert.match(xml, /unitCode="HUR">2<\/cbc:InvoicedQuantity>/);
+});
+
+// --- PDF layout (i18n, units, VAT breakdown, logo) -------------------------
+
+test('PDF: Dutch labels, unit column, VAT breakdown, discount row', () => {
+  const c = addContact();
+  const inv = createInvoice(db, {
+    contactId: c.id,
+    lines: ['2x Consultancy @ 100.00 @21 @-10%', '1x Maand @ 50.00 @9'],
+    date: '2026-08-10', discountType: 'pct', discountValue: 500, actor: 'agent:test',
+  });
+  // unit codes for the layout test
+  db.prepare('UPDATE invoice_lines SET unit = ? WHERE invoice_id = ? AND line_no = 1').run('h', inv.id);
+  const html = invoiceHtml(db, getInvoice(db, inv.id));
+  assert.match(html, /FACTUUR/);
+  assert.match(html, /Factuur aan/);
+  assert.match(html, /Omschrijving/);
+  assert.match(html, /Aantal/);
+  assert.match(html, /Eenheid/); // unit column header
+  assert.match(html, /Btw over 21%/);
+  assert.match(html, /Btw over 9%/);
+  assert.match(html, /Totaal btw/);
+  assert.match(html, /Korting/);
+  assert.match(html, /Totaal \(incl\. btw\)/);
+  assert.match(html, />2</); // formatted quantity, not 2000
+  assert.match(html, />uur</); // localized unit
+  assert.doesNotMatch(html, /2000<\/td>/); // milli never leaks to the PDF
+  // money reconciliation in the rendered totals
+  const totals = computeInvoiceTotals(inv.lines, inv.discount_type, inv.discount_value);
+  assert.match(html, new RegExp(formatAmount(totals.net_before_cents)));
+  assert.match(html, new RegExp(formatAmount(totals.gross_cents)));
+});
+
+test('PDF: English labels + reverse-charge wording', () => {
+  const c = addContact('NL999999999B01');
+  const inv = createInvoice(db, {
+    contactId: c.id, lines: ['1x Ding @ 100.00 @21'], date: '2026-08-10',
+    language: 'en', actor: 'agent:test',
+  });
+  const html = invoiceHtml(db, inv);
+  assert.match(html, /INVOICE/);
+  assert.match(html, /Billed to/);
+  assert.match(html, /Description/);
+  assert.match(html, /Qty/);
+  assert.match(html, /Unit/);
+  assert.match(html, /Subtotal excl\. VAT/);
+  assert.match(html, /Total \(incl\. VAT\)/);
+});
+
+test('PDF: company logo renders as a data URI in the header', async (t) => {
+  const c = addContact();
+  const inv = createInvoice(db, { contactId: c.id, lines: ['1x Ding @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
+  db.prepare('UPDATE company SET logo = ?, logo_mime = ? WHERE id = 1').run(pngBytes(120, 60), 'image/png');
+  const html = invoiceHtml(db, inv);
+  assert.match(html, /<img class="logo" src="data:image\/png;base64,/);
+  // and without a logo there is no <img>
+  db.prepare('UPDATE company SET logo = NULL, logo_mime = NULL WHERE id = 1').run();
+  assert.doesNotMatch(invoiceHtml(db, inv), /<img/);
+});
+
+test('PDF: renders through Chromium (skipped when no browser installed)', async (t) => {
+  const c = addContact();
+  const inv = createInvoice(db, {
+    contactId: c.id, lines: ['1.5x Consultancy @ 100.00 @21 @-10%'], date: '2026-08-10',
+    discountType: 'pct', discountValue: 1000, language: 'en', actor: 'agent:test',
+  });
+  const dir = mkdtempSync(path.join(tmpdir(), 'bukio-pdf-'));
+  try {
+    const result = await invoiceToPdf(db, inv, { outPath: path.join(dir, 'inv.pdf') });
+    assert.ok(result.bytes > 1000);
+    assert.ok(readFileSync(path.join(dir, 'inv.pdf')).length > 1000);
+  } catch (err) {
+    if (err.code === 'PDF_UNAVAILABLE') {
+      t.skip(`Chromium not available: ${err.message}`);
+      return;
+    }
+    throw err;
+  }
 });
 
 // --- company logo ---------------------------------------------------------

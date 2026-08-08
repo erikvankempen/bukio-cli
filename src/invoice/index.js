@@ -253,7 +253,7 @@ export function computeInvoiceTotals(lines, discountType = null, discountValue =
   }
   const breakdown = [...byRate.values()].sort((a, b) => b.rate_bp - a.rate_bp);
 
-  return { lineNets, groups: list, breakdown, net_cents: net, vat_cents: vat, gross_cents: net + vat, discount_cents: discountCents };
+  return { lineNets, groups: list, breakdown, net_cents: net, vat_cents: vat, gross_cents: net + vat, discount_cents: discountCents, net_before_cents: netBefore };
 }
 
 // --- contacts -------------------------------------------------------------
