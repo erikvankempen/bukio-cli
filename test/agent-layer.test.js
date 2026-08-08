@@ -328,6 +328,10 @@ function mcpSession(dbPath) {
       child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
       return next();
     },
+    raw(line) {
+      child.stdin.write(`${line}\n`);
+      return next();
+    },
     close() {
       child.stdin.end();
       return new Promise((res) => child.on('exit', res));
@@ -388,6 +392,41 @@ test('MCP: initialize + tools/list + read-only calls work end-to-end', async () 
 
     const unknown = await mcp.call('tools/call', { name: 'nope', arguments: {} });
     assert.equal(unknown.error.code, -32602);
+  } finally {
+    await mcp.close();
+  }
+});
+
+test('MCP: non-object JSON-RPC messages get Invalid Request, server survives', async () => {
+  const tmp = await import('node:fs/promises');
+  const dir = await tmp.mkdtemp('/tmp/mcp-test-');
+  const dbPath = `${dir}/x.db`;
+  const fileDb = openDb(dbPath);
+  seedDefaultChart(fileDb);
+  fileDb.prepare(`
+    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
+            'Industrieweg 12', '2712 CD', 'Zoetermeer', 1)
+  `).run();
+  enableVatModule(fileDb);
+  fileDb.close();
+
+  const mcp = mcpSession(dbPath);
+  try {
+    // valid JSON but not JSON-RPC request objects — must not crash the server
+    const r1 = await mcp.raw('null');
+    assert.equal(r1.error.code, -32600);
+    assert.equal(r1.id, null);
+
+    const r2 = await mcp.raw('42');
+    assert.equal(r2.error.code, -32600);
+
+    const r3 = await mcp.raw('[1,2]');
+    assert.equal(r3.error.code, -32600);
+
+    // the server is still alive and answers normally
+    const init = await mcp.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    assert.equal(init.result.serverInfo.name, 'bukio-cli');
   } finally {
     await mcp.close();
   }

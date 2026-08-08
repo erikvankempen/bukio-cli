@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 16:50:08 UTC — **✅ 508 passing · 0 failing (508 tests)**
+**Latest run:** 2026-08-08 16:55:09 UTC — **✅ 509 passing · 0 failing (509 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -31,7 +31,7 @@
 
 ### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar
 
-19 passing · 0 failing
+20 passing · 0 failing
 
     - ✅ fx: parseRate and convertFx — integer math, round-half-up
     - ✅ fx: setFxRate upsert + audit; getFxRate exact then latest-on/before
@@ -49,6 +49,7 @@
     - ✅ compliance: calendar shows obligations, statuses flip with filings
     - ✅ compliance: closed books show on the jaarrekening obligation
     - ✅ MCP: initialize + tools/list + read-only calls work end-to-end
+    - ✅ MCP: non-object JSON-RPC messages get Invalid Request, server survives
     - ✅ MCP: mutations are plan-only by default; execute books with the actor
     - ✅ MCP: contact_add preserves postal_code and vat_id (regression)
     - ✅ MCP: BUKIO_MCP_READONLY blocks execution

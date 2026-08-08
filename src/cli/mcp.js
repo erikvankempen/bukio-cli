@@ -930,6 +930,13 @@ export function make(program) {
           send(rpcError(null, -32700, 'parse error'));
           continue;
         }
+        // JSON-RPC requests are objects — `null`, `42` or an array would
+        // throw in the dispatch destructure AND again in `msg.id` below,
+        // crashing the whole server instead of answering Invalid Request
+        if (typeof msg !== 'object' || msg === null || Array.isArray(msg)) {
+          send(rpcError(null, -32600, 'invalid request'));
+          continue;
+        }
         try {
           send(await dispatch(db, ctx, msg));
         } catch (err) {
