@@ -201,7 +201,7 @@ export function make(program) {
             console.log('  1d  privégebruik         ', d.fields['1d'].amount);
             console.log('  3a  inkopen hoog         ', d.fields['3a'].amount);
             console.log('  3b  inkopen laag         ', d.fields['3b'].amount);
-            console.log('  3c  inkopen 0/verlegd    ', d.fields['3c'].amount);
+            console.log('  3c  inkopen 0%/overig     ', d.fields['3c'].amount);
             console.log('  4a  verlegd binnenland   ', d.fields['4a'].amount);
             console.log('  4b  verlegd EU           ', d.fields['4b'].amount);
             console.log('  5a  verschuldigde btw    ', d.fields['5a'].amount);
