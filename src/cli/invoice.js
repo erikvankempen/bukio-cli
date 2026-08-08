@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { formatAmount, parseAmount } from '../core/money.js';
 import {
   createContact, updateContact, createInvoice, creditInvoice, finalizeInvoice, getInvoice,
-  invoiceReminders, listContacts, listInvoices, markPaid, parseLineSpec,
+  invoiceReminders, listContacts, listInvoices, markPaid,
 } from '../invoice/index.js';
 import { invoiceToPdf } from '../invoice/pdf.js';
 import { invoiceToUbl } from '../invoice/ubl.js';
@@ -162,22 +162,24 @@ export function make(program) {
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
-        const lines = [opts.lines];
-        if (ctx.dryRun) {
-          const parsed = lines.flatMap((s) => s.split(',')).map(parseLineSpec);
-          output(ctx, {
-            action: 'create draft invoice',
-            contact: Number(opts.contact), date: opts.date, due_days: Number(opts.dueDays),
-            lines: parsed, dryRun: true,
-          }, (d) => {
-            console.log(`plan: draft invoice for contact #${d.contact} on ${d.date}`);
-            for (const l of d.lines) console.log(`  ${l.qty}x ${l.description} @ ${formatAmount(l.priceCents)}${l.vatCode ? ` @${l.vatCode}` : ''}`);
-            console.log('(dry run — nothing written)');
-          });
-          return;
-        }
         const db = ensureDb(ctx);
         try {
+          if (ctx.dryRun) {
+            // same validation as the real run (createInvoice dryRun): the old
+            // branch only parsed lines and echoed garbage dates/contacts as ok
+            const plan = createInvoice(db, {
+              contactId: Number(opts.contact), lines: [opts.lines], date: opts.date,
+              dueDays: Number(opts.dueDays), deliveryDate: opts.deliveryDate ?? null,
+              description: opts.description ?? null, reference: opts.reference ?? null,
+              notes: opts.notes ?? null, actor: ctx.actor, dryRun: true,
+            });
+            output(ctx, plan, (d) => {
+              console.log(`plan: draft invoice for contact #${d.contact_id} on ${d.date} — net ${formatAmount(d.net_cents)}${d.vat_cents ? ` + ${formatAmount(d.vat_cents)} btw` : ''} = ${formatAmount(d.gross_cents)}`);
+              for (const l of d.lines) console.log(`  ${l.qty}x ${l.description} @ ${formatAmount(l.priceCents)}${l.vatCode ? ` @${l.vatCode}` : ''}`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
           const inv = createInvoice(db, {
             contactId: Number(opts.contact), lines: [opts.lines], date: opts.date,
             dueDays: Number(opts.dueDays), deliveryDate: opts.deliveryDate ?? null,
@@ -346,7 +348,13 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           if (ctx.dryRun) {
-            output(ctx, { action: 'create credit note', for_invoice: Number(opts.id), reason: opts.reason ?? null, dryRun: true }, (d) => {
+            // same validation as the real run (creditInvoice dryRun): the old
+            // branch echoed plans for nonexistent/unfinalized invoices as ok
+            const plan = creditInvoice(db, {
+              id: Number(opts.id), date: opts.date ?? null, reason: opts.reason ?? null,
+              actor: ctx.actor, dryRun: true,
+            });
+            output(ctx, plan, (d) => {
               console.log(`plan: credit note for invoice #${d.for_invoice}${d.reason ? ` — "${d.reason}"` : ''}`);
               console.log('(dry run — nothing written)');
             });

@@ -56,7 +56,7 @@ import {
 import { addAsset, disposeAsset, runDue, register, createScheme } from '../src/assets/index.js';
 import {
   createContact, updateContact, getContact, getInvoice,
-  createInvoice, finalizeInvoice, markPaid, listInvoices, paymentFromBank, invoiceReminders,
+  createInvoice, finalizeInvoice, creditInvoice, markPaid, listInvoices, paymentFromBank, invoiceReminders,
 } from '../src/invoice/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { parseBankCsv } from '../src/bank/csv.js';
@@ -1530,4 +1530,43 @@ test('recurring add --dry-run validates like the real run (garbage rejected, not
   const check = openDb(dbPath);
   assert.equal(check.prepare('SELECT COUNT(*) c FROM recurring_templates').get().c, 0, 'dry-run must not write');
   check.close();
+});
+
+test('invoice create --dry-run validates like the real run (garbage date/contact rejected, nothing written)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['contact', 'add', '--name', 'ACME BV']);
+  // the old branch only parsed lines — a garbage date came back ok:true
+  const badDate = cli(dbPath, ['invoice', 'create', '--contact', '1', '--lines', '1x Coaching @ 100.00', '--date', 'abc', '--dry-run']);
+  assert.equal(badDate.code, 1);
+  assert.equal(badDate.out.error.code, 'INVALID_DATE');
+  const badContact = cli(dbPath, ['invoice', 'create', '--contact', '99', '--lines', '1x Coaching @ 100.00', '--date', '2026-01-15', '--dry-run']);
+  assert.equal(badContact.code, 1);
+  assert.equal(badContact.out.error.code, 'CONTACT_NOT_FOUND');
+  // valid dry-run: plan with totals, nothing written
+  const ok = cli(dbPath, ['invoice', 'create', '--contact', '1', '--lines', '1x Coaching @ 100.00', '--date', '2026-01-15', '--dry-run']);
+  assert.equal(ok.code, 0, ok.raw ?? '');
+  assert.equal(ok.out.data.dryRun, true);
+  assert.equal(ok.out.data.gross_cents, 10000);
+  const check = openDb(dbPath);
+  assert.equal(check.prepare('SELECT COUNT(*) c FROM invoices').get().c, 0, 'dry-run must not write');
+  check.close();
+});
+
+test('creditInvoice dry-run validates like the real run (no plan for nonexistent/unfinalized invoices)', () => {
+  setup();
+  // nonexistent invoice
+  assert.throws(() => creditInvoice(db, { id: 999, dryRun: true, actor: 'agent:test' }), (e) => e.code === 'NOT_FOUND');
+  // draft (unfinalized) invoice
+  const contact = addContact();
+  const inv = createInvoice(db, {
+    contactId: contact.id, lines: ['1x Coaching @ 100.00'], date: '2026-01-15', actor: 'agent:test',
+  });
+  assert.throws(() => creditInvoice(db, { id: inv.id, dryRun: true, actor: 'agent:test' }), (e) => e.code === 'NOT_FINALIZED');
+  // finalized invoice → plan, nothing written
+  finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+  const plan = creditInvoice(db, { id: inv.id, dryRun: true, actor: 'agent:test' });
+  assert.equal(plan.dryRun, true);
+  assert.equal(plan.for_invoice, inv.id);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM invoices WHERE invoice_type = 'credit'").get().c, 0, 'dry-run must not write a credit note');
 });

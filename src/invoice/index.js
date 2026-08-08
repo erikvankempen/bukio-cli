@@ -214,7 +214,7 @@ export function invoiceReminders(db, { withinDays = 7 } = {}) {
  */
 export function createInvoice(db, {
   contactId, lines, date, dueDays = 30, deliveryDate = null,
-  description = null, reference = null, notes = null, actor = 'human',
+  description = null, reference = null, notes = null, actor = 'human', dryRun = false,
 }) {
   const contact = getContact(db, contactId);
   if (!contact) throw invoiceError('CONTACT_NOT_FOUND', `contact ${contactId} does not exist`);
@@ -262,6 +262,24 @@ export function createInvoice(db, {
   const dueDate = dueDays != null
     ? new Date(Date.UTC(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8, 10)) + dueDays)).toISOString().slice(0, 10)
     : null;
+
+  if (dryRun) {
+    // validate-everything-first, write nothing: all checks above already ran
+    // (contact, calendar date, lines, VAT codes, due-days), so a green plan
+    // here means the real run will succeed.
+    const net = parsedLines.reduce((s, l) => s + l.amount_cents, 0);
+    const vat = parsedLines.reduce((s, l) => s + l.vat_amount_cents, 0);
+    return {
+      action: 'invoice.create', contact_id: contactId, date, due_days: dueDays,
+      delivery_date: deliveryDate, description, reference, notes,
+      lines: parsedLines.map((l) => ({
+        qty: l.quantity, description: l.description, priceCents: l.unit_price_cents,
+        vatCode: l.vat_code,
+      })),
+      net_cents: net, vat_cents: vat, gross_cents: net + vat,
+      due_date: dueDate, dryRun: true,
+    };
+  }
 
   const tx = db.transaction(() => {
     const info = db.prepare(`
@@ -430,11 +448,20 @@ export function finalizeInvoice(db, { id, actor = 'human', dryRun = false }) {
 }
 
 /** Create a credit note (draft) from a finalized sales invoice. */
-export function creditInvoice(db, { id, date = null, reason = null, actor = 'human' }) {
+export function creditInvoice(db, { id, date = null, reason = null, actor = 'human', dryRun = false }) {
   const original = getInvoice(db, id);
   if (!original) throw invoiceError('NOT_FOUND', `invoice ${id} does not exist`);
   if (original.invoice_type !== 'sales') throw invoiceError('NOT_SALES_INVOICE', 'only sales invoices can be credited');
   if (!['sent', 'paid', 'overdue'].includes(original.status)) throw invoiceError('NOT_FINALIZED', 'the invoice must be finalized before crediting');
+
+  if (dryRun) {
+    return {
+      action: 'invoice.credit', for_invoice: id, reason,
+      date: date ?? new Date().toISOString().slice(0, 10),
+      description: reason ?? `Creditfactuur voor ${original.invoice_number}`,
+      reference: original.invoice_number, dryRun: true,
+    };
+  }
 
   const creditId = createInvoice(db, {
     contactId: original.contact_id,
