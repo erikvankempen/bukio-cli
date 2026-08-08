@@ -135,13 +135,13 @@ tool({
 });
 tool({
   name: 'vat_readout', description: 'OB-aangifte fields 1a-5d for manual filing (never auto-files)', schema: {
-    type: 'object', properties: { period: { type: 'string', description: 'YYYY-Qn or YYYY-MM' } },
+    type: 'object', properties: { period: { type: 'string', description: 'YYYY-Qn or YYYY-MM' } }, required: ['period'],
   },
   handler: (db, args) => obReadout(db, { period: args.period }),
 });
 tool({
   name: 'icp_readout', description: 'ICP listing: EU btw-verlegde supplies per customer', schema: {
-    type: 'object', properties: { period: { type: 'string', description: 'YYYY-Qn' } },
+    type: 'object', properties: { period: { type: 'string', description: 'YYYY-Qn' } }, required: ['period'],
   },
   handler: (db, args) => icpReadout(db, { period: args.period }),
 });
@@ -153,11 +153,12 @@ tool({
 });
 tool({
   name: 'compliance', description: 'compliance calendar for a year (OB/ICP deadlines, jaarrekening deposit)', schema: {
-    type: 'object', properties: { year: { type: 'string' } },
+    type: 'object', properties: { year: { type: 'string' } }, required: ['year'],
   },
   handler: (db, args) => {
-    if (args.year != null && !/^\d{4}$/.test(String(args.year))) throw new McpError('INVALID_YEAR', `year '${args.year}' must be YYYY`);
-    return complianceStatus(db, { year: args.year });
+    const year = String(args.year ?? '');
+    if (!/^\d{4}$/.test(year)) throw new McpError('INVALID_YEAR', `year '${args.year}' must be YYYY`);
+    return complianceStatus(db, { year });
   },
 });
 tool({
@@ -757,7 +758,7 @@ tool({
 tool({
   name: 'assets_register', description: 'activastaat: cost, cumulative depreciation, book value per asset',
   schema: { type: 'object', properties: { as_of: { type: 'string' } } },
-  handler: (db, args) => register(db, { asOf: args.as_of ?? null, actor: 'agent' }),
+  handler: (db, args) => register(db, { asOf: args.as_of ?? null }),
 });
 
 tool({

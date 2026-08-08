@@ -52,9 +52,9 @@ export function make(program) {
     .requiredOption('--name <name>', 'template name (also the entry description prefix)')
     .option('--kind <entry|invoice>', 'template kind', 'entry')
     .option('--contact <id>', 'contact id (required for --kind invoice)')
-    .option('--lines <spec>', 'invoice line specs "[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]" (for --kind invoice)')
-    .option('--items <spec>', 'invoice item specs "ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]" (for --kind invoice; prices snapshotted per run)')
-    .option('--postings <CODE:AMOUNT[@VAT]>', 'posting specs, comma-separated or repeatable (required for --kind entry)')
+    .option('--lines <spec>', 'invoice line specs "[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]" (for --kind invoice)', (v, acc) => [...acc, v], [])
+    .option('--items <spec>', 'item specs "ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]" (for --kind invoice; prices snapshotted per run)', (v, acc) => [...acc, v], [])
+    .option('--postings <CODE:AMOUNT[@VAT]>', 'posting specs, comma-separated or repeatable (required for --kind entry)', (v, acc) => [...acc, v], [])
     .requiredOption('--frequency <frequency>', `one of ${FREQUENCIES.join(', ')}`)
     .requiredOption('--start <yyyy-mm-dd>', 'first run date')
     .option('--day <n>', 'day of period to book on (1-28)', '1')
@@ -76,11 +76,11 @@ export function make(program) {
               name: opts.name, description: opts.desc ?? null, frequency: opts.frequency,
               dayOfPeriod: Number(opts.day), startDate: opts.start, endDate: opts.end ?? null,
               runs: opts.runs ? Number(opts.runs) : null,
-              postings: opts.postings ? [opts.postings] : [],
+              postings: opts.postings ?? [],
               reversePrevious: Boolean(opts.reversePrevious),
               kind: opts.kind, contactId: opts.contact ? Number(opts.contact) : null,
-              invoiceLines: opts.lines ? [opts.lines] : null,
-              invoiceItems: opts.items ? [opts.items] : null,
+              invoiceLines: opts.lines?.length ? opts.lines : null,
+              invoiceItems: opts.items?.length ? opts.items : null,
               dueDays: Number(opts.dueDays),
               actor: ctx.actor, dryRun: true,
             });
@@ -96,11 +96,11 @@ export function make(program) {
             name: opts.name, description: opts.desc ?? null, frequency: opts.frequency,
             dayOfPeriod: Number(opts.day), startDate: opts.start, endDate: opts.end ?? null,
             runs: opts.runs ? Number(opts.runs) : null,
-            postings: opts.postings ? [opts.postings] : [],
+            postings: opts.postings ?? [],
             reversePrevious: Boolean(opts.reversePrevious),
             kind: opts.kind, contactId: opts.contact ? Number(opts.contact) : null,
-            invoiceLines: opts.lines ? [opts.lines] : null,
-            invoiceItems: opts.items ? [opts.items] : null,
+            invoiceLines: opts.lines?.length ? opts.lines : null,
+            invoiceItems: opts.items?.length ? opts.items : null,
             dueDays: Number(opts.dueDays),
             actor: ctx.actor,
           });

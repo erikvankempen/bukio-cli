@@ -6,8 +6,9 @@
 
 // UBL 2.1 / Peppol BIS 3.0 (EN 16931) invoice XML export.
 // Hand-rolled, deterministic, no dependencies. Covers the core BIS 3.0
-// structure: seller/buyer parties, VAT breakdown per rate, monetary totals
-// with allowances, lines (with per-line allowances for discounts).
+// structure: seller/buyer parties (with EndpointID electronic addresses,
+// BT-34/BT-49), VAT breakdown per rate, monetary totals with allowances,
+// lines (with per-line allowances for discounts).
 // Full Peppol validation (Schematron) is out of scope — verify via a
 // validation service before production use.
 import { computeInvoiceTotals, formatQty } from './index.js';
@@ -38,8 +39,15 @@ function addressBlock(partyName, p, taxId = null) {
   // the supplier row is snake_case (postal_code); contacts are camelCase —
   // read both so the postal code is never silently dropped
   const postal = p.postalCode ?? p.postal_code ?? '';
+  // Peppol BIS 3.0 BT-34: Seller electronic address (cbc:EndpointID, 1..1).
+  // For Dutch companies this is the KVK number under scheme 9944 (the Peppol
+  // registry code for the Dutch Chamber of Commerce). Emitted when present —
+  // the seller's kvk is always set (finalize requires it).
+  const endpoint = p.kvk
+    ? `\n        <cbc:EndpointID schemeID="9944">${esc(p.kvk)}</cbc:EndpointID>`
+    : '';
   return `
-        <cac:Party>
+        <cac:Party>${endpoint}
           <cac:PartyName><cbc:Name>${esc(partyName)}</cbc:Name></cac:PartyName>
           <cac:PostalAddress>
             <cbc:StreetName>${esc(p.address ?? '')}</cbc:StreetName>
@@ -199,6 +207,7 @@ export function invoiceToUbl(db, invoice) {
   <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.btw_id)}</cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
     <cac:Party>
+      ${contact.kvk ? `<cbc:EndpointID schemeID="9944">${esc(contact.kvk)}</cbc:EndpointID>` : ''}
       <cac:PartyName><cbc:Name>${esc(contact.name)}</cbc:Name></cac:PartyName>
       <cac:PostalAddress>
         <cbc:StreetName>${esc(contact.address ?? '')}</cbc:StreetName>

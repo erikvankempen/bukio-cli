@@ -30,7 +30,7 @@ beforeEach(() => {
 function addContact() {
   return createContact(db, {
     name: 'ACME B.V.', address: 'Straat 1', postalCode: '1000 AA', city: 'Amsterdam',
-    vatId: 'NL999999999B01', actor: 'agent:test',
+    vatId: 'NL999999999B01', kvk: '98765432', actor: 'agent:test',
   });
 }
 
@@ -239,5 +239,26 @@ test('peppol send: not configured / provider error / dry-run', async () => {
     delete process.env.BUKIO_PEPPOL_ENDPOINT;
     delete process.env.BUKIO_PEPPOL_TOKEN;
     server.close();
+  }
+});
+
+test('peppol send: buyer without a KVK number is rejected up front (BT-49)', async () => {
+  const c = createContact(db, {
+    name: 'Geen KVK B.V.', address: 'Straat 1', postalCode: '1000 AA', city: 'Amsterdam',
+    vatId: 'NL888888888B01', actor: 'agent:test', // no kvk
+  });
+  const inv = createInvoice(db, { contactId: c.id, date: '2026-08-01', lines: ['1x A @ 10.00 @21'] });
+  finalizeInvoice(db, { id: inv.id });
+  const oldEndpoint = process.env.BUKIO_PEPPOL_ENDPOINT;
+  const oldToken = process.env.BUKIO_PEPPOL_TOKEN;
+  process.env.BUKIO_PEPPOL_ENDPOINT = 'http://127.0.0.1:9';
+  process.env.BUKIO_PEPPOL_TOKEN = 'tok';
+  try {
+    // fails BEFORE any network call — even dry-run validates like execute
+    await assert.rejects(() => sendPeppolInvoice(db, getInvoice(db, inv.id)), { code: 'PEPPOL_BUYER_MISSING_ID' });
+    await assert.rejects(() => sendPeppolInvoice(db, getInvoice(db, inv.id), { dryRun: true }), { code: 'PEPPOL_BUYER_MISSING_ID' });
+  } finally {
+    if (oldEndpoint === undefined) delete process.env.BUKIO_PEPPOL_ENDPOINT; else process.env.BUKIO_PEPPOL_ENDPOINT = oldEndpoint;
+    if (oldToken === undefined) delete process.env.BUKIO_PEPPOL_TOKEN; else process.env.BUKIO_PEPPOL_TOKEN = oldToken;
   }
 });

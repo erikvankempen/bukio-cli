@@ -261,6 +261,26 @@ test('UBL: Peppol BIS 3.0 structure', () => {
   assert.equal(line['Item']['ClassifiedTaxCategory']['Percent'], '21.00');
 });
 
+test('UBL: seller + buyer EndpointID (BT-34/BT-49) when KVK numbers are present', () => {
+  const contact = createContact(db, {
+    name: 'ACME B.V.', address: 'Straat 1', postalCode: '1000 AA', city: 'Amsterdam',
+    vatId: 'NL999999999B01', kvk: '98765432', actor: 'agent:test',
+  });
+  const inv = createInvoice(db, {
+    contactId: contact.id, date: '2026-07-10', lines: ['1x Consultancy @ 100.00 @21'],
+  });
+  finalizeInvoice(db, { id: inv.id });
+  const xml = invoiceToUbl(db, getInvoice(db, inv.id));
+  // BT-34 seller electronic address: KVK under scheme 9944 (Peppol registry
+  // code for the Dutch Chamber of Commerce)
+  assert.match(xml, /<cbc:EndpointID schemeID="9944">12345678<\/cbc:EndpointID>/);
+  // BT-49 buyer electronic address
+  assert.match(xml, /<cbc:EndpointID schemeID="9944">98765432<\/cbc:EndpointID>/);
+  // EndpointID is the FIRST child of cac:Party (per the Peppol party sequence)
+  const sellerParty = xml.match(/<cac:AccountingSupplierParty>\s*<cac:Party>([\s\S]*?)<\/cac:Party>/)[1];
+  assert.ok(sellerParty.trimStart().startsWith('<cbc:EndpointID'), 'EndpointID must be the first child of the seller Party');
+});
+
 test('UBL: credit note uses CreditNote root + type 381 (Peppol BIS 3.0)', () => {
   addContact();
   const inv = mkInvoice();

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 22:32:31 UTC — **✅ 569 passing · 0 failing (569 tests)**
+**Latest run:** 2026-08-08 22:58:00 UTC — **✅ 571 passing · 0 failing (571 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -486,7 +486,7 @@
 
 ### invoice.test.js — invoicing: lifecycle, 12-vereisten, credit notes, payments, reminders
 
-21 passing · 0 failing
+22 passing · 0 failing
 
     - ✅ parseLineSpec: qty, description, price, vat
     - ✅ createInvoice: draft with line math (2x 150 @21 = 300 net, 63 vat)
@@ -500,6 +500,7 @@
     - ✅ payments: partial then full -> paid; overpayment rejected
     - ✅ nextInvoiceNumber: year-scoped sequence
     - ✅ UBL: Peppol BIS 3.0 structure
+    - ✅ UBL: seller + buyer EndpointID (BT-34/BT-49) when KVK numbers are present
     - ✅ UBL: credit note uses CreditNote root + type 381 (Peppol BIS 3.0)
     - ✅ UBL: XML control characters in descriptions are stripped (Peppol-safe)
     - ✅ bank auto-match: incoming payment pays the invoice and posts Bank/Debiteuren
@@ -561,7 +562,7 @@
 
 ### recurring-invoice.test.js — subscription invoice templates
 
-8 passing · 0 failing
+9 passing · 0 failing
 
     - ✅ invoice template: generates draft invoices on schedule (never auto-finalizes)
     - ✅ invoice template: generated drafts finalize normally (compliance + number)
@@ -571,6 +572,7 @@
     - ✅ invoice template: runs limit completes the template
     - ✅ peppol send: posts the UBL to the provider (mock server)
     - ✅ peppol send: not configured / provider error / dry-run
+    - ✅ peppol send: buyer without a KVK number is rejected up front (BT-49)
 
 ### recurring.test.js — recurring entries engine: schedules, depreciation, accruals
 

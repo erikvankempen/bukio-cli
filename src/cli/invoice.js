@@ -224,8 +224,8 @@ export function make(program) {
     .command('create')
     .description('create a draft invoice (compliance-validated at finalize)')
     .requiredOption('--contact <id>', 'contact id')
-    .option('--lines <spec>', 'line spec "[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]", comma-separated or repeatable')
-    .option('--items <spec>', 'item spec "ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]", comma-separated or repeatable')
+    .option('--lines <spec>', 'line spec "[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]", comma-separated or repeatable', (v, acc) => [...acc, v], [])
+    .option('--items <spec>', 'item spec "ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]", comma-separated or repeatable', (v, acc) => [...acc, v], [])
     .requiredOption('--date <yyyy-mm-dd>', 'invoice date')
     .option('--due-days <n>', 'payment term in days', '30')
     .option('--delivery-date <yyyy-mm-dd>', 'delivery/service date if different')
@@ -253,8 +253,8 @@ export function make(program) {
             // same validation as the real run (createInvoice dryRun): the old
             // branch only parsed lines and echoed garbage dates/contacts as ok
             const plan = createInvoice(db, {
-              contactId: Number(opts.contact), lines: opts.lines ? [opts.lines] : null,
-              items: opts.items ? [opts.items] : null, date: opts.date,
+              contactId: Number(opts.contact), lines: opts.lines?.length ? opts.lines : null,
+              items: opts.items?.length ? opts.items : null, date: opts.date,
               dueDays: Number(opts.dueDays), deliveryDate: opts.deliveryDate ?? null,
               description: opts.description ?? null, reference: opts.reference ?? null,
               notes: opts.notes ?? null, discountType, discountValue,
@@ -268,8 +268,8 @@ export function make(program) {
             return;
           }
           const inv = createInvoice(db, {
-            contactId: Number(opts.contact), lines: opts.lines ? [opts.lines] : null,
-            items: opts.items ? [opts.items] : null, date: opts.date,
+            contactId: Number(opts.contact), lines: opts.lines?.length ? opts.lines : null,
+            items: opts.items?.length ? opts.items : null, date: opts.date,
             dueDays: Number(opts.dueDays), deliveryDate: opts.deliveryDate ?? null,
             description: opts.description ?? null, reference: opts.reference ?? null,
             notes: opts.notes ?? null, discountType, discountValue,

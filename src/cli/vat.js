@@ -112,7 +112,7 @@ export function make(program) {
     .description('book a VAT-aware entry — tag a net posting with @VATCODE (e.g. 8000:-100.00@21)')
     .requiredOption('--date <yyyy-mm-dd>', 'entry date')
     .requiredOption('--desc <description>', 'description')
-    .requiredOption('--postings <CODE:AMOUNT[@VATCODE]>', 'posting specs, repeatable or comma-separated')
+    .requiredOption('--postings <CODE:AMOUNT[@VATCODE]>', 'posting specs, repeatable or comma-separated', (v, acc) => [...acc, v], [])
     .option('--source <source>', 'manual|bank|invoice|agent', 'manual')
     .option('--source-ref <ref>', 'source reference')
     .option('--currency <ISO>', 'postings are in this foreign currency; converted to EUR (needs a rate)')

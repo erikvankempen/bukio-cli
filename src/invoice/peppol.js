@@ -36,6 +36,13 @@ export async function sendPeppolInvoice(db, invoice, { endpoint = null, dryRun =
   if (!ep) {
     throw peppolError('PEPPOL_NOT_CONFIGURED', 'no Peppol endpoint — set BUKIO_PEPPOL_ENDPOINT (or pass --endpoint)');
   }
+  // Peppol BIS 3.0 BT-49: the buyer's electronic address (cbc:EndpointID) is
+  // mandatory (1..1) — a buyer without a KVK number cannot receive a Peppol
+  // document (the access point validates this). Fail early with a clear
+  // message instead of a Schematron rejection at the provider.
+  if (!invoice.contact?.kvk) {
+    throw peppolError('PEPPOL_BUYER_MISSING_ID', `buyer '${invoice.contact?.name ?? 'unknown'}' has no KVK number — Peppol BIS 3.0 requires the buyer electronic address (BT-49); set it via 'contact update --id <id> --kvk <number>'`);
+  }
   if (dryRun) {
     return {
       dryRun: true,
