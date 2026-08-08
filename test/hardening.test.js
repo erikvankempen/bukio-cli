@@ -1771,6 +1771,14 @@ test('MCP entry_reverse / invoice_credit / invoice_pay dry-runs validate like ex
     const contact = await mcp.call('tools/call', { name: 'contact_add', arguments: { name: '  ' } });
     assert.equal(contact.result.isError, true);
     assert.equal(JSON.parse(contact.result.content[0].text).error.code, 'INVALID_NAME');
+    // invoice_finalize on a nonexistent invoice → NOT_FOUND in dry-run
+    const finalize = await mcp.call('tools/call', { name: 'invoice_finalize', arguments: { id: 999 } });
+    assert.equal(finalize.result.isError, true);
+    assert.equal(JSON.parse(finalize.result.content[0].text).error.code, 'NOT_FOUND');
+    // fx_set with an impossible date → INVALID_DATE in dry-run
+    const fx = await mcp.call('tools/call', { name: 'fx_set', arguments: { currency: 'USD', date: '2026-02-30', rate: '1.0875' } });
+    assert.equal(fx.result.isError, true);
+    assert.equal(JSON.parse(fx.result.content[0].text).error.code, 'INVALID_DATE');
   } finally {
     await mcp.close();
   }

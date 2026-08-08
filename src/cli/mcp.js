@@ -331,7 +331,12 @@ tool({
   schema: { type: 'object', properties: { id: { type: 'number' }, actor: { type: 'string' }, mode: { type: 'string' } }, required: ['id'] },
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);
-    if (modeOf(args) === 'dry-run') return { action: 'invoice.finalize', id: args.id, mode: 'dry-run', note: 'assigns YYYY-NNNN and books Debiteuren/Omzet/btw' };
+    if (modeOf(args) === 'dry-run') {
+      // validate like the real path (finalizeInvoice dryRun: existence,
+      // status, the 12 factuurvereisten) — the old plan echoed ok for
+      // nonexistent/draft-incomplete invoices
+      return finalizeInvoice(db, { id: args.id, actor: args.actor ?? ctx.actor, dryRun: true });
+    }
     const inv = finalizeInvoice(db, { id: args.id, actor: args.actor ?? ctx.actor });
     return { action: 'invoice.finalize', id: args.id, invoice_number: inv.invoice_number, entry_id: inv.entry_id, mode: 'execute' };
   },
@@ -412,9 +417,12 @@ tool({
   },
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);
-    const rateX10000 = parseRate(args.rate);
-    if (modeOf(args) === 'dry-run') return { action: 'fx.set', currency: args.currency, date: args.date, rate: (rateX10000 / 10000).toFixed(4), mode: 'dry-run' };
-    return setFxRate(db, { currency: args.currency, date: args.date, rate: rateX10000, actor: args.actor ?? ctx.actor });
+    // setFxRate validates currency/date (incl. calendar round-trip) and
+    // returns the dry-run plan itself — the old branch skipped those checks
+    return setFxRate(db, {
+      currency: args.currency, date: args.date, rate: parseRate(args.rate),
+      actor: args.actor ?? ctx.actor, dryRun: modeOf(args) === 'dry-run',
+    });
   },
 });
 tool({
