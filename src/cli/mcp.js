@@ -42,7 +42,7 @@ import { aging } from '../report/aging.js';
 import { sales } from '../report/sales.js';
 import { importUblInvoice } from '../import/ubl-invoice.js';
 import { emailInvoice } from '../invoice/email.js';
-import { addMandate, listMandates, removeMandate, createPaymentBatch, exportPaymentBatch } from '../payments/index.js';
+import { addMandate, listMandates, createPaymentBatch, exportPaymentBatch } from '../payments/index.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 

@@ -127,6 +127,22 @@ test('getOrCreateBankAccount: validates IBAN and links to ledger account', () =>
   assert.throws(() => getOrCreateBankAccount(db, { iban: IBAN, accountCode: '9999' }), { code: 'ACCOUNT_NOT_FOUND' });
 });
 
+test('getOrCreateBankAccount: dashed IBAN normalizes to the stored form (no duplicate account)', () => {
+  // regression: the bank normalizer stripped only spaces while core strips
+  // spaces AND dashes — a dashed form passed validation (core validates
+  // internally) but was stored dash-retaining, so a later import lookup
+  // missed and created a SECOND account for the same real IBAN
+  const dashed = 'NL91-ABNA-0417-1643-00';
+  const first = getOrCreateBankAccount(db, { iban: dashed, name: 'Betaalrekening', accountCode: '1100' });
+  assert.equal(first.iban, IBAN); // stored dash-free, matching core
+  const second = getOrCreateBankAccount(db, { iban: IBAN, accountCode: '1100' });
+  assert.equal(second.id, first.id); // same row — no duplicate
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM bank_accounts').get().c, 1);
+  // listTransactions filters with a dashed iban too
+  importTransactions(db, { iban: IBAN, transactions: parseCamt053(CAMT) });
+  assert.equal(listTransactions(db, { iban: dashed, state: 'unmatched' }).length, 2);
+});
+
 test('listBankAccounts: balance and counts', () => {
   importTransactions(db, { iban: IBAN, transactions: parseCamt053(CAMT) });
   const accounts = listBankAccounts(db);

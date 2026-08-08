@@ -22,7 +22,11 @@ function txHash(iban, tx) {
 }
 
 export function normalizeIban(iban) {
-  return String(iban ?? '').trim().toUpperCase().replace(/\s+/g, '');
+  // strip spaces AND dashes, matching the core normalizer — a dashed form
+  // otherwise passes validation (core isValidIban normalizes internally) but
+  // is stored dash-retaining, so a later import lookup misses and creates a
+  // duplicate bank account for the same real IBAN
+  return String(iban ?? '').trim().toUpperCase().replace(/[\s-]/g, '');
 }
 
 export function validateIban(iban) {
@@ -136,7 +140,7 @@ export function listTransactions(db, { state = null, iban = null, limit = 200 } 
   if (state) { clauses.push('bt.state = ?'); params.push(state); }
   if (iban) {
     clauses.push('ba.iban = ?');
-    params.push(String(iban).toUpperCase().replace(/\s+/g, ''));
+    params.push(normalizeIban(iban));
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   return db.prepare(`

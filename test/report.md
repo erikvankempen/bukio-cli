@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 22:58:00 UTC — **✅ 571 passing · 0 failing (571 tests)**
+**Latest run:** 2026-08-08 23:07:25 UTC — **✅ 572 passing · 0 failing (572 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -129,7 +129,7 @@
 
 ### bank.test.js — CAMT.053/CSV import, idempotency, matching/reconciliation
 
-18 passing · 0 failing
+19 passing · 0 failing
 
     - ✅ parseCamt053: CRDT positive, DBIT negative, counterparty + description
     - ✅ parseCamt053: rejects non-CAMT input
@@ -139,6 +139,7 @@
     - ✅ importTransactions: idempotent via hash (duplicates skipped)
     - ✅ previewImport: dry-run counts without writing
     - ✅ getOrCreateBankAccount: validates IBAN and links to ledger account
+    - ✅ getOrCreateBankAccount: dashed IBAN normalizes to the stored form (no duplicate account)
     - ✅ listBankAccounts: balance and counts
     - ✅ postFromTransaction: posts bank + counter leg and reconciles
     - ✅ postFromTransaction: refuses already-matched transactions
