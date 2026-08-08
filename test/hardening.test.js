@@ -1783,3 +1783,28 @@ test('MCP entry_reverse / invoice_credit / invoice_pay dry-runs validate like ex
     await mcp.close();
   }
 });
+
+test('init validates iban, vat choice and fiscal-year-end (garbage was stored silently)', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-init-'));
+  const dbPath = path.join(dir, 't.db');
+  // garbage IBAN → INVALID_IBAN (company update already rejected it; init stored it)
+  const badIban = cli(dbPath, ['init', '--name', 'Test BV', '--iban', 'NL00BOGUS']);
+  assert.equal(badIban.code, 1);
+  assert.equal(badIban.out.error.code, 'INVALID_IBAN');
+  // garbage vat choice → INVALID_VAT_CHOICE (was silently treated as off)
+  const badVat = cli(dbPath, ['init', '--name', 'Test BV', '--vat', 'banana']);
+  assert.equal(badVat.code, 1);
+  assert.equal(badVat.out.error.code, 'INVALID_VAT_CHOICE');
+  // impossible fiscal year end → INVALID_FISCAL_YEAR_END (99-99 passed the regex and
+  // made the jaarrekening as-of '2026-99-99' → silently empty annual accounts)
+  const badFye = cli(dbPath, ['init', '--name', 'Test BV', '--fiscal-year-end', '99-99']);
+  assert.equal(badFye.code, 1);
+  assert.equal(badFye.out.error.code, 'INVALID_FISCAL_YEAR_END');
+  const badFye2 = cli(dbPath, ['init', '--name', 'Test BV', '--fiscal-year-end', '02-30']);
+  assert.equal(badFye2.code, 1);
+  assert.equal(badFye2.out.error.code, 'INVALID_FISCAL_YEAR_END');
+  // a valid init still works
+  const ok = cli(dbPath, ['init', '--name', 'Test BV', '--iban', 'NL91ABNA0417164300', '--fiscal-year-end', '12-31', '--vat', 'on']);
+  assert.equal(ok.code, 0, ok.raw ?? '');
+  assert.equal(ok.out.data.company.vat_module, 1);
+});

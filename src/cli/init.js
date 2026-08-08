@@ -5,6 +5,7 @@ import { DEFAULT_CHART } from '../core/chart.js';
 import { listAccounts, seedDefaultChart } from '../core/accounts.js';
 import { record } from '../audit/index.js';
 import { enableVatModule } from '../vat/index.js';
+import { isValidIban } from '../core/iban.js';
 import { dbError, ensureDb, makeCtx, output, fail } from './util.js';
 
 const LEGAL_FORMS = ['eenmanszaak', 'vof', 'bv', 'nv', 'stichting', 'vereniging'];
@@ -40,8 +41,22 @@ function buildCompany(opts) {
   if (!LEGAL_FORMS.includes(opts.legalForm)) {
     throw dbError('INVALID_LEGAL_FORM', `legal form '${opts.legalForm}' must be one of ${LEGAL_FORMS.join(', ')}`);
   }
+  if (opts.vat !== 'on' && opts.vat !== 'off') {
+    throw dbError('INVALID_VAT_CHOICE', `--vat must be 'on' or 'off', got '${opts.vat}'`);
+  }
   if (!FY_END_RE.test(opts.fiscalYearEnd)) {
     throw dbError('INVALID_FISCAL_YEAR_END', `fiscal year end '${opts.fiscalYearEnd}' must be mm-dd`);
+  }
+  // calendar check: 99-99 and 02-30 pass the regex but break the jaarrekening
+  // as-of date and the compliance periods ('2026-99-99' sorts after every
+  // real date → silently empty annual accounts)
+  const [fmm, fdd] = opts.fiscalYearEnd.split('-').map(Number);
+  const fye = new Date(Date.UTC(2000, fmm - 1, fdd));
+  if (Number.isNaN(fye.getTime()) || fye.getUTCMonth() !== fmm - 1 || fye.getUTCDate() !== fdd) {
+    throw dbError('INVALID_FISCAL_YEAR_END', `fiscal year end '${opts.fiscalYearEnd}' is not a valid calendar date`);
+  }
+  if (opts.iban && !isValidIban(opts.iban)) {
+    throw dbError('INVALID_IBAN', `'${opts.iban}' is not a valid IBAN`);
   }
   return {
     name: opts.name,
