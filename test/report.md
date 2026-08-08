@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 11:38:33 UTC — **✅ 424 passing · 0 failing (424 tests)**
+**Latest run:** 2026-08-08 11:50:42 UTC — **✅ 426 passing · 0 failing (426 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -349,7 +349,7 @@
 
 ### invoice-features.test.js — 
 
-29 passing · 0 failing
+31 passing · 0 failing
 
     - ✅ fractional quantities parse to milli-units
     - ✅ line discounts parse (pct and amount)
@@ -378,6 +378,8 @@
     - ✅ PDF: English labels + reverse-charge wording
     - ✅ PDF: company logo renders as a data URI in the header
     - ✅ PDF: renders through Chromium (skipped when no browser installed)
+    - ✅ recurring invoice template with items snapshots catalog prices per run
+    - ✅ MCP: item_add/item_list/item_update + invoice_create with items/discount/language
     - ✅ company logo: set (PNG), extract round-trip, remove; audits
     - ✅ company logo: format, size and dimension guards
 

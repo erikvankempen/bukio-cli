@@ -12,7 +12,8 @@ import { getAccountByCode } from '../core/accounts.js';
 import { createEntry, parsePostingSpecs, postEntry, reverseEntry } from '../core/entries.js';
 import { record } from '../audit/index.js';
 import { expandVatPostings, parseVatPostingSpecs } from '../vat/index.js';
-import { createInvoice, getContact, validateInvoiceLines } from '../invoice/index.js';
+import { createInvoice, getContact, parseItemSpec, validateInvoiceLines } from '../invoice/index.js';
+import { getItem } from '../items/index.js';
 
 export function recurringError(code, message) {
   const e = new Error(message);
@@ -78,7 +79,8 @@ export function validatePostings(db, postings) {
 export function createTemplate(db, {
   name, description = null, frequency, dayOfPeriod = 1, startDate,
   endDate = null, runs = null, postings, reversePrevious = false, actor = 'human',
-  kind = 'entry', contactId = null, invoiceLines = null, dueDays = 30, dryRun = false,
+  kind = 'entry', contactId = null, invoiceLines = null, invoiceItems = null,
+  dueDays = 30, dryRun = false,
 }) {
   if (!name || typeof name !== 'string') throw recurringError('INVALID_NAME', 'template needs a name');
   if (!FREQUENCIES.includes(frequency)) {
@@ -100,17 +102,36 @@ export function createTemplate(db, {
   }
 
   let postingsJson = '[]';
+  let invoiceItemsJson = null;
   let vatAware = false;
   if (kind === 'invoice') {
-    // invoice templates: validate the line specs at creation (no insert)
+    // invoice templates: validate the line/item specs at creation (no insert)
     if (!contactId) throw recurringError('INVALID_KIND', 'invoice templates need --contact');
     if (!getContact(db, contactId)) throw recurringError('CONTACT_NOT_FOUND', `contact ${contactId} does not exist`);
-    if (!invoiceLines || invoiceLines.length === 0) throw recurringError('INVALID_KIND', 'invoice templates need --lines');
-    const parsed = validateInvoiceLines(db, invoiceLines);
-    vatAware = parsed.some((l) => l.vatCode);
-    postingsJson = JSON.stringify(parsed.map((l) => ({
-      description: l.description, quantity: l.qty, priceCents: l.priceCents, vatCode: l.vatCode,
-    })));
+    const hasLines = Array.isArray(invoiceLines) ? invoiceLines.length > 0 : Boolean(invoiceLines);
+    const hasItems = Array.isArray(invoiceItems) ? invoiceItems.length > 0 : Boolean(invoiceItems);
+    if (!hasLines && !hasItems) throw recurringError('INVALID_KIND', 'invoice templates need --lines or --items');
+    if (hasLines && hasItems) throw recurringError('INVALID_KIND', 'pass either --lines or --items, not both');
+    if (hasItems) {
+      // item specs are stored verbatim; catalog prices are snapshotted at
+      // each generation (recurring run resolves them like invoice create)
+      const specs = invoiceItems.flatMap((s) => (typeof s === 'string' ? [s] : [s]));
+      for (const spec of specs) {
+        const p = parseItemSpec(spec);
+        const item = getItem(db, p.itemId);
+        if (!item) throw recurringError('ITEM_NOT_FOUND', `item ${p.itemId} does not exist`);
+        if (item.active !== 1) throw recurringError('ITEM_INACTIVE', `item ${p.itemId} is deactivated`);
+        if (p.vatCode || item.vat_code) vatAware = true;
+      }
+      invoiceItemsJson = JSON.stringify(specs);
+      postingsJson = '[]';
+    } else {
+      const parsed = validateInvoiceLines(db, invoiceLines);
+      vatAware = parsed.some((l) => l.vatCode);
+      postingsJson = JSON.stringify(parsed.map((l) => ({
+        description: l.description, quantity: l.qtyMilli, priceCents: l.priceCents, vatCode: l.vatCode,
+      })));
+    }
   } else {
     // Resolve posting specs (CODE:AMOUNT[@VAT]) and expand VAT legs when tagged.
     // Strings are parsed; plain objects { code, amountCents } pass through.
@@ -164,6 +185,7 @@ export function createTemplate(db, {
       vat_aware: vatAware,
       postings: postingsJson === '[]' ? null : postings.map((p) => (typeof p === 'string' ? p : JSON.stringify(p))).join(', '),
       lines: invoiceLines ? invoiceLines.join(' + ') : null,
+      items: invoiceItems ? invoiceItems.join(' + ') : null,
       next_run_date: nextRun, dryRun: true,
     };
   }
@@ -172,12 +194,14 @@ export function createTemplate(db, {
     INSERT INTO recurring_templates
       (name, description, frequency, day_of_period, start_date, end_date, runs,
        postings_json, reverse_previous, next_run_date, vat_aware, created_by,
-       kind, contact_id, invoice_lines_json, due_days)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       kind, contact_id, invoice_lines_json, invoice_items_json, due_days)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(name, description, frequency, dayOfPeriod, startDate, endDate, runs,
     postingsJson,
     reversePrevious ? 1 : 0, nextRun, vatAware ? 1 : 0, actor,
-    kind, kind === 'invoice' ? contactId : null, kind === 'invoice' ? postingsJson : null,
+    kind, kind === 'invoice' ? contactId : null,
+    kind === 'invoice' && !invoiceItemsJson ? postingsJson : null,
+    invoiceItemsJson,
     kind === 'invoice' ? dueDays : null);
 
   record(db, {
@@ -194,6 +218,7 @@ export function getTemplate(db, id) {
   tpl.postings = JSON.parse(tpl.postings_json);
   tpl.final_postings = tpl.final_postings_json ? JSON.parse(tpl.final_postings_json) : null;
   tpl.invoice_lines = tpl.invoice_lines_json ? JSON.parse(tpl.invoice_lines_json) : null;
+  tpl.invoice_items = tpl.invoice_items_json ? JSON.parse(tpl.invoice_items_json) : null;
   return tpl;
 }
 
@@ -203,6 +228,7 @@ export function listTemplates(db, { status = 'active' } = {}) {
   for (const r of rows) {
     r.postings = JSON.parse(r.postings_json);
     r.invoice_lines = r.invoice_lines_json ? JSON.parse(r.invoice_lines_json) : null;
+    r.invoice_items = r.invoice_items_json ? JSON.parse(r.invoice_items_json) : null;
   }
   return rows;
 }
@@ -234,16 +260,27 @@ function runTemplateOnce(db, tpl, actor) {
   if (tpl.kind === 'invoice') {
     // subscription invoice: generate a DRAFT invoice dated next_run_date.
     // Finalizing stays a separate audited action — never auto-finalize.
-    const inv = createInvoice(db, {
-      contactId: tpl.contact_id,
-      lines: tpl.invoice_lines.map((l) => ({
-        qty: l.quantity, description: l.description, priceCents: l.priceCents, vatCode: l.vatCode,
-      })),
-      date: tpl.next_run_date,
-      dueDays: tpl.due_days ?? 30,
-      description: tpl.name,
-      actor: entryActor,
-    });
+    // Item-based templates re-resolve the catalog at generation time, so a
+    // price change applies from the next run (snapshot semantics).
+    const inv = tpl.invoice_items
+      ? createInvoice(db, {
+          contactId: tpl.contact_id,
+          items: tpl.invoice_items,
+          date: tpl.next_run_date,
+          dueDays: tpl.due_days ?? 30,
+          description: tpl.name,
+          actor: entryActor,
+        })
+      : createInvoice(db, {
+          contactId: tpl.contact_id,
+          lines: tpl.invoice_lines.map((l) => ({
+            qtyMilli: l.quantity, description: l.description, priceCents: l.priceCents, vatCode: l.vatCode,
+          })),
+          date: tpl.next_run_date,
+          dueDays: tpl.due_days ?? 30,
+          description: tpl.name,
+          actor: entryActor,
+        });
     generated.push({ kind: 'invoice', invoice: { id: inv.id, invoice_number: null, status: 'draft', date: inv.date } });
   } else {
     const postings = isFinalRun(tpl) ? tpl.final_postings : tpl.postings;
@@ -320,6 +357,7 @@ export function runDue(db, { asOf = null, templateId = null, actor = 'human', dr
     if (t.final_postings_json) t.final_postings = JSON.parse(t.final_postings_json);
     else t.final_postings = null;
     if (t.invoice_lines_json) t.invoice_lines = JSON.parse(t.invoice_lines_json);
+    if (t.invoice_items_json) t.invoice_items = JSON.parse(t.invoice_items_json);
   }
 
   const results = [];
@@ -348,7 +386,7 @@ export function runDue(db, { asOf = null, templateId = null, actor = 'human', dr
                 date: sim.next_run_date,
                 due_date: addDays(sim.next_run_date, sim.due_days ?? 0),
                 contact_name: contact?.name ?? null,
-                lines: sim.invoice_lines ?? [],
+                lines: sim.invoice_items ?? sim.invoice_lines ?? [],
               },
             });
           } else {

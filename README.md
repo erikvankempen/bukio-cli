@@ -10,7 +10,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-395%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-426%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -418,12 +418,15 @@ Outgoing invoicing (FR3) — compliant with the 12 verplichte factuurvereisten, 
 |---------|---------|
 | `contact add --name N [--address] [--postal-code] [--city] [--vat-id] [--kvk] [--email]` | Add a customer (vat-id required when btw verlegd) |
 | `contact list` | List contacts |
-| `invoice create --contact <id> --lines "2x Consultancy @ 150.00 @21,1x Rapportage @ 400.00 @9" --date YYYY-MM-DD [--due-days 30] [--reference] [--dry-run]` | Create a draft invoice (line spec: `[QTYx] DESC @ PRICE [@ VATCODE]`) |
+| `item add --name N [--description] [--unit h\|day\|month\|unit\|session\|km\|kg\|project] --price P [--vat] [--gl]` / `item list` / `item show --id` / `item update --id [--price] [--unit] [--vat] [--gl] [--deactivate]` | **Items catalog (v0.13)**: reusable products/services; invoice lines snapshot the price/VAT at creation, so later edits never rewrite existing invoices; `--deactivate` blocks new invoices (existing keep their snapshots) |
+| `invoice create --contact <id> --lines "2x Consultancy @ 150.00 @21,1x Rapportage @ 400.00 @9" --date YYYY-MM-DD [--due-days 30] [--reference] [--dry-run]` | Create a draft invoice. Line spec: `[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]` — fractional quantities (`1.5x`), per-line discounts (`@-10%` or `@-25.00`) |
+| `invoice create --contact <id> --items "1:2,3:1.5@140.00@21@-10%" ...` | Create from the catalog — item spec `ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]`; price/VAT overrides apply to **this invoice only** (catalog untouched) |
+| `invoice create ... [--discount-pct 5 \| --discount-amount 50.00] [--language nl\|en]` | **Total discount** (before VAT; allocated across VAT-rate groups to the cent so the OB readout reconciles) and invoice language (Dutch default, English optional — PDF labels, unit names, UBL `LanguageID`) |
 | `invoice finalize --id N [--dry-run]` | **Assign the sequential number (YYYY-NNNN) and book the entry** (Debiteuren / Omzet / Te betalen btw) |
 | `invoice list [--status] [--type]` / `show --id` | Inspect invoices |
-| `invoice pdf --id N [--out PATH]` | Render a compliant PDF via headless Chromium |
+| `invoice pdf --id N [--out PATH]` | Render a compliant PDF via headless Chromium — includes the **company logo** (set via `company update --logo`), a **VAT breakdown per rate** (`Btw 21% over …`), a Eenheid/Unit column and localized labels |
 | `invoice ubl --id N [--out PATH]` | Export **UBL 2.1 / Peppol BIS 3.0 (EN 16931)** XML |
-| `invoice credit --id N [--reason]` | Create a credit note (draft) from a finalized invoice |
+| `invoice credit --id N [--reason]` | Create a credit note (draft) from a finalized invoice (inherits language + discounts) |
 | `invoice pay --id N --date [--amount]` | Record a payment (tracking; the posting comes from the bank flow) |
 
 **Compliance (validated at finalize):** supplier name/KvK/btw-id/address/postal/city (set at `init`), invoice date, sequential number, customer name+address+city, line descriptions/quantities/prices, VAT rate + amount per rate, totals, and the customer's btw-id when a line carries `@R`/`@RE` (btw verlegd). Missing data fails with `SUPPLIER_INCOMPLETE` / `CUSTOMER_INCOMPLETE` / `CUSTOMER_VAT_REQUIRED`.
@@ -1054,6 +1057,7 @@ three standard modes); treat the ratios, not the decimals, as the point.
 | 8 | SEPA payment batches: payables register (transfer vs direct-debit), pain.001 export for bank-portal upload | Prepare vendor payments in bukio, upload the file in the bank, close the loop via the CAMT import — **✅ done (v0.11.0, 295 tests green)** | planned |
 | 9 | External handover: `export xaf` (Auditfile Financieel 4.0) + audit log as csv/xlsx | The year as a file your boekhouder/tax advisor/auditor imports directly — **✅ done (v0.12.0, 342 tests green)** | planned |
 | 10 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
+| 11 | Items catalog + discounts + invoice languages: `item` CRUD, `invoice create --items/--discount-*/--language`, fractional quantities, per-line + total discounts with per-rate VAT allocation, VAT breakdown per rate on PDF/UBL, company logo on the PDF | Invoice from a reusable catalog with discounts, in Dutch or English, with the company logo — **✅ done (v0.13.0, 426 tests green)** | planned |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 

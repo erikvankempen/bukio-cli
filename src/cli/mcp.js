@@ -35,6 +35,8 @@ import { complianceStatus } from '../compliance/index.js';
 import { parseImportAmount } from '../import/index.js';
 import { openDb } from '../core/db.js';
 import { isValidActor } from '../core/actor.js';
+import { parseAmount } from '../core/money.js';
+import { createItem, listItems, updateItem } from '../items/index.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -303,34 +305,119 @@ tool({
 });
 tool({
   name: 'invoice_create', mutating: true,
-  description: 'create a draft invoice (contact id + line specs like "2x Dienst @ 150.00 @21")',
+  description: 'create a draft invoice: contact_id + line specs ("2x Dienst @ 150.00 @21", per-line discount "@-10%" or "@-25.00", fractional qty "1.5x") OR item specs ("1:2@140.00@21@-10%"); discount_pct/discount_amount_cents apply to the total before VAT; language nl|en',
   schema: {
     type: 'object', properties: {
-      contact_id: { type: 'number' }, lines: { type: 'array', items: { type: 'string' } },
-      date: { type: 'string' }, due_days: { type: 'number' }, actor: { type: 'string' }, mode: { type: 'string' },
-    }, required: ['contact_id', 'lines'],
+      contact_id: { type: 'number' },
+      lines: { type: 'array', items: { type: 'string' } },
+      items: { type: 'array', items: { type: 'string' } },
+      date: { type: 'string' }, due_days: { type: 'number' },
+      discount_pct: { type: 'number' }, discount_amount_cents: { type: 'number' },
+      language: { type: 'string' },
+      actor: { type: 'string' }, mode: { type: 'string' },
+    }, required: ['contact_id'],
   },
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);
+    const discountType = args.discount_pct !== undefined ? 'pct'
+      : args.discount_amount_cents !== undefined ? 'amount' : null;
+    const discountValue = discountType === 'pct'
+      ? Math.round(Number(args.discount_pct) * 100)
+      : discountType === 'amount' ? args.discount_amount_cents : null;
+    const base = {
+      contactId: args.contact_id,
+      lines: args.lines ?? null,
+      items: args.items ?? null,
+      date: args.date ?? new Date().toISOString().slice(0, 10),
+      dueDays: args.due_days ?? 30,
+      discountType, discountValue,
+      language: args.language ?? 'nl',
+      actor: args.actor ?? ctx.actor,
+    };
     if (modeOf(args) === 'dry-run') {
       // validate like the real path (createInvoice dryRun) — the old plan
       // echoed ok for garbage dates and nonexistent contacts
-      const plan = createInvoice(db, {
-        contactId: args.contact_id, lines: args.lines,
-        date: args.date ?? new Date().toISOString().slice(0, 10),
-        dueDays: args.due_days ?? 30, actor: args.actor ?? ctx.actor, dryRun: true,
-      });
+      const plan = createInvoice(db, { ...base, dryRun: true });
       return { ...plan, mode: 'dry-run', note: 'plan only — re-run with mode=execute to book' };
     }
-    const inv = createInvoice(db, {
-      contactId: args.contact_id, lines: args.lines, date: args.date ?? new Date().toISOString().slice(0, 10),
-      dueDays: args.due_days ?? 30, actor: args.actor ?? ctx.actor,
-    });
+    const inv = createInvoice(db, base);
     return {
-      action: 'invoice.create', contact_id: args.contact_id, lines: args.lines, date: inv.date,
+      action: 'invoice.create', contact_id: args.contact_id,
+      lines: args.lines ?? null, items: args.items ?? null, date: inv.date,
       mode: 'execute', invoice_id: inv.id, invoice_number: null, status: 'draft',
-      totals: { net: inv.net_cents, vat: inv.vat_cents, gross: inv.gross_cents },
+      totals: { net: inv.net_cents, vat: inv.vat_cents, gross: inv.gross_cents, discount: inv.discount_cents },
     };
+  },
+});
+tool({
+  name: 'item_add', mutating: true,
+  description: 'add an item to the catalog (name, quantity unit h|day|month|unit|session|km|kg|project, price, optional default VAT code + revenue account)',
+  schema: {
+    type: 'object', properties: {
+      name: { type: 'string' }, description: { type: 'string' },
+      unit: { type: 'string' }, unit_price: { type: 'string' },
+      vat_code: { type: 'string' }, gl_account: { type: 'string' },
+      actor: { type: 'string' }, mode: { type: 'string' },
+    }, required: ['name', 'unit_price'],
+  },
+  handler: (db, args, ctx) => {
+    guardExecute(ctx, args);
+    const base = {
+      name: args.name, description: args.description ?? null,
+      unit: args.unit ?? 'unit', unitPriceCents: parseAmount(args.unit_price),
+      vatCode: args.vat_code ?? null, glAccount: args.gl_account ?? null,
+      actor: args.actor ?? ctx.actor,
+    };
+    if (modeOf(args) === 'dry-run') {
+      return { ...createItem(db, { ...base, dryRun: true }), mode: 'dry-run', note: 'plan only — re-run with mode=execute to write' };
+    }
+    const item = createItem(db, base);
+    return {
+      action: 'item.create', mode: 'execute', item_id: item.id, name: item.name,
+      unit: item.unit, unit_price_cents: item.unit_price_cents,
+      vat_code: item.vat_code, gl_account: item.gl_account,
+    };
+  },
+});
+tool({
+  name: 'item_list',
+  description: 'items catalog (active items; pass include_inactive:true for all)',
+  schema: { type: 'object', properties: { include_inactive: { type: 'boolean' } } },
+  handler: (db, args) => ({
+    items: listItems(db, { activeOnly: !(args?.include_inactive === true) })
+      .map((i) => ({ id: i.id, name: i.name, unit: i.unit, unit_price_cents: i.unit_price_cents, vat_code: i.vat_code, gl_account: i.gl_account, active: i.active === 1 })),
+  }),
+});
+tool({
+  name: 'item_update', mutating: true,
+  description: 'update an item (price, unit, VAT, GL account) or deactivate it (deactivate:true blocks new invoices; existing keep snapshots)',
+  schema: {
+    type: 'object', properties: {
+      id: { type: 'number' }, name: { type: 'string' }, description: { type: 'string' },
+      unit: { type: 'string' }, unit_price: { type: 'string' },
+      vat_code: { type: 'string' }, gl_account: { type: 'string' },
+      deactivate: { type: 'boolean' },
+      actor: { type: 'string' }, mode: { type: 'string' },
+    }, required: ['id'],
+  },
+  handler: (db, args, ctx) => {
+    guardExecute(ctx, args);
+    const base = {
+      id: args.id,
+      name: args.name ?? null,
+      description: args.description !== undefined ? args.description : null,
+      unit: args.unit ?? null,
+      unitPriceCents: args.unit_price !== undefined ? parseAmount(args.unit_price) : null,
+      vatCode: args.vat_code !== undefined ? args.vat_code : null,
+      glAccount: args.gl_account !== undefined ? args.gl_account : null,
+      deactivate: args.deactivate === true,
+      actor: args.actor ?? ctx.actor,
+    };
+    if (modeOf(args) === 'dry-run') {
+      return { ...updateItem(db, { ...base, dryRun: true }), mode: 'dry-run', note: 'plan only — re-run with mode=execute to write' };
+    }
+    const item = updateItem(db, base);
+    return { action: 'item.update', mode: 'execute', item_id: item.id, active: item.active === 1 };
   },
 });
 tool({

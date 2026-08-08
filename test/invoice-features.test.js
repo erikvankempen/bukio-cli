@@ -19,6 +19,7 @@ import {
   parseLineSpec,
 } from '../src/invoice/index.js';
 import { createItem, getItem, listItems, updateItem } from '../src/items/index.js';
+import { createTemplate, runDue } from '../src/recurring/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { invoiceHtml, invoiceToPdf } from '../src/invoice/pdf.js';
 import { unitLabel } from '../src/invoice/i18n.js';
@@ -485,6 +486,122 @@ test('PDF: renders through Chromium (skipped when no browser installed)', async 
     }
     throw err;
   }
+});
+
+// --- recurring items + MCP -------------------------------------------------
+
+test('recurring invoice template with items snapshots catalog prices per run', () => {
+  const c = addContact();
+  const item = addItem({ name: 'SaaS', unitPriceCents: 9900, vatCode: '21' });
+  const tpl = createTemplate(db, {
+    name: 'SaaS abonnement', kind: 'invoice', contactId: c.id,
+    invoiceItems: [`${item.id}:1`], frequency: 'monthly', startDate: '2026-08-01',
+    dueDays: 14, actor: 'agent:test',
+  });
+  assert.equal(tpl.invoice_items.length, 1);
+  assert.equal(tpl.vat_aware, 1);
+
+  runDue(db, { asOf: '2026-08-31', actor: 'agent:test' });
+  let inv = getInvoice(db, db.prepare('SELECT id FROM invoices ORDER BY id LIMIT 1').get().id);
+  assert.equal(inv.lines[0].item_id, item.id);
+  assert.equal(inv.lines[0].unit_price_cents, 9900);
+  assert.equal(inv.lines[0].quantity, 1000);
+
+  // a price change applies from the NEXT run (snapshot semantics)
+  updateItem(db, { id: item.id, unitPriceCents: 11900, actor: 'agent:test' });
+  runDue(db, { asOf: '2026-09-30', actor: 'agent:test' });
+  const sep = getInvoice(db, db.prepare("SELECT id FROM invoices WHERE date = '2026-09-01'").get().id);
+  assert.equal(sep.lines[0].unit_price_cents, 11900);
+  const aug = getInvoice(db, db.prepare("SELECT id FROM invoices WHERE date = '2026-08-01'").get().id);
+  assert.equal(aug.lines[0].unit_price_cents, 9900); // past drafts untouched
+});
+
+// --- MCP tools (items + extended invoice_create) --------------------------
+
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const REPO_ROOT = path.resolve(import.meta.dirname, '..');
+
+function mcpSession(dbPath) {
+  const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', dbPath], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, BUKIO_ACTOR: 'agent:test' },
+  });
+  let buf = '';
+  const pending = [];
+  const waiters = [];
+  child.stdout.on('data', (d) => {
+    buf += d.toString();
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      const msg = JSON.parse(line);
+      if (waiters.length) waiters.shift()(msg);
+      else pending.push(msg);
+    }
+  });
+  const next = () => (pending.length ? Promise.resolve(pending.shift()) : new Promise((res) => waiters.push(res)));
+  return {
+    child,
+    call(method, params = {}, id = Math.floor(Math.random() * 1e9)) {
+      child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+      return next();
+    },
+    close() {
+      child.stdin.end();
+      return new Promise((res) => child.on('exit', res));
+    },
+  };
+}
+
+test('MCP: item_add/item_list/item_update + invoice_create with items/discount/language', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'bukio-mcp-features-'));
+  const dbPath = path.join(dir, 'test.db');
+  runCli(['init', '--name', 'Demo BV', '--kvk', '12345678', '--vat', 'on'], dbPath);
+  runCli(['contact', 'add', '--name', 'ACME B.V.', '--address', 'Straat 1', '--city', 'Amsterdam'], dbPath);
+  const mcp = mcpSession(dbPath);
+  try {
+    const added = await mcp.call('tools/call', {
+      name: 'item_add', arguments: {
+        name: 'Consultancy', unit: 'h', unit_price: '150.00', vat_code: '21',
+        mode: 'execute', actor: 'agent:mcp-test',
+      },
+    });
+    assert.ok(added.result.content[0].text.includes('"action": "item.create"'), 'item_add must execute');
+
+    const list = await mcp.call('tools/call', { name: 'item_list', arguments: {} });
+    assert.ok(list.result.content[0].text.includes('Consultancy'), 'item_list must show the item');
+
+    const inv = await mcp.call('tools/call', {
+      name: 'invoice_create', arguments: {
+        contact_id: 1, items: ['1:2@140.00'], date: '2026-08-10', discount_pct: 5,
+        language: 'en', mode: 'execute', actor: 'agent:mcp-test',
+      },
+    });
+    const parsed = JSON.parse(inv.result.content[0].text);
+    assert.equal(parsed.invoice_id, 1);
+    assert.equal(parsed.totals.discount, 1400); // 5% of 280.00
+    assert.equal(parsed.totals.net, 26600);
+    assert.equal(parsed.totals.vat, 5586); // 21% of 266.00
+
+    const deact = await mcp.call('tools/call', {
+      name: 'item_update', arguments: { id: 1, deactivate: true, mode: 'execute', actor: 'agent:mcp-test' },
+    });
+    assert.ok(deact.result.content[0].text.includes('"active": false'), 'item_update must deactivate');
+
+    // item_add dry-run writes nothing
+    const plan = await mcp.call('tools/call', {
+      name: 'item_add', arguments: { name: 'X', unit_price: '10.00', mode: 'dry-run' },
+    });
+    assert.ok(plan.result.content[0].text.includes('"dryRun": true'));
+  } finally {
+    await mcp.close();
+  }
+  const check = openDb(dbPath);
+  assert.equal(check.prepare('SELECT COUNT(*) c FROM items').get().c, 1); // dry-run wrote nothing
+  check.close();
 });
 
 // --- company logo ---------------------------------------------------------

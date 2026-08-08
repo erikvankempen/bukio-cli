@@ -59,7 +59,11 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio recurring preview/list/pause/resume` | Schedule inspection and control. |
 | `bukio depreciation add --cost C --life-months M --start DATE` | Depreciation schedule (remainder-adjusted final run). |
 | `bukio invoice peppol-send --id N [--endpoint URL] [--dry-run]` | POST the UBL to a Peppol access-point provider (env `BUKIO_PEPPOL_ENDPOINT` + `BUKIO_PEPPOL_TOKEN`). |
+| `bukio item add --name N [--description] [--unit h\|day\|month\|unit\|session\|km\|kg\|project] --price P [--vat] [--gl]` | Add a catalog item (price/VAT snapshot onto invoice lines at creation). |
+| `bukio item list [--all]` / `show --id` / `update --id [--price] [--unit] [--vat] [--gl] [--deactivate]` | Inspect/update the catalog; deactivation blocks new invoices, existing keep snapshots. |
 | `bukio contact add --name N [--address] [--vat-id]` / `list` | Invoice counterparties. |
+| `bukio invoice create --contact N --lines "..." \| --items "..." --date D [--discount-pct P \| --discount-amount A] [--language nl\|en]` | Draft invoice. Lines: `[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]` (fractional qty allowed, per-line discount `@-10%`/`@-25.00`). Items: `ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]` with per-invoice overrides. Total discount applies BEFORE VAT. |
+| `bukio company update --logo FILE` / `--remove-logo` / `company logo --out FILE` | Store/extract the invoice logo (PNG/JPEG/SVG ≤ 1 MB, ≤ 2048×2048 px, stored as a BLOB in the DB — travels with backups). |
 | `bukio invoice create --contact N --lines "2x DESC @ PRICE @21" --date D` | Draft invoice (12-vereisten validated at finalize). |
 | `bukio invoice finalize --id N [--dry-run]` | Sequential number + booking entry (Debiteuren/Omzet/btw). |
 | `bukio invoice pdf --id N` / `ubl --id N` / `credit --id N` / `pay --id N --date` | PDF (Chromium), Peppol BIS 3.0 XML, credit notes, payments. |

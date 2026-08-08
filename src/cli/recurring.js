@@ -46,7 +46,8 @@ export function make(program) {
     .requiredOption('--name <name>', 'template name (also the entry description prefix)')
     .option('--kind <entry|invoice>', 'template kind', 'entry')
     .option('--contact <id>', 'contact id (required for --kind invoice)')
-    .option('--lines <spec>', 'invoice line specs "[QTYx] DESC @ PRICE [@ VATCODE]" (required for --kind invoice)')
+    .option('--lines <spec>', 'invoice line specs "[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]" (for --kind invoice)')
+    .option('--items <spec>', 'invoice item specs "ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]" (for --kind invoice; prices snapshotted per run)')
     .option('--postings <CODE:AMOUNT[@VAT]>', 'posting specs, comma-separated or repeatable (required for --kind entry)')
     .requiredOption('--frequency <frequency>', `one of ${FREQUENCIES.join(', ')}`)
     .requiredOption('--start <yyyy-mm-dd>', 'first run date')
@@ -73,6 +74,7 @@ export function make(program) {
               reversePrevious: Boolean(opts.reversePrevious),
               kind: opts.kind, contactId: opts.contact ? Number(opts.contact) : null,
               invoiceLines: opts.lines ? [opts.lines] : null,
+              invoiceItems: opts.items ? [opts.items] : null,
               dueDays: Number(opts.dueDays),
               actor: ctx.actor, dryRun: true,
             });
@@ -92,6 +94,7 @@ export function make(program) {
             reversePrevious: Boolean(opts.reversePrevious),
             kind: opts.kind, contactId: opts.contact ? Number(opts.contact) : null,
             invoiceLines: opts.lines ? [opts.lines] : null,
+            invoiceItems: opts.items ? [opts.items] : null,
             dueDays: Number(opts.dueDays),
             actor: ctx.actor,
           });
