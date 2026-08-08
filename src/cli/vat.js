@@ -267,6 +267,7 @@ export function make(program) {
     .description('book the bank payment that cancels the af-te-dragen balance; the rounding difference goes to the P&L')
     .requiredOption('--tx <id>', 'unmatched bank transaction of the OB payment (incoming for a refund)')
     .option('--period <period>', 'YYYY-Qn or YYYY-MM — used in the entry/audit label')
+    .option('--account <code>', `af-te-dragen account to settle (default ${VAT_FILE_ACCOUNT_DEFAULT} — must match the account used at 'vat file', e.g. when it fell to the next free code)`)
     .option('--difference-account <code>', `P&L account for the rounding difference (default ${VAT_DIFFERENCE_ACCOUNT_DEFAULT})`)
     .option('--desc <text>', 'entry description override')
     .option('--dry-run', 'show the plan without writing')
@@ -284,11 +285,12 @@ export function make(program) {
           if (ctx.dryRun) {
             const result = vatSettle(db, {
               txAmountCents: tx.amount_cents, txDate: tx.date, bankAccountCode: tx.account_code,
+              account: opts.account ?? VAT_FILE_ACCOUNT_DEFAULT,
               differenceAccount: opts.differenceAccount ?? VAT_DIFFERENCE_ACCOUNT_DEFAULT,
               period: opts.period ?? null, desc: opts.desc ?? null, actor: ctx.actor, dryRun: true,
             });
             output(ctx, { ...result, tx_id: tx.id }, (d) => {
-              console.log(`plan: settle ${formatAmount(d.paid_cents)} against af te dragen ${formatAmount(d.liability_cents)} (${d.owe ? 'te betalen' : 'te ontvangen'})`);
+              console.log(`plan: settle ${formatAmount(d.paid_cents)} against af te dragen ${formatAmount(d.liability_cents)} on ${d.account} (${d.owe ? 'te betalen' : 'te ontvangen'})`);
               for (const p of d.postings) console.log(`  ${p.code}  ${formatAmount(p.amount_cents)}`);
               console.log(`  rounding difference -> ${d.difference_account}: ${formatAmount(d.difference_cents)}`);
               console.log('(dry run — nothing written)');
@@ -301,6 +303,7 @@ export function make(program) {
           const settled = db.transaction(() => {
             const result = vatSettle(db, {
               txAmountCents: tx.amount_cents, txDate: tx.date, bankAccountCode: tx.account_code,
+              account: opts.account ?? VAT_FILE_ACCOUNT_DEFAULT,
               differenceAccount: opts.differenceAccount ?? VAT_DIFFERENCE_ACCOUNT_DEFAULT,
               period: opts.period ?? null, desc: opts.desc ?? null, actor: ctx.actor, dryRun: false,
             });
@@ -309,7 +312,7 @@ export function make(program) {
           })();
           const linked = getTransaction(db, txId);
           output(ctx, { ...settled, tx: { id: tx.id, date: tx.date, amount: formatAmount(tx.amount_cents), state: linked.state } }, (d) => {
-            console.log(`entry #${d.entry_id}  settled OB payment of ${formatAmount(d.paid_cents)} (${d.owe ? 'te betalen' : 'te ontvangen'})`);
+            console.log(`entry #${d.entry_id}  settled OB payment of ${formatAmount(d.paid_cents)} against ${d.account} (${d.owe ? 'te betalen' : 'te ontvangen'})`);
             for (const p of d.postings) console.log(`  ${p.code}  ${formatAmount(p.amount_cents)}`);
             console.log(`  rounding difference -> ${d.difference_account}: ${formatAmount(d.difference_cents)}  (tx #${d.tx.id} matched)`);
           });

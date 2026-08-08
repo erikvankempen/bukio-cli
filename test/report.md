@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 20:03:21 UTC — **✅ 534 passing · 0 failing (534 tests)**
+**Latest run:** 2026-08-08 20:35:25 UTC — **✅ 539 passing · 0 failing (539 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -150,7 +150,7 @@
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
-24 passing · 0 failing
+25 passing · 0 failing
 
     - ✅ init --dry-run: shows plan, creates nothing
     - ✅ init: creates company + 30-account chart with VAT on
@@ -172,6 +172,7 @@
     - ✅ vat enable/book/readout/mark-filed end-to-end
     - ✅ vat: module off blocks book, enable works on existing company
     - ✅ account list: human mode renders without crashing (table import regression)
+    - ✅ vat file + settle with a custom af-te-dragen account (--account 2515)
     - ✅ vat file + vat settle end-to-end: filing moves the position, the payment cancels it with the rounding difference in the P&L
     - ✅ entry post --dry-run: rejects non-draft entries instead of a green plan
     - ✅ entry reverse --dry-run: rejects drafts (NOT_POSTED) and double reversals
@@ -635,7 +636,7 @@
 
 ### vat-settle.test.js — 
 
-14 passing · 0 failing
+18 passing · 0 failing
 
     - ✅ vat file: owe — 2500 cleared, 2510 holds the exact-cents liability, audited
     - ✅ vat file: refund position — 1500 cleared, 2510 debit (te ontvangen)
@@ -651,6 +652,10 @@
     - ✅ vat settle: dry-run books nothing and leaves the tx unmatched
     - ✅ vat settle: custom difference account (e.g. dedicated Afrondingsverschillen)
     - ✅ vat file + settle round-trip: readout 5d agrees with the booked net position
+    - ✅ vat file: 2510 taken by another account falls to the next free code (2511)
+    - ✅ vat file: custom account 2515 is used when requested and settle cancels it
+    - ✅ vat file: dry-run plans the next free code without creating anything
+    - ✅ vat settle: an af-te-dragen account already reused from an earlier filing is settled on its own code
 
 ### vat.test.js — optional VAT module: codes, vat book, OB readout 1a–5d
 

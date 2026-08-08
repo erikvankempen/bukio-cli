@@ -11,7 +11,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../src/core/db.js';
-import { seedDefaultChart } from '../src/core/accounts.js';
+import { seedDefaultChart, createAccount } from '../src/core/accounts.js';
 import {
   enableVatModule, bookVatEntry, parseVatPostingSpecs, obReadout,
   vatFile, vatSettle, vatNetPosition,
@@ -269,4 +269,70 @@ test('vat file + settle round-trip: readout 5d agrees with the booked net positi
   const readout = obReadout(db, { period: '2026-07' });
   assert.equal(readout.to_pay_cents, 1050);
   assert.equal(vatNetPosition(db), readout.to_pay_cents);
+});
+
+test('vat file: 2510 taken by another account falls to the next free code (2511)', () => {
+  // legacy/imported chart collision: 2510 already means something else
+  db.prepare("INSERT INTO accounts (code, name, type, normal_balance, active) VALUES ('2510', 'Te betalen omzetbelasting 2025', 'liability', 'credit', 1)").run();
+  bookQuarter();
+  const r = vatFile(db, { period: '2026-Q3', actor: 'agent:test' });
+  assert.equal(r.account, '2511'); // next best numeric code
+  assert.equal(balance('2510'), 0); // the foreign 2510 is untouched
+  assert.equal(balance('2511'), -1050); // af te dragen lands on 2511
+  const acc = db.prepare("SELECT name, type, normal_balance FROM accounts WHERE code = '2511'").get();
+  assert.equal(acc.name, 'Af te dragen omzetbelasting');
+  assert.equal(acc.type, 'liability');
+  assert.equal(acc.normal_balance, 'credit');
+  // and the settlement can target that account explicitly
+  importTransactions(db, { iban: IBAN, transactions: parseCamt053(camtPayment('10.00')) });
+  const tx = lastTx();
+  const s = vatSettle(db, {
+    txAmountCents: tx.amount_cents, txDate: tx.date, bankAccountCode: tx.account_code,
+    account: '2511', actor: 'agent:test',
+  });
+  assert.equal(s.account, '2511');
+  assert.equal(s.difference_cents, -50);
+  assert.equal(balance('2511'), 0);
+});
+
+test('vat file: custom account 2515 is used when requested and settle cancels it', () => {
+  bookQuarter();
+  const r = vatFile(db, { account: '2515', period: '2026-Q3', actor: 'agent:test' });
+  assert.equal(r.account, '2515');
+  assert.equal(balance('2515'), -1050);
+  assert.equal(balance('2510'), 0); // default account untouched
+  importTransactions(db, { iban: IBAN, transactions: parseCamt053(camtPayment('10.00')) });
+  const tx = lastTx();
+  const s = vatSettle(db, {
+    txAmountCents: tx.amount_cents, txDate: tx.date, bankAccountCode: tx.account_code,
+    account: '2515', actor: 'agent:test',
+  });
+  assert.equal(s.account, '2515');
+  assert.equal(balance('2515'), 0);
+});
+
+test('vat file: dry-run plans the next free code without creating anything', () => {
+  db.prepare("INSERT INTO accounts (code, name, type, normal_balance, active) VALUES ('2510', 'Oude schuld', 'liability', 'credit', 1)").run();
+  bookQuarter();
+  const r = vatFile(db, { period: '2026-Q3', actor: 'agent:test', dryRun: true });
+  assert.equal(r.dryRun, true);
+  assert.equal(r.account, '2511'); // the plan shows where it WOULD land
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM accounts WHERE code = '2511'").get().c, 0); // not created
+  assert.equal(balance('2510'), 0);
+});
+
+test('vat settle: an af-te-dragen account already reused from an earlier filing is settled on its own code', () => {
+  // two filings: the first collides to 2511, the second must find the SAME 2511 again
+  db.prepare("INSERT INTO accounts (code, name, type, normal_balance, active) VALUES ('2510', 'Oude schuld', 'liability', 'credit', 1)").run();
+  bookQuarter();
+  const first = vatFile(db, { period: '2026-Q3', actor: 'agent:test' });
+  assert.equal(first.account, '2511');
+  // book a second quarter's VAT and file again — 2511 is already the af-te-dragen account
+  bookVatEntry(db, {
+    date: '2026-10-01', description: 'Omzet Q4',
+    postings: parseVatPostingSpecs(['1100:121.00,8000:-100.00@21']), post: true,
+  });
+  const second = vatFile(db, { period: '2026-Q4', actor: 'agent:test' });
+  assert.equal(second.account, '2511'); // reuse, not 2512
+  assert.equal(balance('2511'), -3150); // -1050 (Q3) + -2100 (Q4)
 });

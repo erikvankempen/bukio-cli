@@ -327,12 +327,48 @@ export function vatNetPosition(db) {
 
 /** Ensure the 'Af te dragen omzetbelasting' liability account exists (idempotent). */
 function ensureAfTeDragenAccount(db, account) {
-  if (!getAccountByCode(db, account)) {
+  const resolved = resolveAfTeDragenAccount(db, account);
+  if (!getAccountByCode(db, resolved)) {
     createAccount(db, {
-      code: account, name: 'Af te dragen omzetbelasting', type: 'liability',
+      code: resolved, name: AF_TE_DRAGEN_NAME, type: 'liability',
       normalBalance: 'credit', rgsCode: 'BSCH.12',
     });
   }
+  return resolved;
+}
+
+const AF_TE_DRAGEN_NAME = 'Af te dragen omzetbelasting';
+
+function isAfTeDragenAccount(a) {
+  return Boolean(a && a.name === AF_TE_DRAGEN_NAME && a.type === 'liability' && a.normal_balance === 'credit');
+}
+
+/**
+ * Decide which account code the af-te-dragen position lands on, WITHOUT
+ * writing anything (used by both the plan and the real run):
+ * - code free            -> as requested
+ * - code exists and IS the af-te-dragen account (right name/type) -> reuse
+ * - code taken by another account -> the next free numeric code (2510 -> 2511
+ *   -> ...), reusing an af-te-dragen account found along the way; a
+ *   non-numeric code with no successor is an error (VAT_ACCOUNT_COLLISION).
+ */
+function resolveAfTeDragenAccount(db, account) {
+  const existing = getAccountByCode(db, account);
+  if (!existing) return account;
+  if (isAfTeDragenAccount(existing)) return account;
+  if (!/^\d+$/.test(account)) {
+    throw vatError('VAT_ACCOUNT_COLLISION', `account ${account} exists but is not '${AF_TE_DRAGEN_NAME}' and has no numeric successor — pick a free code with --account`);
+  }
+  let code = String(Number(account) + 1);
+  let guard = 0;
+  while (getAccountByCode(db, code)) {
+    if (isAfTeDragenAccount(getAccountByCode(db, code))) return code; // a previous filing already landed here
+    code = String(Number(code) + 1);
+    if (++guard > 999) {
+      throw vatError('VAT_ACCOUNT_COLLISION', `no free numeric successor after ${account} — pick a free code with --account`);
+    }
+  }
+  return code;
 }
 
 /**
@@ -349,9 +385,13 @@ export function vatFile(db, { account = VAT_FILE_ACCOUNT_DEFAULT, period = null,
   if (net === 0) {
     throw vatError('VAT_NOTHING_TO_FILE', 'no outstanding VAT position to reclassify (2500/1500 net is zero)');
   }
-  // The FULL clearing position moves to 2510: both clearing accounts are
-  // emptied (2500 te betalen holds the credit/output legs, 1500 te vorderen
-  // the debit/input legs) and the NET lands on 'af te dragen omzetbelasting'
+  // Resolve the af-te-dragen account BEFORE building the plan: a requested
+  // code that is taken by another account falls to the next free numeric
+  // code, and the caller sees exactly where the position will land.
+  account = resolveAfTeDragenAccount(db, account);
+  // The FULL clearing position moves to the af-te-dragen account: both
+  // clearing accounts are emptied (2500 te betalen holds the credit/output
+  // legs, 1500 te vorderen the debit/input legs) and the NET lands there
   // (credit when you owe, debit when you get a refund).
   const postings = [
     { code: '2500', amountCents: -bal2500 },
@@ -396,30 +436,32 @@ export function vatFile(db, { account = VAT_FILE_ACCOUNT_DEFAULT, period = null,
  * transaction and links it to the booked entry.
  */
 export function vatSettle(db, {
-  txAmountCents, txDate, bankAccountCode, differenceAccount = VAT_DIFFERENCE_ACCOUNT_DEFAULT,
+  txAmountCents, txDate, bankAccountCode, account = VAT_FILE_ACCOUNT_DEFAULT,
+  differenceAccount = VAT_DIFFERENCE_ACCOUNT_DEFAULT,
   period = null, desc = null, actor = 'human', dryRun = false,
 }) {
   requireVat(db);
   if (!Number.isInteger(txAmountCents)) throw vatError('INVALID_AMOUNT', 'tx amount must be an integer number of cents');
-  const balance = accountBalance(db, VAT_FILE_ACCOUNT_DEFAULT);
+  const balance = accountBalance(db, account);
   if (balance === 0) {
-    throw vatError('VAT_SETTLE_NOTHING', `no outstanding balance on ${VAT_FILE_ACCOUNT_DEFAULT} (af te dragen omzetbelasting) to settle`);
+    throw vatError('VAT_SETTLE_NOTHING', `no outstanding balance on ${account} (af te dragen omzetbelasting) to settle`);
   }
-  const owe = balance < 0; // 2510 credit (negative) = te betalen
+  const owe = balance < 0; // af-te-dragen credit (negative) = te betalen
   const liability = Math.abs(balance);
   const paid = Math.abs(txAmountCents);
   if (owe && txAmountCents >= 0) {
-    throw vatError('VAT_SETTLE_DIRECTION', `paying ${VAT_FILE_ACCOUNT_DEFAULT} (te betalen) requires an OUTGOING bank transaction, got +${paid} cents`);
+    throw vatError('VAT_SETTLE_DIRECTION', `paying ${account} (te betalen) requires an OUTGOING bank transaction, got +${paid} cents`);
   }
   if (!owe && txAmountCents <= 0) {
-    throw vatError('VAT_SETTLE_DIRECTION', `receiving a refund on ${VAT_FILE_ACCOUNT_DEFAULT} (te ontvangen) requires an INCOMING bank transaction, got ${txAmountCents} cents`);
+    throw vatError('VAT_SETTLE_DIRECTION', `receiving a refund on ${account} (te ontvangen) requires an INCOMING bank transaction, got ${txAmountCents} cents`);
   }
   if (!getAccountByCode(db, differenceAccount)) {
     throw vatError('INVALID_DIFFERENCE_ACCOUNT', `difference account ${differenceAccount} does not exist (pick an expense account, e.g. ${VAT_DIFFERENCE_ACCOUNT_DEFAULT})`);
   }
 
   // rounding difference: +debit (loss, paid more than booked) / -credit (gain,
-  // rounded in your favour). Legs: cancel 2510, book bank, difference -> P&L.
+  // rounded in your favour). Legs: cancel the af-te-dragen balance, book bank,
+  // difference -> P&L.
   const difference = (owe ? 1 : -1) * (paid - liability);
   if (Math.abs(difference) > VAT_SETTLE_MAX_DIFFERENCE_CENTS) {
     throw vatError(
@@ -428,7 +470,7 @@ export function vatSettle(db, {
     );
   }
   const postings = [
-    { code: VAT_FILE_ACCOUNT_DEFAULT, amountCents: owe ? liability : -liability },
+    { code: account, amountCents: owe ? liability : -liability },
     { code: bankAccountCode, amountCents: txAmountCents },
   ];
   if (difference !== 0) postings.push({ code: differenceAccount, amountCents: difference });
@@ -436,7 +478,7 @@ export function vatSettle(db, {
 
   if (dryRun) {
     return {
-      action: 'vat.settle', dryRun: true, owe, liability_cents: liability, paid_cents: paid,
+      action: 'vat.settle', dryRun: true, account, owe, liability_cents: liability, paid_cents: paid,
       difference_cents: difference, difference_account: differenceAccount, date: txDate,
       postings: postings.map((p) => ({ code: p.code, amount_cents: p.amountCents })),
     };
@@ -451,7 +493,7 @@ export function vatSettle(db, {
     record(db, {
       actor, action: 'vat.settle', command: 'vat settle',
       args: {
-        period, owe, liability_cents: liability, paid_cents: paid, difference_cents: difference,
+        account, period, owe, liability_cents: liability, paid_cents: paid, difference_cents: difference,
         difference_account: differenceAccount, description,
       },
       outcome: 'ok', entryIds: [created.id],
@@ -459,7 +501,7 @@ export function vatSettle(db, {
     return created;
   })();
   return {
-    action: 'vat.settle', entry_id: entry.id, owe, liability_cents: liability, paid_cents: paid,
+    action: 'vat.settle', entry_id: entry.id, account, owe, liability_cents: liability, paid_cents: paid,
     difference_cents: difference, difference_account: differenceAccount, postings,
   };
 }

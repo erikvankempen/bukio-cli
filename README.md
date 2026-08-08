@@ -10,7 +10,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-534%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-539%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -375,8 +375,8 @@ Optional VAT module (per company; KOR companies cannot enable it).
 | `vat codes` | List VAT codes (21, 9, 0, V vrijgesteld, R/RE verlegd, M marge, P privé) |
 | `vat book --date --desc --postings "1100:121.00,8000:-100.00@21" [--post] [--dry-run]` | Book a VAT-aware entry. `@CODE` tags a posting as net; the VAT amount and the VAT ledger leg (2500/1500) are computed automatically. |
 | `vat readout --period 2026-Q2 [--mark-filed]` | **OB-aangifte manual-filing readout** — fields 1a–5d for the period (quarter `YYYY-Qn` or month `YYYY-MM`). bukio never files; you enter these amounts in Mijn Belastingdienst Zakelijk. `--mark-filed` records the filing. |
-| `vat file --period 2026-Q2 [--account 2510] [--dry-run]` | Reclassify the outstanding VAT position to **'Af te dragen omzetbelasting'** (default 2510, auto-created) at filing — clears 1500/2500, moves the exact-cents net. The form is filed in rounded whole euros; the cents-level difference is settled to the P&L later. |
-| `vat settle --tx <id> [--period] [--difference-account 4700] [--dry-run]` | Book the bank payment that cancels the af-te-dragen balance (tx must be unmatched; outgoing for te betalen, incoming for a refund). The rounding difference between the filed whole-euro payment and the exact-cents liability goes to the P&L difference account (default 4700, `--difference-account` for a dedicated account) — a gain when you rounded in your favour. Entry + tx reconciliation commit atomically. |
+| `vat file --period 2026-Q2 [--account 2510] [--dry-run]` | Reclassify the outstanding VAT position to **'Af te dragen omzetbelasting'** (default 2510, auto-created) at filing — clears 1500/2500, moves the exact-cents net. If the requested code is taken by another account (e.g. an imported chart), it auto-falls to the next free numeric code (2511, …) and reports it; pick any free code with `--account`. The form is filed in rounded whole euros; the cents-level difference is settled to the P&L later. |
+| `vat settle --tx <id> [--period] [--account 2510] [--difference-account 4700] [--dry-run]` | Book the bank payment that cancels the af-te-dragen balance (tx must be unmatched; outgoing for te betalen, incoming for a refund). `--account` matches what `vat file` used (default 2510; pass 2511 when the filing collided to the next free code). The rounding difference between the filed whole-euro payment and the exact-cents liability goes to the P&L difference account (default 4700, `--difference-account` for a dedicated account) — a gain when you rounded in your favour. Entry + tx reconciliation commit atomically. |
 
 ```bash
 # sale: 121.00 incl 21% -> omzet 100 + te betalen btw 21

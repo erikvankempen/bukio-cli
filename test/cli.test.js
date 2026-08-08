@@ -450,6 +450,39 @@ test('account list: human mode renders without crashing (table import regression
   assert.match(out, /1100/);
 });
 
+test('vat file + settle with a custom af-te-dragen account (--account 2515)', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
+  run(dbPath, ['vat', 'book', '--date', '2026-07-01', '--desc', 'Omzet', '--postings', '1100:121.00,8000:-100.00@21', '--post', '--json']);
+  // file to a custom account — the dry-run must show the same code
+  const dry = run(dbPath, ['vat', 'file', '--account', '2515', '--period', '2026-Q3', '--dry-run', '--json']);
+  assert.equal(dry.out.data.account, '2515');
+  const filed = run(dbPath, ['vat', 'file', '--account', '2515', '--period', '2026-Q3', '--json']);
+  assert.equal(filed.out.data.account, '2515');
+  assert.equal(filed.out.data.liability_cents, 2100);
+  // payment tx arrives; settle against the custom account
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-ob2-'));
+  const camt = path.join(dir, 'ob.camt.xml');
+  writeFileSync(camt, `<?xml version="1.0"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt><Stmt><Acct><Id><IBAN>NL91ABNA0417164300</IBAN></Id></Acct>
+    <Ntry><Amt>21.00</Amt><CdtDbtInd>DBIT</CdtDbtInd><BookgDt><Dt>2026-07-25</Dt></BookgDt>
+      <NtryDtls><TxDtls><RltdPties><Dbtr><Nm>Belastingdienst</Nm></Dbtr></RltdPties>
+      <RmtInf><Ustrd>OB aangifte</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>
+  </Stmt></BkToCstmrStmt>
+</Document>`);
+  run(dbPath, ['bank', 'add', '--iban', 'NL91ABNA0417164300', '--name', 'Rabobank', '--json']);
+  run(dbPath, ['bank', 'import', '--file', camt, '--iban', 'NL91ABNA0417164300', '--json']);
+  const txId = run(dbPath, ['bank', 'transactions', '--json']).out.data.transactions[0].id;
+  const settled = run(dbPath, ['vat', 'settle', '--tx', String(txId), '--account', '2515', '--period', '2026-Q3', '--json']);
+  assert.equal(settled.out.data.account, '2515');
+  assert.equal(settled.out.data.difference_cents, 0); // 21.00 filed = 21.00 booked
+  assert.equal(settled.out.data.tx.state, 'matched');
+  // the default account was never touched
+  const tb = run(dbPath, ['report', 'trial-balance', '--json']);
+  assert.equal(tb.out.data.balanced, true);
+});
+
 test('vat file + vat settle end-to-end: filing moves the position, the payment cancels it with the rounding difference in the P&L', () => {
   const dbPath = tmpDb();
   run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
