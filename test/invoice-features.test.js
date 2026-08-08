@@ -419,6 +419,14 @@ test('UBL: formatted quantity, unit code, language, discounted tax bases', () =>
   // BT-107 covers ONLY the document-level allowance (13.50) — line discounts
   // are folded into the line net amounts
   assert.match(xml, /<cbc:AllowanceTotalAmount currencyID="EUR">13.50<\/cbc:AllowanceTotalAmount>/);
+  // UBL 2.1 LegalMonetaryTotal XSD sequence: LineExtensionAmount →
+  // TaxExclusiveAmount → TaxInclusiveAmount → AllowanceTotalAmount →
+  // PayableAmount (regression: AllowanceTotalAmount used to sit right after
+  // LineExtensionAmount, failing XSD validation at Peppol access points)
+  const lmt = xml.slice(xml.indexOf('<cac:LegalMonetaryTotal>'), xml.indexOf('</cac:LegalMonetaryTotal>'));
+  const order = ['LineExtensionAmount', 'TaxExclusiveAmount', 'TaxInclusiveAmount', 'AllowanceTotalAmount', 'PayableAmount']
+    .map((t) => lmt.indexOf(`<cbc:${t}`));
+  assert.ok(order.every((i, n) => i > -1 && (n === 0 || i > order[n - 1])), `LegalMonetaryTotal children out of order: ${order}`);
   // TaxExclusiveAmount = discounted net 121.50
   assert.match(xml, /<cbc:TaxExclusiveAmount currencyID="EUR">121.50<\/cbc:TaxExclusiveAmount>/);
   // taxable base in the TaxSubtotal is the discounted base

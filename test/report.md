@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 23:07:25 UTC — **✅ 572 passing · 0 failing (572 tests)**
+**Latest run:** 2026-08-08 23:22:53 UTC — **✅ 574 passing · 0 failing (574 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -129,10 +129,12 @@
 
 ### bank.test.js — CAMT.053/CSV import, idempotency, matching/reconciliation
 
-19 passing · 0 failing
+21 passing · 0 failing
 
     - ✅ parseCamt053: CRDT positive, DBIT negative, counterparty + description
     - ✅ parseCamt053: rejects non-CAMT input
+    - ✅ parseCamt053: empty party-name element falls through to the other party
+    - ✅ parseBankAmount: degenerate inputs (., ,) return null, never NaN
     - ✅ parseBankAmount: Dutch and international formats
     - ✅ parseBankCsv: Rabo-style export with Af/Bij sign
     - ✅ parseBankCsv: missing required columns rejected

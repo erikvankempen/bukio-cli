@@ -75,6 +75,36 @@ test('parseCamt053: rejects non-CAMT input', () => {
   assert.throws(() => parseCamt053('not xml at all'), { code: 'INVALID_CAMT' });
 });
 
+test('parseCamt053: empty party-name element falls through to the other party', () => {
+  // <Nm></Nm> (empty element) must be treated as absent so the counterparty
+  // falls back to the other party's name instead of storing ''
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt><Stmt>
+    <Acct><Id><IBAN>NL91ABNA0417164300</IBAN></Id></Acct>
+    <Ntry>
+      <Amt>100.00</Amt><CdtDbtInd>DBIT</CdtDbtInd>
+      <BookgDt><Dt>2026-06-01</Dt></BookgDt>
+      <NtryDtls><TxDtls>
+        <RltdPties><Cdtr><Nm></Nm></Cdtr><Dbtr><Nm>Acme BV</Nm></Dbtr></RltdPties>
+      </TxDtls></NtryDtls>
+    </Ntry>
+  </Stmt></BkToCstmrStmt>
+</Document>`;
+  const txs = parseCamt053(xml);
+  assert.equal(txs.length, 1);
+  assert.equal(txs[0].counterparty, 'Acme BV'); // fell through from empty Cdtr.Nm
+});
+
+test('parseBankAmount: degenerate inputs (., ,) return null, never NaN', () => {
+  assert.equal(parseBankAmount('.'), null);
+  assert.equal(parseBankAmount(','), null);
+  assert.equal(parseBankAmount('.,'), null);
+  assert.equal(parseBankAmount(''), null);
+  assert.equal(parseBankAmount('12.50'), 1250);
+  assert.equal(parseBankAmount('1.234,56'), 123456);
+});
+
 test('parseBankAmount: Dutch and international formats', () => {
   assert.equal(parseBankAmount('100,00'), 10000);
   assert.equal(parseBankAmount('1.234,56'), 123456);

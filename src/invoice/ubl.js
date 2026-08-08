@@ -11,7 +11,7 @@
 // lines (with per-line allowances for discounts).
 // Full Peppol validation (Schematron) is out of scope — verify via a
 // validation service before production use.
-import { computeInvoiceTotals, formatQty } from './index.js';
+import { computeInvoiceTotals, formatQty, lineDiscountCents } from './index.js';
 
 function esc(s) {
   // XML 1.0 valid chars: strip control chars (0x00-0x08, 0x0B, 0x0C,
@@ -122,9 +122,7 @@ export function invoiceToUbl(db, invoice) {
   // discounts are already folded into BT-106 (sum of line net amounts), so
   // BT-106 − BT-107 == TaxExclusiveAmount still reconciles exactly.
   const lineAllowance = (l) => {
-    const disc = l.discount_type === 'pct'
-      ? Math.round(l.amount_cents * l.discount_value / 10000)
-      : l.discount_type === 'amount' ? Math.min(l.discount_value, l.amount_cents) : 0;
+    const disc = lineDiscountCents(l);
     return disc > 0 ? `
       <cac:AllowanceCharge>
         <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
@@ -135,9 +133,7 @@ export function invoiceToUbl(db, invoice) {
   };
 
   // line net amount = gross − line discount (BT-131)
-  const lineNet = (l) => l.amount_cents - (l.discount_type === 'pct'
-    ? Math.round(l.amount_cents * l.discount_value / 10000)
-    : l.discount_type === 'amount' ? Math.min(l.discount_value, l.amount_cents) : 0);
+  const lineNet = (l) => l.amount_cents - lineDiscountCents(l);
 
   // document-level allowance total (BT-107): doc discount ONLY
   const allowanceTotal = discount_cents;
@@ -226,9 +222,9 @@ export function invoiceToUbl(db, invoice) {
     <cbc:TaxAmount currencyID="${currency}">${moneyAmount(vat_cents)}</cbc:TaxAmount>${taxSubtotals}
   </cac:TaxTotal>
   <cac:LegalMonetaryTotal>
-    <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(lineExtensionTotal)}</cbc:LineExtensionAmount>${allowanceTotalXml}
+    <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(lineExtensionTotal)}</cbc:LineExtensionAmount>
     <cbc:TaxExclusiveAmount currencyID="${currency}">${moneyAmount(net_cents)}</cbc:TaxExclusiveAmount>
-    <cbc:TaxInclusiveAmount currencyID="${currency}">${moneyAmount(gross_cents)}</cbc:TaxInclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="${currency}">${moneyAmount(gross_cents)}</cbc:TaxInclusiveAmount>${allowanceTotalXml}
     <cbc:PayableAmount currencyID="${currency}">${moneyAmount(gross_cents)}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>${linesXml}
 </${isCredit ? 'CreditNote' : 'Invoice'}>`;

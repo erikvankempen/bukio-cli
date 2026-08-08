@@ -259,6 +259,11 @@ test('compliance: jaarrekening deadline is 13 months after the fiscal year end',
   db.prepare("UPDATE company SET fiscal_year_end = '06-30'").run();
   const c2 = db.prepare('SELECT * FROM company WHERE id = 1').get();
   assert.equal(jaarrekeningDeadline(c2, 2026), '2027-07-31');
+  // tolerant parse: a full YYYY-MM-DD fiscal_year_end must not read the year
+  // as the month (regression — the old first-part parse computed ~2195)
+  db.prepare("UPDATE company SET fiscal_year_end = '2026-06-30'").run();
+  const c3 = db.prepare('SELECT * FROM company WHERE id = 1').get();
+  assert.equal(jaarrekeningDeadline(c3, 2026), '2027-07-31');
 });
 
 test('compliance: calendar shows obligations, statuses flip with filings', () => {

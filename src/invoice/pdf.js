@@ -9,7 +9,7 @@
 // import, and keeping it out of the static graph keeps every CLI invocation
 // fast (cli/index.js pulls this module in eagerly via cli/invoice.js).
 import { formatAmount } from '../core/money.js';
-import { computeInvoiceTotals, formatQty } from './index.js';
+import { computeInvoiceTotals, formatQty, lineDiscountCents } from './index.js';
 import { label, unitLabel } from './i18n.js';
 
 export function pdfError(code, message) {
@@ -46,9 +46,7 @@ export function invoiceHtml(db, invoice) {
   const logo = logoDataUri(company);
 
   const rows = invoice.lines.map((l, i) => {
-    const disc = l.discount_type === 'pct'
-      ? Math.round(l.amount_cents * l.discount_value / 10000)
-      : l.discount_type === 'amount' ? Math.min(l.discount_value, l.amount_cents) : 0;
+    const disc = lineDiscountCents(l);
     const vatTxt = l.vat_rate_bp ? `${(l.vat_rate_bp / 100).toFixed(1)}%`
       : (l.vat_code === 'R' || l.vat_code === 'RE') ? (lang === 'en' ? 'reverse charge' : 'verlegd') : '-';
     return `

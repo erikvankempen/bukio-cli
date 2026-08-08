@@ -74,6 +74,10 @@ export function parseBankAmount(value) {
   } else {
     cents = parseInt(s, 10) * 100;
   }
+  // degenerate inputs ('.', ',', '.,') pass the character guard but produce
+  // NaN — never let NaN into the ledger (the caller's null check misses it,
+  // and SQLite would reject the whole batch with a cryptic constraint error)
+  if (!Number.isFinite(cents)) return null;
   return negative && cents !== 0 ? -cents : cents;
 }
 

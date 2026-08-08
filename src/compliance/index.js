@@ -34,7 +34,11 @@ export function jaarrekeningDeadline(company, year) {
   // calendar-13-months date, which for a 06-30 FY would be 07-30, one day
   // earlier than the 07-31 used here.
   const fy = company.fiscal_year_end || '12-31';
-  const [mm] = fy.split('-').map(Number);
+  // tolerant parse like fiscalYearWindow: take the SECOND-TO-LAST part so a
+  // full 'YYYY-MM-DD' value works too (first-part would read 2026 as the
+  // month and compute a deadline ~170 years out)
+  const parts = String(fy).split('-');
+  const mm = Number(parts[parts.length - 2]);
   const total = mm + 13;
   const y = Number(year) + Math.floor((total - 1) / 12);
   const m = ((total - 1) % 12) + 1;

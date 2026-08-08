@@ -35,7 +35,12 @@ function cents(value) {
 
 function text(node) {
   if (node == null) return null;
-  if (typeof node === 'string') return node;
+  if (typeof node === 'string') {
+    // an EMPTY element (<Nm></Nm>) parses to '' — treat it as absent so the
+    // counterparty/description fallback chains (??) fall through instead of
+    // storing an empty string as the counterparty
+    return node.trim() ? node : null;
+  }
   return null;
 }
 
