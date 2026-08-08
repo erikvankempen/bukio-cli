@@ -43,7 +43,9 @@ export function migrate(db) {
         db.exec(sql);
         db.pragma(`user_version = ${version}`);
       } catch (err) {
-        throw new Error(`migration ${file} failed: ${err.message}`);
+        const e = new Error(`migration ${file} failed: ${err.message}`);
+        e.code = 'MIGRATION_FAILED';
+        throw e;
       } finally {
         db.pragma(`foreign_keys = ${wasOn ? 'ON' : 'OFF'}`);
       }
@@ -56,7 +58,9 @@ export function migrate(db) {
       db.exec('COMMIT');
     } catch (err) {
       db.exec('ROLLBACK');
-      throw new Error(`migration ${file} failed: ${err.message}`);
+      const e = new Error(`migration ${file} failed: ${err.message}`);
+      e.code = 'MIGRATION_FAILED';
+      throw e;
     }
   }
 }

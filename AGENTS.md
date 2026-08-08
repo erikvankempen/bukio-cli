@@ -591,6 +591,7 @@ tar -czf ~/exports/bukio-documenten-2026.tar.gz -C ~/.bukio invoices/
 |------|---------------|------------|
 | `NO_DATABASE` | DB file missing | Run `bukio init` first |
 | `ALREADY_INITIALISED` | Company exists | Point `--db` at a fresh file |
+| `MIGRATION_FAILED` | A schema migration could not be applied (malformed SQL, version conflict) | The database is left unchanged (transaction rolled back); report the migration file + error |
 | `INVALID_AMOUNT` | Bad amount string | Use `1234.56`, max 2 decimals, no separators |
 | `INVALID_POSTING` | Spec not `CODE:AMOUNT` | Fix the spec |
 | `TOO_FEW_POSTINGS` | < 2 postings | Add the counter-posting |

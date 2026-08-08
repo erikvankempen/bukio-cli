@@ -120,7 +120,7 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const row = getCompany(db);
-          if (!row) throw new Error('no company — run bukio init first');
+          if (!row) throw dbError('NO_COMPANY', 'no company — run bukio init first');
           output(ctx, { company: serializeCompany(row) }, (d) => {
             table([d.company], [
               { key: 'name', label: 'naam' },
@@ -160,7 +160,7 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const row = getCompany(db);
-          if (!row) throw new Error('no company — run bukio init first');
+          if (!row) throw dbError('NO_COMPANY', 'no company — run bukio init first');
 
           const changes = {};
           for (const [opt, col, label] of COMPANY_FIELDS) {
