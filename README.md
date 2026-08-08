@@ -195,6 +195,22 @@ bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on --dry-run
 bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on
 ```
 
+### `bukio company`
+
+Company record — the supplier gegevens on your invoices (12-vereisten 1–3 must be complete before `invoice finalize`).
+
+| Command | Purpose |
+|---------|---------|
+| `company show` | Current company record (name, kvk, btw-id, iban, address) |
+| `company update --name --kvk --btw-id --iban --address --postal-code --city [--dry-run]` | Update supplier data (audited; IBAN mod-97 validated) |
+| `company update --logo FILE` / `--remove-logo` / `company logo --out FILE` | Store/extract the invoice logo (PNG/JPEG/SVG ≤ 1 MB, ≤ 2048×2048 px, stored as a BLOB in the DB — travels with backups) |
+
+```bash
+bukio company update --address "Industrieweg 12" --postal-code "2712 CD" --city "Zoetermeer" --btw-id NL123456789B01
+bukio company update --logo ~/logo.svg
+bukio company show
+```
+
 ### `bukio entry add`
 
 Create a journal entry (draft by default; `--post` posts it immediately).
@@ -511,6 +527,7 @@ The agent layer (Phase 5).
 | `mcp` | **MCP server over stdio** (JSON-RPC 2.0, newline-delimited): `company_info`, `trial_balance`, `balans`, `pnl`, `journal`, `accounts`, `vat_readout`, `icp_readout`, `audit`, `compliance`, `invoices` (read-only) + `entry_add/post/reverse`, `vat_book`, `invoice_create/finalize/credit/pay`, `recurring_run`, `year_end_close`, `fx_set`, `contact_add` (mutations). **Mutations are plan-only unless `mode:"execute"`**; `BUKIO_MCP_READONLY=1` blocks execution entirely. Every execute books with the caller's `actor` and lands in the audit log. NL query = an agent on top of these tools |
 | `fx set --currency USD --date D --rate 1.0875` | Store a rate (1 EUR = N units of foreign currency, 4 decimals max). Upsert; audited |
 | `fx fetch --currency USD [--date D]` | **Fetch the ECB reference rate** (free, no key) for a currency on/before a date and store it (source `ECB`). Weekends/holidays fall back to the last business day; unknown currency or pre-1999 → `ECB_RATE_NOT_AVAILABLE` |
+| `fx list [--limit N]` / `fx show --currency USD [--limit N]` | Rate store inspection (all currencies, or one currency's history) |
 | `entry add / vat book --currency USD [--rate R]` | **Foreign-currency purchase invoices**: spec amounts are in the foreign currency, converted to EUR (round-half-up) at booking; the rate is auto-looked-up (exact date, else latest on/before) when `--rate` is omitted. **Missing rates are fetched live from the ECB** and stored for reuse — one network call ever per currency/date. The ledger stores EUR; each posting keeps `fx_currency`/`fx_amount_cents` (the original amount) — reversals negate both. VAT legs are computed on the EUR amounts. `BUKIO_FX_NO_FETCH=1` disables the network fallback (offline/air-gapped use) |
 | `compliance status --year YYYY` | OB + ICP quarterly deadlines and the jaarrekening deposit (13 months after FY end, art. 2:394 BW) with filed/open/overdue status; `compliance mark --type ICP\|JAARREKENING --period ...` records a filing (OB uses `vat readout --mark-filed`) |
 

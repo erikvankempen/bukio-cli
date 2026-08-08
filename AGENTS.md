@@ -50,25 +50,29 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio report sales [--year YYYY] [--by contact\|item]` | Sales revenue for a year: per contact (net/vat/gross via the totals engine) or per item (net after per-line discounts; invoice-level discounts not allocated per line). |
 | `bukio contact statement --id N [--as-of D]` | Opgave: invoices + payments + payables with a running balance (positive = contact owes you). |
 | `bukio report <cmd> --format csv\|xlsx [--out PATH]` | Export any report; xlsx requires `--out`. |
+| `bukio bank add --iban IBAN [--name N] [--account-code CODE] [--dry-run]` | Register a bank account (default ledger code 1100). |
 | `bukio bank import --file F --iban IBAN [--dry-run]` | Import CAMT.053 XML or bank CSV (idempotent by hash). |
 | `bukio bank match auto [--dry-run]` / `suggest` / `link --tx --entry` / `post --tx --account` | Reconcile: auto-match to entries, or post new entries from unmatched transactions. |
-| `bukio bank list` / `transactions [--state]` / `ignore --tx` | Account balances, transaction states, ignore (own transfers). |
+| `bukio bank list` / `transactions [--state]` / `ignore --tx` / `unignore --tx` | Account balances, transaction states, ignore/unignore (own transfers). |
 | `bukio vat enable` | Enable the VAT module (accounts 1500/2500 + codes). |
+| `bukio vat codes` | List the VAT codes (21/9/0/V/R/RE/M/P with rates + types). |
 | `bukio vat book --postings "1100:121.00,8000:-100.00@21" [--post]` | Book VAT-aware entries — `@CODE` computes the VAT leg automatically. |
 | `bukio vat readout --period 2026-Q2 [--mark-filed]` | OB-aangifte fields 1a–5d for manual filing. Never auto-files. |
 | `bukio recurring add --postings "CODE:AMT" --frequency monthly --start DATE [--reverse-previous]` | Create a recurring **entry** template. |
 | `bukio recurring add --kind invoice --contact N --lines "2x DESC @ PRICE @21" --frequency monthly --start DATE [--due-days]` | Create a **subscription invoice** template — `run` generates draft invoices (never auto-finalizes). `--due-days 0` = due on the invoice date. |
 | `bukio recurring run [--as-of DATE] [--template ID] [--dry-run]` | Generate all due entries/invoice drafts (backfills, idempotent). |
-| `bukio recurring preview/list/pause/resume` | Schedule inspection and control. |
+| `bukio recurring preview/list/show --id/pause/resume` | Schedule inspection and control. |
 | `bukio depreciation add --cost C --life-months M --start DATE` | Depreciation schedule (remainder-adjusted final run). |
 | `bukio invoice peppol-send --id N [--endpoint URL] [--dry-run]` | POST the UBL to a Peppol access-point provider (env `BUKIO_PEPPOL_ENDPOINT` + `BUKIO_PEPPOL_TOKEN`). |
 | `bukio item add --name N [--description] [--unit h\|day\|month\|unit\|session\|km\|kg\|project] --price P [--vat] [--gl]` | Add a catalog item (price/VAT snapshot onto invoice lines at creation). |
 | `bukio item list [--all]` / `show --id` / `update --id [--price] [--unit] [--vat] [--gl] [--deactivate]` | Inspect/update the catalog; deactivation blocks new invoices, existing keep snapshots. |
 | `bukio contact add --name N [--address] [--vat-id]` / `list` | Invoice counterparties. |
 | `bukio invoice create --contact N --lines "..." \| --items "..." --date D [--discount-pct P \| --discount-amount A] [--language nl\|en]` | Draft invoice. Lines: `[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]` (fractional qty allowed, per-line discount `@-10%`/`@-25.00`). Items: `ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]` with per-invoice overrides. Total discount applies BEFORE VAT. |
+| `bukio company show` / `update --name --kvk --btw-id --iban --address --postal-code --city [--dry-run]` | Company record (audited); supplier gegevens must be complete before finalize (12-vereisten 1-3). |
 | `bukio company update --logo FILE` / `--remove-logo` / `company logo --out FILE` | Store/extract the invoice logo (PNG/JPEG/SVG ≤ 1 MB, ≤ 2048×2048 px, stored as a BLOB in the DB — travels with backups). |
 | `bukio attach add --invoice N\|--entry N --file F [--store db\|file] [--note] [--dry-run]` / `attach list --invoice N\|--entry N` / `attach show --id N [--out F] [--force]` / `attach remove --id N [--dry-run]` | Store source documents against invoices/entries. Default `--store db` = BLOB in the DB (travels with backups); `--store file` = copy in `<db>-attachments/` with the path stored. Lists are metadata-only. `show --out` refuses to overwrite without `--force`. |
 | `bukio invoice create --contact N --lines "2x DESC @ PRICE @21" --date D` | Draft invoice (12-vereisten validated at finalize). |
+| `bukio invoice list [--status draft\|sent\|paid\|overdue] [--type sales\|credit]` / `show --id N` | Inspect invoices. |
 | `bukio invoice finalize --id N [--dry-run]` | Sequential number + booking entry (Debiteuren/Omzet/btw). |
 | `bukio invoice pdf --id N` / `ubl --id N` / `credit --id N` / `pay --id N --date` | PDF (Chromium), Peppol BIS 3.0 XML, credit notes, payments. |
 | `bukio invoice email --id N [--to X] [--subject] [--body] [--no-pdf] [--dry-run]` | Email the finalized invoice PDF via SMTP (`BUKIO_SMTP_*` env — host/port/user/pass/from). Delivery is audited; status is `sent` from finalize onward. |
@@ -78,6 +82,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio icp readout --period 2026-Q3` | ICP listing: EU btw-verlegde supplies per customer (manual filing aid). |
 | `bukio fx set --currency USD --date D --rate 1.0875` | FX rate store (upsert, audited). |
 | `bukio fx fetch --currency USD [--date D]` | ECB reference rate (free, no key) on/before a date, stored as source=ECB. |
+| `bukio fx list` / `show --currency USD [--limit N]` | Rate store inspection. |
 | `bukio entry add / vat book --currency USD [--rate R]` | Foreign-currency purchase invoices -> EUR at booking. Rate resolves: --rate -> stored -> ECB auto-fetch (BUKIO_FX_NO_FETCH=1 disables). Postings keep fx_currency/fx_amount_cents. |
 | `bukio mcp` | MCP server over stdio (plan-only mutations unless mode=execute; BUKIO_MCP_READONLY=1 blocks them). |
 | `bukio compliance status --year YYYY` / `mark --type ICP\|JAARREKENING --period ...` | Filing deadlines (OB/ICP/jaarrekening) + manual filing registry. |
