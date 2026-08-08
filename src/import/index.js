@@ -213,10 +213,15 @@ export function importOpeningBalances(db, { csvText, date = null, actor = 'human
 
   const rows = parseCsvRows(csvText);
   if (rows.length === 0) throw importError('EMPTY_CSV', 'opening-balances CSV has no data rows');
+  // optional header row (doc promised it, parser never handled it): a data
+  // row ALWAYS starts with a 1-6 digit account code — if the first row's
+  // first cell isn't one, it is a header ('code,amount' / 'code,debet,credit')
+  const dataRows = CODE_RE.test(rows[0].cells[0] ?? '') ? rows : rows.slice(1);
+  if (dataRows.length === 0) throw importError('EMPTY_CSV', 'opening-balances CSV has no data rows after the header');
 
   const errors = [];
   const specs = [];
-  for (const r of rows) {
+  for (const r of dataRows) {
     const cells = r.cells; // keep empties: layout is decided by column count
     let code;
     let amount;

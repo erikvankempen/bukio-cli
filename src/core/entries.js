@@ -172,7 +172,7 @@ export function postEntry(db, { id, actor = 'human' }) {
  * reversed_from_id points at the original; the audit log records the action.
  * Posted entries are never deleted — they are reversed.
  */
-export function reverseEntry(db, { id, actor = 'human', reason = null }) {
+export function reverseEntry(db, { id, actor = 'human', reason = null, dryRun = false }) {
   const entry = getEntry(db, id);
   if (!entry) throw entryError('NOT_FOUND', `entry ${id} does not exist`);
   if (entry.state !== 'posted') {
@@ -184,6 +184,11 @@ export function reverseEntry(db, { id, actor = 'human', reason = null }) {
   ).get(id);
   if (existingReversal.c > 0) {
     throw entryError('ALREADY_REVERSED', `entry ${id} already has a posted reversal`);
+  }
+
+  if (dryRun) {
+    // same checks as the real path (all above), nothing written
+    return { action: 'entry.reverse', id, reason, dryRun: true };
   }
 
   const description = `Reversal of entry ${id}${reason ? ` — ${reason}` : ''}`;

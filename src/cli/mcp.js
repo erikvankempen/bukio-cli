@@ -11,7 +11,7 @@ import { journal } from '../report/journal.js';
 import { listAccounts } from '../core/accounts.js';
 import {
   createEntry, postEntry, reverseEntry, getEntry, resolvePostings,
-  parsePostingSpecs,
+  parsePostingSpecs, validateDate,
 } from '../core/entries.js';
 import { bookVatEntry, expandVatPostings, obReadout, parseVatPostingSpecs } from '../vat/index.js';
 import {
@@ -177,6 +177,19 @@ tool({
     }) : specs;
     const resolved = resolvePostings(db, converted);
     const sum = resolved.reduce((s, p) => s + p.amountCents, 0);
+    // validate the DB-free invariants in dry-run too — the old plan echoed
+    // garbage dates / single postings / unbalanced sums as a green plan
+    // (createEntry caught them only on execute; the agent saw isError:false)
+    validateDate(args.date);
+    if (!args.description || !String(args.description).trim()) {
+      throw new McpError('INVALID_DESCRIPTION', 'description is required');
+    }
+    if (resolved.length < 2) {
+      throw new McpError('TOO_FEW_POSTINGS', 'an entry needs at least 2 postings');
+    }
+    if (sum !== 0) {
+      throw new McpError('UNBALANCED', `postings do not sum to zero (sum = ${sum} cents)`);
+    }
     const plan = {
       action: 'entry.add', date: args.date, description: args.description,
       currency: args.currency ?? null,
@@ -187,7 +200,6 @@ tool({
       sum_cents: sum, balanced: sum === 0,
     };
     if (modeOf(args) === 'dry-run') return { ...plan, mode: 'dry-run', note: 'plan only — re-run with mode=execute to book' };
-    if (!plan.balanced) throw new McpError('UNBALANCED', `postings do not sum to zero (sum = ${sum} cents)`);
     const actor = args.actor ?? ctx.actor;
     let entry = createEntry(db, {
       date: args.date, description: args.description,
@@ -206,7 +218,14 @@ tool({
     guardExecute(ctx, args);
     const entry = getEntry(db, args.id);
     if (!entry) throw new McpError('NOT_FOUND', `entry ${args.id} does not exist`);
-    if (modeOf(args) === 'dry-run') return { action: 'entry.post', id: args.id, from: entry.state, to: 'posted', mode: 'dry-run' };
+    if (modeOf(args) === 'dry-run') {
+      // validate the transition like the real path (postEntry rejects
+      // already-posted/reversed entries)
+      if (entry.state !== 'draft') {
+        throw new McpError(entry.state === 'posted' ? 'ALREADY_POSTED' : 'ALREADY_REVERSED', `entry ${args.id} is ${entry.state}`);
+      }
+      return { action: 'entry.post', id: args.id, from: entry.state, to: 'posted', mode: 'dry-run' };
+    }
     const posted = postEntry(db, { id: args.id, actor: args.actor ?? ctx.actor });
     return { action: 'entry.post', id: args.id, state: posted.state, mode: 'execute' };
   },
@@ -217,7 +236,11 @@ tool({
   schema: { type: 'object', properties: { id: { type: 'number' }, reason: { type: 'string' }, actor: { type: 'string' }, mode: { type: 'string' } }, required: ['id'] },
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);
-    if (modeOf(args) === 'dry-run') return { action: 'entry.reverse', id: args.id, mode: 'dry-run', note: 'posts a contra-entry cancelling entry N' };
+    if (modeOf(args) === 'dry-run') {
+      // validate like the real path (reverseEntry dryRun) — the old plan
+      // echoed ok for nonexistent/draft entries
+      return reverseEntry(db, { id: args.id, reason: args.reason ?? null, dryRun: true });
+    }
     const reversed = reverseEntry(db, { id: args.id, actor: args.actor ?? ctx.actor, reason: args.reason });
     return { action: 'entry.reverse', id: args.id, reversal_id: reversed.id, state: reversed.state, mode: 'execute' };
   },
@@ -241,6 +264,16 @@ tool({
       rateX10000: await resolveRate(db, { currency: args.currency, rate: args.rate, date: args.date, actor: args.actor ?? ctx.actor }),
     }) : specs;
     const expanded = expandVatPostings(db, converted);
+    // validate the DB-free invariants in dry-run too (parity with entry_add):
+    // expandVatPostings validated codes/accounts, but date/description/count
+    // only surfaced on execute before
+    validateDate(args.date);
+    if (!args.description || !String(args.description).trim()) {
+      throw new McpError('INVALID_DESCRIPTION', 'description is required');
+    }
+    if (expanded.length < 2) {
+      throw new McpError('TOO_FEW_POSTINGS', 'an entry needs at least 2 postings');
+    }
     const plan = {
       action: 'vat.book', date: args.date, description: args.description, currency: args.currency ?? null,
       postings: expanded.map((p) => ({
@@ -271,13 +304,25 @@ tool({
   },
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);
-    const plan = { action: 'invoice.create', contact_id: args.contact_id, lines: args.lines, date: args.date ?? null };
-    if (modeOf(args) === 'dry-run') return { ...plan, mode: 'dry-run' };
+    if (modeOf(args) === 'dry-run') {
+      // validate like the real path (createInvoice dryRun) — the old plan
+      // echoed ok for garbage dates and nonexistent contacts
+      const plan = createInvoice(db, {
+        contactId: args.contact_id, lines: args.lines,
+        date: args.date ?? new Date().toISOString().slice(0, 10),
+        dueDays: args.due_days ?? 30, actor: args.actor ?? ctx.actor, dryRun: true,
+      });
+      return { ...plan, mode: 'dry-run', note: 'plan only — re-run with mode=execute to book' };
+    }
     const inv = createInvoice(db, {
       contactId: args.contact_id, lines: args.lines, date: args.date ?? new Date().toISOString().slice(0, 10),
       dueDays: args.due_days ?? 30, actor: args.actor ?? ctx.actor,
     });
-    return { ...plan, mode: 'execute', invoice_id: inv.id, invoice_number: null, status: 'draft', totals: { net: inv.net_cents, vat: inv.vat_cents, gross: inv.gross_cents } };
+    return {
+      action: 'invoice.create', contact_id: args.contact_id, lines: args.lines, date: inv.date,
+      mode: 'execute', invoice_id: inv.id, invoice_number: null, status: 'draft',
+      totals: { net: inv.net_cents, vat: inv.vat_cents, gross: inv.gross_cents },
+    };
   },
 });
 tool({
@@ -297,7 +342,11 @@ tool({
   schema: { type: 'object', properties: { id: { type: 'number' }, reason: { type: 'string' }, actor: { type: 'string' }, mode: { type: 'string' } }, required: ['id'] },
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);
-    if (modeOf(args) === 'dry-run') return { action: 'invoice.credit', id: args.id, mode: 'dry-run' };
+    if (modeOf(args) === 'dry-run') {
+      // validate like the real path (creditInvoice dryRun) — the old plan
+      // echoed ok for nonexistent/unfinalized invoices
+      return creditInvoice(db, { id: args.id, reason: args.reason ?? null, dryRun: true });
+    }
     const credit = creditInvoice(db, { id: args.id, reason: args.reason, actor: args.actor ?? ctx.actor });
     return { action: 'invoice.credit', id: args.id, credit_id: credit.id, mode: 'execute' };
   },
@@ -318,7 +367,11 @@ tool({
     const amountCents = args.amount_cents != null
       ? args.amount_cents
       : (invoice ? invoice.gross_cents - invoice.paid_cents : null);
-    if (modeOf(args) === 'dry-run') return { action: 'invoice.pay', id: args.id, date: args.date, amount_cents: amountCents, mode: 'dry-run' };
+    if (modeOf(args) === 'dry-run') {
+      // validate like the real path (markPaid dryRun: invoice, status, date,
+      // amount, overpayment) — the old plan echoed ok for garbage
+      return markPaid(db, { id: args.id, date: args.date, amountCents, method: args.method ?? 'bank', dryRun: true });
+    }
     const inv = markPaid(db, { id: args.id, date: args.date, amountCents, method: args.method, actor: args.actor ?? ctx.actor });
     return { action: 'invoice.pay', id: args.id, status: inv.status, mode: 'execute' };
   },
@@ -376,7 +429,13 @@ tool({
   },
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);
-    if (modeOf(args) === 'dry-run') return { action: 'contact.add', name: args.name, mode: 'dry-run' };
+    if (modeOf(args) === 'dry-run') {
+      // validate like the real path (createContact rejects a missing name)
+      if (!args.name || !String(args.name).trim()) {
+        throw new McpError('INVALID_NAME', 'contact needs a name');
+      }
+      return { action: 'contact.add', name: args.name, mode: 'dry-run' };
+    }
     const c = createContact(db, { ...args, actor: args.actor ?? ctx.actor });
     return { action: 'contact.add', id: c.id, name: c.name, mode: 'execute' };
   },

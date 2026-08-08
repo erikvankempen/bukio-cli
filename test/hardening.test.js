@@ -1684,3 +1684,94 @@ test('entry list rejects garbage date bounds (--date-to garbage returned ALL ent
   assert.equal(ok.code, 0);
   assert.equal(ok.out.data.entries.length, 1);
 });
+
+test('import opening-balances accepts the documented optional header row (2- and 3-column)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-ob-'));
+  // 2-column header layout — failed with INVALID_CODE before (doc promised it)
+  const csv2 = path.join(dir, 'ob2.csv');
+  writeFileSync(csv2, 'code,amount\n1100,10000.00\n3000,-10000.00\n');
+  const ok2 = cli(dbPath, ['import', 'opening-balances', '--file', csv2]);
+  assert.equal(ok2.code, 0, ok2.raw ?? '');
+  assert.equal(ok2.out.data.accounts, 2);
+  // 3-column header layout on a second database
+  const dbPath3 = tmpDb();
+  cli(dbPath3, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  const csv3 = path.join(dir, 'ob3.csv');
+  writeFileSync(csv3, 'code,debet,credit\n1100,10000.00,\n3000,,10000.00\n');
+  const ok3 = cli(dbPath3, ['import', 'opening-balances', '--file', csv3]);
+  assert.equal(ok3.code, 0, ok3.raw ?? '');
+  assert.equal(ok3.out.data.accounts, 2);
+  // a data-only file (no header) still works — first cell is a code
+  const dbPath4 = tmpDb();
+  cli(dbPath4, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  const csv4 = path.join(dir, 'ob4.csv');
+  writeFileSync(csv4, '1100,10000.00\n3000,-10000.00\n');
+  const ok4 = cli(dbPath4, ['import', 'opening-balances', '--file', csv4]);
+  assert.equal(ok4.code, 0, ok4.raw ?? '');
+});
+
+test('MCP entry_add dry-run validates like execute (garbage date/unbalanced/single-posting rejected, no isError:false plan)', async () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  const mcp = mcpSession(dbPath);
+  try {
+    // garbage date → INVALID_DATE even in the default dry-run mode
+    const badDate = await mcp.call('tools/call', { name: 'entry_add', arguments: { date: 'abc', description: 'x', postings: ['1100:100.00', '3000:-100.00'] } });
+    assert.equal(badDate.result.isError, true);
+    assert.equal(JSON.parse(badDate.result.content[0].text).error.code, 'INVALID_DATE');
+    // unbalanced → UNBALANCED in dry-run
+    const unbalanced = await mcp.call('tools/call', { name: 'entry_add', arguments: { date: '2026-01-15', description: 'x', postings: ['1100:5.00', '3000:-4.00'] } });
+    assert.equal(unbalanced.result.isError, true);
+    assert.equal(JSON.parse(unbalanced.result.content[0].text).error.code, 'UNBALANCED');
+    // single posting → TOO_FEW_POSTINGS in dry-run
+    const single = await mcp.call('tools/call', { name: 'entry_add', arguments: { date: '2026-01-15', description: 'x', postings: ['1100:100.00'] } });
+    assert.equal(single.result.isError, true);
+    assert.equal(JSON.parse(single.result.content[0].text).error.code, 'TOO_FEW_POSTINGS');
+    // a valid plan still returns a green dry-run with balanced:true
+    const ok = await mcp.call('tools/call', { name: 'entry_add', arguments: { date: '2026-01-15', description: 'x', postings: ['1100:100.00', '3000:-100.00'] } });
+    assert.equal(ok.result.isError, false);
+    assert.equal(JSON.parse(ok.result.content[0].text).balanced, true);
+  } finally {
+    await mcp.close();
+  }
+});
+
+test('MCP entry_reverse / invoice_credit / invoice_pay dry-runs validate like execute', async () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['contact', 'add', '--name', 'ACME BV', '--address', 'Klantstraat 1', '--city', 'Amsterdam']);
+  const mcp = mcpSession(dbPath);
+  try {
+    // entry_reverse on a nonexistent entry → NOT_FOUND in dry-run
+    const rev = await mcp.call('tools/call', { name: 'entry_reverse', arguments: { id: 999 } });
+    assert.equal(rev.result.isError, true);
+    assert.equal(JSON.parse(rev.result.content[0].text).error.code, 'NOT_FOUND');
+    // entry_post on a nonexistent entry → NOT_FOUND in dry-run
+    const post = await mcp.call('tools/call', { name: 'entry_post', arguments: { id: 999 } });
+    assert.equal(post.result.isError, true);
+    assert.equal(JSON.parse(post.result.content[0].text).error.code, 'NOT_FOUND');
+    // invoice_credit on a nonexistent invoice → NOT_FOUND in dry-run
+    const credit = await mcp.call('tools/call', { name: 'invoice_credit', arguments: { id: 999 } });
+    assert.equal(credit.result.isError, true);
+    assert.equal(JSON.parse(credit.result.content[0].text).error.code, 'NOT_FOUND');
+    // invoice_pay on a nonexistent invoice → NOT_FOUND in dry-run
+    const payMissing = await mcp.call('tools/call', { name: 'invoice_pay', arguments: { id: 999, date: '2026-01-15' } });
+    assert.equal(payMissing.result.isError, true);
+    assert.equal(JSON.parse(payMissing.result.content[0].text).error.code, 'NOT_FOUND');
+    // invoice_pay with a garbage date on a real finalized invoice → INVALID_DATE in dry-run
+    cli(dbPath, ['company', 'update', '--address', 'Teststraat 1', '--postal-code', '1000 AA', '--city', 'Amsterdam']);
+    cli(dbPath, ['invoice', 'create', '--contact', '1', '--lines', '1x Coaching @ 100.00', '--date', '2026-01-15']);
+    cli(dbPath, ['invoice', 'finalize', '--id', '1']);
+    const pay = await mcp.call('tools/call', { name: 'invoice_pay', arguments: { id: 1, date: 'abc' } });
+    assert.equal(pay.result.isError, true);
+    assert.equal(JSON.parse(pay.result.content[0].text).error.code, 'INVALID_DATE');
+    // contact_add without a name → INVALID_NAME in dry-run
+    const contact = await mcp.call('tools/call', { name: 'contact_add', arguments: { name: '  ' } });
+    assert.equal(contact.result.isError, true);
+    assert.equal(JSON.parse(contact.result.content[0].text).error.code, 'INVALID_NAME');
+  } finally {
+    await mcp.close();
+  }
+});

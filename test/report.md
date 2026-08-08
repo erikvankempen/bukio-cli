@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 05:28:22 UTC — **✅ 388 passing · 0 failing (388 tests)**
+**Latest run:** 2026-08-08 05:45:55 UTC — **✅ 391 passing · 0 failing (391 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -218,7 +218,7 @@
 
 ### hardening.test.js — 
 
-77 passing · 0 failing
+80 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -297,6 +297,9 @@
     - ✅ report balans rejects a garbage as-of (it silently read as "forever" before)
     - ✅ report pnl / journal / trial-balance reject a garbage year (no abc-01-01 ranges)
     - ✅ entry list rejects garbage date bounds (--date-to garbage returned ALL entries before)
+    - ✅ import opening-balances accepts the documented optional header row (2- and 3-column)
+    - ✅ MCP entry_add dry-run validates like execute (garbage date/unbalanced/single-posting rejected, no isError:false plan)
+    - ✅ MCP entry_reverse / invoice_credit / invoice_pay dry-runs validate like execute
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 
