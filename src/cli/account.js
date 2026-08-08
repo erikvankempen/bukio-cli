@@ -4,7 +4,8 @@ import {
   createAccount, deactivateAccount, getAccountByCode, importChartCsv,
   listAccounts, reactivateAccount, readChartCsvFile, validateAccount,
 } from '../core/accounts.js';
-import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { makeCtx, output, fail, ensureDb } from './util.js';
+import { record } from '../audit/index.js';
 
 function serializeAccount(a) {
   return {
@@ -44,6 +45,11 @@ export function make(program) {
           const accountRow = createAccount(db, {
             code: opts.code, name: opts.name, type: opts.type,
             normalBalance: opts.normalBalance, rgsCode: opts.rgsCode ?? null,
+          });
+          record(db, {
+            actor: ctx.actor, action: 'account.add', command: 'account add',
+            args: { code: opts.code, name: opts.name, type: opts.type, normal_balance: opts.normalBalance, rgs_code: opts.rgsCode ?? null },
+            outcome: 'ok',
           });
           output(ctx, serializeAccount(accountRow), (a) => {
             console.log(`added account ${a.code} ${a.name} (${a.type}/${a.normal_balance})`);
@@ -129,6 +135,10 @@ export function make(program) {
             return;
           }
           const updated = deactivateAccount(db, opts.code);
+          record(db, {
+            actor: ctx.actor, action: 'account.deactivate', command: 'account deactivate',
+            args: { code: opts.code }, outcome: 'ok',
+          });
           output(ctx, serializeAccount(updated), (d) => console.log(`deactivated account ${d.code} ${d.name}`));
         } finally {
           db.close();
@@ -149,6 +159,12 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const updated = reactivateAccount(db, opts.code, { dryRun: ctx.dryRun });
+          if (!ctx.dryRun) {
+            record(db, {
+              actor: ctx.actor, action: 'account.reactivate', command: 'account reactivate',
+              args: { code: opts.code }, outcome: 'ok',
+            });
+          }
           output(ctx, { account: updated }, (d) => {
             if (d.account.dryRun) {
               console.log(`plan: reactivate account ${d.account.code} (${d.account.from} -> ${d.account.to})`);
@@ -188,6 +204,11 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const result = importChartCsv(db, csvText);
+          record(db, {
+            actor: ctx.actor, action: 'account.import', command: 'account import',
+            args: { file: opts.file, created: result.created, skipped: result.skipped },
+            outcome: 'ok',
+          });
           output(ctx, { file: opts.file, ...result, dryRun: false }, (d) => {
             console.log(`imported ${d.created} of ${d.total} accounts from ${d.file}`);
             for (const e of d.errors) console.log(`  line ${e.line}: ${e.error}`);

@@ -1808,3 +1808,52 @@ test('init validates iban, vat choice and fiscal-year-end (garbage was stored si
   assert.equal(ok.code, 0, ok.raw ?? '');
   assert.equal(ok.out.data.company.vat_module, 1);
 });
+
+test('account add/deactivate/reactivate/import are audited (they mutated silently before)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['account', 'add', '--code', '9999', '--name', 'Test account', '--type', 'asset', '--normal-balance', 'debit']);
+  cli(dbPath, ['account', 'deactivate', '--code', '9999']);
+  cli(dbPath, ['account', 'reactivate', '--code', '9999']);
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-chart-'));
+  const csvPath = path.join(dir, 'chart.csv');
+  writeFileSync(csvPath, 'code,name,type,normal_balance,rgs_code\n8888,Nieuwe rekening,expense,debit,WKPR.70\n');
+  cli(dbPath, ['account', 'import', '--file', csvPath]);
+  const audit = cli(dbPath, ['audit']);
+  const actions = audit.out.data.entries.map((e) => e.action);
+  for (const expected of ['company.init', 'account.add', 'account.deactivate', 'account.reactivate', 'account.import']) {
+    assert.ok(actions.includes(expected), `audit log must contain ${expected} (got: ${actions.join(', ')})`);
+  }
+  // dry-runs must NOT record
+  cli(dbPath, ['account', 'deactivate', '--code', '8888', '--dry-run']);
+  const audit2 = cli(dbPath, ['audit']);
+  assert.equal(audit2.out.data.entries.filter((e) => e.action === 'account.deactivate').length, 1, 'dry-run must not write an audit row');
+});
+
+test('MCP on a missing database errors NO_DATABASE instead of silently creating an empty company', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-mcp-'));
+  const missingPath = path.join(dir, 'missing.db');
+  const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', missingPath], {
+    cwd: process.cwd(),
+    env: { ...process.env, BUKIO_ACTOR: 'agent:test' },
+  });
+  child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'trial_balance', arguments: {} } })}\n`);
+  child.stdin.end();
+  const out = [];
+  child.stdout.on('data', (d) => out.push(d.toString()));
+  child.stderr.on('data', (d) => out.push(d.toString()));
+  return new Promise((resolve) => {
+    child.on('exit', (code) => {
+      try {
+        assert.notEqual(code, 0, 'MCP must exit non-zero on a missing database');
+        assert.match(out.join(''), /no database at .*run 'bukio init' first/);
+        assert.equal(existsSync(missingPath), false, 'must not create the database file');
+        resolve();
+      } catch (err) {
+        resolve(err);
+      }
+    });
+  }).then((err) => {
+    if (err) throw err;
+  });
+});

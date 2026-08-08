@@ -4,11 +4,13 @@
 // plans — an agent executes only after a human approves the plan.
 // Env: BUKIO_MCP_READONLY=1 turns every mutation into a plan-only call.
 import { createInterface } from 'node:readline';
+import { existsSync } from 'node:fs';
 import { trialBalance } from '../report/trial-balance.js';
 import { balans } from '../report/balans.js';
 import { pnl } from '../report/pnl.js';
 import { journal } from '../report/journal.js';
 import { listAccounts } from '../core/accounts.js';
+import { dbError } from './util.js';
 import {
   createEntry, postEntry, reverseEntry, getEntry, resolvePostings,
   parsePostingSpecs, validateDate,
@@ -606,6 +608,12 @@ export function make(program) {
         actor: command.optsWithGlobals().actor ?? 'agent:mcp',
         readonly: process.env.BUKIO_MCP_READONLY === '1',
       };
+      // same guard as the CLI's ensureDb: a missing path must NOT be
+      // auto-created — openDb would silently build an empty 24-table company
+      // and an agent with a typo'd --db would book into it (balanced:true!)
+      if (!existsSync(ctx.dbPath)) {
+        throw dbError('NO_DATABASE', `no database at ${ctx.dbPath} — run 'bukio init' first`);
+      }
       const db = openDb(ctx.dbPath);
       const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
       const send = (line) => {
