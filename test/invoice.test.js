@@ -52,10 +52,12 @@ function mkInvoice(overrides = {}) {
 
 test('parseLineSpec: qty, description, price, vat', () => {
   assert.deepEqual(parseLineSpec('2x Consultancy @ 150.00 @21'), {
-    qty: 2, description: 'Consultancy', priceCents: 15000, vatCode: '21',
+    qtyMilli: 2000, qty: 2, description: 'Consultancy', priceCents: 15000,
+    vatCode: '21', discountType: null, discountValue: null,
   });
   assert.deepEqual(parseLineSpec('Kantoorartikelen @ 45,50'), {
-    qty: 1, description: 'Kantoorartikelen', priceCents: 4550, vatCode: null,
+    qtyMilli: 1000, qty: 1, description: 'Kantoorartikelen', priceCents: 4550,
+    vatCode: null, discountType: null, discountValue: null,
   });
   assert.throws(() => parseLineSpec('garbage'), { code: 'INVALID_LINE' });
 });

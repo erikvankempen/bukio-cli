@@ -60,7 +60,7 @@ test('invoice template: generates draft invoices on schedule (never auto-finaliz
   // lines + due date carried over
   const inv = getInvoice(db, invoices[0].id);
   assert.equal(inv.lines[0].description, 'Premium');
-  assert.equal(inv.lines[0].quantity, 2);
+  assert.equal(inv.lines[0].quantity, 2000); // milli-units: 2.000 = 2
   assert.equal(inv.lines[0].vat_amount_cents, 4158); // 198.00 @21%
   assert.equal(inv.due_date, '2026-08-15');
   assert.equal(inv.contact.name, 'ACME B.V.');

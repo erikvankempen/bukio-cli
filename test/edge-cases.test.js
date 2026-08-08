@@ -107,10 +107,10 @@ test('invoice: quantity and price guards', () => {
 });
 
 test('invoice: line parser — Dutch comma price, @ inside description', () => {
-  assert.deepEqual(parseLineSpec('Papier @ 45,50 @21'), { qty: 1, description: 'Papier', priceCents: 4550, vatCode: '21' });
+  assert.deepEqual(parseLineSpec('Papier @ 45,50 @21'), { qtyMilli: 1000, qty: 1, description: 'Papier', priceCents: 4550, vatCode: '21', discountType: null, discountValue: null });
   // descriptions with @ are kept (space-normalised around the @)
-  assert.deepEqual(parseLineSpec('2x Email @ adres @ 5.00'), { qty: 2, description: 'Email@adres', priceCents: 500, vatCode: null });
-  assert.deepEqual(parseLineSpec('1000x Zeer lange omschrijving met @ tekens erin @ 0.99 @9'), { qty: 1000, description: 'Zeer lange omschrijving met@tekens erin', priceCents: 99, vatCode: '9' });
+  assert.deepEqual(parseLineSpec('2x Email @ adres @ 5.00'), { qtyMilli: 2000, qty: 2, description: 'Email@adres', priceCents: 500, vatCode: null, discountType: null, discountValue: null });
+  assert.deepEqual(parseLineSpec('1000x Zeer lange omschrijving met @ tekens erin @ 0.99 @9'), { qtyMilli: 1000000, qty: 1000, description: 'Zeer lange omschrijving met@tekens erin', priceCents: 99, vatCode: '9', discountType: null, discountValue: null });
 });
 
 test('invoice: per-line rounding edge — 3x 0.01 @21 has 1 cent VAT (line-total rounding)', () => {

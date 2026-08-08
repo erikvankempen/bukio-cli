@@ -6,9 +6,12 @@
 
 // UBL 2.1 / Peppol BIS 3.0 (EN 16931) invoice XML export.
 // Hand-rolled, deterministic, no dependencies. Covers the core BIS 3.0
-// structure: seller/buyer parties, VAT breakdown, monetary totals, lines.
+// structure: seller/buyer parties, VAT breakdown per rate, monetary totals
+// with allowances, lines (with per-line allowances for discounts).
 // Full Peppol validation (Schematron) is out of scope — verify via a
 // validation service before production use.
+import { computeInvoiceTotals, formatQty } from './index.js';
+import { unitLabel } from './i18n.js';
 
 function esc(s) {
   return String(s ?? '')
@@ -21,6 +24,12 @@ function esc(s) {
 function moneyAmount(cents, currency = 'EUR') {
   return (cents / 100).toFixed(2);
 }
+
+// UN/ECE Rec 20 unit codes for the quantity units we support (C62 = unit/one)
+const UNIT_CODE_MAP = {
+  h: 'HUR', day: 'DAY', month: 'MON', unit: 'C62',
+  session: 'C62', km: 'KMT', kg: 'KGM', project: 'C62',
+};
 
 function addressBlock(partyName, p) {
   // the supplier row is snake_case (postal_code); contacts are camelCase —
@@ -40,6 +49,9 @@ function addressBlock(partyName, p) {
 
 /**
  * Build a Peppol BIS 3.0 UBL Invoice (380) or CreditNote (381) XML document.
+ * Discounts are expressed as UBL allowances: per line (cac:AllowanceCharge on
+ * the InvoiceLine) and on the total (AllowanceTotalAmount). VAT breakdown
+ * bases are the discounted amounts, so the XML reconciles with the books.
  */
 export function invoiceToUbl(db, invoice) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
@@ -48,41 +60,49 @@ export function invoiceToUbl(db, invoice) {
   const typeCode = isCredit ? '381' : '380';
   // the invoices table has no currency column — always EUR (the ledger is EUR)
   const currency = invoice.currency ?? 'EUR';
+  const language = invoice.language ?? 'nl';
 
-  // VAT breakdown per rate (exact per-line sums)
-  const byRate = new Map();
-  for (const l of invoice.lines) {
-    const key = `${l.vat_code ?? 'none'}|${l.vat_rate_bp}`;
-    if (!byRate.has(key)) byRate.set(key, { code: l.vat_code, rateBp: l.vat_rate_bp, taxable: 0, tax: 0 });
-    byRate.get(key).taxable += l.amount_cents;
-    byRate.get(key).tax += l.vat_amount_cents;
-  }
+  // VAT breakdown per rate, on the DISCOUNTED bases (one source of truth)
+  const { breakdown, net_cents, vat_cents, gross_cents, discount_cents } =
+    computeInvoiceTotals(invoice.lines, invoice.discount_type, invoice.discount_value);
 
-  const taxSubtotals = [...byRate.values()]
-    .filter((g) => g.tax !== 0)
-    .map((g) => {
-      const category = (g.code === 'R' || g.code === 'RE') ? 'AE' : 'S';
-      const percent = g.code === 'R' || g.code === 'RE' ? '21.00' : (g.rateBp / 100).toFixed(2);
-      return `
+  const taxSubtotals = breakdown.map((g) => {
+    const code = g.rate_bp === 2100 ? 'S' : 'S'; // standard rate category; R/RE never carry VAT
+    return `
       <cac:TaxSubtotal>
-        <cbc:TaxableAmount currencyID="${currency}">${moneyAmount(g.taxable)}</cbc:TaxableAmount>
-        <cbc:TaxAmount currencyID="${currency}">${moneyAmount(g.tax)}</cbc:TaxAmount>
+        <cbc:TaxableAmount currencyID="${currency}">${moneyAmount(g.base_cents)}</cbc:TaxableAmount>
+        <cbc:TaxAmount currencyID="${currency}">${moneyAmount(g.vat_cents)}</cbc:TaxAmount>
         <cac:TaxCategory>
-          <cbc:ID>${category}</cbc:ID>
-          <cbc:Percent>${percent}</cbc:Percent>
+          <cbc:ID>${code}</cbc:ID>
+          <cbc:Percent>${(g.rate_bp / 100).toFixed(2)}</cbc:Percent>
           <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>
         </cac:TaxCategory>
       </cac:TaxSubtotal>`;
-    }).join('');
+  }).join('');
+
+  const lineAllowance = (l) => {
+    const disc = l.discount_type === 'pct'
+      ? Math.round(l.amount_cents * l.discount_value / 10000)
+      : l.discount_type === 'amount' ? Math.min(l.discount_value, l.amount_cents) : 0;
+    return disc > 0 ? `
+      <cac:AllowanceCharge>
+        <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+        <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>
+        <cbc:Amount currencyID="${currency}">${moneyAmount(disc)}</cbc:Amount>
+        <cbc:BaseAmount currencyID="${currency}">${moneyAmount(l.amount_cents)}</cbc:BaseAmount>
+      </cac:AllowanceCharge>` : '';
+  };
 
   const linesXml = invoice.lines.map((l, i) => {
-    const category = (l.vat_code === 'R' || l.vat_code === 'RE') ? 'AE' : (l.vat_code ? 'S' : 'E');
+    const category = (l.vat_code === 'R' || l.vat_code === 'RE') ? 'AE'
+      : (l.vat_code ? 'S' : (l.vat_rate_bp === 0 && l.vat_code ? 'Z' : 'E'));
     const percent = (l.vat_code === 'R' || l.vat_code === 'RE') ? '21.00' : (l.vat_rate_bp / 100).toFixed(2);
+    const unitCode = UNIT_CODE_MAP[l.unit] ?? 'C62';
     return `
     <cac:InvoiceLine>
       <cbc:ID>${i + 1}</cbc:ID>
-      <cbc:InvoicedQuantity unitCode="C62">${l.quantity}</cbc:InvoicedQuantity>
-      <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(l.amount_cents)}</cbc:LineExtensionAmount>
+      <cbc:InvoicedQuantity unitCode="${unitCode}">${formatQty(l.quantity)}</cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(l.amount_cents)}</cbc:LineExtensionAmount>${lineAllowance(l)}
       <cac:Item>
         <cbc:Name>${esc(l.description)}</cbc:Name>
         <cac:ClassifiedTaxCategory>
@@ -102,6 +122,12 @@ export function invoiceToUbl(db, invoice) {
         <cac:PartyTaxScheme><cbc:CompanyID schemeID="VAT">${esc(contact.vat_id)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>`
     : '';
 
+  const lineExtensionTotal = invoice.lines.reduce((s, l) => s + l.amount_cents, 0);
+  const allowanceTotal = discount_cents > 0
+    ? `
+    <cbc:AllowanceTotalAmount currencyID="${currency}">${moneyAmount(discount_cents)}</cbc:AllowanceTotalAmount>`
+    : '';
+
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
          xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
@@ -112,6 +138,7 @@ export function invoiceToUbl(db, invoice) {
   <cbc:IssueDate>${invoice.date}</cbc:IssueDate>
   ${invoice.due_date ? `<cbc:DueDate>${invoice.due_date}</cbc:DueDate>` : ''}
   <cbc:InvoiceTypeCode>${typeCode}</cbc:InvoiceTypeCode>
+  <cbc:LanguageID>${language === 'en' ? 'en' : 'nl-NL'}</cbc:LanguageID>
   ${invoice.notes ? `<cbc:Note>${esc(invoice.notes)}</cbc:Note>` : ''}
   <cac:AccountingSupplierParty>${addressBlock(company.name, company)}</cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
@@ -131,13 +158,13 @@ export function invoiceToUbl(db, invoice) {
   </cac:PaymentMeans>
   ${invoice.due_date ? `<cac:PaymentTerms><cbc:PaymentDueDate>${invoice.due_date}</cbc:PaymentDueDate></cac:PaymentTerms>` : ''}
   <cac:TaxTotal>
-    <cbc:TaxAmount currencyID="${currency}">${moneyAmount(invoice.vat_cents)}</cbc:TaxAmount>${taxSubtotals}
+    <cbc:TaxAmount currencyID="${currency}">${moneyAmount(vat_cents)}</cbc:TaxAmount>${taxSubtotals}
   </cac:TaxTotal>
   <cac:LegalMonetaryTotal>
-    <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(invoice.net_cents)}</cbc:LineExtensionAmount>
-    <cbc:TaxExclusiveAmount currencyID="${currency}">${moneyAmount(invoice.net_cents)}</cbc:TaxExclusiveAmount>
-    <cbc:TaxInclusiveAmount currencyID="${currency}">${moneyAmount(invoice.gross_cents)}</cbc:TaxInclusiveAmount>
-    <cbc:PayableAmount currencyID="${currency}">${moneyAmount(invoice.gross_cents)}</cbc:PayableAmount>
+    <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(lineExtensionTotal)}</cbc:LineExtensionAmount>${allowanceTotal}
+    <cbc:TaxExclusiveAmount currencyID="${currency}">${moneyAmount(net_cents)}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="${currency}">${moneyAmount(gross_cents)}</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="${currency}">${moneyAmount(gross_cents)}</cbc:PayableAmount>
   </cac:LegalMonetaryTotal>${linesXml}
 </Invoice>`;
   return xml;

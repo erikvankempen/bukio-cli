@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 11:00:28 UTC — **✅ 395 passing · 0 failing (395 tests)**
+**Latest run:** 2026-08-08 11:33:04 UTC — **✅ 420 passing · 0 failing (420 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -346,6 +346,36 @@
     - ✅ import journal: --create-missing accounts also get RGS codes
     - ✅ import chart CSV without an rgs column infers RGS codes
     - ✅ import contacts: dry-run writes nothing
+
+### invoice-features.test.js — 
+
+25 passing · 0 failing
+
+    - ✅ fractional quantities parse to milli-units
+    - ✅ line discounts parse (pct and amount)
+    - ✅ item specs parse (id, qty, overrides, discount)
+    - ✅ allocateLargestRemainder sums exactly and is deterministic
+    - ✅ item add/list/show/update/deactivate with audit
+    - ✅ item guards: name/unit/price/vat/account
+    - ✅ item without a VAT code is allowed when the VAT module is off
+    - ✅ unit labels localize
+    - ✅ invoice create --items snapshots catalog values
+    - ✅ invoice create --items per-invoice overrides (price, VAT, discount)
+    - ✅ item guards on invoices: unknown, inactive, bad override, conflicting sources
+    - ✅ fractional quantity line math (1.5h @ 100 = 150.00)
+    - ✅ line discount pct and amount reduce net and VAT
+    - ✅ total discount: single rate, pct and amount
+    - ✅ total discount across mixed VAT rates allocates to the cent
+    - ✅ total discount with awkward split still balances (largest remainder)
+    - ✅ computeInvoiceTotals is deterministic across recomputes (getInvoice consistency)
+    - ✅ booking with discounts: omzet uses discounted nets, VAT per rate
+    - ✅ finalize with discounts books a balanced entry
+    - ✅ invoice language: nl default, en allowed, invalid rejected
+    - ✅ credit note inherits language, total discount and line discounts
+    - ✅ UBL: formatted quantity, unit code, language, discounted tax bases
+    - ✅ UBL: hour unit maps to HUR
+    - ✅ company logo: set (PNG), extract round-trip, remove; audits
+    - ✅ company logo: format, size and dimension guards
 
 ### invoice.test.js — invoicing: lifecycle, 12-vereisten, credit notes, payments, reminders
 

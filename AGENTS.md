@@ -625,6 +625,9 @@ tar -czf ~/exports/bukio-documenten-2026.tar.gz -C ~/.bukio invoices/
 | `ALREADY_FINALIZED` / `CREDIT_NOT_PAYABLE` / `NOT_PAYABLE` / `NOT_SALES_INVOICE` / `NO_LINES` / `OVERPAYMENT` / `ENTRY_NOT_FOUND` / `CUSTOMER_INCOMPLETE` / `CUSTOMER_VAT_REQUIRED` / `SUPPLIER_INCOMPLETE` | Invoice lifecycle guard: already finalized, credit of a non-sales invoice, pay on a non-payable invoice, missing lines, overpayment, unknown entry, or missing customer/supplier fields (12-vereisten) | Complete the customer/supplier profile (`contact add` with address), then finalize |
 | `FX_DIFFERENCE_TOO_LARGE` | FX-difference leg exceeds the tolerance at booking | Re-check the rate — or book the difference explicitly |
 | `ICP_VAT_ID_MISSING` / `NO_COMPANY` | ICP readout needs customer btw-ids; company row missing | Add btw-ids to EU customers; run `init` first |
+| `ITEM_NOT_FOUND` / `ITEM_INACTIVE` / `INVALID_ITEM_SPEC` / `INVALID_ITEM_OVERRIDE` / `INVALID_UNIT` / `INVALID_PRICE` / `INVALID_VAT_CODE` | Items catalog: unknown/deactivated item, malformed `--items` spec, bad price, quantity-unit or VAT-code override | `item list` to find ids; fix the spec (`ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]`); units are `h|day|month|unit|session|km|kg|project` |
+| `INVALID_LINE_DISCOUNT` / `INVALID_LANGUAGE` / `CONFLICTING_LINES` | Discount outside (0,100]% or ≥ line amount, language not `nl`/`en`, or both `--lines` and `--items` passed | Fix the arguments — exactly one line source; discounts apply before VAT |
+| `LOGO_FILE_NOT_FOUND` / `LOGO_TOO_LARGE` / `LOGO_DIMENSIONS_TOO_LARGE` / `LOGO_UNSUPPORTED_FORMAT` / `LOGO_NOT_SET` | Logo file missing, > 1 MB, > 2048×2048 px, not PNG/JPEG/SVG, or `company logo` with no stored logo | Use a PNG/JPEG/SVG ≤ 1 MB (≤ 2048×2048 px); set it with `company update --logo` |
 
 > Every code above is emitted by at least one command — the docs are kept in sync by `test/hardening.test.js` (all codes in `src/` must appear in this table).
 

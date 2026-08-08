@@ -9,7 +9,7 @@ import { writeFileSync } from 'node:fs';
 import { formatAmount, parseAmount } from '../core/money.js';
 import {
   createContact, updateContact, createInvoice, creditInvoice, finalizeInvoice, getInvoice,
-  invoiceReminders, listContacts, listInvoices, markPaid,
+  formatQty, invoiceReminders, listContacts, listInvoices, markPaid,
 } from '../invoice/index.js';
 import { invoiceToPdf } from '../invoice/pdf.js';
 import { invoiceToUbl } from '../invoice/ubl.js';
@@ -18,9 +18,12 @@ import { ensureDb, makeCtx, output, fail, table } from './util.js';
 
 function fmtLine(l) {
   return {
-    line_no: l.line_no, description: l.description, quantity: l.quantity,
+    line_no: l.line_no, description: l.description,
+    quantity: formatQty(l.quantity), quantity_milli: l.quantity,
+    unit: l.unit ?? null, item_id: l.item_id ?? null,
     unit_price_cents: l.unit_price_cents, unit_price: formatAmount(l.unit_price_cents),
     vat_code: l.vat_code, vat_rate_bp: l.vat_rate_bp,
+    discount_type: l.discount_type, discount_value: l.discount_value,
     amount_cents: l.amount_cents, amount: formatAmount(l.amount_cents),
     vat_amount_cents: l.vat_amount_cents, vat_amount: formatAmount(l.vat_amount_cents),
   };
@@ -32,12 +35,19 @@ function fmtInvoice(i) {
     contact_id: i.contact_id, contact_name: i.contact?.name ?? null,
     date: i.date, due_date: i.due_date, delivery_date: i.delivery_date,
     status: i.status, reference: i.reference, notes: i.notes,
+    language: i.language ?? 'nl',
     entry_id: i.entry_id, credit_for_invoice_id: i.credit_for_invoice_id,
     net_cents: i.net_cents, vat_cents: i.vat_cents, gross_cents: i.gross_cents,
+    discount_type: i.discount_type, discount_value: i.discount_value,
+    discount_cents: i.discount_cents,
     paid_cents: i.paid_cents, outstanding_cents: i.gross_cents - i.paid_cents,
     net: formatAmount(i.net_cents), vat: formatAmount(i.vat_cents),
     gross: formatAmount(i.gross_cents), paid: formatAmount(i.paid_cents),
     lines: i.lines.map(fmtLine),
+    vat_breakdown: (i.vat_breakdown ?? []).map((b) => ({
+      rate_bp: b.rate_bp, rate: b.rate_bp / 100,
+      base: formatAmount(b.base_cents), vat: formatAmount(b.vat_cents),
+    })),
     payments: i.payments.map((p) => ({ date: p.date, amount: formatAmount(p.amount_cents), method: p.method })),
   };
 }
@@ -157,43 +167,56 @@ export function make(program) {
     .command('create')
     .description('create a draft invoice (compliance-validated at finalize)')
     .requiredOption('--contact <id>', 'contact id')
-    .requiredOption('--lines <spec>', 'line spec "[QTYx] DESC @ PRICE [@ VATCODE]", comma-separated or repeatable')
+    .option('--lines <spec>', 'line spec "[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]", comma-separated or repeatable')
+    .option('--items <spec>', 'item spec "ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]", comma-separated or repeatable')
     .requiredOption('--date <yyyy-mm-dd>', 'invoice date')
     .option('--due-days <n>', 'payment term in days', '30')
     .option('--delivery-date <yyyy-mm-dd>', 'delivery/service date if different')
     .option('--description <text>', 'invoice description')
     .option('--reference <ref>', 'customer reference / PO number')
     .option('--notes <text>', 'free-text note (printed on the invoice)')
+    .option('--discount-pct <pct>', 'discount on the total, percentage (e.g. 5)')
+    .option('--discount-amount <amount>', 'discount on the total, fixed amount (e.g. 50.00)')
+    .option('--language <lang>', "invoice language: 'nl' (default) or 'en'", 'nl')
     .option('--dry-run', 'validate without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
         try {
+          const discountType = opts.discountPct !== undefined ? 'pct'
+            : opts.discountAmount !== undefined ? 'amount' : null;
+          const discountValue = discountType === 'pct'
+            ? Math.round(Number(opts.discountPct) * 100)
+            : discountType === 'amount' ? parseAmount(opts.discountAmount) : null;
           if (ctx.dryRun) {
             // same validation as the real run (createInvoice dryRun): the old
             // branch only parsed lines and echoed garbage dates/contacts as ok
             const plan = createInvoice(db, {
-              contactId: Number(opts.contact), lines: [opts.lines], date: opts.date,
+              contactId: Number(opts.contact), lines: opts.lines ? [opts.lines] : null,
+              items: opts.items ? [opts.items] : null, date: opts.date,
               dueDays: Number(opts.dueDays), deliveryDate: opts.deliveryDate ?? null,
               description: opts.description ?? null, reference: opts.reference ?? null,
-              notes: opts.notes ?? null, actor: ctx.actor, dryRun: true,
+              notes: opts.notes ?? null, discountType, discountValue,
+              language: opts.language, actor: ctx.actor, dryRun: true,
             });
             output(ctx, plan, (d) => {
-              console.log(`plan: draft invoice for contact #${d.contact_id} on ${d.date} — net ${formatAmount(d.net_cents)}${d.vat_cents ? ` + ${formatAmount(d.vat_cents)} btw` : ''} = ${formatAmount(d.gross_cents)}`);
-              for (const l of d.lines) console.log(`  ${l.qty}x ${l.description} @ ${formatAmount(l.priceCents)}${l.vatCode ? ` @${l.vatCode}` : ''}`);
+              console.log(`plan: draft invoice for contact #${d.contact_id} on ${d.date} — net ${formatAmount(d.net_cents)}${d.vat_cents ? ` + ${formatAmount(d.vat_cents)} btw` : ''} = ${formatAmount(d.gross_cents)}${d.discount_cents ? ` (korting ${formatAmount(d.discount_cents)})` : ''} [${d.language}]`);
+              for (const l of d.lines) console.log(`  ${l.qty}x ${l.description} @ ${formatAmount(l.priceCents)}${l.vatCode ? ` @${l.vatCode}` : ''}${l.discountType ? ` @-${l.discountType === 'pct' ? `${l.discountValue / 100}%` : formatAmount(l.discountValue)}` : ''}`);
               console.log('(dry run — nothing written)');
             });
             return;
           }
           const inv = createInvoice(db, {
-            contactId: Number(opts.contact), lines: [opts.lines], date: opts.date,
+            contactId: Number(opts.contact), lines: opts.lines ? [opts.lines] : null,
+            items: opts.items ? [opts.items] : null, date: opts.date,
             dueDays: Number(opts.dueDays), deliveryDate: opts.deliveryDate ?? null,
             description: opts.description ?? null, reference: opts.reference ?? null,
-            notes: opts.notes ?? null, actor: ctx.actor,
+            notes: opts.notes ?? null, discountType, discountValue,
+            language: opts.language, actor: ctx.actor,
           });
           output(ctx, { invoice: fmtInvoice(inv), dryRun: false }, (d) => {
-            console.log(`invoice #${d.invoice.id} [draft] ${d.invoice.date} — ${d.invoice.contact_name}: ${d.invoice.gross} (btw ${d.invoice.vat})`);
+            console.log(`invoice #${d.invoice.id} [draft] ${d.invoice.date} — ${d.invoice.contact_name}: ${d.invoice.gross} (btw ${d.invoice.vat})${d.invoice.discount_cents ? ` (korting ${formatAmount(d.invoice.discount_cents)})` : ''} [${d.invoice.language}]`);
           });
         } finally {
           db.close();
