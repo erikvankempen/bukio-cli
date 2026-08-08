@@ -21,6 +21,7 @@ import { jaarrekening } from '../src/report/jaarrekening.js';
 import { balans } from '../src/report/balans.js';
 import { pnl } from '../src/report/pnl.js';
 import { icpReadout } from '../src/icp/index.js';
+import { setFxRate, parseRate, convertFx } from '../src/fx/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
 import {
   createContact, createInvoice, finalizeInvoice, creditInvoice,
@@ -393,6 +394,33 @@ test('icp: credit note reduces the customer total; period boundary respected', (
   // Q2 has nothing
   const q2 = icpReadout(db, { period: '2026-Q2' });
   assert.equal(q2.customers.length, 0);
+});
+
+test('icp: RE base uses the DISCOUNTED amount (agrees with the OB 2a base)', () => {
+  const de = createContact(db, { name: 'GmbH Hamburg', address: 'H 1', city: 'Hamburg', country: 'DE', vatId: 'DE987654321', actor: 'a' });
+  // 1000.00 RE with 10% total discount -> discounted base 900.00
+  const inv = createInvoice(db, {
+    contactId: de.id, date: '2026-07-10', lines: ['1x Levering @ 1000.00 @RE'],
+    discountType: 'pct', discountValue: 1000,
+  });
+  finalizeInvoice(db, { id: inv.id });
+  const r = icpReadout(db, { period: '2026-Q3' });
+  assert.equal(r.customers[0].amount_cents, 90000); // 900.00, not 1000.00
+  // credit note of the discounted invoice subtracts the same discounted base
+  const credit = creditInvoice(db, { id: inv.id });
+  finalizeInvoice(db, { id: credit.id });
+  const r2 = icpReadout(db, { period: '2026-Q3' });
+  assert.equal(r2.customers[0].amount_cents, 0);
+});
+
+test('fx: setFxRate with a raw float rate parses as 1.0875, not 1.0875 x10000', () => {
+  const stored = setFxRate(db, { currency: 'USD', date: '2026-08-01', rate: 1.0875, actor: 'agent:test' });
+  assert.equal(stored.rate_x10000, 10875);
+  assert.equal(stored.rate, '1.0875');
+  assert.equal(convertFx(10000, stored.rate_x10000), 9195); // $100.00 -> EUR 91.95
+  // scaled integers still pass through untouched (ECB/MCP path)
+  const scaled = setFxRate(db, { currency: 'USD', date: '2026-08-02', rate: 10875, actor: 'agent:test' });
+  assert.equal(scaled.rate_x10000, 10875);
 });
 
 // --- dry-run hygiene -------------------------------------------------------

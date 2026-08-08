@@ -10,6 +10,7 @@
 // Aid for the quarterly ICP listing — bukio never submits anything.
 import { parsePeriod } from '../vat/index.js';
 import { formatAmount } from '../core/money.js';
+import { getInvoice, computeInvoiceTotals } from '../invoice/index.js';
 
 export function icpError(code, message) {
   const e = new Error(message);
@@ -20,10 +21,9 @@ export function icpError(code, message) {
 export function icpReadout(db, { period }) {
   const { from, to, label } = parsePeriod(period);
 
-  const rows = db.prepare(`
-    SELECT c.id AS contact_id, c.name, c.vat_id, c.country,
-      SUM(CASE WHEN i.invoice_type = 'credit' THEN -l.amount_cents ELSE l.amount_cents END) AS amount_cents,
-      GROUP_CONCAT(DISTINCT i.invoice_number) AS invoice_numbers
+  const invoiceRows = db.prepare(`
+    SELECT DISTINCT i.id, i.invoice_type, i.invoice_number, i.date, i.contact_id,
+           c.name, c.vat_id, c.country
     FROM invoices i
     JOIN invoice_lines l ON l.invoice_id = i.id
     JOIN contacts c ON c.id = i.contact_id
@@ -31,18 +31,33 @@ export function icpReadout(db, { period }) {
       AND i.status IN ('sent', 'paid', 'overdue')
       AND i.date >= ? AND i.date <= ?
       AND l.vat_code = 'RE'
-    GROUP BY c.id
-    ORDER BY c.name
+    ORDER BY c.name, i.id
   `).all(from, to);
 
-  const customers = rows.map((r) => ({
-    contact_id: r.contact_id,
-    name: r.name,
-    vat_id: r.vat_id,
-    country: r.country,
-    amount_cents: r.amount_cents,
-    amount: formatAmount(r.amount_cents),
-    invoice_numbers: r.invoice_numbers ? r.invoice_numbers.split(',') : [],
+  const perContact = new Map();
+  for (const row of invoiceRows) {
+    const inv = getInvoice(db, row.id);
+    // the DISCOUNTED RE base: the per-rate-group allocation spreads line and
+    // total discounts across groups, so the RE group net is exactly the base
+    // the OB readout reports in 2a — the ICP listing must agree with it
+    // (raw line sums would ignore v0.13 discounts and overstate the listing)
+    const totals = computeInvoiceTotals(inv.lines, inv.discount_type, inv.discount_value);
+    const reNet = totals.groups.find((g) => g.code === 'RE')?.discountedNet ?? 0;
+    if (reNet === 0) continue;
+    const signed = row.invoice_type === 'credit' ? -reNet : reNet;
+    const cur = perContact.get(row.contact_id) ?? {
+      contact_id: row.contact_id, name: row.name, vat_id: row.vat_id,
+      country: row.country, amount_cents: 0, invoice_numbers: [],
+    };
+    cur.amount_cents += signed;
+    cur.invoice_numbers.push(row.invoice_number);
+    perContact.set(row.contact_id, cur);
+  }
+
+  const customers = [...perContact.values()].map((c) => ({
+    ...c,
+    amount: formatAmount(c.amount_cents),
+    invoice_numbers: [...new Set(c.invoice_numbers)],
   }));
 
   const missingVat = customers.filter((c) => !c.vat_id);

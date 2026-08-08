@@ -52,7 +52,12 @@ export function setFxRate(db, { currency, date, rate, source = 'manual', actor =
       throw fxError('INVALID_DATE', `date '${date}' is not a valid calendar date`);
     }
   }
-  const rateX10000 = typeof rate === 'number' ? rate : parseRate(rate);
+  // Numbers must be already-scaled x10000 integers (the ECB store and MCP
+  // pass rateX10000); a raw float like 1.0875 would silently be treated as
+  // 1.0875 x10000 and corrupt every conversion — route it through parseRate.
+  const rateX10000 = typeof rate === 'number'
+    ? (Number.isInteger(rate) ? rate : parseRate(String(rate)))
+    : parseRate(rate);
   if (dryRun) {
     return { action: 'fx.set', currency, date, rate: (rateX10000 / 10000).toFixed(4), rate_x10000: rateX10000, dryRun: true };
   }

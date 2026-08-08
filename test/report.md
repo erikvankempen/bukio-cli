@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 12:12:06 UTC — **✅ 430 passing · 0 failing (430 tests)**
+**Latest run:** 2026-08-08 12:16:27 UTC — **✅ 432 passing · 0 failing (432 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -145,7 +145,7 @@
 
 ### edge-cases.test.js — rounding, boundaries, idempotency, lifecycle violations, dry-run hygiene
 
-32 passing · 0 failing
+34 passing · 0 failing
 
     - ✅ ledger: unbalanced, zero-amount, too-few postings rejected
     - ✅ ledger: same account on both sides is legal
@@ -178,6 +178,8 @@
     - ✅ jaarrekening: micro with no activity — zero balans, balanced
     - ✅ year-end: closing two different years works independently
     - ✅ icp: credit note reduces the customer total; period boundary respected
+    - ✅ icp: RE base uses the DISCOUNTED amount (agrees with the OB 2a base)
+    - ✅ fx: setFxRate with a raw float rate parses as 1.0875, not 1.0875 x10000
     - ✅ all mutating paths leave no trace in dry-run
 
 ### entries.test.js — journal entries: add/post/reverse, immutability
