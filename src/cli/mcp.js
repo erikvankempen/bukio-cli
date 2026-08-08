@@ -42,6 +42,7 @@ import { aging } from '../report/aging.js';
 import { sales } from '../report/sales.js';
 import { importUblInvoice } from '../import/ubl-invoice.js';
 import { emailInvoice } from '../invoice/email.js';
+import { addMandate, listMandates, removeMandate, createPaymentBatch, exportPaymentBatch } from '../payments/index.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -550,6 +551,77 @@ tool({
     }
     const r = await emailInvoice(db, base);
     return { action: 'invoice.email', mode: 'execute', invoice_id: r.id, invoice_number: r.invoice_number, to: r.to, delivered: r.delivered };
+  },
+});
+tool({
+  name: 'payments_mandate_add', mutating: true,
+  description: 'register a signed SEPA direct-debit mandate for a contact (core = 8-week refund right, b2b = none)',
+  schema: {
+    type: 'object', properties: {
+      contact_id: { type: 'number' }, mandate_ref: { type: 'string' },
+      mandate_date: { type: 'string' }, scheme: { type: 'string' },
+      actor: { type: 'string' }, mode: { type: 'string' },
+    }, required: ['contact_id', 'mandate_ref'],
+  },
+  handler: (db, args, ctx) => {
+    guardExecute(ctx, args);
+    const base = {
+      contactId: args.contact_id, mandateRef: args.mandate_ref, mandateDate: args.mandate_date ?? null,
+      scheme: args.scheme ?? 'core', actor: args.actor ?? ctx.actor,
+    };
+    if (modeOf(args) === 'dry-run') {
+      const plan = addMandate(db, { ...base, dryRun: true });
+      return { ...plan, mode: 'dry-run', note: 'plan only — re-run with mode=execute to register' };
+    }
+    const r = addMandate(db, base);
+    return { action: 'payments.mandate.add', mode: 'execute', mandate_id: r.id, contact_id: r.contact_id, mandate_ref: r.mandate_ref, scheme: r.scheme };
+  },
+});
+tool({
+  name: 'payments_mandate_list',
+  description: 'list SEPA direct-debit mandates (optionally per contact)',
+  schema: { type: 'object', properties: { contact_id: { type: 'number' } } },
+  handler: (db, args) => ({ mandates: listMandates(db, { contactId: args?.contact_id ?? null }) }),
+});
+tool({
+  name: 'payments_batch_create', mutating: true,
+  description: 'create a SEPA batch: type transfer (pain.001) from transfer payables, or direct_debit (pain.008, incasso) from direct-debit payables (each needs a contact mandate)',
+  schema: {
+    type: 'object', properties: {
+      payable_ids: { type: 'array', items: { type: 'number' } },
+      batch_date: { type: 'string' }, type: { type: 'string' },
+      actor: { type: 'string' }, mode: { type: 'string' },
+    },
+  },
+  handler: (db, args, ctx) => {
+    guardExecute(ctx, args);
+    const base = {
+      date: args.batch_date ?? null, debitIban: null, lines: [],
+      payableIds: (args.payable_ids ?? []).map(Number),
+      kind: args.type === 'direct_debit' ? 'direct_debit' : 'transfer',
+      actor: args.actor ?? ctx.actor,
+    };
+    if (modeOf(args) === 'dry-run') {
+      const plan = createPaymentBatch(db, { ...base, dryRun: true });
+      return { ...plan, mode: 'dry-run', note: 'plan only — re-run with mode=execute to create' };
+    }
+    const r = createPaymentBatch(db, base);
+    return { action: 'payments.batch.create', mode: 'execute', batch_id: r.id, batch_kind: r.batch_kind, total_cents: r.total_cents, lines: r.lines.length, status: r.status };
+  },
+});
+tool({
+  name: 'payments_batch_export', mutating: true,
+  description: 'export a draft batch as SEPA XML (pain.001 for transfer, pain.008.001.02 for direct-debit) — one export per batch, marks it exported',
+  schema: { type: 'object', properties: { batch_id: { type: 'number' }, actor: { type: 'string' }, mode: { type: 'string' } }, required: ['batch_id'] },
+  handler: (db, args, ctx) => {
+    guardExecute(ctx, args);
+    const base = { id: args.batch_id, schema: null, actor: args.actor ?? ctx.actor };
+    if (modeOf(args) === 'dry-run') {
+      const plan = exportPaymentBatch(db, { ...base, dryRun: true });
+      return { ...plan, mode: 'dry-run', note: 'plan only — re-run with mode=execute to export' };
+    }
+    const r = exportPaymentBatch(db, base);
+    return { action: 'payments.batch.export', mode: 'execute', batch_id: r.batch_id, schema: r.schema, msg_id: r.msg_id, status: r.status, xml: r.xml };
   },
 });
 tool({

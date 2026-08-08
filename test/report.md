@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 14:23:48 UTC — **✅ 487 passing · 0 failing (487 tests)**
+**Latest run:** 2026-08-08 14:33:31 UTC — **✅ 495 passing · 0 failing (495 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -176,6 +176,19 @@
     - ✅ company update: no options -> NOTHING_TO_UPDATE
     - ✅ company update: invalid IBAN rejected
     - ✅ company show: returns the company record
+
+### direct-debit.test.js — 
+
+8 passing · 0 failing
+
+    - ✅ mandates: add/list/remove with audit; guards
+    - ✅ direct-debit batch: FRST then RCUR, mandate snapshot on the line
+    - ✅ direct-debit batch without a mandate → MANDATE_REQUIRED
+    - ✅ payment-term isolation: transfer batch rejects direct-debit payables and vice versa
+    - ✅ buildPain008: structure, mandate data, NOTPROVIDED agents, CORE/B2B split
+    - ✅ export: DD batch → pain.008.001.02, one export per batch; transfer regression
+    - ✅ cli: mandate add/list + direct-debit batch create/export e2e
+    - ✅ mcp: mandate add/list + batch create/export (dry-run parity + execute)
 
 ### edge-cases.test.js — rounding, boundaries, idempotency, lifecycle violations, dry-run hygiene
 

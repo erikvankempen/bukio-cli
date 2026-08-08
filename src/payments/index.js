@@ -68,6 +68,70 @@ export function getPaymentBatch(db, id) {
   return row ? serializeBatch(db, row) : null;
 }
 
+// --- SEPA direct-debit mandates --------------------------------------------
+
+export function addMandate(db, {
+  contactId, mandateRef, mandateDate = null, scheme = 'core', actor = 'human', dryRun = false,
+}) {
+  if (!Number.isInteger(contactId) || contactId <= 0) throw paymentsError('CONTACT_NOT_FOUND', 'a contact id is required');
+  const contact = getContact(db, contactId);
+  if (!contact) throw paymentsError('CONTACT_NOT_FOUND', `contact ${contactId} does not exist`);
+  const ref = String(mandateRef ?? '').trim();
+  if (!ref) throw paymentsError('INVALID_MANDATE_REF', 'a mandate reference is required (max 35 chars)');
+  if (ref.length > 35) throw paymentsError('INVALID_MANDATE_REF', 'mandate reference max 35 characters');
+  const date = mandateDate ?? new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw paymentsError('INVALID_DATE', `mandate date '${date}' must be YYYY-MM-DD`);
+  const d = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) {
+    throw paymentsError('INVALID_DATE', `mandate date '${date}' is not a valid calendar date`);
+  }
+  const sch = String(scheme ?? 'core').toLowerCase();
+  if (!['core', 'b2b'].includes(sch)) throw paymentsError('INVALID_SCHEME', "mandate scheme must be 'core' or 'b2b'");
+  const dup = db.prepare('SELECT id FROM sepa_mandates WHERE contact_id = ? AND mandate_ref = ?').get(contactId, ref);
+  if (dup) throw paymentsError('MANDATE_DUPLICATE', `contact ${contact.name} already has mandate '${ref}' (id ${dup.id})`);
+  const plan = { action: 'payments.mandate.add', contact_id: contactId, contact_name: contact.name, mandate_ref: ref, mandate_date: date, scheme: sch, dryRun };
+  if (dryRun) return plan;
+  const info = db.prepare(
+    'INSERT INTO sepa_mandates (contact_id, mandate_ref, mandate_date, scheme, created_by) VALUES (?, ?, ?, ?, ?)',
+  ).run(contactId, ref, date, sch, actor);
+  record(db, { actor, action: 'payments.mandate.add', command: 'payments mandate add', args: { mandate_id: Number(info.lastInsertRowid), contact_id: contactId, mandate_ref: ref }, outcome: 'ok' });
+  return { id: Number(info.lastInsertRowid), contact_id: contactId, contact_name: contact.name, mandate_ref: ref, mandate_date: date, scheme: sch };
+}
+
+export function listMandates(db, { contactId = null } = {}) {
+  const rows = contactId
+    ? db.prepare('SELECT m.*, c.name AS contact_name FROM sepa_mandates m JOIN contacts c ON c.id = m.contact_id WHERE m.contact_id = ? ORDER BY m.id').all(contactId)
+    : db.prepare('SELECT m.*, c.name AS contact_name FROM sepa_mandates m JOIN contacts c ON c.id = m.contact_id ORDER BY m.id').all();
+  return rows.map((r) => ({
+    id: r.id, contact_id: r.contact_id, contact_name: r.contact_name,
+    mandate_ref: r.mandate_ref, mandate_date: r.mandate_date, scheme: r.scheme,
+  }));
+}
+
+export function removeMandate(db, { id, actor = 'human', dryRun = false }) {
+  const mandate = db.prepare('SELECT * FROM sepa_mandates WHERE id = ?').get(id);
+  if (!mandate) throw paymentsError('MANDATE_NOT_FOUND', `mandate ${id} does not exist`);
+  const contact = getContact(db, mandate.contact_id);
+  const plan = { action: 'payments.mandate.remove', mandate_id: id, contact_id: mandate.contact_id, contact_name: contact?.name ?? null, mandate_ref: mandate.mandate_ref, dryRun };
+  if (dryRun) return plan;
+  db.prepare('DELETE FROM sepa_mandates WHERE id = ?').run(id);
+  record(db, { actor, action: 'payments.mandate.remove', command: 'payments mandate remove', args: { mandate_id: id, mandate_ref: mandate.mandate_ref }, outcome: 'ok' });
+  return { mandate_id: id, status: 'deleted' };
+}
+
+/** Latest mandate for a contact (newest id wins), or null. */
+function latestMandate(db, contactId) {
+  return db.prepare('SELECT * FROM sepa_mandates WHERE contact_id = ? ORDER BY id DESC LIMIT 1').get(contactId);
+}
+
+/** FRST on a contact's first direct-debit batch, RCUR afterwards. */
+function mandateSeqFor(db, contactId) {
+  const used = db.prepare(
+    "SELECT COUNT(*) c FROM payment_batch_lines l JOIN payment_batches b ON b.id = l.batch_id WHERE l.contact_id = ? AND b.batch_kind = 'direct_debit'",
+  ).get(contactId);
+  return used.c > 0 ? 'RCUR' : 'FRST';
+}
+
 export function listPaymentBatches(db, { status = null } = {}) {
   const rows = status
     ? db.prepare('SELECT * FROM payment_batches WHERE status = ? ORDER BY id DESC').all(status)
@@ -132,8 +196,11 @@ export function markPayablePaid(db, { id, actor = 'human', dryRun = false }) {
  * BATCH_VALIDATION_FAILED with per-line details.
  */
 export function createPaymentBatch(db, {
-  date = null, debitIban = null, lines = [], payableIds = [], actor = 'human', dryRun = false,
+  date = null, debitIban = null, lines = [], payableIds = [], kind = 'transfer', actor = 'human', dryRun = false,
 }) {
+  if (!['transfer', 'direct_debit'].includes(kind)) {
+    throw paymentsError('INVALID_KIND', "batch kind must be 'transfer' (SEPA credit) or 'direct_debit' (incasso)");
+  }
   const company = getCompany(db);
   if (!company) throw paymentsError('COMPANY_REQUIRED', 'company is not initialised');
   const debit = debitIban ? normalizeIban(debitIban) : normalizeIban(company.iban ?? '');
@@ -177,11 +244,29 @@ export function createPaymentBatch(db, {
     const lineNo = `payable ${id}`;
     if (!p) { fail(lineNo, 'PAYABLE_NOT_FOUND', `payable ${id} does not exist`); continue; }
     if (p.status !== 'unpaid') { fail(lineNo, 'PAYABLE_NOT_UNPAID', `payable ${id} is ${p.status}`); continue; }
-    if (p.payment_method !== 'transfer') { fail(lineNo, 'PAYABLE_DIRECT_DEBIT', `payable ${id} is paid by direct debit (incasso) — excluded from batches`); continue; }
+    if (kind === 'transfer') {
+      if (p.payment_method !== 'transfer') { fail(lineNo, 'PAYABLE_DIRECT_DEBIT', `payable ${id} is paid by direct debit (incasso) — excluded from transfer batches`); continue; }
+    } else if (p.payment_method !== 'direct_debit') {
+      fail(lineNo, 'PAYABLE_NOT_DIRECT_DEBIT', `payable ${id} is a transfer (betaalbaar) — not an incasso; use a transfer batch`); continue;
+    }
     const c = getContact(db, p.contact_id);
     const iban = normalizeIban(c?.iban ?? '');
     if (!iban) { fail(lineNo, 'CONTACT_IBAN_MISSING', `contact ${c?.name ?? p.contact_id} has no IBAN — set one with: bukio contact update --id ${p.contact_id} --iban <IBAN>`); continue; }
     if (!isValidIban(iban)) { fail(lineNo, 'INVALID_IBAN', `'${iban}' is not a valid IBAN`); continue; }
+    if (kind === 'direct_debit') {
+      const mandate = latestMandate(db, p.contact_id);
+      if (!mandate) {
+        fail(lineNo, 'MANDATE_REQUIRED', `contact ${c?.name ?? p.contact_id} has no SEPA mandate — add one with: bukio payments mandate add --contact ${p.contact_id} --ref <REF> [--type b2b]`);
+        continue;
+      }
+      items.push({
+        payable_id: p.id, contact_id: p.contact_id, name: c.name, iban, amount_cents: p.amount_cents,
+        reference: `Factuur ${p.invoice_ref}`,
+        mandate_ref: mandate.mandate_ref, mandate_date: mandate.mandate_date,
+        mandate_seq: mandateSeqFor(db, p.contact_id), scheme: mandate.scheme,
+      });
+      continue;
+    }
     items.push({ payable_id: p.id, contact_id: p.contact_id, name: c.name, iban, amount_cents: p.amount_cents, reference: `Factuur ${p.invoice_ref}` });
   }
 
@@ -195,28 +280,31 @@ export function createPaymentBatch(db, {
   const totalCents = items.reduce((s, l) => s + l.amount_cents, 0);
   const plan = {
     action: 'payments.batch.create',
-    batch_date: batchDate, debit_iban: debit, debit_name: company.name,
+    batch_date: batchDate, debit_iban: debit, debit_name: company.name, batch_kind: kind,
     total_cents: totalCents, lines: items, dryRun,
   };
   if (dryRun) return plan;
 
   const created = db.transaction(() => {
     const info = db.prepare(
-      'INSERT INTO payment_batches (batch_date, debit_iban, debit_name, total_cents, created_by) VALUES (?, ?, ?, ?, ?)',
-    ).run(batchDate, debit, company.name, totalCents, actor);
+      'INSERT INTO payment_batches (batch_date, debit_iban, debit_name, total_cents, batch_kind, created_by) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(batchDate, debit, company.name, totalCents, kind, actor);
     const batchId = Number(info.lastInsertRowid);
     const insertLine = db.prepare(
-      'INSERT INTO payment_batch_lines (batch_id, contact_id, name, iban, amount_cents, reference) VALUES (?, ?, ?, ?, ?, ?)',
+      'INSERT INTO payment_batch_lines (batch_id, contact_id, name, iban, amount_cents, reference, mandate_ref, mandate_seq, mandate_date, scheme) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     );
     for (const l of items) {
-      const li = insertLine.run(batchId, l.contact_id, l.name, l.iban, l.amount_cents, l.reference);
+      const li = insertLine.run(
+        batchId, l.contact_id, l.name, l.iban, l.amount_cents, l.reference,
+        l.mandate_ref ?? null, l.mandate_seq ?? null, l.mandate_date ?? null, l.scheme ?? null,
+      );
       if (l.payable_id) {
         db.prepare("UPDATE payables SET status = 'in_batch', batch_line_id = ? WHERE id = ?").run(Number(li.lastInsertRowid), l.payable_id);
       }
     }
     return batchId;
   })();
-  record(db, { actor, action: 'payments.batch.create', command: 'payments batch create', args: { batch_id: created, lines: items.length, total_cents: totalCents }, outcome: 'ok' });
+  record(db, { actor, action: 'payments.batch.create', command: 'payments batch create', args: { batch_id: created, kind, lines: items.length, total_cents: totalCents }, outcome: 'ok' });
   return getPaymentBatch(db, created);
 }
 
@@ -325,30 +413,104 @@ ${txs}
 `;
 }
 
-export function exportPaymentBatch(db, { id, schema = '001.03', actor = 'human', dryRun = false }) {
-  if (!['001.03', '001.09'].includes(schema)) throw paymentsError('INVALID_SCHEMA', "schema must be '001.03' or '001.09'");
+/**
+ * Build a pain.008.001.02 direct-debit-initiation document. One PmtInf per
+ * mandate scheme (CORE / B2B). Lines carry the debtor's mandate snapshot:
+ *   { name, iban, amount_cents, reference, mandate_ref, mandate_date, mandate_seq, scheme }
+ */
+export function buildPain008({ msgId, createdIso, debitName, debitIban, batchDate, lines }) {
+  const total = lines.reduce((s, l) => s + l.amount_cents, 0);
+  const ctrlSum = (total / 100).toFixed(2);
+  const byScheme = (scheme) => lines.filter((l) => (l.scheme ?? 'core') === scheme);
+  const txInf = (l, i) => {
+    const endToEnd = (l.reference ? String(l.reference).slice(0, 35) : `BUKIO${i + 1}`);
+    return `      <DrctDbtTxInf>
+        <PmtId><EndToEndId>${esc(endToEnd)}</EndToEndId></PmtId>
+        <InstdAmt Ccy="EUR">${(l.amount_cents / 100).toFixed(2)}</InstdAmt>
+        <DrctDbtTx><MndtRltdInf>
+          <MndtId>${esc(l.mandate_ref)}</MndtId>
+          <DtOfSgntr>${esc(l.mandate_date)}</DtOfSgntr>
+        </MndtRltdInf></DrctDbtTx>
+        <DbtrAgt><FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId></DbtrAgt>
+        <Dbtr><Nm>${esc(l.name)}</Nm></Dbtr>
+        <DbtrAcct><Id><IBAN>${esc(l.iban)}</IBAN></Id></DbtrAcct>
+        ${l.reference ? `<RmtInf><Ustrd>${esc(l.reference)}</Ustrd></RmtInf>` : ''}
+      </DrctDbtTxInf>`;
+  };
+  const pmtInf = (scheme, schemeLines, idx) => {
+    const subTotal = schemeLines.reduce((s, l) => s + l.amount_cents, 0);
+    const subCtrl = (subTotal / 100).toFixed(2);
+    const txs = schemeLines.map((l, i) => txInf(l, i)).join('\n');
+    return `    <PmtInf>
+      <PmtInfId>${esc(msgId)}${idx}</PmtInfId>
+      <PmtMtd>DD</PmtMtd>
+      <BtchBookg>true</BtchBookg>
+      <NbOfTxs>${schemeLines.length}</NbOfTxs>
+      <CtrlSum>${subCtrl}</CtrlSum>
+      <PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl><LclInstrm><Cd>${scheme === 'b2b' ? 'B2B' : 'CORE'}</Cd></LclInstrm></PmtTpInf>
+      <ReqdColltnDt>${esc(batchDate)}</ReqdColltnDt>
+      <Cdtr><Nm>${esc(debitName)}</Nm></Cdtr>
+      <CdtrAcct><Id><IBAN>${esc(debitIban)}</IBAN></Id></CdtrAcct>
+      <CdtrAgt><FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId></CdtrAgt>
+      <ChrgBr>SLEV</ChrgBr>
+${txs}
+    </PmtInf>`;
+  };
+  const schemes = ['core', 'b2b'].filter((s) => byScheme(s).length > 0);
+  const pmtInfs = schemes.map((s, i) => pmtInf(s, byScheme(s), i + 1)).join('\n');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.008.001.02">
+  <CstmrDrctDbtInitn>
+    <GrpHdr>
+      <MsgId>${esc(msgId)}</MsgId>
+      <CreDtTm>${esc(createdIso)}</CreDtTm>
+      <NbOfTxs>${lines.length}</NbOfTxs>
+      <CtrlSum>${ctrlSum}</CtrlSum>
+      <InitgPty><Nm>${esc(debitName)}</Nm></InitgPty>
+    </GrpHdr>
+${pmtInfs}
+  </CstmrDrctDbtInitn>
+</Document>
+`;
+}
+
+export function exportPaymentBatch(db, { id, schema = null, actor = 'human', dryRun = false }) {
   const batch = db.prepare('SELECT * FROM payment_batches WHERE id = ?').get(id);
   if (!batch) throw paymentsError('BATCH_NOT_FOUND', `batch ${id} does not exist`);
   if (batch.status !== 'draft') throw paymentsError('BATCH_ALREADY_EXPORTED', `batch ${id} is already ${batch.status} — exporting again could double-pay; create a new batch instead`);
+  const isDD = batch.batch_kind === 'direct_debit';
+  const effSchema = schema ?? (isDD ? '008.02' : '001.03');
+  if (isDD) {
+    if (!['008.02'].includes(effSchema)) throw paymentsError('INVALID_SCHEMA', 'direct-debit batches export pain.008.001.02 only');
+  } else if (!['001.03', '001.09'].includes(effSchema)) {
+    throw paymentsError('INVALID_SCHEMA', "schema must be '001.03' or '001.09'");
+  }
   const lines = db.prepare('SELECT * FROM payment_batch_lines WHERE batch_id = ? ORDER BY id').all(id);
   // SEPA MsgId max 35 chars: BUKIO + 14-char timestamp + batch id (last 16
   // digits — ids beyond 10^16 are not realistic, but the slice keeps the
   // contract unconditional; the guard below would catch any future change)
   const msgId = `BUKIO${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}${String(id).slice(-16)}`;
   if (msgId.length > 35) throw paymentsError('MSGID_TOO_LONG', `generated MsgId '${msgId}' exceeds the SEPA 35-character limit`);
-  const xml = buildPain001({
-    msgId, createdIso: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-    debitName: batch.debit_name, debitIban: batch.debit_iban, batchDate: batch.batch_date,
-    lines, schema,
-  });
+  const xml = isDD
+    ? buildPain008({
+        msgId, createdIso: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+        debitName: batch.debit_name, debitIban: batch.debit_iban, batchDate: batch.batch_date,
+        lines,
+      })
+    : buildPain001({
+        msgId, createdIso: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+        debitName: batch.debit_name, debitIban: batch.debit_iban, batchDate: batch.batch_date,
+        lines, schema: effSchema,
+      });
+  const storedSchema = isDD ? 'pain.008.001.02' : (effSchema === '001.03' ? 'pain.001.001.03' : 'pain.001.001.09');
   const fileHash = createHash('sha256').update(xml).digest('hex');
   if (dryRun) {
-    return { action: 'payments.batch.export', batch_id: id, schema, msg_id: msgId, lines: lines.length, total_cents: batch.total_cents, file_hash: fileHash, xml, dryRun: true };
+    return { action: 'payments.batch.export', batch_id: id, batch_kind: batch.batch_kind, schema: storedSchema, msg_id: msgId, lines: lines.length, total_cents: batch.total_cents, file_hash: fileHash, xml, dryRun: true };
   }
   db.prepare("UPDATE payment_batches SET status = 'exported', msg_id = ?, file_hash = ?, schema = ?, exported_at = ? WHERE id = ?")
-    .run(msgId, fileHash, `pain.${schema}`, new Date().toISOString(), id);
-  record(db, { actor, action: 'payments.batch.export', command: 'payments batch export', args: { batch_id: id, msg_id: msgId, lines: lines.length, total_cents: batch.total_cents, file_hash: fileHash.slice(0, 12), schema }, outcome: 'ok' });
-  return { batch_id: id, status: 'exported', msg_id: msgId, file_hash: fileHash, schema: `pain.${schema}`, xml, lines: lines.length, total_cents: batch.total_cents };
+    .run(msgId, fileHash, storedSchema, new Date().toISOString(), id);
+  record(db, { actor, action: 'payments.batch.export', command: 'payments batch export', args: { batch_id: id, kind: batch.batch_kind, msg_id: msgId, lines: lines.length, total_cents: batch.total_cents, file_hash: fileHash.slice(0, 12), schema: storedSchema }, outcome: 'ok' });
+  return { batch_id: id, status: 'exported', msg_id: msgId, file_hash: fileHash, schema: storedSchema, xml, lines: lines.length, total_cents: batch.total_cents };
 }
 
 export function deletePaymentBatch(db, { id, actor = 'human', dryRun = false }) {

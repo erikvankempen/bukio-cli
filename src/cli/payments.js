@@ -13,6 +13,7 @@ import {
   addPayable, listPayables, markPayablePaid,
   createPaymentBatch, createPaymentBatchFromCsv,
   exportPaymentBatch, deletePaymentBatch, listPaymentBatches, getPaymentBatch,
+  addMandate, listMandates, removeMandate,
 } from '../payments/index.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 
@@ -100,6 +101,64 @@ export function make(program) {
       } catch (err) { fail(ctx, err); }
     });
 
+  const mandate = payments.command('mandate').description('SEPA direct-debit mandates (incassovolmacht)');
+  mandate
+    .command('add')
+    .description('register a signed mandate for a contact')
+    .requiredOption('--contact <id>', 'contact id')
+    .requiredOption('--ref <ref>', 'mandate reference (max 35 chars, e.g. NL01ZZZ123456789012)')
+    .option('--date <date>', 'signature date YYYY-MM-DD (default today)')
+    .option('--type <type>', "scheme: 'core' (8-week refund right) or 'b2b' (no refund right)", 'core')
+    .option('--dry-run', 'show the plan without writing')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const r = addMandate(db, { contactId: Number(opts.contact), mandateRef: opts.ref, mandateDate: opts.date, scheme: opts.type, actor: ctx.actor, dryRun: opts.dryRun });
+          output(ctx, r, (d) => {
+            if (d.dryRun) { console.log(`plan: mandate '${d.mandate_ref}' for ${d.contact_name} (${d.scheme}, signed ${d.mandate_date})`); console.log('(dry run — nothing written)'); return; }
+            console.log(`mandate #${d.id} '${d.mandate_ref}' for ${d.contact_name} (${d.scheme}, signed ${d.mandate_date})`);
+          });
+        } finally { db.close(); }
+      } catch (err) { fail(ctx, err); }
+    });
+  mandate
+    .command('list')
+    .description('list mandates (optionally per contact)')
+    .option('--contact <id>', 'only this contact\'s mandates')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const rows = listMandates(db, { contactId: opts.contact ? Number(opts.contact) : null });
+          output(ctx, { mandates: rows }, (d) => {
+            if (!d.mandates.length) { console.log('no mandates'); return; }
+            table(d.mandates.map((m) => ({ id: m.id, contact: m.contact_name, ref: m.mandate_ref, scheme: m.scheme, signed: m.mandate_date })), ['id', 'contact', 'ref', 'scheme', 'signed']);
+          });
+        } finally { db.close(); }
+      } catch (err) { fail(ctx, err); }
+    });
+  mandate
+    .command('remove')
+    .description('delete a mandate')
+    .requiredOption('--id <id>', 'mandate id')
+    .option('--dry-run', 'show the plan without writing')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const r = removeMandate(db, { id: Number(opts.id), actor: ctx.actor, dryRun: opts.dryRun });
+          output(ctx, r, (d) => {
+            if (d.dryRun) { console.log(`plan: remove mandate '${d.mandate_ref}'`); console.log('(dry run — nothing written)'); return; }
+            console.log(`mandate #${d.mandate_id} removed`);
+          });
+        } finally { db.close(); }
+      } catch (err) { fail(ctx, err); }
+    });
+
   const batch = payments.command('batch').description('payment batches');
   batch
     .command('create')
@@ -110,6 +169,7 @@ export function make(program) {
     .option('--payable <ids>', 'only these payable ids (comma-separated)')
     .option('--date <date>', 'requested execution date YYYY-MM-DD (default today)')
     .option('--from-iban <iban>', 'debit account IBAN (default: company IBAN)')
+    .option('--type <type>', "batch kind: 'transfer' (SEPA credit, pain.001) or 'direct-debit' (incasso, pain.008)", 'transfer')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
@@ -118,31 +178,33 @@ export function make(program) {
         try {
           let lines = opts.lines ? parseLinesSpec(opts.lines) : [];
           const payableIds = opts.payable ? String(opts.payable).split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n)) : [];
+          const kind = opts.type === 'direct-debit' ? 'direct_debit' : 'transfer';
+          const method = kind === 'direct_debit' ? 'direct_debit' : 'transfer';
           const fromInvoices = opts.fromInvoices || payableIds.length > 0;
           let res;
           if (opts.csv) {
             const csvText = readImportFile(opts.csv);
             res = createPaymentBatchFromCsv(db, { csvText, date: opts.date, debitIban: opts.fromIban, actor: ctx.actor, dryRun: opts.dryRun });
           } else if (fromInvoices) {
-            const payables = listPayables(db, { status: 'unpaid', method: 'transfer' });
-            const ids = payableIds.length ? payableIds : payables.map((p) => p.id);
+            const eligible = listPayables(db, { status: 'unpaid', method });
+            const ids = payableIds.length ? payableIds : eligible.map((p) => p.id);
             for (const id of ids) {
-              if (!payables.some((x) => x.id === id)) {
-                throw Object.assign(new Error(`payable ${id} is not unpaid+transfer (already batched or direct debit)`), { code: 'PAYABLE_NOT_ELIGIBLE' });
+              if (!eligible.some((x) => x.id === id)) {
+                throw Object.assign(new Error(`payable ${id} is not unpaid+${method.replace('_', '-')} (already batched or wrong payment term)`), { code: 'PAYABLE_NOT_ELIGIBLE' });
               }
             }
-            res = createPaymentBatch(db, { date: opts.date, debitIban: opts.fromIban, lines, payableIds: ids, actor: ctx.actor, dryRun: opts.dryRun });
+            res = createPaymentBatch(db, { date: opts.date, debitIban: opts.fromIban, lines, payableIds: ids, kind, actor: ctx.actor, dryRun: opts.dryRun });
           } else {
-            res = createPaymentBatch(db, { date: opts.date, debitIban: opts.fromIban, lines, payableIds: [], actor: ctx.actor, dryRun: opts.dryRun });
+            res = createPaymentBatch(db, { date: opts.date, debitIban: opts.fromIban, lines, payableIds: [], kind, actor: ctx.actor, dryRun: opts.dryRun });
           }
           output(ctx, res, (d) => {
             if (d.dryRun) {
-              console.log(`plan: payment batch ${d.batch_date} from ${d.debit_iban} — ${d.lines.length} line${d.lines.length === 1 ? '' : 's'}, total ${(d.total_cents / 100).toFixed(2)}`);
-              for (const l of d.lines) console.log(`  ${l.name} ${l.iban} ${(l.amount_cents / 100).toFixed(2)}${l.reference ? ` — ${l.reference}` : ''}`);
+              console.log(`plan: ${d.batch_kind ?? 'transfer'} batch ${d.batch_date} from ${d.debit_iban} — ${d.lines.length} line${d.lines.length === 1 ? '' : 's'}, total ${(d.total_cents / 100).toFixed(2)}`);
+              for (const l of d.lines) console.log(`  ${l.name} ${l.iban} ${(l.amount_cents / 100).toFixed(2)}${l.reference ? ` — ${l.reference}` : ''}${l.mandate_ref ? ` (${l.mandate_seq} ${l.mandate_ref})` : ''}`);
               console.log('(dry run — nothing written)');
               return;
             }
-            console.log(`batch #${d.id} — ${d.lines.length} lines, total ${(d.total_cents / 100).toFixed(2)}, status ${d.status}`);
+            console.log(`batch #${d.id} — ${d.lines.length} lines, total ${(d.total_cents / 100).toFixed(2)}, status ${d.status}, kind ${d.batch_kind ?? 'transfer'}`);
           });
         } finally { db.close(); }
       } catch (err) { fail(ctx, err); }
@@ -210,9 +272,9 @@ export function make(program) {
     });
   batch
     .command('export')
-    .description('export a batch as SEPA pain.001 XML for bank-portal upload (once per batch)')
+    .description('export a batch as SEPA XML for bank-portal upload (pain.001 for transfer, pain.008 for direct-debit; once per batch)')
     .requiredOption('--id <id>', 'batch id')
-    .option('--schema <schema>', "schema version: '001.03' (default) or '001.09'", '001.03')
+    .option('--schema <schema>', "transfer schema: '001.03' (default) or '001.09' (direct-debit batches always export pain.008.001.02)")
     .option('--out <file>', 'write the XML to this file')
     .option('--dry-run', 'show the plan without writing')
     .action(async (opts, command) => {
@@ -220,7 +282,7 @@ export function make(program) {
       try {
         const db = ensureDb(ctx);
         try {
-          const r = exportPaymentBatch(db, { id: Number(opts.id), schema: opts.schema, actor: ctx.actor, dryRun: opts.dryRun });
+          const r = exportPaymentBatch(db, { id: Number(opts.id), schema: opts.schema ?? null, actor: ctx.actor, dryRun: opts.dryRun });
           if (r.xml && opts.out) {
             mkdirSync(dirname(opts.out) || '.', { recursive: true });
             writeFileSync(opts.out, r.xml);
