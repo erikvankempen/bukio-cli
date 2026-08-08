@@ -10,7 +10,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-433%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-495%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -24,12 +24,14 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 
 - **Agent-native** — every command emits deterministic `--json`; every mutation supports `--dry-run` (plan mode); every action lands in an append-only audit log with named-actor attribution (`--actor agent:bartholomeus` / `human:erik`).
 - **VAT optional** — the core ledger is VAT-agnostic. The optional VAT module adds codes, the OB readout (fields 1a–5d) and KOR support when you need them. Filing always stays manual — bukio never submits anything.
-- **Peppol BIS 3.0 ready** — the 2027 mandate in one loop: `finalize → PDF → UBL → peppol-send`.
+- **Peppol BIS 3.0 ready** — the 2027 mandate both ways: `finalize → PDF → UBL → peppol-send` for outgoing, and `import invoice` (EN 16931/Peppol UBL) into the payables register for incoming. `invoice email` delivers the PDF by SMTP (`BUKIO_SMTP_*` env).
+- **Documents in the DB** — `attach` stores source documents (PDFs, scans) as BLOBs by default (metadata-only lists; 25 MB/file cap; sha256 dedupe) or content-addressed files, so the books carry their paper trail and backups stay one consistent file. `backup --encrypt` (AES-256-GCM) + `--keep N` rotation protects it off-box.
+- **Cash management reports** — `report aging` (debtors/creditors 30/60/90+ buckets), `contact statement` (opgave with running balance), `report sales --by contact|item` for the agent's weekly briefings.
 - **FX built in** — book foreign-currency purchase invoices in USD, GBP, …; rates resolve from your rate store or straight from the ECB.
 - **Migration-ready** — `import opening-balances`, `import journal` (SnelStart/Exact-style CSV) and `import xaf` (XML Auditfile Financieel 4.0) bring a whole administration in; every importer validates the entire file before writing a single cent.
 - **Runs itself** — `month-end` is the agent's close check (drafts, bank, VAT, invoices, recurring, fixed assets, profit); `invoice reminders` drafts overdue payment reminders.
 - **Fixed assets** — depreciation schemes (lineair / degressief with the standard switch-to-linear rule), an asset register with **mid-life adoption** (recognition date + cumulative depreciation at recognition — only the remaining depreciation is booked), monthly runs (idempotent per asset-month), disposal with winst/verlies booking, and the **activastaat** (CSV/XLSX export).
-- **SEPA payment batches** — a payables register (purchase invoices, `transfer` vs `direct_debit`/incasso), batch creation from unpaid invoices or CSV, and **pain.001 export** (`001.03`/`001.09`) for upload in any Dutch bank portal. One export per batch (unique `MsgId` — re-uploading would double-pay); the ledger is untouched until the bank statement import books the payments.
+- **SEPA payment batches** — a payables register (purchase invoices, `transfer` vs `direct_debit`/incasso), batch creation from unpaid invoices or CSV, and **pain.001 export** (`001.03`/`001.09`) for upload in any Dutch bank portal. **Direct debit** adds an incassovolmacht register (`payments mandate add`, core/b2b) and **pain.008.001.02 export** (one `PmtInf` per scheme, FRST/RCUR auto-assigned). One export per batch (unique `MsgId` — re-uploading would double-pay); the ledger is untouched until the bank statement import books the payments.
 - **One company per database** — a second company is a second SQLite file (`--db` or `BUKIO_DB`).
 - **Local-first** — no cloud, no lock-in. Your 7-year administration stays yours.
 
@@ -320,6 +322,22 @@ bukio report pnl --year 2026 --format xlsx --out ~/exports/pnl-2026.xlsx
 bukio report journal --year 2026 --format csv --out ~/exports/journal-2026.csv
 ```
 
+### `bukio report aging` / `report sales` / `contact statement`
+
+Open-items and revenue analytics (v0.14) — all exportable with `--format csv|xlsx [--out]`.
+
+| Command | Purpose |
+|---------|---------|
+| `report aging [--as-of D] [--kind debtors\|creditors\|both]` | Open items per contact bucketed by days past due (current/30/60/90+); creditors show `in_batch` amounts separately — the agent's daily cash pulse |
+| `report sales --year YYYY [--by contact\|item]` | Sales revenue: per contact (net/vat/gross via the totals engine) or per item (net after per-line discounts; invoice-level discounts are not allocated per line) |
+| `contact statement --id N [--as-of D]` | Opgave: the contact's invoices + payments + payables with a running balance (positive = they owe you) |
+
+```bash
+bukio report aging --kind debtors --format csv --out ~/exports/aging.csv
+bukio report sales --year 2026 --by contact
+bukio contact statement --id 3
+```
+
 ### `bukio account`
 
 Chart of accounts management.
@@ -442,6 +460,9 @@ Outgoing invoicing (FR3) — compliant with the 12 verplichte factuurvereisten, 
 | `invoice ubl --id N [--out PATH]` | Export **UBL 2.1 / Peppol BIS 3.0 (EN 16931)** XML |
 | `invoice credit --id N [--reason]` | Create a credit note (draft) from a finalized invoice (inherits language + discounts) |
 | `invoice pay --id N --date [--amount]` | Record a payment (tracking; the posting comes from the bank flow) |
+| `contact statement --id N [--as-of D]` | **Opgave (v0.14)**: the contact's invoices + payments + payables with a running balance |
+| `invoice email --id N [--to] [--subject] [--body] [--no-pdf] [--dry-run]` | **Email the finalized invoice PDF (v0.14)** via SMTP (`BUKIO_SMTP_HOST/PORT/USER/PASS/FROM` env). Delivery is audited (`invoice.email`); dry-run renders + validates but sends nothing. Status is `sent` from finalize onward |
+| `invoice peppol-send --id N [--endpoint] [--dry-run]` | POST the UBL to a Peppol access-point provider (`BUKIO_PEPPOL_ENDPOINT` + `BUKIO_PEPPOL_TOKEN` env) |
 
 **Compliance (validated at finalize):** supplier name/KvK/btw-id/address/postal/city (set at `init`), invoice date, sequential number, customer name+address+city, line descriptions/quantities/prices, VAT rate + amount per rate, totals, and the customer's btw-id when a line carries `@R`/`@RE` (btw verlegd). Missing data fails with `SUPPLIER_INCOMPLETE` / `CUSTOMER_INCOMPLETE` / `CUSTOMER_VAT_REQUIRED`.
 
@@ -505,6 +526,7 @@ Imports are idempotent: re-running skips already-imported boekstukken.
 | Command | Purpose |
 |---------|---------|
 | `import opening-balances --file <csv> [--date yyyy-mm-dd] [--dry-run]` | Import opening balances as ONE posted `Beginbalans` entry. CSV: `code,amount` (signed; + = debet) or `code,debet,credit` (Dutch layout). Amounts accept `1234.56`, `1234,56` and `1.234,56`. Sum must be zero. Re-import → `OPENING_ALREADY_IMPORTED` |
+| `import invoice --file <ubl.xml> [--contact N] [--create-missing] [--dry-run]` | **Inbound e-invoice (v0.14)**: parse an EN 16931/Peppol BIS 3.0 UBL invoice (fast-xml-parser) into the **payables register** — whole-file validation, supplier auto-created with `--create-missing` (matched by btw-id → name → explicit `--contact`), idempotent by supplier+invoice number, VAT breakdown per rate reported but **not booked** (book via the normal workflow). Credit notes (type 381) → `UNSUPPORTED_UBL_DOCUMENT` |
 | `import journal --file <csv> [--create-missing] [--dry-run]` | Import a journal from SnelStart/Exact-style CSV: header `datum,boekstuknummer,rekening,tegenrekening,bedrag[,omschrijving][,btwcode]` (aliases + `;` delimiter supported). Each row books `+bedrag` on rekening / `−bedrag` on tegenrekening; rows per boekstuknummer become ONE posted entry (`source='import'`, `source_ref='journal:<nr>'`). `--create-missing` creates unknown accounts (type inferred from net movement). BtwCode columns are reported in `ignored_btw_codes` but not booked |
 | `import xaf --file <audit.xaf> [--dry-run]` | Import an **XML Auditfile Financieel 4.0** — both the Belastingdienst layout (`Xaf`/`Rekeningen`/`Mutaties`) and the generic AuditFile layout (`AuditFile`/`Header`/`MasterFiles`/`GeneralLedgerEntries`, explicit debit/credit lines): the file's chart is upserted (types from `AccountType`/`RekeningSoort`), each Mutatie/Transaction becomes one posted entry (`source='xaf'`, `source_ref=<boekstuk/transaction>`). A differing company KVK → `COMPANY_MISMATCH` (name differences are warnings). **On an empty ledger the file's chart is authoritative**: colliding account codes are renamed to the file's meanings (listed in the dry-run as `accounts_to_rename`, reported as `accounts_updated` after import); accounts that already carry postings are never touched |
 | `month-end --period yyyy-mm` | **Read-only close check**: draft entries, unmatched bank transactions, the OB readout for the containing quarter, draft + overdue invoices (with outstanding total), due recurring templates, period debit/credit totals (`balanced`), the month's profit, and human-readable `warnings` — the agent's monthly "can I close?" report |
@@ -516,10 +538,11 @@ Imports are idempotent: re-running skips already-imported boekstukken.
 | `assets register [--as-of DATE] [--format json\|csv\|xlsx --out]` | The **activastaat**: cost, cumulative depreciation, book value per asset + totals |
 | `assets dispose --id N --date [--proceeds] [--bank-account 1100] [--result-account 8100] [--dry-run]` | Dispose (sale or scrap): proposes the full entry (bank / cum-dep / asset / winst-verlies), status → `disposed` |
 | `assets list [--status]` / `show --id` / `pause --id` / `resume --id` | Register inspection + depreciation pause/resume |
-| `payments payables add --contact N --ref --date --amount [--due] [--method transfer\|direct-debit] [--entry-id]` | Register a purchase invoice (payable). `direct-debit` = incasso, excluded from batches | 
+| `payments payables add --contact N --ref --date --amount [--due] [--method transfer\|direct-debit] [--entry-id]` | Register a purchase invoice (payable). `direct-debit` = incasso (collected by the vendor — only joins direct-debit batches) | 
 | `payments payables list [--status] [--method]` / `pay --id` | Open payables (unpaid / in_batch / paid); mark paid after the bank statement confirms |
-| `payments batch create [--from-invoices] [--payable ids] [--lines "C:AMT[:REF];…"] [--csv file] [--date] [--from-iban] [--dry-run]` | Build a batch from unpaid transfer payables and/or explicit lines; whole-set validation (IBAN mod-97, amounts, refs) |
-| `payments batch export --id N [--schema 001.03\|001.09] [--out file.xml] [--dry-run]` | Export **pain.001** SEPA XML for bank-portal upload. Once per batch (unique `MsgId` — re-export would double-pay) |
+| `payments mandate add --contact N --ref R [--date D] [--type core\|b2b]` / `list [--contact]` / `remove --id` | **Incassovolmacht register (v0.14)**: SEPA mandates per contact. `core` = 8-week refund right, `b2b` = none. Required before a direct-debit batch can collect from a contact (`MANDATE_REQUIRED` otherwise) |
+| `payments batch create [--type transfer\|direct-debit] [--from-invoices] [--payable ids] [--lines "C:AMT[:REF];…"] [--csv file] [--date] [--from-iban] [--dry-run]` | Build a batch from unpaid payables matching the type and/or explicit lines; whole-set validation (IBAN mod-97, amounts, refs). Direct-debit lines auto-carry the contact's mandate snapshot + FRST/RCUR sequence |
+| `payments batch export --id N [--schema 001.03\|001.09] [--out file.xml] [--dry-run]` | Export SEPA XML for bank-portal upload: **pain.001** for transfer batches, **pain.008.001.02** for direct-debit (one `PmtInf` per CORE/B2B scheme). Once per batch (unique `MsgId` — re-export would double-pay/collect) |
 | `payments batch list [--status]` / `show --id` / `delete --id` | Batch tracking; delete only allowed on drafts (releases payables back to unpaid) |
 | `contact update --id N [--iban] [--address] …` / `contact add --iban` | Contact IBANs (mod-97 validated) — required to include a vendor in a batch |
 | `export xaf --year yyyy --out <file.xaf>` | Export the fiscal year as an **Auditfile Financieel 4.0 XML** (Belastingdienst standard) — the file a boekhouder, tax advisor or auditor imports directly into SnelStart/Exact. One `<Mutatie>` per **posted** entry (drafts excluded); postings as `<Boeking>` debet/credit pairs that re-import losslessly. Records an `export.xaf` audit row; read-only |
@@ -565,18 +588,23 @@ always wins; `BUKIO_FX_NO_FETCH=1` keeps bukio fully offline. The description
 should note the currency and the original invoice number. Outgoing invoices
 stay EUR-only (the 12-vereisten and UBL are EUR-based).
 
-### `bukio backup` / `bukio restore`
+### `bukio backup` / `bukio restore` / `bukio attach`
 
 | Command | Purpose |
 |---------|---------|
-| `backup [--out <path>]` | Consistent SQLite backup (default `~/.bukio/backups/bukio-<ts>.db`) |
-| `restore --from <file> [--to <path>] [--force]` | Restore from a backup file (validated first) |
+| `backup [--out <path>] [--encrypt] [--passphrase] [--keep N] [--dry-run]` | Consistent SQLite backup (default `~/.bukio/backups/bukio-<ts>.db`). **`--encrypt` (v0.14)** wraps it in AES-256-GCM (scrypt-derived key) — file extension `.enc`, passphrase from `--passphrase` or `BUKIO_BACKUP_PASSPHRASE` env (never in the repo). **`--keep N`** prunes the oldest backups in the default folder (rejects `--out` — rotation only applies to the default location) |
+| `restore --from <file> [--to <path>] [--force] [--passphrase]` | Restore from a backup file (validated first); **encrypted backups are auto-detected** by the `BUKIOENC1` magic header and decrypted with `--passphrase` / `BUKIO_BACKUP_PASSPHRASE` |
+| `attach add --invoice N \| --entry N --file F [--store db\|file] [--note] [--dry-run]` | **Source documents (v0.14)**: store the original PDF/scans against an invoice or entry. Default `--store db` = BLOB in the SQLite file (travels with backups; 25 MB/file cap; sha256 dedupe). `--store file` = content-addressed copy in `<db>-attachments/` |
+| `attach list --invoice N \| --entry N` / `show --id [--out F]` / `remove --id` | Metadata-only listing (never reads the BLOB); `show` extracts the bytes (`--force` to overwrite); `remove` deletes the BLOB/copy. Add/remove are audited |
 
-`restore` refuses to overwrite an existing initialised database unless `--force` is given, and refuses `--from`/`--to` pointing at the same file.
+`restore` refuses to overwrite an existing initialised database unless `--force` is given, and refuses `--from`/`--to` pointing at the same file. Wrong passphrase → `BACKUP_PASSPHRASE_WRONG` (tamper-proof via GCM auth tag).
 
 ```bash
-bukio backup
-bukio restore --from ~/.bukio/backups/bukio-2026-08-04T12-00-00.db --to ~/.bukio/restored.db
+bukio backup                                   # ~/.bukio/backups/bukio-<ts>.db
+BUKIO_BACKUP_PASSPHRASE='...' bukio backup --encrypt --keep 30
+bukio restore --from ~/.bukio/backups/bukio-<ts>.db.enc --to ~/.bukio/restored.db
+bukio attach add --invoice 1 --file ~/invoices/2026-08-01_acme_F2026-123.pdf
+bukio attach list --invoice 1
 ```
 
 ### `bukio audit`
@@ -966,7 +994,7 @@ principle for AI-generated content:
 | Aspect | Disclosure |
 |---|---|
 | Development method | All source, tests and documentation were generated with an AI coding assistant (Hermes Agent, running `deepseek-v4-flash`), then reviewed, verified and accepted by the repository owner. |
-| Human oversight | Every commit is reviewed by the owner before it lands; the automated test suite (433 tests, `npm test`) must pass; money paths additionally require a balanced trial balance. Nothing is accepted blind. |
+| Human oversight | Every commit is reviewed by the owner before it lands; the automated test suite (495 tests, `npm test`) must pass; money paths additionally require a balanced trial balance. Nothing is accepted blind. |
 | Synthetic content | Code, tests and docs are AI-generated output; this README section and the commit history serve as the disclosure that the content is machine-generated. |
 | Model provider obligations | The underlying general-purpose AI model is provided by DeepSeek; its obligations under the AI Act (e.g. Article 53 documentation, copyright policy, training-data summary) sit with the provider, not with this repository. |
 | No prohibited practices | The project involves none of the Article 5 prohibited practices (no social scoring, no biometric identification, no manipulation). |
@@ -1078,6 +1106,7 @@ three standard modes); treat the ratios, not the decimals, as the point.
 | 9 | External handover: `export xaf` (Auditfile Financieel 4.0) + audit log as csv/xlsx | The year as a file your boekhouder/tax advisor/auditor imports directly — **✅ done (v0.12.0, 342 tests green)** | planned |
 | 10 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
 | 11 | Items catalog + discounts + invoice languages: `item` CRUD, `invoice create --items/--discount-*/--language`, fractional quantities, per-line + total discounts with per-rate VAT allocation, VAT breakdown per rate on PDF/UBL, company logo on the PDF | Invoice from a reusable catalog with discounts, in Dutch or English, with the company logo — **✅ done (v0.13.0, 433 tests green)** | planned |
+| 12 | Inbound e-invoicing + delivery + cash management: attachments in-DB (`attach`), encrypted/rotated backups, aging/statement/sales reports, `import invoice` (EN 16931/Peppol UBL → payables), `invoice email` (SMTP), SEPA direct debit (`mandate` + pain.008) | The 2027 e-invoice mandate both ways: receive UBL invoices, email the PDF, collect by incasso — **✅ done (v0.14.0, 495 tests green)** | planned |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 
