@@ -1079,26 +1079,27 @@ Stated plainly, so nothing is hidden:
 - **It was free:** the ≈ €338 is an imputed opportunity cost, not money paid.
   Out-of-pocket spend remains **$5.49** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
-  conventional code review of a 17.3 KLOC codebase would take; treat them as
+  conventional code review of a 21.0 KLOC codebase would take; treat them as
   the owner's direction-and-check time, not a substitute for professional
   review.
 
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **17,268 non-blank, non-comment lines of JavaScript**
-across 85 files (10,694 in `src/`, 6,574 in `test/`), i.e. **17.27 KLOC**.
+model (Boehm, 1981): **20,956 non-blank, non-comment lines of JavaScript**
+across 99 files (12,554 in `src/`, 8,402 in `test/`), i.e. **20.96 KLOC**
+(measured with `scc` v3.7.0).
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 47.8 PM | 10.9 months | ~4 developers | ≈ €430K |
-| Semi-detached | 72.9 PM | 11.2 months | ~7 developers | ≈ €656K |
-| Embedded | 109.9 PM | 11.2 months | ~10 developers | ≈ €989K |
+| Organic | 58.6 PM | 11.7 months | ~5 developers | ≈ €527K |
+| Semi-detached | 90.6 PM | 12.1 months | ~8 developers | ≈ €815K |
+| Embedded | 138.6 PM | 12.1 months | ~11 developers | ≈ €1,248K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 48–110
-person-months (≈ €430K–€989K)**; the AI-assisted build consumed **$5.49 in API
+**Comparison:** a conventional team building this would estimate **≈ 59–139
+person-months (≈ €527K–€1,248K)**; the AI-assisted build consumed **$5.49 in API
 costs plus ≈ €338 of owner review-and-direction time (contributed, unpaid —
 see above)** over five evenings and a Saturday — still a tiny fraction of the
 conventional estimate.
