@@ -450,6 +450,46 @@ test('account list: human mode renders without crashing (table import regression
   assert.match(out, /1100/);
 });
 
+test('update: fetches from origin/main via --repo (fixture only, never the live repo)', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-upd-cli-'));
+  const origin = path.join(dir, 'origin.git');
+  const sh = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).replace(/\s+$/, '');
+  sh(dir, ['init', '--bare', 'origin.git']);
+  sh(dir, ['--git-dir=origin.git', 'symbolic-ref', 'HEAD', 'refs/heads/main']);
+  const work1 = path.join(dir, 'work1');
+  sh(dir, ['clone', origin, 'work1']);
+  sh(work1, ['config', 'user.email', 't@t']);
+  sh(work1, ['config', 'user.name', 'T']);
+  writeFileSync(path.join(work1, 'package.json'), '{"name":"bukio-cli","version":"1.0.0"}\n');
+  writeFileSync(path.join(work1, 'README.md'), 'v1\n');
+  sh(work1, ['add', '.']);
+  sh(work1, ['commit', '-m', 'v1']);
+  sh(work1, ['push', '-u', 'origin', 'main']);
+  const work2 = path.join(dir, 'work2');
+  sh(dir, ['clone', origin, 'work2']);
+  sh(work2, ['config', 'user.email', 't@t']);
+  sh(work2, ['config', 'user.name', 'T']);
+  writeFileSync(path.join(work2, 'README.md'), 'v2\n');
+  sh(work2, ['add', '.']);
+  sh(work2, ['commit', '-m', 'v2']);
+  sh(work2, ['push', 'origin', 'main']);
+
+  const dbPath = tmpDb(); // no company db exists -> update still works (audit skipped)
+  const dry = run(dbPath, ['update', '--repo', work1, '--trust-remote', '--dry-run', '--json']);
+  assert.equal(dry.out.data.incoming_count, 1);
+  assert.equal(dry.out.data.warning, null);
+  assert.equal(dry.out.data.up_to_date, false);
+
+  // without --yes the overwrite is refused
+  const refused = run(dbPath, ['update', '--repo', work1, '--trust-remote', '--json'], { expectFail: true });
+  assert.equal(refused.out.error.code, 'UPDATE_CONFIRM_REQUIRED');
+
+  const done = run(dbPath, ['update', '--repo', work1, '--trust-remote', '--yes', '--json']);
+  assert.equal(done.out.data.updated, true);
+  assert.equal(done.out.data.commits_applied, 1);
+  assert.equal(readFileSync(path.join(work1, 'README.md'), 'utf8'), 'v2\n');
+});
+
 test('vat file + settle with a custom af-te-dragen account (--account 2515)', () => {
   const dbPath = tmpDb();
   run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);

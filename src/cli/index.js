@@ -30,6 +30,7 @@ import { make as assetsCmd } from './assets.js';
 import { make as paymentsCmd } from './payments.js';
 import { make as itemCmd } from './item.js';
 import { make as attachCmd } from './attach.js';
+import { make as updateCmd } from './update.js';
 import { actorError } from '../core/actor.js';
 
 export async function runCli(argv) {
@@ -65,6 +66,7 @@ export async function runCli(argv) {
   paymentsCmd(program);
   itemCmd(program);
   attachCmd(program);
+  updateCmd(program);
 
   // Named-actor enforcement: every action must identify as '<role>:<name>'
   // (agent:bartholomeus, human:erik) so the audit trail always names who acted.

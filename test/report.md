@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 20:35:25 UTC — **✅ 539 passing · 0 failing (539 tests)**
+**Latest run:** 2026-08-08 20:52:30 UTC — **✅ 550 passing · 0 failing (550 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -150,7 +150,7 @@
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
-25 passing · 0 failing
+26 passing · 0 failing
 
     - ✅ init --dry-run: shows plan, creates nothing
     - ✅ init: creates company + 30-account chart with VAT on
@@ -172,6 +172,7 @@
     - ✅ vat enable/book/readout/mark-filed end-to-end
     - ✅ vat: module off blocks book, enable works on existing company
     - ✅ account list: human mode renders without crashing (table import regression)
+    - ✅ update: fetches from origin/main via --repo (fixture only, never the live repo)
     - ✅ vat file + settle with a custom af-te-dragen account (--account 2515)
     - ✅ vat file + vat settle end-to-end: filing moves the position, the payment cancels it with the rounding difference in the P&L
     - ✅ entry post --dry-run: rejects non-draft entries instead of a green plan
@@ -633,6 +634,21 @@
     - ✅ trial balance: startkapitaal + expense, per-account totals
     - ✅ trial balance: year filter
     - ✅ trial balance: drafts are excluded, reversals net out
+
+### update.test.js — 
+
+10 passing · 0 failing
+
+    - ✅ update plan: a non-clone directory is refused
+    - ✅ update plan: a non-official remote is refused
+    - ✅ update plan: shows the incoming commit and current version without warning
+    - ✅ update plan: local modifications are reported as overwrite warnings
+    - ✅ update: refuses to run without --yes
+    - ✅ update: --yes resets the working tree to origin/main
+    - ✅ update: --yes overwrites a local customization (tracked modification)
+    - ✅ update: --yes drops local commits (warned in the plan)
+    - ✅ update: reinstalls dependencies when package.json changed
+    - ✅ update: records an audit row when a company db exists
 
 ### vat-settle.test.js — 
 
