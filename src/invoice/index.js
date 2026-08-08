@@ -362,6 +362,62 @@ export function listInvoices(db, { status = null, type = null } = {}) {
 }
 
 /**
+ * Per-contact statement (opgave): finalized sales invoices + their payments +
+ * payables, merged by date with a running balance. Positive balance = the
+ * contact owes us; negative = we owe the contact. Read-only.
+ */
+export function contactStatement(db, { contactId, asOf = null }) {
+  const contact = getContact(db, contactId);
+  if (!contact) throw invoiceError('CONTACT_NOT_FOUND', `contact ${contactId} does not exist`);
+  const asOfDate = asOf ?? new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(asOfDate)) throw invoiceError('INVALID_DATE', `as-of '${asOfDate}' must be YYYY-MM-DD`);
+  {
+    const d = new Date(`${asOfDate}T00:00:00Z`);
+    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== asOfDate) {
+      throw invoiceError('INVALID_DATE', `as-of '${asOfDate}' is not a valid calendar date`);
+    }
+  }
+
+  const rows = [];
+  const invoices = listInvoices(db).filter((i) =>
+    i.contact_id === contactId && i.invoice_type === 'sales'
+    && i.status !== 'draft' && i.status !== 'void'
+    && i.date <= asOfDate);
+  for (const i of invoices) {
+    rows.push({
+      date: i.date, kind: 'invoice', ref: i.invoice_number ?? `#${i.id}`,
+      description: i.description ?? `Factuur ${i.invoice_number}`,
+      debit_cents: i.gross_cents, credit_cents: 0, balance_cents: 0,
+    });
+    for (const p of i.payments) {
+      rows.push({
+        date: p.date, kind: 'payment', ref: i.invoice_number,
+        description: `Betaling ${i.invoice_number}`,
+        debit_cents: 0, credit_cents: p.amount_cents, balance_cents: 0,
+      });
+    }
+  }
+  const payables = db.prepare(
+    'SELECT id, invoice_ref, date, amount_cents FROM payables WHERE contact_id = ? AND date <= ? ORDER BY date, id',
+  ).all(contactId, asOfDate);
+  for (const p of payables) {
+    rows.push({
+      date: p.date, kind: 'payable', ref: p.invoice_ref,
+      description: `Inkoopfactuur ${p.invoice_ref}`,
+      debit_cents: 0, credit_cents: p.amount_cents, balance_cents: 0,
+    });
+  }
+
+  rows.sort((a, b) => a.date.localeCompare(b.date) || a.kind.localeCompare(b.kind));
+  let balance = 0;
+  for (const r of rows) {
+    balance += r.debit_cents - r.credit_cents;
+    r.balance_cents = balance;
+  }
+  return { contact: { id: contact.id, name: contact.name }, as_of: asOfDate, rows, balance_cents: balance };
+}
+
+/**
  * Reminder candidates: sales invoices that are overdue or due within
  * `withinDays` days. Read-only. Returns reminders sorted most-overdue first.
  * The `--draft-emails` enrichment happens in the CLI (needs company data).

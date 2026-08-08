@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 13:33:40 UTC — **✅ 457 passing · 0 failing (457 tests)**
+**Latest run:** 2026-08-08 13:42:11 UTC — **✅ 465 passing · 0 failing (465 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -530,6 +530,19 @@
     - ✅ previewDue: read-only plan matches runDue
     - ✅ listTemplates: status filter
     - ✅ generated entries are immutable + trial balance stays balanced
+
+### reports-v014.test.js — 
+
+8 passing · 0 failing
+
+    - ✅ aging debtors: buckets, totals, paid excluded, contacts sorted by total
+    - ✅ aging creditors: buckets + in_batch shown separately
+    - ✅ aging validation: bad as-of and kind rejected
+    - ✅ contact statement: running balance ends at outstanding; supplier side negative
+    - ✅ sales by contact: net/vat/gross from the totals engine; credit notes excluded
+    - ✅ sales by item: catalog items group by item_id, ad-hoc lines by description
+    - ✅ cli: report aging + sales + contact statement e2e with csv export
+    - ✅ mcp: report_aging and report_sales expose the same shapes
 
 ### reports.test.js — balans, P&L, journal
 

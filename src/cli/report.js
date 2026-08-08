@@ -12,6 +12,8 @@ import { trialBalance } from '../report/trial-balance.js';
 import { balans } from '../report/balans.js';
 import { pnl } from '../report/pnl.js';
 import { journal } from '../report/journal.js';
+import { aging } from '../report/aging.js';
+import { sales } from '../report/sales.js';
 import { toCsv, writeXlsx } from '../report/export.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 
@@ -23,7 +25,7 @@ function currentYear() {
 }
 
 /** Shared emit: json | csv | xlsx | human. */
-async function emitReport(ctx, opts, data, { csvColumns, csvRows, sheets, render }) {
+export async function emitReport(ctx, opts, data, { csvColumns, csvRows, sheets, render }) {
   const format = opts.format || (ctx.json ? 'json' : 'human');
   if (format === 'json') {
     console.log(JSON.stringify({ ok: true, data }, null, 2));
@@ -305,6 +307,148 @@ export function make(program) {
                 { key: 'account_name', label: 'account' }, { key: 'amount', label: 'amount' },
                 { key: 'description', label: 'description' },
               ]);
+            },
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  report
+    .command('aging')
+    .description('open items per contact, bucketed by days past due (30/60/90+)')
+    .option('--as-of <yyyy-mm-dd>', 'aging date (default: today)')
+    .option('--kind <kind>', 'debtors | creditors | both (default: both)')
+    .option('--format <format>', 'json|csv|xlsx|human')
+    .option('--out <path>', 'output file (csv/xlsx)')
+    .action(async (opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const data = aging(db, { asOf: opts.asOf || null, kind: opts.kind || 'both' });
+          const flat = (d) => {
+            const rows = [];
+            for (const side of ['debtors', 'creditors']) {
+              if (!d[side]) continue;
+              for (const c of d[side].contacts) {
+                rows.push({
+                  side,
+                  contact_id: c.contact_id,
+                  name: c.name ?? '',
+                  current: formatAmount(c.buckets.current),
+                  d30: formatAmount(c.buckets.d30),
+                  d60: formatAmount(c.buckets.d60),
+                  d90: formatAmount(c.buckets.d90),
+                  d90plus: formatAmount(c.buckets.d90plus),
+                  in_batch: formatAmount(c.in_batch_cents),
+                  total: formatAmount(c.total_cents),
+                });
+              }
+            }
+            return rows;
+          };
+          const csvColumns = [
+            { key: 'side', label: 'side' }, { key: 'contact_id', label: 'contact_id' },
+            { key: 'name', label: 'name' }, { key: 'current', label: 'current' },
+            { key: 'd30', label: '30d' }, { key: 'd60', label: '60d' },
+            { key: 'd90', label: '90d' }, { key: 'd90plus', label: '90d+' },
+            { key: 'in_batch', label: 'in_batch' }, { key: 'total', label: 'total' },
+          ];
+          await emitReport(ctx, opts, data, {
+            csvColumns,
+            csvRows: flat,
+            sheets: (d) => [{ name: 'Aging', columns: csvColumns.map((c) => ({ header: c.label, key: c.key })), rows: flat(d) }],
+            render: (d) => {
+              for (const side of ['debtors', 'creditors']) {
+                if (!d[side]) continue;
+                console.log(`--- ${side} (as of ${d.as_of}) ---`);
+                if (!d[side].contacts.length) {
+                  console.log('(none)');
+                  continue;
+                }
+                table(d[side].contacts.map((c) => ({
+                  contact: `${c.contact_id} ${c.name ?? ''}`.trim(),
+                  current: formatAmount(c.buckets.current),
+                  d30: formatAmount(c.buckets.d30),
+                  d60: formatAmount(c.buckets.d60),
+                  d90: formatAmount(c.buckets.d90),
+                  d90plus: formatAmount(c.buckets.d90plus),
+                  in_batch: formatAmount(c.in_batch_cents),
+                  total: formatAmount(c.total_cents),
+                })), [
+                  { key: 'contact', label: 'Contact' },
+                  { key: 'current', label: 'Current' },
+                  { key: 'd30', label: '30d' },
+                  { key: 'd60', label: '60d' },
+                  { key: 'd90', label: '90d' },
+                  { key: 'd90plus', label: '90d+' },
+                  { key: 'in_batch', label: 'In batch' },
+                  { key: 'total', label: 'Total' },
+                ]);
+                console.log(`total ${side}: ${formatAmount(d[side].totals.total_cents)}`);
+              }
+            },
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  report
+    .command('sales')
+    .description('sales revenue for a year, by contact or by item')
+    .option('--year <yyyy>', 'fiscal year (default: current)')
+    .option('--by <dim>', 'contact | item (default: contact)')
+    .option('--format <format>', 'json|csv|xlsx|human')
+    .option('--out <path>', 'output file (csv/xlsx)')
+    .action(async (opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const year = opts.year || currentYear();
+          const by = opts.by || 'contact';
+          const data = sales(db, { year, by });
+          const fmt = (g) => (by === 'contact'
+            ? {
+              key: g.contact_id, name: g.name ?? '', invoice_count: g.invoice_count,
+              net: formatAmount(g.net_cents), vat: formatAmount(g.vat_cents), gross: formatAmount(g.gross_cents),
+            }
+            : { key: g.key, name: g.name, line_count: g.line_count, net: formatAmount(g.net_cents) });
+          const csvColumns = by === 'contact'
+            ? [
+              { key: 'key', label: 'contact_id' }, { key: 'name', label: 'name' },
+              { key: 'invoice_count', label: 'invoices' }, { key: 'net', label: 'net' },
+              { key: 'vat', label: 'vat' }, { key: 'gross', label: 'gross' },
+            ]
+            : [
+              { key: 'key', label: 'key' }, { key: 'name', label: 'name' },
+              { key: 'line_count', label: 'lines' }, { key: 'net', label: 'net' },
+            ];
+          const rows = (d) => d.groups.map(fmt);
+          await emitReport(ctx, opts, data, {
+            csvColumns,
+            csvRows: rows,
+            sheets: (d) => [{ name: 'Sales', columns: csvColumns.map((c) => ({ header: c.label, key: c.key })), rows: rows(d) }],
+            render: (d) => {
+              console.log(`--- sales ${d.year} by ${d.by} ---`);
+              if (!d.groups.length) {
+                console.log('(no sales)');
+                return;
+              }
+              table(rows(d), csvColumns.map((c) => ({ key: c.key, label: c.label })));
+              if (by === 'contact') {
+                console.log(`totals: ${d.totals.invoice_count} invoices, net ${formatAmount(d.totals.net_cents)}, vat ${formatAmount(d.totals.vat_cents)}, gross ${formatAmount(d.totals.gross_cents)}`);
+              } else {
+                console.log(`totals: ${d.totals.line_count} lines, net ${formatAmount(d.totals.net_cents)}`);
+              }
             },
           });
         } finally {

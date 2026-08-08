@@ -46,6 +46,9 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio report balans [--as-of YYYY-MM-DD]` | Balance sheet; `data.balanced` must be true. |
 | `bukio report pnl [--year YYYY]` | P&L: revenue, costs, result. |
 | `bukio report journal [--year YYYY]` | Journal export (one row per posting). |
+| `bukio report aging [--as-of D] [--kind debtors\|creditors\|both]` | Open items per contact, bucketed by days past due (current/30/60/90+); creditors show `in_batch` separately. |
+| `bukio report sales [--year YYYY] [--by contact\|item]` | Sales revenue for a year: per contact (net/vat/gross via the totals engine) or per item (net after per-line discounts; invoice-level discounts not allocated per line). |
+| `bukio contact statement --id N [--as-of D]` | Opgave: invoices + payments + payables with a running balance (positive = contact owes you). |
 | `bukio report <cmd> --format csv\|xlsx [--out PATH]` | Export any report; xlsx requires `--out`. |
 | `bukio bank import --file F --iban IBAN [--dry-run]` | Import CAMT.053 XML or bank CSV (idempotent by hash). |
 | `bukio bank match auto [--dry-run]` / `suggest` / `link --tx --entry` / `post --tx --account` | Reconcile: auto-match to entries, or post new entries from unmatched transactions. |

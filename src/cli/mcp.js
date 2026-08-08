@@ -38,6 +38,8 @@ import { isValidActor } from '../core/actor.js';
 import { parseAmount } from '../core/money.js';
 import { createItem, listItems, updateItem } from '../items/index.js';
 import { addAttachment, listAttachments, removeAttachment } from '../core/attachments.js';
+import { aging } from '../report/aging.js';
+import { sales } from '../report/sales.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -471,6 +473,23 @@ tool({
     const r = removeAttachment(db, { id: args.id, actor: args.actor ?? ctx.actor });
     return { action: 'attachment.remove', mode: 'execute', attachment_id: r.id, kind: r.kind, ref_id: r.ref_id, file_name: r.file_name };
   },
+});
+tool({
+  name: 'report_aging',
+  description: 'open items per contact bucketed by days past due (kind: debtors | creditors | both)',
+  schema: {
+    type: 'object', properties: { as_of: { type: 'string' }, kind: { type: 'string' } },
+  },
+  handler: (db, args) => aging(db, { asOf: args?.as_of ?? null, kind: args?.kind ?? 'both' }),
+});
+tool({
+  name: 'report_sales',
+  description: 'sales revenue for a year, by contact (net/vat/gross) or by item (net)',
+  schema: {
+    type: 'object', properties: { year: { type: 'string' }, by: { type: 'string' } },
+    required: ['year'],
+  },
+  handler: (db, args) => sales(db, { year: args.year, by: args?.by ?? 'contact' }),
 });
 tool({
   name: 'invoice_finalize', mutating: true,

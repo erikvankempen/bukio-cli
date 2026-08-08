@@ -9,12 +9,13 @@ import { writeFileSync } from 'node:fs';
 import { formatAmount, parseAmount } from '../core/money.js';
 import {
   createContact, updateContact, createInvoice, creditInvoice, finalizeInvoice, getInvoice,
-  formatQty, invoiceReminders, listContacts, listInvoices, markPaid,
+  formatQty, invoiceReminders, listContacts, listInvoices, markPaid, contactStatement,
 } from '../invoice/index.js';
 import { invoiceToPdf } from '../invoice/pdf.js';
 import { invoiceToUbl } from '../invoice/ubl.js';
 import { sendPeppolInvoice } from '../invoice/peppol.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { emitReport } from './report.js';
 
 function fmtLine(l) {
   return {
@@ -152,6 +153,61 @@ export function make(program) {
               { key: 'id', label: '#' }, { key: 'name', label: 'name' },
               { key: 'city', label: 'city' }, { key: 'vat_id', label: 'btw-id' },
             ]);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  contact
+    .command('statement')
+    .description('opgave: invoices + payments + payables with a running balance')
+    .requiredOption('--id <id>', 'contact id')
+    .option('--as-of <yyyy-mm-dd>', 'statement date (default: today)')
+    .option('--format <format>', 'json|csv|xlsx|human')
+    .option('--out <path>', 'output file (csv/xlsx)')
+    .action(async (opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const data = contactStatement(db, { contactId: Number(opts.id), asOf: opts.asOf || null });
+          const fmtRows = (d) => d.rows.map((r) => ({
+            date: r.date, kind: r.kind, ref: r.ref, description: r.description,
+            debit: formatAmount(r.debit_cents), credit: formatAmount(r.credit_cents),
+            balance: formatAmount(r.balance_cents),
+          }));
+          const csvColumns = [
+            { key: 'date', label: 'date' }, { key: 'kind', label: 'kind' },
+            { key: 'ref', label: 'ref' }, { key: 'description', label: 'description' },
+            { key: 'debit', label: 'debit' }, { key: 'credit', label: 'credit' },
+            { key: 'balance', label: 'balance' },
+          ];
+          await emitReport(ctx, opts, data, {
+            csvColumns,
+            csvRows: fmtRows,
+            sheets: (d) => [{
+              name: 'Statement',
+              columns: csvColumns.map((c) => ({ header: c.label, key: c.key })),
+              rows: fmtRows(d),
+            }],
+            render: (d) => {
+              console.log(`statement ${d.contact.name} (as of ${d.as_of})`);
+              if (!d.rows.length) {
+                console.log('(no transactions)');
+                return;
+              }
+              table(fmtRows(d), [
+                { key: 'date', label: 'date' }, { key: 'kind', label: 'kind' },
+                { key: 'ref', label: 'ref' }, { key: 'description', label: 'description' },
+                { key: 'debit', label: 'debit' }, { key: 'credit', label: 'credit' },
+                { key: 'balance', label: 'balance' },
+              ]);
+              console.log(`balance: ${formatAmount(d.balance_cents)}`);
+            },
           });
         } finally {
           db.close();
