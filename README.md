@@ -1033,7 +1033,7 @@ is the measured token consumption and its cost at **official DeepSeek API list
 prices** (`deepseek-v4-flash`, per 1M tokens): **$0.14** input (cache miss),
 **$0.0028** input (cache hit), **$0.28** output. Reasoning tokens are billed
 at the output rate. Data is captured by the `bukio-token-track` tool from the
-agent's session telemetry (snapshot 2026-08-08, 14:37).
+agent's session telemetry (snapshot 2026-08-08, 18:12).
 
 **Proven stack:** bukio-cli is developed and operated end-to-end with
 **Hermes Agent** (Nous Research) running **DeepSeek V4 Flash** via OpenCode
@@ -1045,13 +1045,13 @@ checks) run on the same stack against this same codebase.
 
 | Token type | Tokens | Est. cost |
 |---|---|---|
-| Input (cache miss) | 10.98M | $1.54 |
-| Cached input (cache hit) | 717.96M | $2.01 |
-| Output | 2.71M | $0.76 |
-| Reasoning (at output rate) | 1.27M | $0.36 |
-| **Total** | **732.92M** | **$4.66** |
+| Input (cache miss) | 12.51M | $1.75 |
+| Cached input (cache hit) | 874.01M | $2.45 |
+| Output | 3.19M | $0.89 |
+| Reasoning (at output rate) | 1.41M | $0.40 |
+| **Total** | **891.12M** | **$5.49** |
 
-**$4.66 total** at DeepSeek list prices for the entire project (3,190 API
+**$5.49 total** at DeepSeek list prices for the entire project (3,867 API
 calls across all development sessions).
 
 ### Owner time (contributed, unpaid)
@@ -1077,7 +1077,7 @@ Stated plainly, so nothing is hidden:
   wide margin. It is included high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
 - **It was free:** the ≈ €338 is an imputed opportunity cost, not money paid.
-  Out-of-pocket spend remains **$4.66** in API costs.
+  Out-of-pocket spend remains **$5.49** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
   conventional code review of a 17.3 KLOC codebase would take; treat them as
   the owner's direction-and-check time, not a substitute for professional
@@ -1098,7 +1098,7 @@ across 85 files (10,694 in `src/`, 6,574 in `test/`), i.e. **17.27 KLOC**.
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
 **Comparison:** a conventional team building this would estimate **≈ 48–110
-person-months (≈ €430K–€989K)**; the AI-assisted build consumed **$4.66 in API
+person-months (≈ €430K–€989K)**; the AI-assisted build consumed **$5.49 in API
 costs plus ≈ €338 of owner review-and-direction time (contributed, unpaid —
 see above)** over five evenings and a Saturday — still a tiny fraction of the
 conventional estimate.
