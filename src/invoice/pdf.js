@@ -143,7 +143,7 @@ export function invoiceHtml(db, invoice) {
     ${totals.discount_cents > 0 ? `<tr><td>${L('discount')}</td><td></td><td class="num">−${formatAmount(totals.discount_cents)}</td></tr>` : ''}
     ${vatRows}
     ${totals.vat_cents > 0 ? `<tr><td>${L('vatTotal')}</td><td></td><td class="num">${formatAmount(totals.vat_cents)}</td></tr>` : ''}
-    <tr class="grand"><td>${L('total')} (${L('inclVat')})</td><td></td><td class="num">${formatAmount(invoice.gross_cents)}</td></tr>
+    <tr class="grand"><td>${L('total')}${totals.vat_cents > 0 ? ` (${L('inclVat')})` : ''}</td><td></td><td class="num">${formatAmount(invoice.gross_cents)}</td></tr>
   </table>
   <div class="footer">
     <p>${footerPay}</p>

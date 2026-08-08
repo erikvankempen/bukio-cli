@@ -145,7 +145,7 @@ export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
   parts.push(`    <StartDate>${year}-01-01</StartDate>`);
   parts.push(`    <EndDate>${year}-12-31</EndDate>`);
   parts.push('    <SoftwareName>bukio-cli</SoftwareName>');
-  parts.push(`    <SoftwareVersion>${esc('0.12.0')}</SoftwareVersion>`);
+  parts.push(`    <SoftwareVersion>${esc('0.13.0')}</SoftwareVersion>`);
   parts.push('  </XafHeader>');
 
   parts.push('  <Rekeningen>');

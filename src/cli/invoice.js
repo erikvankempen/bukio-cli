@@ -184,6 +184,9 @@ export function make(program) {
       try {
         const db = ensureDb(ctx);
         try {
+          if (opts.discountPct !== undefined && opts.discountAmount !== undefined) {
+            throw Object.assign(new Error('pass either --discount-pct or --discount-amount, not both'), { code: 'INVALID_DISCOUNT' });
+          }
           const discountType = opts.discountPct !== undefined ? 'pct'
             : opts.discountAmount !== undefined ? 'amount' : null;
           const discountValue = discountType === 'pct'

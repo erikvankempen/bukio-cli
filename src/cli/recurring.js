@@ -102,7 +102,7 @@ export function make(program) {
             const t = d.template;
             console.log(`template #${t.id} "${t.name}" [${t.kind}] — next run ${t.next_run_date} (${t.frequency})`);
             if (t.kind === 'invoice') {
-              console.log(`  contact #${t.contact_id}: ${t.invoice_lines?.map((l) => `${l.quantity}x ${l.description}`).join(' + ')}`);
+              console.log(`  contact #${t.contact_id}: ${(t.invoice_items ?? t.invoice_lines)?.map((l) => (typeof l === 'string' ? l : `${l.quantity / 1000}x ${l.description}`)).join(' + ')}`);
             }
           });
         } finally {

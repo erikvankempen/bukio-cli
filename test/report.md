@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 11:50:42 UTC — **✅ 426 passing · 0 failing (426 tests)**
+**Latest run:** 2026-08-08 11:56:25 UTC — **✅ 428 passing · 0 failing (428 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -349,7 +349,7 @@
 
 ### invoice-features.test.js — 
 
-31 passing · 0 failing
+33 passing · 0 failing
 
     - ✅ fractional quantities parse to milli-units
     - ✅ line discounts parse (pct and amount)
@@ -371,8 +371,10 @@
     - ✅ booking with discounts: omzet uses discounted nets, VAT per rate
     - ✅ finalize with discounts books a balanced entry
     - ✅ invoice language: nl default, en allowed, invalid rejected
+    - ✅ CLI: --discount-pct and --discount-amount together are rejected
     - ✅ credit note inherits language, total discount and line discounts
     - ✅ UBL: formatted quantity, unit code, language, discounted tax bases
+    - ✅ UBL: line-only discounts still emit AllowanceTotalAmount; @V maps to E, @0 to Z
     - ✅ UBL: hour unit maps to HUR
     - ✅ PDF: Dutch labels, unit column, VAT breakdown, discount row
     - ✅ PDF: English labels + reverse-charge wording

@@ -11,7 +11,6 @@
 // Full Peppol validation (Schematron) is out of scope — verify via a
 // validation service before production use.
 import { computeInvoiceTotals, formatQty } from './index.js';
-import { unitLabel } from './i18n.js';
 
 function esc(s) {
   return String(s ?? '')
@@ -93,9 +92,23 @@ export function invoiceToUbl(db, invoice) {
       </cac:AllowanceCharge>` : '';
   };
 
+  // EN 16931 BT-108: AllowanceTotalAmount must cover ALL allowances (line +
+  // document level) whenever any exist
+  const lineAllowanceTotal = invoice.lines.reduce((s, l) => {
+    const disc = l.discount_type === 'pct'
+      ? Math.round(l.amount_cents * l.discount_value / 10000)
+      : l.discount_type === 'amount' ? Math.min(l.discount_value, l.amount_cents) : 0;
+    return s + disc;
+  }, 0);
+  const allowanceTotal = lineAllowanceTotal + discount_cents;
+
   const linesXml = invoice.lines.map((l, i) => {
+    // EN 16931 category: AE reverse charge, S standard, Z zero-rated (@0),
+    // E exempt (@V vrijgesteld / @M margin / no code)
     const category = (l.vat_code === 'R' || l.vat_code === 'RE') ? 'AE'
-      : (l.vat_code ? 'S' : (l.vat_rate_bp === 0 && l.vat_code ? 'Z' : 'E'));
+      : l.vat_code === '0' ? 'Z'
+        : (l.vat_code === 'V' || l.vat_code === 'M') ? 'E'
+          : (l.vat_code ? 'S' : 'E');
     const percent = (l.vat_code === 'R' || l.vat_code === 'RE') ? '21.00' : (l.vat_rate_bp / 100).toFixed(2);
     const unitCode = UNIT_CODE_MAP[l.unit] ?? 'C62';
     return `
@@ -123,9 +136,9 @@ export function invoiceToUbl(db, invoice) {
     : '';
 
   const lineExtensionTotal = invoice.lines.reduce((s, l) => s + l.amount_cents, 0);
-  const allowanceTotal = discount_cents > 0
+  const allowanceTotalXml = allowanceTotal > 0
     ? `
-    <cbc:AllowanceTotalAmount currencyID="${currency}">${moneyAmount(discount_cents)}</cbc:AllowanceTotalAmount>`
+    <cbc:AllowanceTotalAmount currencyID="${currency}">${moneyAmount(allowanceTotal)}</cbc:AllowanceTotalAmount>`
     : '';
 
   const xml = `<?xml version="1.0" encoding="UTF-8"?>
@@ -161,7 +174,7 @@ export function invoiceToUbl(db, invoice) {
     <cbc:TaxAmount currencyID="${currency}">${moneyAmount(vat_cents)}</cbc:TaxAmount>${taxSubtotals}
   </cac:TaxTotal>
   <cac:LegalMonetaryTotal>
-    <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(lineExtensionTotal)}</cbc:LineExtensionAmount>${allowanceTotal}
+    <cbc:LineExtensionAmount currencyID="${currency}">${moneyAmount(lineExtensionTotal)}</cbc:LineExtensionAmount>${allowanceTotalXml}
     <cbc:TaxExclusiveAmount currencyID="${currency}">${moneyAmount(net_cents)}</cbc:TaxExclusiveAmount>
     <cbc:TaxInclusiveAmount currencyID="${currency}">${moneyAmount(gross_cents)}</cbc:TaxInclusiveAmount>
     <cbc:PayableAmount currencyID="${currency}">${moneyAmount(gross_cents)}</cbc:PayableAmount>

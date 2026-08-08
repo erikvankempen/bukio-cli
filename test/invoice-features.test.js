@@ -359,6 +359,18 @@ test('invoice language: nl default, en allowed, invalid rejected', () => {
   );
 });
 
+test('CLI: --discount-pct and --discount-amount together are rejected', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'bukio-disc-'));
+  const dbPath = path.join(dir, 'test.db');
+  runCli(['init', '--name', 'Demo BV', '--kvk', '12345678', '--vat', 'on'], dbPath);
+  runCli(['contact', 'add', '--name', 'ACME B.V.', '--address', 'Straat 1', '--city', 'Amsterdam'], dbPath);
+  assertCliError(
+    ['invoice', 'create', '--contact', '1', '--lines', '1x Ding @ 10.00', '--date', '2026-08-10',
+      '--discount-pct', '5', '--discount-amount', '5.00'],
+    dbPath, /INVALID_DISCOUNT/,
+  );
+});
+
 test('credit note inherits language, total discount and line discounts', () => {
   const c = addContact();
   const inv = createInvoice(db, {
@@ -390,12 +402,38 @@ test('UBL: formatted quantity, unit code, language, discounted tax bases', () =>
   assert.match(xml, /<cbc:LanguageID>en<\/cbc:LanguageID>/);
   // line allowance for the 10% line discount: 15.00
   assert.match(xml, /<cac:AllowanceCharge>[\s\S]*?<cbc:ChargeIndicator>false<\/cbc:ChargeIndicator>[\s\S]*?<cbc:Amount currencyID="EUR">15.00<\/cbc:Amount>/);
-  // total allowance: 10% of 135.00 net = 13.50
-  assert.match(xml, /<cbc:AllowanceTotalAmount currencyID="EUR">13.50<\/cbc:AllowanceTotalAmount>/);
+  // AllowanceTotalAmount covers ALL allowances (EN 16931 BT-108): line 15.00 + total 13.50
+  assert.match(xml, /<cbc:AllowanceTotalAmount currencyID="EUR">28.50<\/cbc:AllowanceTotalAmount>/);
   // TaxExclusiveAmount = discounted net 121.50
   assert.match(xml, /<cbc:TaxExclusiveAmount currencyID="EUR">121.50<\/cbc:TaxExclusiveAmount>/);
   // taxable base in the TaxSubtotal is the discounted base
   assert.match(xml, /<cbc:TaxableAmount currencyID="EUR">121.50<\/cbc:TaxableAmount>/);
+});
+
+test('UBL: line-only discounts still emit AllowanceTotalAmount; @V maps to E, @0 to Z', () => {
+  const c = addContact();
+  // line discount 10% (15.00) but NO total discount
+  const inv = createInvoice(db, {
+    contactId: c.id, lines: ['1.5x Consultancy @ 100.00 @21 @-10%'], date: '2026-08-10',
+    actor: 'agent:test',
+  });
+  finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+  const xml = invoiceToUbl(db, getInvoice(db, inv.id));
+  assert.match(xml, /<cbc:AllowanceTotalAmount currencyID="EUR">15.00<\/cbc:AllowanceTotalAmount>/);
+  assert.match(xml, /<cbc:TaxExclusiveAmount currencyID="EUR">135.00<\/cbc:TaxExclusiveAmount>/);
+
+  // category mapping: @0 zero-rated -> Z, @V vrijgesteld -> E, @21 -> S
+  const c2 = addContact('NL999999999B01');
+  const inv2 = createInvoice(db, {
+    contactId: c2.id,
+    lines: ['1x Nul @ 10.00 @0', '1x Vrij @ 10.00 @V', '1x Normaal @ 10.00 @21'],
+    date: '2026-08-10', actor: 'agent:test',
+  });
+  finalizeInvoice(db, { id: inv2.id, actor: 'agent:test' });
+  const xml2 = invoiceToUbl(db, getInvoice(db, inv2.id));
+  assert.match(xml2, /<cbc:ID>Z<\/cbc:ID>/);
+  assert.match(xml2, /<cbc:ID>E<\/cbc:ID>/);
+  assert.match(xml2, /<cbc:ID>S<\/cbc:ID>/);
 });
 
 test('UBL: hour unit maps to HUR', () => {
