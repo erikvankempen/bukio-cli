@@ -40,6 +40,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, existsSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1828,6 +1829,26 @@ test('account add/deactivate/reactivate/import are audited (they mutated silentl
   cli(dbPath, ['account', 'deactivate', '--code', '8888', '--dry-run']);
   const audit2 = cli(dbPath, ['audit']);
   assert.equal(audit2.out.data.entries.filter((e) => e.action === 'account.deactivate').length, 1, 'dry-run must not write an audit row');
+});
+
+test('every emitted error code in src/ is documented in AGENTS.md §7', () => {
+  const agents = readFileSync(path.join(process.cwd(), 'AGENTS.md'), 'utf8');
+  const codes = new Set();
+  const walk = (dir) => {
+    for (const f of readdirSync(dir)) {
+      const p = path.join(dir, f);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (f.endsWith('.js')) {
+        const src = readFileSync(p, 'utf8');
+        for (const m of src.matchAll(/(?:Error|throw Object\.assign\(new Error)\(\s*'([A-Z][A-Z0-9_]{2,40})'|code:\s*'([A-Z][A-Z0-9_]{2,40})'|e\.code = '([A-Z][A-Z0-9_]{2,40})'/g)) {
+          codes.add(m[1] ?? m[2] ?? m[3]);
+        }
+      }
+    }
+  };
+  walk(path.join(process.cwd(), 'src'));
+  const missing = [...codes].filter((c) => !agents.includes(c)).sort();
+  assert.deepEqual(missing, [], `error codes emitted by src/ but missing from AGENTS.md: ${missing.join(', ')}`);
 });
 
 test('MCP on a missing database errors NO_DATABASE instead of silently creating an empty company', () => {

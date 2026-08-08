@@ -598,6 +598,34 @@ tar -czf ~/exports/bukio-documenten-2026.tar.gz -C ~/.bukio invoices/
 | `SQLITE_CONSTRAINT_TRIGGER` | You violated an invariant (immutable posted entry, append-only audit) | You bypassed the engine or the operation is illegal — never "fix" this with raw SQL |
 | `EXPORT_EMPTY_YEAR` | No posted entries in the year | Book something first, or pick a different year — drafts are never exported |
 | `INVALID_DATE` / `INVALID_YEAR` / `INVALID_PERIOD` / `INVALID_WINDOW` / `INVALID_LIMIT` / `INVALID_DUE_DAYS` | A date, year, period, day-window, row-limit or due-days argument is malformed (e.g. `2026-13`, `2026-02-30`, `--limit abc`, `--due-days abc`) | Use the format the flag help shows — these are rejected before anything is written, so nothing is half-booked. `--due-days 0` means due on the invoice date (kept as 0, never silently defaulted) |
+| `ACTOR_REQUIRED` / `INVALID_ACTOR` | `--actor` missing or not `'<role>:<name>'` (bare `human`/`agent` rejected) | Always pass `--actor '<role>:<name>'` or `BUKIO_ACTOR` |
+| `INVALID_DESCRIPTION` / `INVALID_POSTINGS` / `INVALID_AMOUNT_CENTS` | Description empty, posting spec malformed, or a posting amount is 0 | Fix the argument — every entry needs a description, ≥2 non-zero postings |
+| `INVALID_LEGAL_FORM` / `INVALID_VAT_CHOICE` / `INVALID_FISCAL_YEAR_END` | `init` got a bad legal form, `--vat` other than `on`/`off`, or an impossible `--fiscal-year-end` (e.g. `99-99`, `02-30`) | Use the values the flag help shows (calendar dates only) |
+| `INVALID_IBAN` / `INVALID_NAME` / `INVALID_TYPE` / `NOTHING_TO_UPDATE` | Bad company/contact field on `init`/`company update`/`contact add` (IBAN mod-97 validated) | Fix the value; pass at least one change to `company update` |
+| `COMPANY_REQUIRED` / `COMPANY_INCOMPLETE` / `NOT_INITIALISED` | Company missing or incomplete (e.g. no valid company IBAN for SEPA) | Run `init`, then `company update` to complete the profile |
+| `INVALID_CURRENCY` / `INVALID_RATE` / `INVALID_FX_AMOUNT` / `INVALID_FX_CURRENCY` / `FX_RATE_NOT_FOUND` | FX rate or foreign-currency posting is malformed, or no rate exists | `fx set` a rate, pass `--rate`, or allow the ECB fetch |
+| `ECB_FETCH_FAILED` / `ECB_RATE_NOT_AVAILABLE` | ECB unreachable, or the currency/date has no reference rate | Retry later or `fx set` a rate manually |
+| `INVALID_FREQUENCY` / `INVALID_RUNS` / `INVALID_RANGE` / `INVALID_REVERSE` | Recurring template arguments malformed (frequency, run count, date range, reverse flag) | Fix the template arguments |
+| `INVALID_SCHEMA` / `INVALID_COST` / `INVALID_LIFE` / `INVALID_RESIDUAL` / `ASSET_NOT_FOUND` | Assets arguments malformed (scheme, cost, life months, residual value) or asset id unknown | Fix the arguments |
+| `VAT_MODULE_OFF` / `VAT_CODE_NOT_FOUND` / `INVALID_VAT_AMOUNT` / `VAT_MARGIN_NOT_SUPPORTED` / `KOR_ACTIVE` | VAT module off / unknown `@CODE` / bad VAT amount / margin on an unsupported line / KOR blocks `vat book` | `vat enable` first; use the codes `vat enable` creates; `@M` is unsupported for some paths |
+| `NOT_FINALIZED` / `CONTACT_NOT_FOUND` / `INVOICE_REF_REQUIRED` / `PDF_UNAVAILABLE` | Invoice not finalized, unknown contact, missing invoice reference, PDF engine unavailable | Finalize first; fix the contact; `PDF_UNAVAILABLE` means headless Chromium isn't installed |
+| `PEPPOL_NOT_CONFIGURED` / `PEPPOL_SEND_FAILED` | No Peppol endpoint, or the provider rejected/unreachable | Set `BUKIO_PEPPOL_ENDPOINT`/`BUKIO_PEPPOL_TOKEN`; check the provider response |
+| `INVALID_CAMT` / `INVALID_CSV_HEADER` / `EMPTY_STATEMENT` / `ALREADY_MATCHED` | Bank file unparsable, bad header, empty statement, or a matched transaction re-linked | Use a real CAMT.053/CSV export; unmatch first |
+| `INVALID_XAF` / `EMPTY_CSV` / `IMPORT_VALIDATION_FAILED` / `FILE_NOT_FOUND` | Import file unreadable/empty/structurally invalid, or validation failed with per-line details | The error lists every offending line — fix and re-run |
+| `INCOMPLETE_YEAR` / `ALREADY_CLOSED` / `OUT_REQUIRED` | Year-end close blocked: drafts exist, or the year is already closed, or `--out` is required | Clear drafts / pick another year / pass `--out` |
+| `INVALID_FORMAT` / `INVALID_STATUS` / `INVALID_VALUE` / `INVALID_SOURCE` / `INVALID_KIND` | Report format, status filter, value, source or kind argument malformed | Use the values the flag help shows |
+| `BATCH_VALIDATION_FAILED` / `BATCH_NOT_FOUND` / `BATCH_ALREADY_EXPORTED` / `EMPTY_BATCH` | SEPA batch invalid (per-line details), unknown, already exported once, or empty | The error lists every bad line; fix and re-create |
+| `PAYABLE_NOT_FOUND` / `PAYABLE_NOT_ELIGIBLE` / `ALREADY_PAID` / `MSGID_TOO_LONG` / `INVALID_METHOD` | Payable unknown/not transferable/already paid, MsgId > 35 chars, or bad payment method | Use `payments payables list`; payables are single-use |
+| `INVALID_BACKUP` / `RESTORE_EXISTS` / `SAME_FILE` | Backup file invalid, restoring over an existing company (needs `--force`), or backup = restore path | Use a real backup file; pass `--force` deliberately |
+| `MCP_READONLY` | `BUKIO_MCP_READONLY=1` blocked a mutation | Plan-only in that mode; unset the env to execute |
+| `ACCOUNT_EXISTS` / `ACCOUNT_TYPE` / `INVALID_CODE` / `INVALID_NORMAL_BALANCE` / `INVALID_RGS_CODE` | Account code taken, bad type, or malformed code/balance/rgs on `account add`/`import` | Fix the account arguments (RGS like `WKPR.70`) |
+| `ALREADY_ACTIVE` / `ALREADY_INACTIVE` / `ALREADY_COMPLETED` / `ALREADY_DISPOSED` / `SCHEME_NAME_TAKEN` / `SCHEME_NOT_FOUND` | Assets state conflicts (activate/pause/dispose/completed) or scheme name taken/unknown | Check `assets list` / `assets schemes list` first |
+| `INVALID_COMBINATION` / `INVALID_DEPRECIATION` / `INVALID_LINE` / `INVALID_MODEL` / `INVALID_RESIDUAL` | Assets/jaarrekening argument combos malformed (depreciation method, line spec, micro/klein model) | Use the values the flag help shows |
+| `ALREADY_FINALIZED` / `CREDIT_NOT_PAYABLE` / `NOT_PAYABLE` / `NOT_SALES_INVOICE` / `NO_LINES` / `OVERPAYMENT` / `ENTRY_NOT_FOUND` / `CUSTOMER_INCOMPLETE` / `CUSTOMER_VAT_REQUIRED` / `SUPPLIER_INCOMPLETE` | Invoice lifecycle guard: already finalized, credit of a non-sales invoice, pay on a non-payable invoice, missing lines, overpayment, unknown entry, or missing customer/supplier fields (12-vereisten) | Complete the customer/supplier profile (`contact add` with address), then finalize |
+| `FX_DIFFERENCE_TOO_LARGE` | FX-difference leg exceeds the tolerance at booking | Re-check the rate — or book the difference explicitly |
+| `ICP_VAT_ID_MISSING` / `NO_COMPANY` | ICP readout needs customer btw-ids; company row missing | Add btw-ids to EU customers; run `init` first |
+
+> Every code above is emitted by at least one command — the docs are kept in sync by `test/hardening.test.js` (all codes in `src/` must appear in this table).
 
 ---
 

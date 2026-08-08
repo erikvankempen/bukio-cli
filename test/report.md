@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 07:19:41 UTC — **✅ 394 passing · 0 failing (394 tests)**
+**Latest run:** 2026-08-08 07:42:01 UTC — **✅ 395 passing · 0 failing (395 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -218,7 +218,7 @@
 
 ### hardening.test.js — 
 
-83 passing · 0 failing
+84 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -302,6 +302,7 @@
     - ✅ MCP entry_reverse / invoice_credit / invoice_pay dry-runs validate like execute
     - ✅ init validates iban, vat choice and fiscal-year-end (garbage was stored silently)
     - ✅ account add/deactivate/reactivate/import are audited (they mutated silently before)
+    - ✅ every emitted error code in src/ is documented in AGENTS.md §7
     - ✅ MCP on a missing database errors NO_DATABASE instead of silently creating an empty company
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
