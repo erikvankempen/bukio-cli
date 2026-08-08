@@ -318,9 +318,11 @@ bukio vat book --date 2026-06-01 --desc "Factuur 2026-001" \
 # purchase 60.50 incl 21%: kosten 50 + te vorderen btw 10.50
 bukio vat book --date 2026-06-05 --desc "Kantoorartikelen" \
   --postings "4300:50.00@21,1100:-60.50" --post
-# reverse charge: net 100, VAT due 21 (auto), claim 21 back on 1500
+# reverse charge: net 100, VAT self-assessed (auto @R feeds 4a/5b; no VAT leg
+# is booked — verschuldigd + aftrekbaar net to zero, the supplier never
+# charged VAT, so the bank leg stays at the net amount)
 bukio vat book --date 2026-06-06 --desc "Inkoop verlegd" \
-  --postings "4300:100.00@R,1100:-100.00,1500:-21.00" --post
+  --postings "4300:100.00@R,1100:-100.00" --post
 ```
 
 ### 6.8 Extend the chart

@@ -32,6 +32,9 @@ function fmtEntry(entry) {
       vat_code: p.vat_code ?? null,
       vat_amount_cents: p.vat_amount_cents,
       vat_amount: p.vat_amount_cents == null ? null : formatAmount(p.vat_amount_cents),
+      fx_currency: p.fx_currency ?? null,
+      fx_amount_cents: p.fx_amount_cents ?? null,
+      fx_amount: p.fx_amount_cents == null ? null : formatAmount(p.fx_amount_cents),
     })),
   };
 }

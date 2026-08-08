@@ -11,7 +11,7 @@ import { seedDefaultChart, getAccountByCode } from '../src/core/accounts.js';
 import { createEntry, postEntry } from '../src/core/entries.js';
 import {
   bookVatEntry, enableVatModule, expandVatPostings, isVatEnabled, listVatCodes,
-  markFiled, obReadout, parsePeriod, parseVatPostingSpecs,
+  markFiled, obReadout, parsePeriod, parseVatPostingSpecs, vatNetPosition,
 } from '../src/vat/index.js';
 
 let db;
@@ -161,16 +161,27 @@ test('obReadout: period isolation and drafts excluded', () => {
 
 test('obReadout: reverse charge fields 3a/4a (nets out via 5b)', () => {
   enableVat();
-  bookVatEntry(db, {
+  // Reverse charge books NO auto VAT leg (self-assessed verschuldigd +
+  // aftrekbaar net to zero); the tagged posting feeds the readout. The bank
+  // leg stays at the net amount — the supplier never charged VAT.
+  const { entry } = bookVatEntry(db, {
     date: '2026-06-01', description: 'Inkoop verlegd',
-    // 100 net, VAT due 21 (auto @R), paid 100, claim 21 back on 1500
-    postings: parseVatPostingSpecs(['4300:100.00@R,1100:-100.00,1500:-21.00']), post: true,
+    postings: parseVatPostingSpecs(['4300:100.00@R,1100:-100.00']), post: true,
   });
+  const postings = db.prepare(`
+    SELECT a.code, p.amount_cents FROM postings p
+    JOIN journal_entries e ON e.id = p.entry_id AND e.state = 'posted'
+    JOIN accounts a ON a.id = p.account_id WHERE e.id = ?
+  `).all(entry.id);
+  assert.deepEqual(postings.map((p) => `${p.code}:${p.amount_cents}`).sort(), ['1100:-10000', '4300:10000']);
   const r = obReadout(db, { period: '2026-Q2' });
   assert.equal(r.fields['3a'], 10000); // binnenlandse verlegde inkoop -> 3a
-  assert.equal(r.fields['4a'], 2100); // 21% of 100
+  assert.equal(r.fields['4a'], 2100); // 21% of 100, derived from the tagged posting
   assert.equal(r.fields['5b'], 2100); // claimed back — nets out
   assert.equal(r.fields['5d'], 0);
+  // GL position stays zero — vatFile finds nothing to file for pure reverse
+  const position = vatNetPosition(db);
+  assert.equal(Object.is(position, -0) ? 0 : position, 0);
 });
 
 test('obReadout: guards — module off, invalid period', () => {

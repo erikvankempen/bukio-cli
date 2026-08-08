@@ -192,6 +192,12 @@ export function invoiceToUbl(db, invoice) {
   <cbc:DocumentCurrencyCode>${currency}</cbc:DocumentCurrencyCode>
   <cbc:LanguageID>${language === 'en' ? 'en' : 'nl-NL'}</cbc:LanguageID>
   ${invoice.notes ? `<cbc:Note>${esc(invoice.notes)}</cbc:Note>` : ''}
+  ${isCredit && invoice.reference ? `
+  <cac:BillingReference>
+    <cac:InvoiceDocumentReference>
+      <cbc:ID>${esc(invoice.reference)}</cbc:ID>
+    </cac:InvoiceDocumentReference>
+  </cac:BillingReference>` : ''}
   <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.btw_id)}</cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
     <cac:Party>

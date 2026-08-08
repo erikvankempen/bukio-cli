@@ -740,19 +740,15 @@ tool({
   },
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);
-    if (modeOf(args) === 'dry-run') {
-      // validate like the real path (createContact rejects a missing name)
-      if (!args.name || !String(args.name).trim()) {
-        throw new McpError('INVALID_NAME', 'contact needs a name');
-      }
-      return { action: 'contact.create', name: args.name, mode: 'dry-run' };
-    }
+    // same validation in both paths — createContact rejects a missing name
+    // AND an invalid IBAN (dry-run included), so a dry-run plan can't lie
     const c = createContact(db, {
       name: args.name, address: args.address, postalCode: args.postal_code, city: args.city,
       country: args.country ?? 'NL', email: args.email, vatId: args.vat_id, kvk: args.kvk,
       iban: args.iban, actor: args.actor ?? ctx.actor,
+      dryRun: modeOf(args) === 'dry-run',
     });
-    return { action: 'contact.create', id: c.id, name: c.name, mode: 'execute' };
+    return { action: 'contact.create', id: c.id ?? null, name: c.name, mode: modeOf(args) === 'dry-run' ? 'dry-run' : 'execute' };
   },
 });
 

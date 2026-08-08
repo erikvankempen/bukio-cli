@@ -395,8 +395,16 @@ export function runDue(db, { asOf = null, templateId = null, actor = 'human', dr
           } else {
             const next = sim.runs && sim.runs_done + 1 >= sim.runs && sim.final_postings
               ? sim.final_postings : sim.postings;
+            // mirror the execute shape: reverse_previous templates produce a
+            // reversal of the previous period's entry FIRST, then the new one
+            if (sim.reverse_previous && sim.last_entry_id) {
+              tplResult.runs.push({
+                kind: 'reversal',
+                entry: { id: sim.last_entry_id, date: sim.next_run_date, description: `recurring template "${sim.name}" — previous period reversal` },
+              });
+            }
             tplResult.runs.push({
-              kind: sim.reverse_previous && sim.last_entry_id ? 'reversal' : null,
+              kind: 'entry',
               entry: { date: sim.next_run_date, postings: next, description: `${sim.name} ${sim.next_run_date}` },
             });
           }

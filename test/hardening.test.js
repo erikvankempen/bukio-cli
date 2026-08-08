@@ -358,13 +358,17 @@ test('vat book with @V (vrijgesteld) and @0 (nultarief) books without a zero leg
   assert.equal(readout.fields['1c'], 20000);
 });
 
-test('vat book with @R (verlegd) still books the 21% due leg', () => {
+test('vat book with @R (verlegd) books NO VAT leg — self-assessed, nets to zero', () => {
+  // verlegd (R/RE): the VAT is self-assessed (verschuldigd + aftrekbaar net to
+  // zero), so no 2500/1500 leg is auto-booked — the bank leg stays at the net
+  // amount and the OB readout derives 4a/5b from the tagged posting.
   const { entry } = bookVatEntry(db, {
     date: '2026-01-10', description: 'verlegd',
-    postings: parseVatPostingSpecs('8000:-100.00@R,1100:121.00'),
+    postings: parseVatPostingSpecs('8000:-100.00@R,1100:100.00'),
     actor: 'agent:test', post: true,
   });
-  assert.equal(entry.postings.find((p) => p.account_code === '2500').amount_cents, -2100);
+  assert.equal(entry.postings.length, 2); // omzet + bank, no VAT leg
+  assert.ok(!entry.postings.some((p) => p.account_code === '2500' || p.account_code === '1500'));
 });
 
 // --- F10: FX+VAT rounding drift ---------------------------------------------

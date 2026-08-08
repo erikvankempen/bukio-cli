@@ -120,13 +120,20 @@ export function expandVatPostings(db, specs) {
         vatCode: vat.code, vatAmountCents: vatAmount,
         fxCurrency: spec.fxCurrency ?? null, fxAmountCents: spec.fxAmountCents ?? null,
       });
-      // The VAT leg carries the SAME sign as the tagged posting:
-      // sales -> credit on 2500 (te betalen), purchases -> debit on 1500 (te vorderen).
+      // Reverse charge (R/RE): NO auto VAT leg. The VAT is self-assessed
+      // (verschuldigd) and claimed back (aftrekbaar) — the two legs net to
+      // zero on the books, so a single leg with the posting's sign would
+      // create a phantom 2500 debit (or credit) that corrupts the te-betalen
+      // balance and makes vatFile under/over-file. The tagged posting still
+      // carries vatAmountCents so the OB readout derives 4a/4b + 5b. This
+      // matches the invoice path, which books verlegd lines with no VAT leg.
+      // Private use (@P) and standard codes DO get a leg: you owe (credit
+      // 2500) or claim back (debit 1500) real VAT.
       // A 0-rate code (@V vrijgesteld, @0 nultarief) computes a 0 leg — it is
       // skipped entirely (createEntry rejects zero-amount postings); the
       // tagged posting still carries vatAmountCents 0 so the readout reports
       // the base (1c/2a).
-      if (vatAmount !== 0) vatLegs.push({ code: vatAccountCode, amountCents: vatAmount });
+      if (vatAmount !== 0 && vat.type !== 'reverse') vatLegs.push({ code: vatAccountCode, amountCents: vatAmount });
     } else {
       expanded.push({
         code: spec.code, amountCents: spec.amountCents, vatCode: null, vatAmountCents: null,

@@ -162,6 +162,20 @@ test('reverse_previous: completed accrual chain nets zero after final run', () =
   assert.equal(net, -10000); // last accrual still outstanding (reversed next run — but template completed)
 });
 
+test('reverse_previous: dry-run preview mirrors the execute shape (reversal + new entry)', () => {
+  tpl({ name: 'Nog te betalen kosten', reversePrevious: true, postings: ['4310:250.00,2400:-250.00'] });
+  runDue(db, { asOf: '2026-01-31' });
+  const preview = runDue(db, { asOf: '2026-02-28', dryRun: true });
+  const t = preview.templates[0];
+  assert.equal(t.runs.length, 2);
+  assert.equal(t.runs[0].kind, 'reversal');
+  assert.equal(t.runs[0].entry.id, 1); // the previous accrual's entry id
+  assert.equal(t.runs[1].kind, 'entry');
+  assert.equal(t.runs[1].entry.date, '2026-02-01');
+  // nothing written by the dry-run
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM journal_entries WHERE source='recurring'").get().c, 1);
+});
+
 test('buildDepreciationTemplate: remainder-adjusted final run, cents-exact total', () => {
   const r = buildDepreciationTemplate(db, {
     name: 'Laptop Dell', costCents: 537000, lifeMonths: 36, startDate: '2026-01-01',

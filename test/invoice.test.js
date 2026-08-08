@@ -277,6 +277,10 @@ test('UBL: credit note uses CreditNote root + type 381 (Peppol BIS 3.0)', () => 
   assert.equal(root['ID'], '2026-0002');
   assert.ok(root['CreditNoteLine'], 'credit notes use cac:CreditNoteLine');
   assert.equal(root['CreditNoteLine']['CreditNoteLineQuantity']['#text'], '2');
+  // EN 16931 BR-3 / BT-25: a credit note must reference the preceding invoice
+  const billingRef = root['BillingReference'];
+  assert.ok(billingRef, 'credit notes must carry cac:BillingReference (BT-25/BR-3)');
+  assert.equal(billingRef['InvoiceDocumentReference']['ID'], '2026-0001');
 });
 
 test('UBL: XML control characters in descriptions are stripped (Peppol-safe)', () => {

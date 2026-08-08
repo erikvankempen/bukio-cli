@@ -110,7 +110,7 @@ export function make(program) {
   attach
     .command('show')
     .description('show attachment metadata, or extract the bytes with --out')
-    .option('--id <id>', 'attachment id')
+    .requiredOption('--id <id>', 'attachment id')
     .option('--out <path>', 'write the file to this path')
     .option('--force', 'overwrite an existing --out file')
     .action(async (opts, command) => {
@@ -154,7 +154,7 @@ export function make(program) {
   attach
     .command('remove')
     .description('remove an attachment')
-    .option('--id <id>', 'attachment id')
+    .requiredOption('--id <id>', 'attachment id')
     .option('--dry-run', 'show the plan without writing')
     .action(async (opts, command) => {
       const ctx = makeCtx(command);

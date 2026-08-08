@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 21:26:16 UTC — **✅ 562 passing · 0 failing (562 tests)**
+**Latest run:** 2026-08-08 21:54:28 UTC — **✅ 563 passing · 0 failing (563 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -307,7 +307,7 @@
     - ✅ payments batch CSV without a header parses positionally
     - ✅ buildDepreciationTemplate rejects a non-positive final run
     - ✅ vat book with @V (vrijgesteld) and @0 (nultarief) books without a zero leg
-    - ✅ vat book with @R (verlegd) still books the 21% due leg
+    - ✅ vat book with @R (verlegd) books NO VAT leg — self-assessed, nets to zero
     - ✅ FX+VAT booking absorbs rounding drift (rate 1.0001, 41.33 USD @21)
     - ✅ FX+VAT: a range of amounts never trips UNBALANCED
     - ✅ CLI: vat book --json reports the vat_code on tagged postings
@@ -571,7 +571,7 @@
 
 ### recurring.test.js — recurring entries engine: schedules, depreciation, accruals
 
-20 passing · 0 failing
+21 passing · 0 failing
 
     - ✅ addPeriod: monthly/quarterly/yearly with day preserved
     - ✅ createTemplate: validates postings, balances, accounts
@@ -586,6 +586,7 @@
     - ✅ runDue: dry-run writes nothing
     - ✅ reverse_previous: accrual pattern — each run reverses the prior entry
     - ✅ reverse_previous: completed accrual chain nets zero after final run
+    - ✅ reverse_previous: dry-run preview mirrors the execute shape (reversal + new entry)
     - ✅ buildDepreciationTemplate: remainder-adjusted final run, cents-exact total
     - ✅ buildDepreciationTemplate: validation
     - ✅ vat-aware template: expansion stored, generation replays it

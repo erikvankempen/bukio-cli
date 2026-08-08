@@ -278,7 +278,7 @@ export function createContact(db, {
   name, address = null, postalCode = null, city = null, country = 'NL',
   email = null, vatId = null, kvk = null, iban = null, actor = 'human', dryRun = false,
 }) {
-  if (!name || typeof name !== 'string') throw invoiceError('INVALID_NAME', 'contact needs a name');
+  if (!name || typeof name !== 'string' || !name.trim()) throw invoiceError('INVALID_NAME', 'contact needs a name');
   if (iban != null && !isValidIban(iban)) throw invoiceError('INVALID_IBAN', `'${iban}' is not a valid IBAN`);
   const cleanIban = iban ? iban.trim().replace(/\s+/g, '') : null;
   if (dryRun) {
