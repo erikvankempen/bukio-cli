@@ -453,6 +453,8 @@ test('UBL: zero-VAT categories (RE/V) still emit TaxSubtotal — EN 16931 1..n',
   });
   finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
   const xml = invoiceToUbl(db, getInvoice(db, inv.id));
+  // EN 16931 BT-5 / BR-18: the document currency code is MANDATORY
+  assert.match(xml, /<cbc:DocumentCurrencyCode>EUR<\/cbc:DocumentCurrencyCode>/);
   // AE subtotal: verlegd base 500.00 with zero VAT
   assert.match(xml, /<cac:TaxSubtotal>[\s\S]*?<cbc:TaxableAmount currencyID="EUR">500\.00<\/cbc:TaxableAmount>[\s\S]*?<cbc:TaxAmount currencyID="EUR">0\.00<\/cbc:TaxAmount>[\s\S]*?<cbc:ID>AE<\/cbc:ID>/);
   // E subtotal: vrijgesteld base 100.00 with zero VAT
