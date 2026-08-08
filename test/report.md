@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 17:50:45 UTC — **✅ 518 passing · 0 failing (518 tests)**
+**Latest run:** 2026-08-08 18:03:40 UTC — **✅ 519 passing · 0 failing (519 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -150,7 +150,7 @@
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
-22 passing · 0 failing
+23 passing · 0 failing
 
     - ✅ init --dry-run: shows plan, creates nothing
     - ✅ init: creates company + 30-account chart with VAT on
@@ -171,6 +171,7 @@
     - ✅ bank match --auto links posted entries (exact)
     - ✅ vat enable/book/readout/mark-filed end-to-end
     - ✅ vat: module off blocks book, enable works on existing company
+    - ✅ account list: human mode renders without crashing (table import regression)
     - ✅ entry post --dry-run: rejects non-draft entries instead of a green plan
     - ✅ entry reverse --dry-run: rejects drafts (NOT_POSTED) and double reversals
     - ✅ vat book --dry-run: validates date and description like the execute path

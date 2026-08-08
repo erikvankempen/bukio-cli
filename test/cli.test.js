@@ -439,6 +439,17 @@ test('vat: module off blocks book, enable works on existing company', () => {
   run(dbPath, ['vat', 'book', '--date', '2026-04-10', '--desc', 'x', '--postings', '1100:121.00,8000:-100.00@21', '--post', '--json']);
 });
 
+test('account list: human mode renders without crashing (table import regression)', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'off', '--json']);
+  // human mode (no --json): the render callback calls table() — a missing
+  // import crashed with 'table is not defined' instead of listing accounts
+  const out = execFileSync(process.execPath, [BIN, '--db', dbPath, 'account', 'list'], {
+    env: { ...process.env, BUKIO_ACTOR: 'agent:test' }, encoding: 'utf8',
+  });
+  assert.match(out, /1100/);
+});
+
 test('entry post --dry-run: rejects non-draft entries instead of a green plan', () => {
   const dbPath = tmpDb();
   run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'off', '--json']);

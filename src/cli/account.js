@@ -10,7 +10,7 @@ import {
   createAccount, deactivateAccount, getAccountByCode, importChartCsv,
   listAccounts, reactivateAccount, readChartCsvFile, validateAccount,
 } from '../core/accounts.js';
-import { makeCtx, output, fail, ensureDb } from './util.js';
+import { makeCtx, output, fail, ensureDb, table } from './util.js';
 import { record } from '../audit/index.js';
 
 function serializeAccount(a) {
