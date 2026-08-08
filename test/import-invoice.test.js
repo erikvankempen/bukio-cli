@@ -347,3 +347,12 @@ test('importUblInvoice: multiple PartyTaxScheme entries — VAT number still ext
   assert.equal(rows[0].source_ref, 'nl123456789b01:F2026-123'); // vat-id key preserved
   assert.equal(rows[0].contact_id, existing.id);
 });
+
+test('importUblInvoice: missing cbc:InvoiceTypeCode (EN 16931 BT-3) is rejected', () => {
+  const xml = ublInvoice().replace(/<cbc:InvoiceTypeCode>380<\/cbc:InvoiceTypeCode>/, '');
+  assert.throws(
+    () => importUblInvoice(db, { xmlText: xml, actor: 'agent:test' }),
+    (err) => err.code === 'INVALID_UBL_INVOICE' && /InvoiceTypeCode is missing/.test(err.message),
+  );
+  assert.equal(payables().length, 0); // nothing registered
+});

@@ -393,6 +393,15 @@ test('MCP: initialize + tools/list + read-only calls work end-to-end', async () 
 
     const unknown = await mcp.call('tools/call', { name: 'nope', arguments: {} });
     assert.equal(unknown.error.code, -32602);
+
+    // year is REQUIRED for pnl and journal — the schema must say so (a
+    // client validating against the schema should catch it, not the server)
+    const pnlTool = tools.result.tools.find((t) => t.name === 'pnl');
+    assert.ok(pnlTool, 'pnl tool exists');
+    assert.deepEqual(pnlTool.inputSchema.required, ['year']);
+    const journalTool = tools.result.tools.find((t) => t.name === 'journal');
+    assert.ok(journalTool, 'journal tool exists');
+    assert.deepEqual(journalTool.inputSchema.required, ['year']);
   } finally {
     await mcp.close();
   }

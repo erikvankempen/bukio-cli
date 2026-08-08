@@ -90,7 +90,12 @@ export function importUblInvoice(db, {
   if (!invoiceRef) errors.push({ line: 0, error: 'INVALID_UBL_INVOICE: cbc:ID (invoice number) is missing' });
 
   const typeCode = pick(inv, ['cbc:InvoiceTypeCode']);
-  if (typeCode && typeCode !== '380') {
+  // EN 16931 BT-3 is mandatory (1..1) — an absent type code is a malformed
+  // document, not an implicit 380
+  if (!typeCode) {
+    throw importError('INVALID_UBL_INVOICE', 'cbc:InvoiceTypeCode is missing (EN 16931 BT-3)');
+  }
+  if (typeCode !== '380') {
     throw importError('UNSUPPORTED_UBL_DOCUMENT', `InvoiceTypeCode '${typeCode}' is not supported (380 = invoice; credit notes 381 are not imported yet)`);
   }
 

@@ -105,7 +105,7 @@ tool({
 });
 tool({
   name: 'pnl', description: 'profit & loss for a year (excludes closing entries)', schema: {
-    type: 'object', properties: { year: { type: 'string' } },
+    type: 'object', properties: { year: { type: 'string' } }, required: ['year'],
   },
   handler: (db, args) => {
     const year = String(args.year ?? '');
@@ -116,7 +116,7 @@ tool({
 });
 tool({
   name: 'journal', description: 'journal export for a year (complete unless a limit is given; truncated: true when rows were cut)', schema: {
-    type: 'object', properties: { year: { type: 'string' }, limit: { type: 'number' } },
+    type: 'object', properties: { year: { type: 'string' }, limit: { type: 'number' } }, required: ['year'],
   },
   handler: (db, args) => {
     const year = String(args.year ?? '');
@@ -679,7 +679,7 @@ tool({
       // amount, overpayment) — the old plan echoed ok for garbage
       return markPaid(db, { id: args.id, date: args.date, amountCents, method: args.method ?? 'bank', dryRun: true });
     }
-    const inv = markPaid(db, { id: args.id, date: args.date, amountCents, method: args.method, actor: args.actor ?? ctx.actor });
+    const inv = markPaid(db, { id: args.id, date: args.date, amountCents, method: args.method ?? 'bank', actor: args.actor ?? ctx.actor });
     return { action: 'invoice.pay', id: args.id, status: inv.status, mode: 'execute' };
   },
 });

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 22:18:54 UTC — **✅ 568 passing · 0 failing (568 tests)**
+**Latest run:** 2026-08-08 22:32:31 UTC — **✅ 569 passing · 0 failing (569 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -386,7 +386,7 @@
 
 ### import-invoice.test.js — inbound UBL (EN 16931/Peppol) invoice import into payables: idempotent, VAT reported not booked
 
-11 passing · 0 failing
+12 passing · 0 failing
 
     - ✅ importUblInvoice: registers a payable, matches contact by vat-id, parses VAT
     - ✅ importUblInvoice: idempotent re-import → duplicate skipped
@@ -399,6 +399,7 @@
     - ✅ cli: import invoice end-to-end → payable in the register, dry-run plan
     - ✅ mcp: invoice_import dry-run parity + execute
     - ✅ importUblInvoice: multiple PartyTaxScheme entries — VAT number still extracted
+    - ✅ importUblInvoice: missing cbc:InvoiceTypeCode (EN 16931 BT-3) is rejected
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 
