@@ -430,8 +430,8 @@ test('UBL: formatted quantity, unit code, language, discounted tax bases', () =>
   // BR-CO-11 (fatal): when AllowanceTotalAmount is present, a document-level
   // cac:AllowanceCharge must exist between PaymentTerms and TaxTotal, and its
   // Amount must equal AllowanceTotalAmount (13.50)
-  const docAllowance = xml.match(/<cac:AllowanceCharge>\s*<cbc:ChargeIndicator>false<\/cbc:ChargeIndicator>\s*<cbc:AllowanceChargeReasonCode>95<\/cbc:AllowanceChargeReasonCode>\s*<cbc:Amount currencyID="EUR">13.50<\/cbc:Amount>\s*<cbc:BaseAmount currencyID="EUR">135.00<\/cbc:BaseAmount>\s*<\/cac:AllowanceCharge>/);
-  assert.ok(docAllowance, 'document-level AllowanceCharge (BR-CO-11) missing for the 13.50 discount');
+  const docAllowance = xml.match(/<cac:AllowanceCharge>\s*<cbc:ChargeIndicator>false<\/cbc:ChargeIndicator>\s*<cbc:AllowanceChargeReasonCode>95<\/cbc:AllowanceChargeReasonCode>\s*<cbc:Amount currencyID="EUR">13.50<\/cbc:Amount>\s*<cbc:BaseAmount currencyID="EUR">135.00<\/cbc:BaseAmount>\s*<cbc:MultiplierFactorNumeric>10<\/cbc:MultiplierFactorNumeric>\s*<\/cac:AllowanceCharge>/);
+  assert.ok(docAllowance, 'document-level AllowanceCharge (BR-CO-11 + R042 percentage) missing for the 13.50 discount');
   // it sits between PaymentTerms and TaxTotal
   const ptIdx = xml.indexOf('<cac:PaymentTerms>');
   const acIdx = xml.indexOf('<cac:AllowanceCharge>');

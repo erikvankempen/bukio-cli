@@ -329,10 +329,11 @@ export function parseBatchCsv(csvText) {
   const lines = String(csvText ?? '').split(/\r?\n/).filter((l) => l.trim() !== '');
   const errors = [];
   if (!lines.length) throw paymentsError('EMPTY_CSV', 'batch CSV is empty');
-  const parseRow = (line) => {
-    const a = line.split(';').length > 1 ? line.split(';') : line.split(',');
-    return a.map((c) => c.trim());
-  };
+  // detect the delimiter ONCE from the first line (like bank/csv.js) — a
+  // per-row heuristic flips to ';' mode when a comma-delimited data field
+  // contains a semicolon, misparsing that row
+  const delimiter = lines[0].split(';').length > lines[0].split(',').length ? ';' : ',';
+  const parseRow = (line) => line.split(delimiter).map((c) => c.trim());
   const header = parseRow(lines[0]).map((h) => h.toLowerCase());
   const hasHeader = header.some((h) => ['contact', 'naam', 'leverancier', 'amount', 'bedrag'].includes(h));
   const idx = hasHeader

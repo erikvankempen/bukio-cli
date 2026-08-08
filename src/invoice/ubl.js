@@ -121,14 +121,26 @@ export function invoiceToUbl(db, invoice) {
   // allowance total (BT-107) covers ONLY document-level discounts — line
   // discounts are already folded into BT-106 (sum of line net amounts), so
   // BT-106 − BT-107 == TaxExclusiveAmount still reconciles exactly.
+  // per-line discount percentage (R040: Amount = BaseAmount × pct / 100).
+  // pct discount: the stored basis points ARE the percentage (1000 bp = 10).
+  // amount discount: derived — rounded to 4 decimals (R040 allows ±0.02 slack)
+  const linePct = (l) => {
+    const disc = lineDiscountCents(l);
+    if (disc <= 0) return null;
+    if (l.discount_type === 'pct') return l.discount_value / 100;
+    if (l.discount_type === 'amount') return (disc / l.amount_cents) * 100;
+    return null;
+  };
   const lineAllowance = (l) => {
     const disc = lineDiscountCents(l);
+    const pct = linePct(l);
     return disc > 0 ? `
       <cac:AllowanceCharge>
         <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
         <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>
         <cbc:Amount currencyID="${currency}">${moneyAmount(disc)}</cbc:Amount>
         <cbc:BaseAmount currencyID="${currency}">${moneyAmount(l.amount_cents)}</cbc:BaseAmount>
+        <cbc:MultiplierFactorNumeric>${pct.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}</cbc:MultiplierFactorNumeric>
       </cac:AllowanceCharge>` : '';
   };
 
@@ -225,6 +237,7 @@ export function invoiceToUbl(db, invoice) {
     <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>
     <cbc:Amount currencyID="${currency}">${moneyAmount(discount_cents)}</cbc:Amount>
     <cbc:BaseAmount currencyID="${currency}">${moneyAmount(net_before_cents)}</cbc:BaseAmount>
+    <cbc:MultiplierFactorNumeric>${(discount_cents / net_before_cents * 100).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}</cbc:MultiplierFactorNumeric>
   </cac:AllowanceCharge>` : ''}
   <cac:TaxTotal>
     <cbc:TaxAmount currencyID="${currency}">${moneyAmount(vat_cents)}</cbc:TaxAmount>${taxSubtotals}

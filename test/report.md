@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 23:36:38 UTC — **✅ 577 passing · 0 failing (577 tests)**
+**Latest run:** 2026-08-08 23:53:25 UTC — **✅ 578 passing · 0 failing (578 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -539,7 +539,7 @@
 
 ### payments.test.js — SEPA payment batches: payables, pain.001 export
 
-21 passing · 0 failing
+22 passing · 0 failing
 
     - ✅ isValidIban: mod-97 check with normalization
     - ✅ payables: add transfer + direct-debit, audit, list filters
@@ -562,6 +562,7 @@
     - ✅ buildPain001: batch date lands in ReqdExctnDt
     - ✅ delete: only drafts; payables released back to unpaid
     - ✅ getPaymentBatch: serializes total + lines
+    - ✅ parseBatchCsv: comma-delimited rows keep the comma delimiter even when a field contains a semicolon
 
 ### recurring-invoice.test.js — subscription invoice templates
 

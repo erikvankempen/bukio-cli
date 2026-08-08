@@ -13,7 +13,7 @@ import { createContact, updateContact, listContacts } from '../src/invoice/index
 import {
   addPayable, listPayables, markPayablePaid,
   createPaymentBatch, createPaymentBatchFromCsv, exportPaymentBatch,
-  deletePaymentBatch, getPaymentBatch, buildPain001,
+  deletePaymentBatch, getPaymentBatch, buildPain001, parseBatchCsv,
 } from '../src/payments/index.js';
 import { listEntries } from '../src/core/entries.js';
 
@@ -284,4 +284,15 @@ test('getPaymentBatch: serializes total + lines', () => {
   assert.equal(fetched.lines.length, 1);
   assert.equal(fetched.lines[0].amount, '121.00');
   assert.equal(listContacts(db).length, 1); // sanity
+});
+
+test('parseBatchCsv: comma-delimited rows keep the comma delimiter even when a field contains a semicolon', () => {
+  // regression: the old per-row delimiter heuristic flipped to ';' mode for
+  // any row containing a semicolon, misparsing comma-delimited CSVs
+  const csv = 'contact,amount,reference\nA&B; Trading,100.00,ref-1\n';
+  const r = parseBatchCsv(csv);
+  assert.equal(r.errors.length, 0, JSON.stringify(r.errors));
+  assert.equal(r.lines.length, 1);
+  assert.equal(r.lines[0].contact, 'A&B; Trading');
+  assert.equal(r.lines[0].amountCents, 10000);
 });
