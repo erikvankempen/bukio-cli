@@ -37,6 +37,7 @@ import { openDb } from '../core/db.js';
 import { isValidActor } from '../core/actor.js';
 import { parseAmount } from '../core/money.js';
 import { createItem, listItems, updateItem } from '../items/index.js';
+import { addAttachment, listAttachments, removeAttachment } from '../core/attachments.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -418,6 +419,57 @@ tool({
     }
     const item = updateItem(db, base);
     return { action: 'item.update', mode: 'execute', item_id: item.id, active: item.active === 1 };
+  },
+});
+
+// --- attachments ------------------------------------------------------------
+
+tool({
+  name: 'attachment_add', mutating: true,
+  description: 'store a source document (pdf/jpg/png/xml/eml/...) against an invoice or entry; mode db (default) = BLOB in the database, file = path in <db>-attachments/',
+  schema: {
+    type: 'object', properties: {
+      kind: { type: 'string' }, ref_id: { type: 'number' }, file_path: { type: 'string' },
+      store: { type: 'string' }, note: { type: 'string' },
+      actor: { type: 'string' }, mode: { type: 'string' },
+    }, required: ['kind', 'ref_id', 'file_path'],
+  },
+  handler: (db, args, ctx) => {
+    guardExecute(ctx, args);
+    const base = {
+      kind: args.kind, refId: args.ref_id, filePath: args.file_path,
+      note: args.note ?? null, store: args.store ?? 'db', actor: args.actor ?? ctx.actor,
+    };
+    if (modeOf(args) === 'dry-run') {
+      // module dryRun validates like execute (kind, ref, file, size, duplicate)
+      return { ...addAttachment(db, { ...base, dryRun: true }), mode: 'dry-run', note: 'plan only — re-run with mode=execute to write' };
+    }
+    const a = addAttachment(db, base);
+    return { action: 'attachment.add', mode: 'execute', attachment_id: a.id, kind: a.kind, ref_id: a.ref_id, file_name: a.file_name, size: a.size, store: a.mode };
+  },
+});
+tool({
+  name: 'attachment_list',
+  description: 'attachments for an invoice or entry (metadata only — never the file bytes)',
+  schema: {
+    type: 'object', properties: { kind: { type: 'string' }, ref_id: { type: 'number' } },
+    required: ['kind', 'ref_id'],
+  },
+  handler: (db, args) => ({
+    attachments: listAttachments(db, { kind: args.kind, refId: args.ref_id }),
+  }),
+});
+tool({
+  name: 'attachment_remove', mutating: true,
+  description: 'remove an attachment (file-mode copies on disk are deleted too)',
+  schema: { type: 'object', properties: { id: { type: 'number' }, actor: { type: 'string' }, mode: { type: 'string' } }, required: ['id'] },
+  handler: (db, args, ctx) => {
+    guardExecute(ctx, args);
+    if (modeOf(args) === 'dry-run') {
+      return { ...removeAttachment(db, { id: args.id, actor: args.actor ?? ctx.actor, dryRun: true }), mode: 'dry-run', note: 'plan only — re-run with mode=execute to write' };
+    }
+    const r = removeAttachment(db, { id: args.id, actor: args.actor ?? ctx.actor });
+    return { action: 'attachment.remove', mode: 'execute', attachment_id: r.id, kind: r.kind, ref_id: r.ref_id, file_name: r.file_name };
   },
 });
 tool({

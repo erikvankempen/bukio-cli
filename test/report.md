@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-08 12:30:57 UTC — **✅ 433 passing · 0 failing (433 tests)**
+**Latest run:** 2026-08-08 13:29:18 UTC — **✅ 448 passing · 0 failing (448 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -80,6 +80,26 @@
     - ✅ register: book values and totals as of a date
     - ✅ register: disposal dates and proceeds surface in the register
     - ✅ trial balance stays balanced through the whole lifecycle
+
+### attachments.test.js — 
+
+15 passing · 0 failing
+
+    - ✅ attach add (db mode): stores BLOB, round-trips byte-identical, infers mime
+    - ✅ attach add: works for entries too
+    - ✅ attach add: validation errors
+    - ✅ attach list: metadata only, no data column payload
+    - ✅ attach remove: deletes row + audits; unknown id errors
+    - ✅ attach add: dry-run writes nothing and audits nothing
+    - ✅ attach add: file mode copies to <db>-attachments/<sha256> and remove deletes it
+    - ✅ attach get: file-mode with missing file on disk → ATTACHMENT_FILE_MISSING
+    - ✅ cli: attach add/list/show --out/remove round-trip with audit
+    - ✅ cli: attach add rejects both refs, and unknown store
+    - ✅ cli: attach dry-run writes nothing
+    - ✅ cli: attach file mode end-to-end
+    - ✅ migration 013 applies on fresh init (attachments table exists)
+    - ✅ attachmentsDir convention: demo.db → demo-attachments/
+    - ✅ file-mode attachments dir is created under the DB dir (regression)
 
 ### audit.test.js — append-only audit log invariants
 
