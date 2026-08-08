@@ -986,6 +986,28 @@ agent's session telemetry (snapshot 2026-08-08).
 **$4.24 total** at DeepSeek list prices for the entire project (2,900 API
 calls across all development sessions).
 
+### Owner time (contributed, unpaid)
+
+Beyond API spend, the project consumed **≈ 10 hours of the owner's own time**:
+five evenings after work (Aug 4–8, 2026, ~1.5–2 h per evening, taken at the
+maximum 2 h). At the average Dutch **junior** software-developer rate of
+**≈ €20/hour** gross-equivalent (Jul 2026: €20.03/h
+[Jooble](https://nl.jooble.org/salary/junior-software-engineer-hbo),
+€3,747/mo [Indeed](https://nl.indeed.com/career/junior-software-developer/salaries),
+€35,146/yr [PayScale](https://www.payscale.com/research/NL/Job=Junior_Software_Engineer/Salary)),
+the owner's time is valued at **≈ €200**.
+
+Stated plainly, so nothing is hidden:
+
+- **Compliance:** all work was done in the owner's free time, outside working
+  hours — no employer time, equipment, or other resources were used.
+- **Deliberately conservative:** the owner is an amateur developer, not a
+  junior professional, so the junior rate likely *overstates* the market value
+  of his hours. It is included high on purpose: every cost of this project is
+  quantified rather than tucked away as unmeasured "effort and work".
+- **It was free:** the ≈ €200 is an imputed opportunity cost, not money paid.
+  Out-of-pocket spend remains **$4.24** in API costs.
+
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
@@ -1002,7 +1024,8 @@ across 84 files (9,809 in `src/`, 5,827 in `test/`), i.e. **15.76 KLOC**.
 
 **Comparison:** a conventional team building this would estimate **≈ 43–99
 person-months (≈ €391K–€887K)**; the AI-assisted build consumed **$4.24 in API
-costs** over five calendar days of sessions — before the owner's review time.
+costs plus ≈ €200 of owner time (contributed, unpaid — see above)** over five
+evenings — before the owner's review time.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.
 
