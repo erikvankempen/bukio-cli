@@ -1570,3 +1570,22 @@ test('creditInvoice dry-run validates like the real run (no plan for nonexistent
   assert.equal(plan.for_invoice, inv.id);
   assert.equal(db.prepare("SELECT COUNT(*) c FROM invoices WHERE invoice_type = 'credit'").get().c, 0, 'dry-run must not write a credit note');
 });
+
+test('entry add --dry-run validates like the real run (garbage date/desc/unbalanced rejected, nothing written)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  // the old branch echoed garbage as ok:true
+  const badDate = cli(dbPath, ['entry', 'add', '--date', 'abc', '--desc', 'x', '--postings', '1100:100.00,3000:-100.00', '--dry-run']);
+  assert.equal(badDate.code, 1);
+  assert.equal(badDate.out.error.code, 'INVALID_DATE');
+  const unbalanced = cli(dbPath, ['entry', 'add', '--date', '2026-01-15', '--desc', 'x', '--postings', '1100:5.00,3000:-4.00', '--dry-run']);
+  assert.equal(unbalanced.code, 1);
+  assert.equal(unbalanced.out.error.code, 'UNBALANCED');
+  // valid dry-run still plans and writes nothing
+  const ok = cli(dbPath, ['entry', 'add', '--date', '2026-01-15', '--desc', 'x', '--postings', '1100:100.00,3000:-100.00', '--dry-run']);
+  assert.equal(ok.code, 0, ok.raw ?? '');
+  assert.equal(ok.out.data.dryRun, true);
+  const check = openDb(dbPath);
+  assert.equal(check.prepare('SELECT COUNT(*) c FROM journal_entries').get().c, 0, 'dry-run must not write');
+  check.close();
+});

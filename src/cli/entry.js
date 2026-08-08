@@ -4,7 +4,7 @@ import { openDb } from '../core/db.js';
 import { formatAmount } from '../core/money.js';
 import {
   createEntry, getEntry, listEntries, parsePostingSpecs, postEntry,
-  resolvePostings, reverseEntry,
+  resolvePostings, reverseEntry, validateDate,
 } from '../core/entries.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 import { resolveRate, toEurPostings } from '../fx/index.js';
@@ -138,6 +138,16 @@ async function addAction(ctx, opts) {
   const postings = parsePostingSpecs(opts.postings);
 
   if (ctx.dryRun) {
+    // same validation as the real run where it needs no DB (createEntry does
+    // the full check incl. account resolution when a DB exists) — the old
+    // branch echoed garbage dates/unbalanced postings as ok:true
+    validateDate(opts.date);
+    if (!opts.desc || !String(opts.desc).trim()) {
+      throw Object.assign(new Error('description is required'), { code: 'INVALID_DESCRIPTION' });
+    }
+    if (postings.length < 2) {
+      throw Object.assign(new Error('an entry needs at least 2 postings'), { code: 'TOO_FEW_POSTINGS' });
+    }
     const db = existsSync(ctx.dbPath) ? openDb(ctx.dbPath) : null;
     let converted = postings;
     let resolved = null;
@@ -157,6 +167,9 @@ async function addAction(ctx, opts) {
     // the displayed sum must match the displayed (EUR) postings — for FX
     // entries the raw specs sum in the foreign currency
     const sum = converted.reduce((s, p) => s + p.amountCents, 0);
+    if (sum !== 0) {
+      throw Object.assign(new Error(`postings do not sum to zero (sum = ${sum} cents)`), { code: 'UNBALANCED' });
+    }
     output(ctx, {
       action: 'create journal entry',
       date: opts.date,

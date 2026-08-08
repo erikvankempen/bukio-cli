@@ -12,7 +12,7 @@ export function entryError(code, message) {
   return e;
 }
 
-function validateDate(date) {
+export function validateDate(date) {
   if (!DATE_RE.test(date)) throw entryError('INVALID_DATE', `date '${date}' must be yyyy-mm-dd`);
   const d = new Date(`${date}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) throw entryError('INVALID_DATE', `date '${date}' is not a valid calendar date`);
