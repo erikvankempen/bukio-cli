@@ -53,7 +53,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio vat book --postings "1100:121.00,8000:-100.00@21" [--post]` | Book VAT-aware entries — `@CODE` computes the VAT leg automatically. |
 | `bukio vat readout --period 2026-Q2 [--mark-filed]` | OB-aangifte fields 1a–5d for manual filing. Never auto-files. |
 | `bukio recurring add --postings "CODE:AMT" --frequency monthly --start DATE [--reverse-previous]` | Create a recurring **entry** template. |
-| `bukio recurring add --kind invoice --contact N --lines "2x DESC @ PRICE @21" --frequency monthly --start DATE [--due-days]` | Create a **subscription invoice** template — `run` generates draft invoices (never auto-finalizes). |
+| `bukio recurring add --kind invoice --contact N --lines "2x DESC @ PRICE @21" --frequency monthly --start DATE [--due-days]` | Create a **subscription invoice** template — `run` generates draft invoices (never auto-finalizes). `--due-days 0` = due on the invoice date. |
 | `bukio recurring run [--as-of DATE] [--template ID] [--dry-run]` | Generate all due entries/invoice drafts (backfills, idempotent). |
 | `bukio recurring preview/list/pause/resume` | Schedule inspection and control. |
 | `bukio depreciation add --cost C --life-months M --start DATE` | Depreciation schedule (remainder-adjusted final run). |
@@ -597,7 +597,7 @@ tar -czf ~/exports/bukio-documenten-2026.tar.gz -C ~/.bukio invoices/
 | `ALREADY_REVERSED` | Reversal exists | Find the contra-entry via `entry list` / `entry show` |
 | `SQLITE_CONSTRAINT_TRIGGER` | You violated an invariant (immutable posted entry, append-only audit) | You bypassed the engine or the operation is illegal — never "fix" this with raw SQL |
 | `EXPORT_EMPTY_YEAR` | No posted entries in the year | Book something first, or pick a different year — drafts are never exported |
-| `INVALID_DATE` / `INVALID_YEAR` / `INVALID_PERIOD` / `INVALID_WINDOW` / `INVALID_LIMIT` | A date, year, period, day-window or row-limit argument is malformed (e.g. `2026-13`, `2026-02-30`, `--limit abc`) | Use the format the flag help shows — these are rejected before anything is written, so nothing is half-booked |
+| `INVALID_DATE` / `INVALID_YEAR` / `INVALID_PERIOD` / `INVALID_WINDOW` / `INVALID_LIMIT` / `INVALID_DUE_DAYS` | A date, year, period, day-window, row-limit or due-days argument is malformed (e.g. `2026-13`, `2026-02-30`, `--limit abc`, `--due-days abc`) | Use the format the flag help shows — these are rejected before anything is written, so nothing is half-booked. `--due-days 0` means due on the invoice date (kept as 0, never silently defaulted) |
 
 ---
 

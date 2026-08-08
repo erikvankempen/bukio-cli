@@ -1445,3 +1445,89 @@ test('year-end close handles a zero-result year (income == expense) without zero
   assert.equal(r2.result_cents, 5000);
   assert.equal(r2.entries.length, 2, 'non-zero result still books closing + appropriation');
 });
+
+// --- F19: recurring template numeric inputs pass through unmasked -----------
+// (pre-release pass 5): `recurring add` still masked --due-days 0 -> 30 and
+// --day 0/abc -> 1 with `Number(x) || default`, and the dry-run simulator
+// previewed due_date null for a 0-day template the real run dates same-day.
+
+test('recurring add --due-days 0 stays 0 (the old Number(x) || 30 masked it)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['contact', 'add', '--name', 'ACME BV']);
+  const zero = cli(dbPath, ['recurring', 'add', '--kind', 'invoice', '--contact', '1',
+    '--lines', '1x Coaching @ 100.00', '--frequency', 'monthly', '--start', '2026-01-15',
+    '--due-days', '0', '--name', 't0']);
+  assert.equal(zero.code, 0, zero.raw ?? '');
+  const check = openDb(dbPath);
+  const row = check.prepare("SELECT due_days FROM recurring_templates WHERE name = 't0'").get();
+  assert.equal(row.due_days, 0, 'due-days 0 must survive, not become 30');
+  check.close();
+});
+
+test('recurring add rejects garbage --due-days (INVALID_DUE_DAYS) instead of silently defaulting to 30', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['contact', 'add', '--name', 'ACME BV']);
+  const due = cli(dbPath, ['recurring', 'add', '--kind', 'invoice', '--contact', '1',
+    '--lines', '1x Coaching @ 100.00', '--frequency', 'monthly', '--start', '2026-01-15',
+    '--due-days', 'abc', '--name', 't2']);
+  assert.equal(due.code, 1);
+  assert.equal(due.out.error.code, 'INVALID_DUE_DAYS');
+});
+
+test('recurring add --day 0 and --day abc are rejected (INVALID_DATE) instead of silently becoming day 1', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  const day0 = cli(dbPath, ['recurring', 'add', '--postings', '4300:100.00,1100:-100.00',
+    '--frequency', 'monthly', '--start', '2026-01-15', '--day', '0', '--name', 't1']);
+  assert.equal(day0.code, 1);
+  assert.equal(day0.out.error.code, 'INVALID_DATE');
+  const abc = cli(dbPath, ['recurring', 'add', '--postings', '4300:100.00,1100:-100.00',
+    '--frequency', 'monthly', '--start', '2026-01-15', '--day', 'abc', '--name', 't3']);
+  assert.equal(abc.code, 1);
+  assert.equal(abc.out.error.code, 'INVALID_DATE');
+});
+
+test('recurring run dry-run previews due_date = invoice date when due_days is 0 (parity with the real run)', () => {
+  setup();
+  const contact = addContact();
+  const tpl = createTemplate(db, {
+    name: 'abonnement', frequency: 'monthly', dayOfPeriod: 15, startDate: '2026-01-15',
+    kind: 'invoice', contactId: contact.id,
+    invoiceLines: ['1x Coaching @ 100.00'], dueDays: 0, actor: 'agent:test',
+  });
+  assert.equal(tpl.due_days, 0);
+  const plan = recurringRunDue(db, { asOf: '2026-01-20', dryRun: true, actor: 'agent:test' });
+  assert.equal(plan.templates.length, 1);
+  assert.equal(plan.templates[0].runs.length, 1);
+  assert.equal(plan.templates[0].runs[0].invoice.due_date, '2026-01-15', 'due_days 0 → due on the invoice date, not null');
+  // the real run books a draft invoice due the same day
+  const real = recurringRunDue(db, { asOf: '2026-01-20', actor: 'agent:test' });
+  assert.equal(real.templates.length, 1);
+  assert.equal(real.templates[0].runs.length, 1);
+  const inv = getInvoice(db, real.templates[0].runs[0].generated[0].invoice.id);
+  assert.equal(inv.due_date, '2026-01-15', 'real run dates a 0-day template on the invoice date');
+});
+
+test('recurring add --dry-run validates like the real run (garbage rejected, nothing written)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  // the old hand-built dry-run plan echoed garbage as ok:true — now it validates
+  const badDay = cli(dbPath, ['recurring', 'add', '--postings', '4300:100.00,1100:-100.00',
+    '--frequency', 'monthly', '--start', '2026-01-15', '--day', 'abc', '--name', 't1', '--dry-run']);
+  assert.equal(badDay.code, 1);
+  assert.equal(badDay.out.error.code, 'INVALID_DATE');
+  const badPostings = cli(dbPath, ['recurring', 'add', '--postings', 'BOGUS',
+    '--frequency', 'monthly', '--start', '2026-01-15', '--name', 't2', '--dry-run']);
+  assert.equal(badPostings.code, 1);
+  assert.equal(badPostings.out.error.code, 'INVALID_POSTING');
+  // a valid dry-run returns the plan and writes nothing
+  const ok = cli(dbPath, ['recurring', 'add', '--postings', '4300:100.00,1100:-100.00',
+    '--frequency', 'monthly', '--start', '2026-01-15', '--name', 't3', '--dry-run']);
+  assert.equal(ok.code, 0, ok.raw ?? '');
+  assert.equal(ok.out.data.dryRun, true);
+  const check = openDb(dbPath);
+  assert.equal(check.prepare('SELECT COUNT(*) c FROM recurring_templates').get().c, 0, 'dry-run must not write');
+  check.close();
+});

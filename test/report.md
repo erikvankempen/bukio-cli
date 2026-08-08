@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-07 21:05:08 UTC — **✅ 374 passing · 0 failing (374 tests)**
+**Latest run:** 2026-08-08 05:05:16 UTC — **✅ 379 passing · 0 failing (379 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -218,7 +218,7 @@
 
 ### hardening.test.js — 
 
-63 passing · 0 failing
+68 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -283,6 +283,11 @@
     - ✅ bank match auto validates --window-days (garbage errors, 0 stays 0)
     - ✅ autoMatch FX tolerance matches the posting tolerance exactly (SQL integer-division drift)
     - ✅ year-end close handles a zero-result year (income == expense) without zero-amount legs
+    - ✅ recurring add --due-days 0 stays 0 (the old Number(x) || 30 masked it)
+    - ✅ recurring add rejects garbage --due-days (INVALID_DUE_DAYS) instead of silently defaulting to 30
+    - ✅ recurring add --day 0 and --day abc are rejected (INVALID_DATE) instead of silently becoming day 1
+    - ✅ recurring run dry-run previews due_date = invoice date when due_days is 0 (parity with the real run)
+    - ✅ recurring add --dry-run validates like the real run (garbage rejected, nothing written)
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 

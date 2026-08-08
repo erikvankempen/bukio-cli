@@ -72,7 +72,7 @@ export function validatePostings(db, postings) {
 export function createTemplate(db, {
   name, description = null, frequency, dayOfPeriod = 1, startDate,
   endDate = null, runs = null, postings, reversePrevious = false, actor = 'human',
-  kind = 'entry', contactId = null, invoiceLines = null, dueDays = 30,
+  kind = 'entry', contactId = null, invoiceLines = null, dueDays = 30, dryRun = false,
 }) {
   if (!name || typeof name !== 'string') throw recurringError('INVALID_NAME', 'template needs a name');
   if (!FREQUENCIES.includes(frequency)) {
@@ -146,6 +146,20 @@ export function createTemplate(db, {
   }
   if (endDate && nextRun > endDate) {
     throw recurringError('INVALID_RANGE', 'the first run date falls after the end date');
+  }
+
+  if (dryRun) {
+    // validate-everything-first, write nothing: same checks as the real path
+    // (all thrown above), returns the plan for the CLI to render.
+    return {
+      action: 'recurring.create', kind, name, description, frequency,
+      day_of_period: dayOfPeriod, start_date: startDate, end_date: endDate, runs,
+      due_days: dueDays, reverse_previous: reversePrevious, contact_id: contactId,
+      vat_aware: vatAware,
+      postings: postingsJson === '[]' ? null : postings.map((p) => (typeof p === 'string' ? p : JSON.stringify(p))).join(', '),
+      lines: invoiceLines ? invoiceLines.join(' + ') : null,
+      next_run_date: nextRun, dryRun: true,
+    };
   }
 
   const info = db.prepare(`
@@ -326,7 +340,7 @@ export function runDue(db, { asOf = null, templateId = null, actor = 'human', dr
               kind: 'invoice',
               invoice: {
                 date: sim.next_run_date,
-                due_date: sim.due_days ? addDays(sim.next_run_date, sim.due_days) : null,
+                due_date: addDays(sim.next_run_date, sim.due_days ?? 0),
                 contact_name: contact?.name ?? null,
                 lines: sim.invoice_lines ?? [],
               },

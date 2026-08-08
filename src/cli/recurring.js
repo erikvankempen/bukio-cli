@@ -57,17 +57,22 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           if (ctx.dryRun) {
-            output(ctx, {
-              action: 'create recurring template',
-              kind: opts.kind, name: opts.name, frequency: opts.frequency, day_of_period: Number(opts.day),
-              start_date: opts.start, end_date: opts.end ?? null, runs: opts.runs ? Number(opts.runs) : null,
-              reverse_previous: Boolean(opts.reversePrevious),
-              contact: opts.contact ? Number(opts.contact) : null,
-              postings: opts.postings ?? null, lines: opts.lines ?? null,
-              dryRun: true,
-            }, (d) => {
+            // same validation as the real path (createTemplate dryRun): the
+            // old hand-built plan echoed garbage inputs as ok:true
+            const plan = createTemplate(db, {
+              name: opts.name, description: opts.desc ?? null, frequency: opts.frequency,
+              dayOfPeriod: Number(opts.day), startDate: opts.start, endDate: opts.end ?? null,
+              runs: opts.runs ? Number(opts.runs) : null,
+              postings: opts.postings ? [opts.postings] : [],
+              reversePrevious: Boolean(opts.reversePrevious),
+              kind: opts.kind, contactId: opts.contact ? Number(opts.contact) : null,
+              invoiceLines: opts.lines ? [opts.lines] : null,
+              dueDays: Number(opts.dueDays),
+              actor: ctx.actor, dryRun: true,
+            });
+            output(ctx, plan, (d) => {
               console.log(`plan: ${d.kind} template "${d.name}" (${d.frequency}, day ${d.day_of_period}) from ${d.start_date}`);
-              if (d.kind === 'invoice') console.log(`  contact #${d.contact}: ${d.lines}`);
+              if (d.kind === 'invoice') console.log(`  contact #${d.contact_id}: ${d.lines}`);
               else console.log(`  postings: ${d.postings}`);
               console.log('(dry run — nothing written)');
             });
@@ -75,13 +80,13 @@ export function make(program) {
           }
           const tpl = createTemplate(db, {
             name: opts.name, description: opts.desc ?? null, frequency: opts.frequency,
-            dayOfPeriod: Number(opts.day) || 1, startDate: opts.start, endDate: opts.end ?? null,
+            dayOfPeriod: Number(opts.day), startDate: opts.start, endDate: opts.end ?? null,
             runs: opts.runs ? Number(opts.runs) : null,
             postings: opts.postings ? [opts.postings] : [],
             reversePrevious: Boolean(opts.reversePrevious),
             kind: opts.kind, contactId: opts.contact ? Number(opts.contact) : null,
             invoiceLines: opts.lines ? [opts.lines] : null,
-            dueDays: Number(opts.dueDays) || 30,
+            dueDays: Number(opts.dueDays),
             actor: ctx.actor,
           });
           output(ctx, { template: fmtTemplate(tpl), dryRun: false }, (d) => {
