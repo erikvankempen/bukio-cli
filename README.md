@@ -971,38 +971,38 @@ is the measured token consumption and its cost at **official DeepSeek API list
 prices** (`deepseek-v4-flash`, per 1M tokens): **$0.14** input (cache miss),
 **$0.0028** input (cache hit), **$0.28** output. Reasoning tokens are billed
 at the output rate. Data is captured by the `bukio-token-track` tool from the
-agent's session telemetry (snapshot 2026-08-07).
+agent's session telemetry (snapshot 2026-08-08).
 
 ### Token usage — totals per token type
 
 | Token type | Tokens | Est. cost |
 |---|---|---|
-| Input (cache miss) | 8.73M | $1.22 |
-| Cached input (cache hit) | 529.19M | $1.48 |
-| Output | 2.10M | $0.59 |
-| Reasoning (at output rate) | 948K | $0.27 |
-| **Total** | **540.96M** | **$3.56** |
+| Input (cache miss) | 10.19M | $1.43 |
+| Cached input (cache hit) | 643.47M | $1.80 |
+| Output | 2.46M | $0.69 |
+| Reasoning (at output rate) | 1.14M | $0.32 |
+| **Total** | **657.26M** | **$4.24** |
 
-**$3.56 total** at DeepSeek list prices for the entire project (2,311 API
+**$4.24 total** at DeepSeek list prices for the entire project (2,900 API
 calls across all development sessions).
 
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **14,790 non-blank, non-comment lines of JavaScript**
-across 84 files (9,452 in `src/`, 5,220 in `test/`), i.e. **14.79 KLOC**.
+model (Boehm, 1981): **15,760 non-blank, non-comment lines of JavaScript**
+across 84 files (9,809 in `src/`, 5,827 in `test/`), i.e. **15.76 KLOC**.
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 40.6 PM | 10.2 months | ~4 developers | ≈ €365K |
-| Semi-detached | 61.3 PM | 10.6 months | ~6 developers | ≈ €552K |
-| Embedded | 91.3 PM | 10.6 months | ~9 developers | ≈ €821K |
+| Organic | 43.4 PM | 10.5 months | ~4 developers | ≈ €391K |
+| Semi-detached | 65.8 PM | 10.8 months | ~6 developers | ≈ €592K |
+| Embedded | 98.5 PM | 10.9 months | ~9 developers | ≈ €886K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 41–91
-person-months (≈ €365K–€821K)**; the AI-assisted build consumed **$3.56 in API
-costs** over four calendar days of sessions — before the owner's review time.
+**Comparison:** a conventional team building this would estimate **≈ 43–99
+person-months (≈ €391K–€887K)**; the AI-assisted build consumed **$4.24 in API
+costs** over five calendar days of sessions — before the owner's review time.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.
 
