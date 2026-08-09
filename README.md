@@ -10,7 +10,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-600%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-603%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -1011,7 +1011,7 @@ is the measured token consumption and its cost at **official list prices**
 **MiMo-V2.5-Pro** **$0.435** input, **$0.003625** cached input, **$0.87**
 output. Reasoning tokens are billed at the output rate. Data is captured by
 the `bukio-token-track` tool from the agent's session telemetry — including
-delegation subagent sessions (snapshot 2026-08-09, 09:38).
+delegation subagent sessions (snapshot 2026-08-09, 10:07).
 
 **Proven stack:** bukio-cli is developed and operated end-to-end with
 **Hermes Agent** (Nous Research) via OpenCode Go. The main development
@@ -1025,12 +1025,12 @@ against this same codebase.
 
 | Model | API calls | Input | Cached input | Output | Reasoning | Est. cost |
 |---|---|---|---|---|---|---|
-| DeepSeek V4 Flash | 5,625 | 16.27M | 1,361.33M | 4.11M | 1.95M | $7.79 |
+| DeepSeek V4 Flash | 5,682 | 16.35M | 1,385.95M | 4.15M | 1.98M | $7.89 |
 | MiMo-V2.5-Pro (review subagents) | 574 | 6.82M | 42.12M | 1.06M | — | $4.05 |
-| **Total** | **6,207** | **23.09M** | **1,403.45M** | **5.18M** | **1.96M** | **$11.83** |
+| **Total** | **6,264** | **23.17M** | **1,428.07M** | **5.22M** | **1.98M** | **$11.93** |
 
-**$11.83 total** at official list prices for the entire project (6,207 API
-calls across all development sessions, ≈ 1.43B tokens). An additional 8 API
+**$11.93 total** at official list prices for the entire project (6,264 API
+calls across all development sessions, ≈ 1.46B tokens). An additional 8 API
 calls (≈ 9K tokens) ran on MiMo-V2.5 at ≈ $0.00.
 
 ### Owner time (contributed, unpaid)
@@ -1056,7 +1056,7 @@ Stated plainly, so nothing is hidden:
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
 - **It was free:** the ≈ €338 is an imputed opportunity cost, not money paid.
-  My out-of-pocket spend remains **$11.83** in API costs.
+  My out-of-pocket spend remains **$11.93** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
   conventional code review of a 23.3 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
@@ -1064,20 +1064,20 @@ Stated plainly, so nothing is hidden:
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **23,343 non-blank, non-comment lines of JavaScript**
-across 105 files (13,424 in `src/`, 9,919 in `test/`), i.e. **23.34 KLOC**
+model (Boehm, 1981): **23,389 non-blank, non-comment lines of JavaScript**
+across 105 files (13,429 in `src/`, 9,960 in `test/`), i.e. **23.39 KLOC**
 (measured with `scc` v3.7.0).
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 65.6 PM | 12.3 months | ~5 developers | ≈ €590K |
-| Semi-detached | 102.2 PM | 12.6 months | ~8 developers | ≈ €920K |
-| Embedded | 157.6 PM | 12.6 months | ~12 developers | ≈ €1,418K |
+| Organic | 65.7 PM | 12.3 months | ~5 developers | ≈ €591K |
+| Semi-detached | 102.5 PM | 12.6 months | ~8 developers | ≈ €923K |
+| Embedded | 158.2 PM | 12.6 months | ~12 developers | ≈ €1,424K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
 **Comparison:** a conventional team building this would estimate **≈ 66–158
-person-months (≈ €590K–€1,418K)**; the AI-assisted build consumed **$11.83 in
+person-months (≈ €591K–€1,424K)**; the AI-assisted build consumed **$11.93 in
 API costs plus ≈ €338 of my review-and-direction time (contributed, unpaid
 — see above)** over five evenings and a Saturday — still a tiny fraction of
 the conventional estimate.
@@ -1102,7 +1102,7 @@ three standard modes); treat the ratios, not the decimals, as the point.
 | 9 | External handover: `export xaf` (Auditfile Financieel 4.0) + audit log as csv/xlsx | The year as a file your boekhouder/tax advisor/auditor imports directly — **✅ done (v0.12.0, 342 tests green)** | planned |
 | 10 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
 | 11 | Items catalog + discounts + invoice languages: `item` CRUD, `invoice create --items/--discount-*/--language`, fractional quantities, per-line + total discounts with per-rate VAT allocation, VAT breakdown per rate on PDF/UBL, company logo on the PDF | Invoice from a reusable catalog with discounts, in Dutch or English, with the company logo — **✅ done (v0.13.0, 433 tests green)** | planned |
-| 12 | Inbound e-invoicing + delivery + cash management: attachments in-DB (`attach`), encrypted/rotated backups, aging/statement/sales reports, `import invoice` (EN 16931/Peppol UBL → payables), `invoice email` (SMTP), SEPA direct debit (`mandate` + pain.008) | The 2027 e-invoice mandate both ways: receive UBL invoices, email the PDF, collect by incasso — **✅ done (v0.14.1, 600 tests green)** | planned |
+| 12 | Inbound e-invoicing + delivery + cash management: attachments in-DB (`attach`), encrypted/rotated backups, aging/statement/sales reports, `import invoice` (EN 16931/Peppol UBL → payables), `invoice email` (SMTP), SEPA direct debit (`mandate` + pain.008) | The 2027 e-invoice mandate both ways: receive UBL invoices, email the PDF, collect by incasso — **✅ done (v0.14.1, 603 tests green)** | planned |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 
