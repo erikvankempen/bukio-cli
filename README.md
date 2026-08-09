@@ -74,7 +74,8 @@ Read the repository README.md and AGENTS.md files, configure `bukio mcp` as a lo
 16. [Common Tasks](#common-tasks)
 17. [EU AI Act Transparency](#eu-ai-act-transparency)
 18. [AI Development Cost & Token Usage](#ai-development-cost--token-usage)
-19. [Roadmap](#roadmap)
+19. [Troubleshooting](#troubleshooting)
+20. [Roadmap](#roadmap)
 
 ---
 
@@ -1083,6 +1084,15 @@ API costs plus ≈ €338 of my review-and-direction time (contributed, unpaid
 the conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.
+
+---
+
+## Troubleshooting
+
+Ran into a question, bug, or anything else you need to know? **Ask your
+agent first** — it has the full agent manual (AGENTS.md) and this README in
+context. If your agent is unable to help, shoot me a message at
+<erik@posthumanresources.nl> and I'll try to answer it when I'm able.
 
 ---
 
