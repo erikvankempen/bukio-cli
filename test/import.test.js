@@ -8,7 +8,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../src/core/db.js';
 import { seedDefaultChart, getAccountByCode } from '../src/core/accounts.js';
-import { listEntries, getEntry, createEntry, postEntry } from '../src/core/entries.js';
+import { listEntries, getEntry, createEntry, postEntry, reverseEntry } from '../src/core/entries.js';
 import {
   importOpeningBalances, importJournalCsv, importXaf, importContacts, parseImportAmount,
 } from '../src/import/index.js';
@@ -90,6 +90,17 @@ test('opening-balances: re-import is rejected', () => {
   );
 });
 
+test('opening-balances: re-import succeeds after reversing the opening entry (correction path)', () => {
+  const res = importOpeningBalances(db, { csvText: '1100,1.00\n3000,-1.00\n', date: '2026-01-01', actor: 'agent:test' });
+  reverseEntry(db, { id: res.entry.id, actor: 'agent:test' });
+  // the reversal nets the old balances to zero — a fresh import is allowed
+  const res2 = importOpeningBalances(db, { csvText: '1100,2.00\n3000,-2.00\n', date: '2026-01-02', actor: 'agent:test' });
+  assert.notEqual(res2.entry.id, res.entry.id, 'a NEW opening entry is created');
+  const sums = {};
+  for (const p of getEntry(db, res2.entry.id).postings) sums[p.account_code] = (sums[p.account_code] ?? 0) + p.amount_cents;
+  assert.deepEqual(sums, { 1100: 200, 3000: -200 });
+});
+
 test('opening-balances: dry-run validates and writes nothing', () => {
   const plan = importOpeningBalances(db, { csvText: '1100,1.00\n3000,-1.00\n', date: '2026-01-01', dryRun: true });
   assert.equal(plan.accounts, 2);
@@ -135,6 +146,24 @@ test('journal: idempotent re-import skips existing boekstukken', () => {
   assert.equal(res.imported, 0);
   assert.equal(res.duplicates, 2);
   assert.equal(listEntries(db).length, 2);
+});
+
+test('journal: comma-delimited file with a semicolon inside a quoted field parses (delimiter decided once)', () => {
+  // the per-line heuristic used to flip this row to ';'-mode because the
+  // quoted description contains a semicolon, misparsing the row; the
+  // delimiter must come from the first (header) line only
+  const csv = 'datum,boekstuknummer,rekening,tegenrekening,bedrag,omschrijving\n'
+    + '2026-01-05,J1,1100,8000,100.00,"Consultancy; tweede termijn"\n'
+    + '2026-01-06,J2,1100,8000,50.00,Zonder puntkomma\n';
+  const res = importJournalCsv(db, { csvText: csv, actor: 'agent:test' });
+  assert.equal(res.imported, 2);
+  const entries = listEntries(db, { state: 'posted' });
+  assert.equal(entries.length, 2);
+  const j1 = getEntry(db, entries.find((e) => e.source_ref === 'journal:J1').id);
+  assert.equal(j1.description, 'Consultancy; tweede termijn', 'the quoted field must survive intact');
+  const sums = {};
+  for (const p of j1.postings) sums[p.account_code] = (sums[p.account_code] ?? 0) + p.amount_cents;
+  assert.deepEqual(sums, { 1100: 10000, 8000: -10000 });
 });
 
 test('journal: unknown account fails whole-file validation without --create-missing', () => {

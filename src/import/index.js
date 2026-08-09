@@ -46,11 +46,11 @@ function todayIso() {
 
 // --- CSV plumbing -----------------------------------------------------------
 
-function parseCsvLine(line) {
+function parseCsvLine(line, delim) {
   // Dutch bookkeeping exports use ';' as delimiter exactly because amounts
-  // carry decimal commas. Rule: if the line contains ';', split on ';' only;
-  // otherwise split on ','. Quotes are respected in both modes.
-  const delim = line.includes(';') ? ';' : ',';
+  // carry decimal commas. The delimiter is decided ONCE from the first line
+  // (parseCsvRows) — a per-line heuristic flips a row to ';' mode when a
+  // comma-delimited field contains a semicolon, misparsing it.
   const out = [];
   let cur = '';
   let inQuotes = false;
@@ -67,10 +67,14 @@ function parseCsvLine(line) {
 export function parseCsvRows(csvText) {
   const rows = [];
   const lines = String(csvText).replace(/^\uFEFF/, '').split(/\r?\n/);
+  // delimiter decided once from the first non-empty line (same rule as
+  // parseBatchCsv / bank/csv.js) — never per row
+  const first = lines.find((l) => l.trim() !== '') ?? '';
+  const delim = first.split(';').length > first.split(',').length ? ';' : ',';
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     if (line.trim() === '') continue;
-    rows.push({ line: i + 1, cells: parseCsvLine(line).map((c) => c.trim()) });
+    rows.push({ line: i + 1, cells: parseCsvLine(line, delim).map((c) => c.trim()) });
   }
   return rows;
 }
@@ -210,9 +214,14 @@ export function importOpeningBalances(db, { csvText, date = null, actor = 'human
   const theDate = date || todayIso();
   if (!validDate(theDate)) throw importError('INVALID_DATE', `date '${theDate}' must be yyyy-mm-dd`);
 
-  const existing = db.prepare(
-    "SELECT id FROM journal_entries WHERE source = 'import' AND source_ref = 'opening-balances'",
-  ).get();
+  // a REVERSED opening-balances entry (the documented correction path) must
+  // not block re-import: the reversal nets the old balances to zero, so a
+  // fresh import books only the corrected values
+  const existing = db.prepare(`
+    SELECT id FROM journal_entries e
+    WHERE e.source = 'import' AND e.source_ref = 'opening-balances'
+      AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.reversed_from_id = e.id)
+  `).get();
   if (existing) {
     throw importError('OPENING_ALREADY_IMPORTED', `opening balances were already imported (entry ${existing.id})`);
   }

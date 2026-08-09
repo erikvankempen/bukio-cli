@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-09 07:36:51 UTC — **✅ 600 passing · 0 failing (600 tests)**
+**Latest run:** 2026-08-09 08:00:45 UTC — **✅ 602 passing · 0 failing (602 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -416,17 +416,19 @@
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 
-37 passing · 0 failing
+39 passing · 0 failing
 
     - ✅ parseImportAmount: international, Dutch comma, thousands-dot forms
     - ✅ opening-balances: imports ONE posted Beginbalans entry (source import)
     - ✅ opening-balances: Dutch code,debet,credit layout
     - ✅ opening-balances: validation collects ALL errors, writes nothing
     - ✅ opening-balances: re-import is rejected
+    - ✅ opening-balances: re-import succeeds after reversing the opening entry (correction path)
     - ✅ opening-balances: dry-run validates and writes nothing
     - ✅ opening-balances: unknown account and zero amount rejected
     - ✅ journal: one posted entry per boekstuk, two postings per line
     - ✅ journal: idempotent re-import skips existing boekstukken
+    - ✅ journal: comma-delimited file with a semicolon inside a quoted field parses (delimiter decided once)
     - ✅ journal: unknown account fails whole-file validation without --create-missing
     - ✅ journal: --create-missing infers type from net movement
     - ✅ journal: bad amount and date mismatch per boekstuk are both collected
