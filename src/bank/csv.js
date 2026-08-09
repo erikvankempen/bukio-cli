@@ -93,6 +93,31 @@ function findColumn(header, aliases) {
  * The IBAN may come from a --iban argument (caller injects it).
  * Header row is required; columns are matched by alias (Dutch + English).
  */
+/** Normalize the date column to ISO YYYY-MM-DD. Accepts ISO (YYYY-MM-DD,
+ *  incl. datetime forms), Dutch DD-MM-YYYY (and D-M-YYYY), and compact
+ *  YYYYMMDD — Rabo/ING/ABN exports mix these depending on export settings.
+ *  Returns null for unparseable OR non-existent calendar dates (2026-02-31). */
+function normalizeDate(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  // ISO datetime / date (already canonical, incl. "2026-03-04T12:00:00")
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ]|$)/);
+  if (m) return validIso(m[1], m[2], m[3]);
+  // Dutch DD-MM-YYYY (or single-digit D-M-YYYY)
+  m = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})(?:[T ]|$)/);
+  if (m) return validIso(m[3], m[2], m[1]);
+  // compact YYYYMMDD
+  m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m) return validIso(m[1], m[2], m[3]);
+  return null;
+}
+
+function validIso(y, mo, d) {
+  const iso = `${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  const dt = new Date(`${iso}T00:00:00Z`);
+  return !Number.isNaN(dt.getTime()) && dt.toISOString().slice(0, 10) === iso ? iso : null;
+}
+
 export function parseBankCsv(csvText, { defaultIban = null } = {}) {
   const lines = csvText.split(/\r?\n/).filter((l) => l.trim() !== '');
   if (lines.length < 2) throw bankError('EMPTY_CSV', 'bank CSV needs a header row and at least one transaction');
@@ -116,7 +141,7 @@ export function parseBankCsv(csvText, { defaultIban = null } = {}) {
     if (row.length === 1 && row[0].trim() === '') continue;
     const get = (key) => (idx[key] >= 0 ? (row[idx[key]] ?? '').trim() : '');
 
-    const date = get('date').slice(0, 10);
+    const date = normalizeDate(get('date'));
     const amount = parseBankAmount(get('amount'));
     if (!date || amount == null) {
       // never drop money silently — report the row so the user can fix the file

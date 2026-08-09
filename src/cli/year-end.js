@@ -87,7 +87,9 @@ export function make(program) {
         try {
           const report = jaarrekening(db, { year: opts.year, model: opts.model });
           if (opts.format === 'json') {
-            output(ctx, { jaarrekening: report }, (d) => renderReport(d.jaarrekening));
+            // --format json is the declared default — it must emit JSON even
+            // without the global --json flag (parity with audit --format json)
+            console.log(JSON.stringify({ ok: true, data: { jaarrekening: report } }, null, 2));
             return;
           }
           if (opts.format === 'pdf') {
@@ -142,16 +144,3 @@ export function make(program) {
     });
 }
 
-function renderReport(r) {
-  console.log(`JAARREKENING ${r.year} (${r.model}) — ${r.company.name}, peildatum ${r.as_of}`);
-  console.log('  BALANS');
-  for (const g of r.balans.activa) console.log(`    ${g.label.padEnd(28)} ${formatAmount(g.total_cents)}`);
-  console.log(`    ${'Totaal activa'.padEnd(28)} ${formatAmount(r.balans.total_activa_cents)}`);
-  for (const g of r.balans.passiva) console.log(`    ${g.label.padEnd(28)} ${formatAmount(g.total_cents)}`);
-  console.log(`    ${'Totaal passiva'.padEnd(28)} ${formatAmount(r.balans.total_passiva_cents)} ${r.balans.balanced ? '✓' : '✗ UNBALANCED'}`);
-  if (r.pnl) {
-    console.log('  W&V');
-    for (const l of r.pnl.lines) console.log(`    ${l.label.padEnd(28)} ${formatAmount(l.total_cents)}`);
-    console.log(`    ${'Resultaat na belastingen'.padEnd(28)} ${r.pnl.resultaat}`);
-  }
-}

@@ -348,3 +348,22 @@ test('suggestUnmatched: proposes expense/income accounts', () => {
   assert.equal(suggestions.find((s) => s.amount_cents > 0).suggested_account, '8000');
   assert.equal(suggestions.find((s) => s.amount_cents < 0).suggested_account, '4300');
 });
+
+test('parseBankCsv: Dutch DD-MM-YYYY and compact YYYYMMDD dates normalize to ISO', () => {
+  const csv = 'Datum;Naam;Bedrag\n03-06-2026;Rabo;100,00\n20260604;ABN;-25.50\n';
+  const txs = parseBankCsv(csv);
+  assert.equal(txs.length, 2);
+  assert.equal(txs[0].date, '2026-06-03');
+  assert.equal(txs[1].date, '2026-06-04');
+  assert.equal(txs[0].amount_cents, 10000);
+  assert.equal(txs[1].amount_cents, -2550);
+  assert.equal(txs.skipped.length, 0);
+});
+
+test('parseBankCsv: an unparseable date is skipped and reported, never silently dropped', () => {
+  const csv = 'Datum;Naam;Bedrag\n31-02-2026;Rabo;10,00\n2026-06-04;ABN;-25.50\n';
+  const txs = parseBankCsv(csv);
+  assert.equal(txs.length, 1);
+  assert.equal(txs.skipped.length, 1);
+  assert.match(txs.skipped[0].reason, /date/i);
+});

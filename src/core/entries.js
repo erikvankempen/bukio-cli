@@ -163,6 +163,17 @@ export function postEntry(db, { id, actor = 'human' }) {
   if (entry.state === 'reversed') throw entryError('ALREADY_REVERSED', `entry ${id} is reversed`);
 
   const tx = db.transaction(() => {
+    // an account deactivated AFTER the draft was created must not receive
+    // money — resolvePostings checks activity only at create time, so a
+    // draft made while active could be posted after deactivation
+    const inactive = db.prepare(`
+      SELECT a.code FROM postings p
+      JOIN accounts a ON a.id = p.account_id
+      WHERE p.entry_id = ? AND a.active = 0
+    `).all(id);
+    if (inactive.length > 0) {
+      throw entryError('ACCOUNT_INACTIVE', `entry ${id} postings reference deactivated account(s): ${inactive.map((r) => r.code).join(', ')}`);
+    }
     db.prepare("UPDATE journal_entries SET state = 'posted', posted_at = ? WHERE id = ?")
       .run(nowIso(), id);
     record(db, { actor, action: 'entry.post', command: 'entry post', args: { id }, outcome: 'ok', entryIds: [id] });
@@ -207,6 +218,17 @@ export function reverseEntry(db, { id, actor = 'human', reason = null, dryRun = 
   );
 
   const tx = db.transaction(() => {
+    // Re-check the reversal count INSIDE the transaction: two concurrent
+    // reverses (two processes, WAL) could both pass the pre-check above and
+    // post two contra-entries, moving the books twice. No DB constraint
+    // backstops reversed_from_id uniqueness, so the count must be re-read
+    // atomically with the insert.
+    const inside = db.prepare(
+      "SELECT COUNT(*) AS c FROM journal_entries WHERE reversed_from_id = ? AND state = 'posted'",
+    ).get(id);
+    if (inside.c > 0) {
+      throw entryError('ALREADY_REVERSED', `entry ${id} already has a posted reversal`);
+    }
     // Create the contra-entry as draft, add its (negated) postings, then post
     // it through the normal validated transition (count >= 2, sum == 0).
     // VAT fields are carried over (negated) so the OB readout cancels the

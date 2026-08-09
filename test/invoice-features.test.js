@@ -130,6 +130,18 @@ test('item add/list/show/update/deactivate with audit', () => {
   assert.deepEqual(audit.map((r) => r.action), ['item.create', 'item.update', 'item.update']);
 });
 
+test('item update: empty string clears vatCode/glAccount instead of keeping the old value (round 11)', () => {
+  addContact();
+  const item = addItem({ vatCode: '21', glAccount: '8000' });
+  assert.equal(getItem(db, item.id).vat_code, '21');
+  assert.equal(getItem(db, item.id).gl_account, '8000');
+  // empty strings mean "clear" — they must not be kept or stored verbatim
+  const updated = updateItem(db, { id: item.id, vatCode: '', glAccount: '', actor: 'agent:test' });
+  assert.equal(updated.vat_code, null, 'empty vatCode must clear the code');
+  assert.equal(updated.gl_account, null, 'empty glAccount must clear the account (stored as NULL, not "")');
+  assert.equal(getItem(db, item.id).gl_account, null);
+});
+
 test('item guards: name/unit/price/vat/account', () => {
   assert.throws(() => createItem(db, { name: '', unit: 'h', unitPriceCents: 100, actor: 'agent:test' }), { code: 'INVALID_NAME' });
   assert.throws(() => createItem(db, { name: 'X', unit: 'weeks', unitPriceCents: 100, actor: 'agent:test' }), { code: 'INVALID_UNIT' });

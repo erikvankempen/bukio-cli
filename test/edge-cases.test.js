@@ -334,6 +334,35 @@ test('vat: private use (P) -> 1d/5a at the standard rate (21%)', () => {
   assert.equal(r.fields['5d'], 1050);
 });
 
+test('vat: private use (P) VAT is ALWAYS owed (credit 2500) regardless of the posting sign', () => {
+  // regression (round 11): the VAT leg used to follow the posting's sign —
+  // a DEBIT-signed private-use booking (expense taken privately) produced a
+  // 2500 DEBIT that reduced te-betalen and negative 1d/5a. Privégebruik is a
+  // deemed supply: you owe (credit 2500), the readout base is always positive.
+  //
+  // The old masked booking "1100:-121.00,4700:100.00@P" booked a WRONG-SIGN
+  // 2500 leg (+21 debit, reducing VAT payable). With the fix the 2500 leg is
+  // a -21 credit (you owe) and the readout reports positive 1d/5a; the bank
+  // sweep leg absorbs the difference (the engine's documented balancing).
+  bookVatEntry(db, {
+    date: '2026-07-01', description: 'Privégebruik (old masked form)',
+    postings: parseVatPostingSpecs(['1100:-121.00,4700:100.00@P']), post: true,
+  });
+  const legs = db.prepare(`
+    SELECT a.code, p.amount_cents FROM postings p
+    JOIN accounts a ON a.id = p.account_id
+    WHERE p.entry_id = (SELECT MAX(id) FROM journal_entries)
+    ORDER BY a.code
+  `).all();
+  const vatLeg = legs.find((l) => l.code === '2500');
+  assert.ok(vatLeg, 'private use must book a 2500 VAT leg');
+  assert.equal(vatLeg.amount_cents, -2100, 'the 2500 leg must be a CREDIT (you owe 21%), never a debit');
+  const r = obReadout(db, { period: '2026-07' });
+  assert.equal(r.fields['1d'], 10000); // positive base even for debit-signed bookings
+  assert.equal(r.fields['5a'], 2100);
+  assert.equal(r.fields['5d'], 2100);
+});
+
 test('vat: R income (verlegd binnenland sale) reports the base in 1c, no VAT due', () => {
   bookVatEntry(db, {
     date: '2026-07-01', description: 'Verlegd binnenland uitgaand',

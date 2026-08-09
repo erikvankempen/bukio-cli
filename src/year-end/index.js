@@ -63,9 +63,19 @@ export function fiscalYearWindow(db, year) {
 }
 
 export function isYearClosed(db, year) {
-  return Boolean(db.prepare(
-    "SELECT 1 FROM journal_entries WHERE source = 'closing' AND source_ref = ?",
-  ).get(`fy:${year}`));
+  // a year is closed only while its closing entries are NOT reversed — the
+  // documented undo (entry reverse on the closing entries) inserts reversal
+  // entries whose reversed_from_id points at the originals, so checking for
+  // any source='closing' row alone would report the year closed forever
+  return Boolean(db.prepare(`
+    SELECT 1 FROM journal_entries e
+    WHERE e.source = 'closing' AND e.source_ref = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM journal_entries r
+        WHERE r.reversed_from_id = e.id
+      )
+    LIMIT 1
+  `).get(`fy:${year}`));
 }
 
 export function yearEndStatus(db, { year }) {

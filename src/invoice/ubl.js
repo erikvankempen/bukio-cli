@@ -56,6 +56,10 @@ function addressBlock(partyName, p, taxId = null) {
             <cac:Country><cbc:IdentificationCode>${esc(p.country ?? 'NL')}</cbc:IdentificationCode></cac:Country>
           </cac:PostalAddress>
           ${taxId ? `<cac:PartyTaxScheme><cbc:CompanyID schemeID="VAT">${esc(taxId)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
+          <cac:PartyLegalEntity>
+            <cbc:RegistrationName>${esc(partyName)}</cbc:RegistrationName>
+            ${p.kvk ? `<cbc:CompanyID>${esc(p.kvk)}</cbc:CompanyID>` : ''}
+          </cac:PartyLegalEntity>
         </cac:Party>`;
 }
 
@@ -231,12 +235,17 @@ export function invoiceToUbl(db, invoice) {
         <cbc:PostalZone>${esc(contact.postal_code ?? '')}</cbc:PostalZone>
         <cac:Country><cbc:IdentificationCode>${esc(contact.country ?? 'NL')}</cbc:IdentificationCode></cac:Country>
       </cac:PostalAddress>${buyerTax}
+      <cac:PartyLegalEntity>
+        <cbc:RegistrationName>${esc(contact.name)}</cbc:RegistrationName>
+        ${contact.kvk ? `<cbc:CompanyID>${esc(contact.kvk)}</cbc:CompanyID>` : ''}
+      </cac:PartyLegalEntity>
     </cac:Party>
   </cac:AccountingCustomerParty>
+  ${company.iban ? `
   <cac:PaymentMeans>
     <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
-    <cac:PayeeFinancialAccount><cbc:ID>${esc(company.iban ?? '')}</cbc:ID></cac:PayeeFinancialAccount>
-  </cac:PaymentMeans>
+    <cac:PayeeFinancialAccount><cbc:ID>${esc(company.iban)}</cbc:ID></cac:PayeeFinancialAccount>
+  </cac:PaymentMeans>` : ''}
   ${invoice.due_date ? `<cac:PaymentTerms><cbc:PaymentDueDate>${invoice.due_date}</cbc:PaymentDueDate></cac:PaymentTerms>` : ''}
   ${discount_cents > 0 ? `
   <cac:AllowanceCharge>

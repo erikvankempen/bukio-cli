@@ -89,7 +89,13 @@ export function jaarrekening(db, { year, model = 'klein' }) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   if (!company) throw jaarrekeningError('NOT_INITIALISED', 'company database not initialised');
 
-  const asOf = `${year}-${company.fiscal_year_end || '12-31'}`;
+  // tolerant like fiscalYearWindow/jaarrekeningDeadline: fiscal_year_end may
+  // be 'MM-DD' or a full 'YYYY-MM-DD' — concatenating blindly would produce
+  // '2026-2026-12-31' for the full-date form and break the whole report
+  const fyeParts = String(company.fiscal_year_end || '12-31').split('-');
+  const fyeMonth = fyeParts[fyeParts.length - 2];
+  const fyeDay = fyeParts[fyeParts.length - 1];
+  const asOf = `${year}-${String(fyeMonth).padStart(2, '0')}-${String(fyeDay).padStart(2, '0')}`;
   const b = balans(db, { asOf });
 
   const activa = groupSections(b.assets.sections, ACTIVA_LINES);

@@ -91,13 +91,21 @@ export function updateItem(db, {
   const existing = getItem(db, id);
   if (!existing) throw itemError('ITEM_NOT_FOUND', `item ${id} does not exist`);
 
+  // empty strings mean "clear" for the optional fields — a caller passing
+  // --vat '' or --gl '' must be able to UNSET them (previously the value
+  // was kept for vatCode and '' was stored verbatim for glAccount, creating
+  // a distinct 'gl_account ?? ""' group key downstream). Use a sentinel so
+  // "not passed" (null → keep existing) is distinct from "explicitly clear".
+  const CLEAR = Symbol('clear');
+  const vat = vatCode === '' ? CLEAR : vatCode;
+  const gl = glAccount === '' ? CLEAR : glAccount;
   const next = {
     name: name ?? existing.name,
     description: description !== null ? description : existing.description,
     unit: unit ?? existing.unit,
     unitPriceCents: unitPriceCents ?? existing.unit_price_cents,
-    vatCode: vatCode !== null ? vatCode : existing.vat_code,
-    glAccount: glAccount !== null ? glAccount : existing.gl_account,
+    vatCode: vat === CLEAR ? null : vat ?? existing.vat_code,
+    glAccount: gl === CLEAR ? null : gl ?? existing.gl_account,
     active: deactivate ? 0 : existing.active,
   };
   validateItem(next);

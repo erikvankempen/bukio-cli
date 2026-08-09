@@ -742,7 +742,14 @@ export function buildInvoicePostings(db, invoice) {
       postings.push({ code: '2500', amountCents: sign * invoice.vat_cents });
     }
   } else {
-    postings.push({ code: '8000', amountCents: sign * invoice.net_cents });
+    // VAT module off: still honor per-line GL accounts (a line with
+    // glAccount '8050' must land on 8050, not the 8000 default) — same
+    // grouping as the VAT-on branch so both modes book identically
+    const { groups } = computeInvoiceTotals(invoice.lines, invoice.discount_type, invoice.discount_value);
+    for (const g of groups) {
+      if (g.discountedNet === 0) continue;
+      postings.push({ code: g.gl ?? '8000', amountCents: sign * g.discountedNet });
+    }
   }
   // debiteuren leg: sales -> debit (+gross), credit note -> credit (-gross)
   postings.push({ code: '1200', amountCents: isCredit ? -gross : gross });

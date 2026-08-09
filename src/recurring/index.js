@@ -396,7 +396,10 @@ export function runDue(db, { asOf = null, templateId = null, actor = 'human', dr
             const next = sim.runs && sim.runs_done + 1 >= sim.runs && sim.final_postings
               ? sim.final_postings : sim.postings;
             // mirror the execute shape: reverse_previous templates produce a
-            // reversal of the previous period's entry FIRST, then the new one
+            // reversal of the previous period's entry FIRST, then the new one.
+            // execute advances last_entry_id per period (each period reverses
+            // ITS OWN prior entry) — simulate that so the plan matches what
+            // running would do (synthetic negative ids; nothing is written)
             if (sim.reverse_previous && sim.last_entry_id) {
               tplResult.runs.push({
                 kind: 'reversal',
@@ -408,7 +411,15 @@ export function runDue(db, { asOf = null, templateId = null, actor = 'human', dr
               entry: { date: sim.next_run_date, postings: next, description: `${sim.name} ${sim.next_run_date}` },
             });
           }
-          sim = { ...sim, next_run_date: addPeriod(sim.next_run_date, sim.frequency, sim.day_of_period), runs_done: sim.runs_done + 1 };
+          sim = {
+            ...sim,
+            next_run_date: addPeriod(sim.next_run_date, sim.frequency, sim.day_of_period),
+            runs_done: sim.runs_done + 1,
+            // the reversal for the NEXT period must reference this period's
+            // (simulated) entry — execute stores the real id; we synthesize a
+            // descending negative id so the plan shape stays honest
+            last_entry_id: sim.reverse_previous ? -(sim.runs_done + 1) : sim.last_entry_id,
+          };
           if ((sim.runs && sim.runs_done >= sim.runs) || (sim.end_date && sim.next_run_date > sim.end_date)) {
             sim.status = 'completed';
           }

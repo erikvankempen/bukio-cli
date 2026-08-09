@@ -166,7 +166,11 @@ export function importUblInvoice(db, {
   if (!payableRaw) {
     errors.push({ line: 0, error: 'INVALID_UBL_INVOICE: cbc:PayableAmount is missing' });
   } else {
-    payableCents = parseImportAmount(payableRaw);
+    try {
+      payableCents = parseImportAmount(payableRaw);
+    } catch {
+      payableCents = null;
+    }
     if (!Number.isInteger(payableCents) || payableCents <= 0) {
       errors.push({ line: 0, error: `INVALID_AMOUNT: cbc:PayableAmount '${payableRaw}' must be a positive amount` });
     }
@@ -178,7 +182,14 @@ export function importUblInvoice(db, {
   for (const st of subtotals) {
     const pct = pick(st, ['cac:TaxCategory', 'cbc:Percent']);
     const taxRaw = pick(st, ['cbc:TaxAmount']);
-    const taxCents = taxRaw ? parseImportAmount(taxRaw) : null;
+    let taxCents = null;
+    if (taxRaw) {
+      // a malformed TaxAmount must not abort the whole file — collect it
+      try { taxCents = parseImportAmount(taxRaw); } catch { taxCents = null; }
+      if (!Number.isInteger(taxCents)) {
+        errors.push({ line: 0, error: `INVALID_AMOUNT: cbc:TaxAmount '${taxRaw}' is not a valid amount` });
+      }
+    }
     if (pct && Number.isInteger(taxCents)) vatByRate[pct] = (vatByRate[pct] ?? 0) + taxCents;
   }
 

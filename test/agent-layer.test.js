@@ -626,3 +626,20 @@ test('MCP: BUKIO_MCP_READONLY blocks execution', async () => {
     await new Promise((res) => child.on('exit', res));
   }
 });
+
+test('fx resolveRate: a dry-run must not persist the fetched ECB rate', async () => {
+  setEcbFetcher(okStub(SDMX_USD));
+  try {
+    const rate = await resolveRate(db, { currency: 'USD', date: '2026-08-03', dryRun: true });
+    assert.equal(rate, 11515);
+    // nothing written: no fx_rates row, no audit row
+    assert.equal(listFxRates(db).length, 0, 'dry-run must not INSERT an fx_rates row');
+    assert.equal(db.prepare("SELECT COUNT(*) c FROM audit_log WHERE action = 'fx.set'").get().c, 0);
+    // the execute path still persists
+    const rate2 = await resolveRate(db, { currency: 'USD', date: '2026-08-03' });
+    assert.equal(rate2, 11515);
+    assert.equal(listFxRates(db).length, 1, 'execute persists the fetched rate');
+  } finally {
+    clearEcbFetcher();
+  }
+});

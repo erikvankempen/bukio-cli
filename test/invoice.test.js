@@ -303,6 +303,40 @@ test('UBL: credit note uses CreditNote root + type 381 (Peppol BIS 3.0)', () => 
   assert.equal(billingRef['InvoiceDocumentReference']['ID'], '2026-0001');
 });
 
+test('UBL: both parties carry cac:PartyLegalEntity/RegistrationName (BT-27/BT-44, 1..1)', () => {
+  const contact = createContact(db, {
+    name: 'ACME B.V.', address: 'Straat 1', postalCode: '1000 AA', city: 'Amsterdam',
+    vatId: 'NL999999999B01', kvk: '98765432', actor: 'agent:test',
+  });
+  const inv = createInvoice(db, {
+    contactId: contact.id, date: '2026-07-10', lines: ['1x Consultancy @ 100.00 @21'],
+  });
+  finalizeInvoice(db, { id: inv.id });
+  const xml = invoiceToUbl(db, getInvoice(db, inv.id));
+  // seller (BT-27): PartyLegalEntity/RegistrationName must be present, with
+  // CompanyID from the KVK
+  const sellerParty = xml.match(/<cac:AccountingSupplierParty>\s*<cac:Party>([\s\S]*?)<\/cac:Party>/)[1];
+  assert.match(sellerParty, /<cac:PartyLegalEntity>\s*<cbc:RegistrationName>Demo BV<\/cbc:RegistrationName>\s*<cbc:CompanyID>12345678<\/cbc:CompanyID>\s*<\/cac:PartyLegalEntity>/);
+  // buyer (BT-44): same structure with the contact's KVK
+  const buyerParty = xml.match(/<cac:AccountingCustomerParty>\s*<cac:Party>([\s\S]*?)<\/cac:Party>/)[1];
+  assert.match(buyerParty, /<cac:PartyLegalEntity>\s*<cbc:RegistrationName>ACME B\.V\.<\/cbc:RegistrationName>\s*<cbc:CompanyID>98765432<\/cbc:CompanyID>\s*<\/cac:PartyLegalEntity>/);
+});
+
+test('UBL: no empty PayeeFinancialAccount when the company has no IBAN (BG-17 cbc:ID 1..1)', () => {
+  const contact = createContact(db, {
+    name: 'ACME B.V.', address: 'Straat 1', postalCode: '1000 AA', city: 'Amsterdam',
+    vatId: 'NL999999999B01', kvk: '98765432', actor: 'agent:test',
+  });
+  db.prepare('UPDATE company SET iban = NULL WHERE id = 1').run();
+  const inv = createInvoice(db, {
+    contactId: contact.id, date: '2026-07-10', lines: ['1x Consultancy @ 100.00 @21'],
+  });
+  finalizeInvoice(db, { id: inv.id });
+  const xml = invoiceToUbl(db, getInvoice(db, inv.id));
+  assert.ok(!xml.includes('<cac:PayeeFinancialAccount>'), 'PayeeFinancialAccount must be omitted entirely when the company has no IBAN');
+  assert.ok(!/<cbc:ID><\/cbc:ID>/.test(xml), 'no empty cbc:ID elements may be emitted');
+});
+
 test('UBL: credit note BT-10 buyer reference carries the original klantkenmerk (not the invoice number)', () => {
   addContact();
   const inv = mkInvoice({ reference: 'PO-2026-099' });
@@ -382,6 +416,21 @@ test('buildInvoicePostings: sales vs credit sign flip', () => {
   const credit = { ...inv, invoice_type: 'credit' };
   const reversed = buildInvoicePostings(db, credit);
   assert.equal(reversed.find((p) => p.code === '1200').amountCents, -36300);
+});
+
+test('buildInvoicePostings: VAT module off still honors per-line GL accounts (round 11)', () => {
+  // a line with glAccount '8050' must land on 8050, not the hardcoded 8000
+  const contact = createContact(db, {
+    name: 'Acme', address: 'Straat 1', postalCode: '1000 AA', city: 'Amsterdam', actor: 'agent:test',
+  });
+  const inv = createInvoice(db, {
+    contactId: contact.id, date: '2026-07-10',
+    lines: [{ qtyMilli: 1000, description: 'Zonder btw', priceCents: 10000, glAccount: '8050' }],
+  });
+  const postings = buildInvoicePostings(db, inv);
+  assert.equal(postings.find((p) => p.code === '1200').amountCents, 10000);
+  assert.equal(postings.find((p) => p.code === '8050').amountCents, -10000, 'the line GL must be honored with the VAT module off');
+  assert.ok(!postings.some((p) => p.code === '8000'), 'the hardcoded 8000 default must not be used when a line GL exists');
 });
 
 // --- reminders --------------------------------------------------------------

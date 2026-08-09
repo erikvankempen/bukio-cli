@@ -836,6 +836,15 @@ test('CLI: assets register --format csv has a header row and totals', () => {
   assert.ok(csv.includes('TOTAAL'), 'totals row must be present');
 });
 
+test('CLI: assets register --format json emits JSON without the global --json flag (round 11)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  const raw = runRaw(dbPath, ['assets', 'register', '--format', 'json']).raw;
+  const parsed = JSON.parse(raw);
+  assert.equal(parsed.ok, true);
+  assert.ok(Array.isArray(parsed.data.assets));
+});
+
 test('CLI: recurring run --dry-run renders plans, not undefined ids', () => {
   const dbPath = tmpDb();
   cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);

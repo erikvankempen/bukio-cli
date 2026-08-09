@@ -368,3 +368,18 @@ test('importUblInvoice: missing cbc:DocumentCurrencyCode (EN 16931 BT-5) is reje
   );
   assert.equal(payables().length, 0); // nothing registered
 });
+
+test('importUblInvoice: a malformed PayableAmount is collected with other errors, not thrown mid-parse (round 11)', () => {
+  // regression: parseImportAmount used to THROW on garbage, aborting before
+  // the collected errors were checked — co-occurring problems were never
+  // reported. Now the malformed amount is collected like any other error.
+  const xml = ublInvoice().replace(/(<cbc:PayableAmount[^>]*>)[^<]*(<\/cbc:PayableAmount>)/, '$11,2,3$2');
+  assert.throws(
+    () => importUblInvoice(db, { xmlText: xml, actor: 'agent:test' }),
+    (err) => {
+      if (err.code !== 'IMPORT_VALIDATION_FAILED') return false;
+      return err.details?.some((d) => /PayableAmount/.test(d.error));
+    },
+  );
+  assert.equal(payables().length, 0);
+});

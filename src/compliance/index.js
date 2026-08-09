@@ -131,5 +131,15 @@ export function complianceStatus(db, { year }) {
 }
 
 function isBooksClosed(db, year) {
-  return Boolean(db.prepare("SELECT 1 FROM journal_entries WHERE source = 'closing' AND source_ref = ?").get(`fy:${year}`));
+  // same semantics as isYearClosed: reversed closing entries do not keep the
+  // year closed (the documented undo is entry reverse on the closing entries)
+  return Boolean(db.prepare(`
+    SELECT 1 FROM journal_entries e
+    WHERE e.source = 'closing' AND e.source_ref = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM journal_entries r
+        WHERE r.reversed_from_id = e.id
+      )
+    LIMIT 1
+  `).get(`fy:${year}`));
 }

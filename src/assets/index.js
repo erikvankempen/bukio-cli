@@ -229,13 +229,28 @@ export function addAsset(db, {
     scheme = getScheme(db, schemeId);
     if (!scheme) throw assetsError('SCHEME_NOT_FOUND', `scheme ${schemeId} does not exist`);
   } else if (method || lifeMonths) {
-    scheme = createScheme(db, {
-      name: `${lifeMonths ?? 60} maanden ${method ?? 'lineair'} ${residualBp ?? 0}basis`,
-      method: method ?? 'lineair', lifeMonths: lifeMonths ?? 60,
-      residualBp: residualBp ?? 0, actor,
-    });
+    const schemeName = `${lifeMonths ?? 60} maanden ${method ?? 'lineair'} ${residualBp ?? 0}basis`;
+    if (dryRun) {
+      // a dry-run must not write: resolve an EXISTING scheme with the same
+      // parameters, else use an in-memory plan object — calling
+      // createScheme here would INSERT a row (and a second dry-run with the
+      // same inline params would then fail SCHEME_NAME_TAKEN)
+      scheme = getSchemeByName(db, schemeName) ?? {
+        id: null, name: schemeName, method: method ?? 'lineair',
+        life_months: lifeMonths ?? 60, residual_bp: residualBp ?? 0,
+      };
+    } else {
+      scheme = createScheme(db, { name: schemeName, method: method ?? 'lineair', lifeMonths: lifeMonths ?? 60, residualBp: residualBp ?? 0, actor });
+    }
   } else {
-    scheme = ensureDefaultScheme(db, actor);
+    if (dryRun) {
+      scheme = getSchemeByName(db, 'Standaard 5 jaar lineair') ?? {
+        id: null, name: 'Standaard 5 jaar lineair', method: 'lineair',
+        life_months: 60, residual_bp: 0,
+      };
+    } else {
+      scheme = ensureDefaultScheme(db, actor);
+    }
   }
   const schemeResidualCents = Math.round((scheme.residual_bp / 10000) * purchasePriceCents);
   const residual = residualCents !== null ? residualCents : schemeResidualCents;

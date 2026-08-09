@@ -8,9 +8,10 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb } from '../src/core/db.js';
 import { seedDefaultChart, getAccountByCode } from '../src/core/accounts.js';
-import { createEntry, postEntry, getEntry } from '../src/core/entries.js';
+import { createEntry, postEntry, getEntry, reverseEntry } from '../src/core/entries.js';
 import { enableVatModule, bookVatEntry, parseVatPostingSpecs, obReadout } from '../src/vat/index.js';
-import { yearEndClose, yearEndStatus } from '../src/year-end/index.js';
+import { yearEndClose, yearEndStatus, isYearClosed } from '../src/year-end/index.js';
+import { complianceStatus } from '../src/compliance/index.js';
 import { jaarrekening } from '../src/report/jaarrekening.js';
 import { jaarrekeningToPdf, jaarrekeningHtml } from '../src/report/jaarrekening-pdf.js';
 import { icpReadout } from '../src/icp/index.js';
@@ -80,6 +81,27 @@ test('year-end close: posts closing + appropriation, balanced, source closing', 
 
   // second close rejected
   assert.throws(() => yearEndClose(db, { year: 2026 }), { code: 'ALREADY_CLOSED' });
+});
+
+test('year-end close: reversing the closing entries re-opens the year (documented undo)', () => {
+  entry('2026-03-01', 'Omzet', [{ code: '1100', amountCents: 12100 }, { code: '8000', amountCents: -10000 }, { code: '2500', amountCents: -2100 }]);
+  const closed = yearEndClose(db, { year: 2026, actor: 'agent:test' });
+  assert.equal(closed.closed, true);
+  assert.equal(isYearClosed(db, 2026), true);
+  // the documented undo: reverse the closing entries (the error message says
+  // "undo with entry reverse on the closing entries")
+  const closing = db.prepare("SELECT * FROM journal_entries WHERE source='closing' AND source_ref='fy:2026'").all();
+  for (const e of closing) reverseEntry(db, { id: e.id, actor: 'agent:test' });
+  // regression (round 11): isYearClosed used to match ANY source='closing'
+  // row regardless of reversal — the year stayed locked forever and
+  // re-closing threw ALREADY_CLOSED even after a full undo
+  assert.equal(isYearClosed(db, 2026), false, 'reversing the closing entries must re-open the year');
+  const status = complianceStatus(db, { year: 2026 });
+  const ar = status.obligations.find((o) => o.type === 'JAARREKENING' && o.period === '2026');
+  assert.ok(ar && ar.books_closed === false, 'the compliance calendar must report the year as open after the undo');
+  // and the year can be closed again
+  const reopened = yearEndClose(db, { year: 2026, actor: 'agent:test' });
+  assert.equal(reopened.closed, true);
 });
 
 test('year-end close: guards — drafts block, empty year reports', () => {

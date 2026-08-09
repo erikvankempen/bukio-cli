@@ -130,6 +130,30 @@ test('aging debtors: buckets, totals, paid excluded, contacts sorted by total', 
   assert.equal(r.debtors.totals.current, 10000);
 });
 
+test('aging debtors: invoices issued AFTER the as-of date are excluded, item totals netted by credits', () => {
+  // an invoice dated after the as-of date did not exist at as-of — it must
+  // not appear as outstanding in a backdated report (round 11 finding)
+  makeFinalized(t.contacts.acme.id, { date: '2026-05-01', dueDays: 31, lines: ['Ding @ 1000.00'] });
+  makeFinalized(t.contacts.acme.id, { date: '2026-09-01', dueDays: 30, lines: ['Later @ 500.00'] });
+  // a credit note dated after as-of must not net against the 03-31 position
+  const cred = creditInvoice(db, { id: 1, date: '2026-09-02', reason: 'later', actor: 'agent:test' });
+  finalizeInvoice(db, { id: cred.id, actor: 'agent:test' });
+  let r = aging(db, { asOf: '2026-08-08', kind: 'debtors' });
+  let acme = r.debtors.contacts.find((c) => c.contact_id === t.contacts.acme.id);
+  assert.equal(acme.total_cents, 100000, 'only the pre-as-of invoice counts');
+  assert.equal(acme.buckets.d90, 100000);
+  // the credit note dated after as-of is ignored; at a LATER as-of the full
+  // €1000 credit nets the OLDEST invoice (FIFO): 2026-0001 → €0, the €500
+  // later invoice stays at €500
+  r = aging(db, { asOf: '2026-09-30', kind: 'debtors' });
+  acme = r.debtors.contacts.find((c) => c.contact_id === t.contacts.acme.id);
+  assert.equal(acme.total_cents, 50000);
+  const first = acme.items.find((i) => i.ref === '2026-0001');
+  assert.equal(first.outstanding_cents, 0, 'the €1000 credit fully offsets the oldest invoice');
+  const later = acme.items.find((i) => i.ref === '2026-0002');
+  assert.equal(later.outstanding_cents, 50000, 'item-level outstanding stays correct after FIFO netting');
+});
+
 test('aging debtors: finalized credit notes reduce the outstanding, drafts do not', () => {
   // Acme: €1000 invoice due 2026-06-01 (d90)
   makeFinalized(t.contacts.acme.id, { date: '2026-05-01', dueDays: 31, lines: ['Ding @ 1000.00'] });

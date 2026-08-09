@@ -158,7 +158,18 @@ export function addPayable(db, {
   if (!['transfer', 'direct_debit'].includes(method)) throw paymentsError('INVALID_METHOD', "payment method must be 'transfer' or 'direct_debit'");
   if (!validDate(date)) throw paymentsError('INVALID_DATE', `date '${date}' must be yyyy-mm-dd`);
   if (dueDate != null && !validDate(dueDate)) throw paymentsError('INVALID_DATE', `due date '${dueDate}' must be yyyy-mm-dd`);
-  const payable = { contact_id: c.id, invoice_ref: String(invoiceRef).trim(), date, due_date: dueDate, amount_cents: amountCents, payment_method: method, entry_id: entryId };
+  const ref = String(invoiceRef).trim();
+  // an unpaid payable with the same (contact, invoice_ref) is a duplicate —
+  // booking the same vendor invoice twice creates two payables that BOTH
+  // enter a batch, i.e. a double payment. A PAID payable with the same ref
+  // is fine (a recurring invoice number across periods); only block unpaid.
+  const dup = db.prepare(
+    "SELECT id FROM payables WHERE contact_id = ? AND invoice_ref = ? AND status = 'unpaid'",
+  ).get(c.id, ref);
+  if (dup) {
+    throw paymentsError('PAYABLE_DUPLICATE', `payable ${dup.id} already exists for ${c.name} / '${ref}' and is still unpaid — settle or remove it before re-adding`);
+  }
+  const payable = { contact_id: c.id, invoice_ref: ref, date, due_date: dueDate, amount_cents: amountCents, payment_method: method, entry_id: entryId };
   if (dryRun) return { action: 'payables.add', ...payable, contact_name: c.name, dryRun: true };
   const info = db.prepare(
     'INSERT INTO payables (contact_id, invoice_ref, date, due_date, amount_cents, payment_method, entry_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
@@ -240,6 +251,23 @@ export function createPaymentBatch(db, {
     if (name.length > 70) { fail(lineNo, 'SEPA_NAME_TOO_LONG', 'beneficiary name max 70 characters (SEPA Max70Text)'); return; }
     if (!isValidIban(iban)) { fail(lineNo, 'INVALID_IBAN', `'${iban}' is not a valid IBAN`); return; }
     if (reference && reference.length > 140) { fail(lineNo, 'REFERENCE_TOO_LONG', 'reference max 140 characters'); return; }
+    if (kind === 'direct_debit') {
+      // a direct-debit batch line MUST carry a SEPA mandate — pain.008 emits
+      // <MndtId>/<DtOfSgntr> per transaction and an empty mandate is
+      // structurally invalid (bank rejects the file, batch marked exported)
+      const mandate = l.contact_id ? latestMandate(db, l.contact_id) : null;
+      if (!mandate) {
+        const who = l.contact_id != null ? `contact ${l.contact_id}` : `line '${name}'`;
+        fail(lineNo, 'MANDATE_REQUIRED', `${who} has no SEPA mandate — add one with: bukio payments mandate add --contact ${l.contact_id ?? '<id>'} --ref <REF> [--type b2b], or use a transfer batch`);
+        return;
+      }
+      items.push({
+        contact_id: l.contact_id ?? null, name, iban, amount_cents: amountCents, reference,
+        mandate_id: mandate.id, mandate_ref: mandate.mandate_ref, mandate_date: mandate.mandate_date,
+        mandate_seq: mandateSeqFor(db, mandate.id), scheme: mandate.scheme,
+      });
+      return;
+    }
     items.push({ contact_id: l.contact_id ?? null, name, iban, amount_cents: amountCents, reference });
   });
 
@@ -333,7 +361,21 @@ export function parseBatchCsv(csvText) {
   // per-row heuristic flips to ';' mode when a comma-delimited data field
   // contains a semicolon, misparsing that row
   const delimiter = lines[0].split(';').length > lines[0].split(',').length ? ';' : ',';
-  const parseRow = (line) => line.split(delimiter).map((c) => c.trim());
+  // quote-aware split (like bank/csv.js): a quoted field containing the
+  // delimiter ("Smith, John" or "1.234,56") must not be split mid-field
+  const parseRow = (line) => {
+    const out = [];
+    let cur = '';
+    let quoted = false;
+    for (let i = 0; i < line.length; i += 1) {
+      const ch = line[i];
+      if (ch === '"') { quoted = !quoted; continue; }
+      if (ch === delimiter && !quoted) { out.push(cur.trim()); cur = ''; continue; }
+      cur += ch;
+    }
+    out.push(cur.trim());
+    return out;
+  };
   const header = parseRow(lines[0]).map((h) => h.toLowerCase());
   const hasHeader = header.some((h) => ['contact', 'naam', 'leverancier', 'amount', 'bedrag'].includes(h));
   const idx = hasHeader

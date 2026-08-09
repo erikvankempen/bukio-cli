@@ -314,6 +314,12 @@ export function make(program) {
             console.log(`wrote ${opts.out}`);
             return;
           }
+          if (format === 'json') {
+            // --format json is the declared default — it must emit JSON even
+            // without the global --json flag (parity with audit --format json)
+            console.log(JSON.stringify({ ok: true, data }, null, 2));
+            return;
+          }
           output(ctx, data, (d) => {
             console.log(`activastaat ${d.as_of}`);
             table(d.assets.map(fmtAssetRow), ASSET_COLUMNS);

@@ -37,6 +37,19 @@ function pnlLines(report) {
     `).join('');
 }
 
+/**
+ * Year result for the micro model (no P&L in the report object): the
+ * 'Onverdeeld resultaat' line the balans engine folds into Eigen vermogen.
+ * The BEIV.05 total is capital + ALL prior results — using it as the year
+ * result mislabels e.g. €18k capital + €12k result as a €30k 'resultaat'.
+ */
+function microResultCents(report) {
+  for (const s of report.balans?.passiva ?? []) {
+    if (s.rgs_code === null && s.label === 'Onverdeeld resultaat') return s.total_cents;
+  }
+  return 0;
+}
+
 export function jaarrekeningHtml(report) {
   const c = report.company;
   return `<!DOCTYPE html>
@@ -80,7 +93,7 @@ export function jaarrekeningHtml(report) {
     ${pnlLines(report)}
     <tr class="total"><td>Resultaat na belastingen</td><td class="num">${report.pnl.resultaat}</td></tr>
   </table>` : `<h2>Resultaat ${report.year}</h2>
-  <table style="width:60%"><tr class="total"><td>Resultaat na belastingen</td><td class="num">${formatAmount(report.balans.passiva.find((s) => s.rgs_code === 'BEIV.05')?.total_cents ?? 0)}</td></tr></table>`}
+  <table style="width:60%"><tr class="total"><td>Resultaat na belastingen</td><td class="num">${formatAmount(microResultCents(report))}</td></tr></table>`}
 
   <div class="footer">
     <p>Opgesteld op basis van de administratie. Jaarrekeningmodel ${report.model === 'micro' ? 'micro' : 'klein'} conform Titel 9 Boek 2 BW.</p>

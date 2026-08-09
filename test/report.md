@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-09 00:19:33 UTC — **✅ 580 passing · 0 failing (580 tests)**
+**Latest run:** 2026-08-09 02:08:36 UTC — **✅ 594 passing · 0 failing (594 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -31,7 +31,7 @@
 
 ### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar
 
-21 passing · 0 failing
+22 passing · 0 failing
 
     - ✅ fx: parseRate and convertFx — integer math, round-half-up
     - ✅ fx: setFxRate upsert + audit; getFxRate exact then latest-on/before
@@ -54,6 +54,7 @@
     - ✅ MCP: assets_run books DEPRECIATION, not recurring entries (import-collision regression)
     - ✅ MCP: contact_add preserves postal_code and vat_id (regression)
     - ✅ MCP: BUKIO_MCP_READONLY blocks execution
+    - ✅ fx resolveRate: a dry-run must not persist the fetched ECB rate
 
 ### assets.test.js — fixed assets: schemes, mid-life adoption, runs, disposal, activastaat
 
@@ -129,7 +130,7 @@
 
 ### bank.test.js — CAMT.053/CSV import, idempotency, matching/reconciliation
 
-21 passing · 0 failing
+23 passing · 0 failing
 
     - ✅ parseCamt053: CRDT positive, DBIT negative, counterparty + description
     - ✅ parseCamt053: rejects non-CAMT input
@@ -152,6 +153,8 @@
     - ✅ autoMatch: outside the window stays unmatched
     - ✅ setTransactionState: ignore and re-open
     - ✅ suggestUnmatched: proposes expense/income accounts
+    - ✅ parseBankCsv: Dutch DD-MM-YYYY and compact YYYYMMDD dates normalize to ISO
+    - ✅ parseBankCsv: an unparseable date is skipped and reported, never silently dropped
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
@@ -210,7 +213,7 @@
 
 ### edge-cases.test.js — rounding, boundaries, idempotency, lifecycle violations, dry-run hygiene
 
-35 passing · 0 failing
+36 passing · 0 failing
 
     - ✅ ledger: unbalanced, zero-amount, too-few postings rejected
     - ✅ ledger: same account on both sides is legal
@@ -237,6 +240,7 @@
     - ✅ bank: partial payment does not auto-match the invoice
     - ✅ vat: mixed rates in one entry, monthly period readout
     - ✅ vat: private use (P) -> 1d/5a at the standard rate (21%)
+    - ✅ vat: private use (P) VAT is ALWAYS owed (credit 2500) regardless of the posting sign
     - ✅ vat: R income (verlegd binnenland sale) reports the base in 1c, no VAT due
     - ✅ year-end: loss year closes with negative result into equity
     - ✅ year-end: fiscal year end 06-30 drives the jaarrekening as-of date
@@ -299,7 +303,7 @@
 
 ### hardening.test.js — 
 
-85 passing · 0 failing
+86 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -335,6 +339,7 @@
     - ✅ obReadout period with a year boundary stays within the period
     - ✅ CLI: import xaf failure prints cleanly (no renderErrors crash)
     - ✅ CLI: assets register --format csv has a header row and totals
+    - ✅ CLI: assets register --format json emits JSON without the global --json flag (round 11)
     - ✅ CLI: recurring run --dry-run renders plans, not undefined ids
     - ✅ CLI: export xaf --dry-run writes nothing; scheme/depreciation dry-runs validate
     - ✅ bank ignore dry-run leaves the transaction untouched
@@ -389,7 +394,7 @@
 
 ### import-invoice.test.js — inbound UBL (EN 16931/Peppol) invoice import into payables: idempotent, VAT reported not booked
 
-13 passing · 0 failing
+14 passing · 0 failing
 
     - ✅ importUblInvoice: registers a payable, matches contact by vat-id, parses VAT
     - ✅ importUblInvoice: idempotent re-import → duplicate skipped
@@ -404,6 +409,7 @@
     - ✅ importUblInvoice: multiple PartyTaxScheme entries — VAT number still extracted
     - ✅ importUblInvoice: missing cbc:InvoiceTypeCode (EN 16931 BT-3) is rejected
     - ✅ importUblInvoice: missing cbc:DocumentCurrencyCode (EN 16931 BT-5) is rejected
+    - ✅ importUblInvoice: a malformed PayableAmount is collected with other errors, not thrown mid-parse (round 11)
 
 ### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
 
@@ -449,13 +455,14 @@
 
 ### invoice-features.test.js — 
 
-36 passing · 0 failing
+37 passing · 0 failing
 
     - ✅ fractional quantities parse to milli-units
     - ✅ line discounts parse (pct and amount)
     - ✅ item specs parse (id, qty, overrides, discount)
     - ✅ allocateLargestRemainder sums exactly and is deterministic
     - ✅ item add/list/show/update/deactivate with audit
+    - ✅ item update: empty string clears vatCode/glAccount instead of keeping the old value (round 11)
     - ✅ item guards: name/unit/price/vat/account
     - ✅ item without a VAT code is allowed when the VAT module is off
     - ✅ unit labels localize
@@ -490,7 +497,7 @@
 
 ### invoice.test.js — invoicing: lifecycle, 12-vereisten, credit notes, payments, reminders
 
-23 passing · 0 failing
+26 passing · 0 failing
 
     - ✅ parseLineSpec: qty, description, price, vat
     - ✅ createInvoice: draft with line math (2x 150 @21 = 300 net, 63 vat)
@@ -506,10 +513,13 @@
     - ✅ UBL: Peppol BIS 3.0 structure
     - ✅ UBL: seller + buyer EndpointID (BT-34/BT-49) when KVK numbers are present
     - ✅ UBL: credit note uses CreditNote root + type 381 (Peppol BIS 3.0)
+    - ✅ UBL: both parties carry cac:PartyLegalEntity/RegistrationName (BT-27/BT-44, 1..1)
+    - ✅ UBL: no empty PayeeFinancialAccount when the company has no IBAN (BG-17 cbc:ID 1..1)
     - ✅ UBL: credit note BT-10 buyer reference carries the original klantkenmerk (not the invoice number)
     - ✅ UBL: XML control characters in descriptions are stripped (Peppol-safe)
     - ✅ bank auto-match: incoming payment pays the invoice and posts Bank/Debiteuren
     - ✅ buildInvoicePostings: sales vs credit sign flip
+    - ✅ buildInvoicePostings: VAT module off still honors per-line GL accounts (round 11)
     - ✅ invoiceReminders: overdue + due-soon, excludes paid and far-future
     - ✅ invoiceReminders: within-days controls the due-soon window
     - ✅ invoiceReminders: credit notes are not reminder candidates
@@ -541,7 +551,7 @@
 
 ### payments.test.js — SEPA payment batches: payables, pain.001 export
 
-22 passing · 0 failing
+24 passing · 0 failing
 
     - ✅ isValidIban: mod-97 check with normalization
     - ✅ payables: add transfer + direct-debit, audit, list filters
@@ -565,6 +575,8 @@
     - ✅ delete: only drafts; payables released back to unpaid
     - ✅ getPaymentBatch: serializes total + lines
     - ✅ parseBatchCsv: comma-delimited rows keep the comma delimiter even when a field contains a semicolon
+    - ✅ addPayable: the same (contact, invoice_ref) twice is rejected while unpaid (double-payment guard)
+    - ✅ createPaymentBatch: direct-debit lines require a SEPA mandate (pain.008 MndtId)
 
 ### recurring-invoice.test.js — subscription invoice templates
 
@@ -610,9 +622,10 @@
 
 ### reports-v014.test.js — aging buckets, contact statements, sales analytics (by contact/item)
 
-10 passing · 0 failing
+11 passing · 0 failing
 
     - ✅ aging debtors: buckets, totals, paid excluded, contacts sorted by total
+    - ✅ aging debtors: invoices issued AFTER the as-of date are excluded, item totals netted by credits
     - ✅ aging debtors: finalized credit notes reduce the outstanding, drafts do not
     - ✅ aging creditors: buckets + in_batch shown separately
     - ✅ aging validation: bad as-of and kind rejected
@@ -733,9 +746,10 @@
 
 ### year-end.test.js — annual close, jaarrekening micro/klein, ICP
 
-19 passing · 0 failing
+20 passing · 0 failing
 
     - ✅ year-end close: posts closing + appropriation, balanced, source closing
+    - ✅ year-end close: reversing the closing entries re-opens the year (documented undo)
     - ✅ year-end close: guards — drafts block, empty year reports
     - ✅ year-end close: dry-run writes nothing
     - ✅ P&L still shows the year result after closing

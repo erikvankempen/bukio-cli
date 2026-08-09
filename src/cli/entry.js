@@ -16,12 +16,12 @@ import { ensureDb, makeCtx, output, fail, table } from './util.js';
 import { resolveRate, toEurPostings } from '../fx/index.js';
 
 /** Convert posting specs to EUR when --currency given; auto rate lookup + ECB fallback. */
-async function applyFx(db, postings, { currency, rate, date, actor }) {
+async function applyFx(db, postings, { currency, rate, date, actor, dryRun = false }) {
   if (!currency) return postings;
   if (!db && rate == null) {
     throw Object.assign(new Error(`no database yet — pass --rate or create the company database first`), { code: 'FX_RATE_NOT_FOUND' });
   }
-  const rateX10000 = await resolveRate(db, { currency, rate, date, actor });
+  const rateX10000 = await resolveRate(db, { currency, rate, date, actor, dryRun });
   return toEurPostings(postings, { currency, rateX10000 });
 }
 

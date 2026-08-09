@@ -47,7 +47,9 @@ function emptyTotals() {
 function debtorsAging(db, asOf) {
   const byContact = new Map();
   const invoices = listInvoices(db)
-    .filter((i) => i.invoice_type === 'sales' && (i.status === 'sent' || i.status === 'overdue'));
+    .filter((i) => i.invoice_type === 'sales' && (i.status === 'sent' || i.status === 'overdue'))
+    // an as-of dated report must not show invoices issued AFTER that date
+    .filter((i) => i.date <= asOf);
 
   for (const i of invoices) {
     const outstanding = i.gross_cents - i.paid_cents;
@@ -83,16 +85,31 @@ function debtorsAging(db, asOf) {
   // overstate the dunning amount. Credits offset the OLDEST debt first
   // (FIFO), so bucket sums keep reconciling with each contact's total.
   const credits = listInvoices(db)
-    .filter((i) => i.invoice_type === 'credit' && !['draft', 'void'].includes(i.status));
+    .filter((i) => i.invoice_type === 'credit' && !['draft', 'void'].includes(i.status))
+    // a credit note dated after the as-of date did not exist yet at as-of
+    .filter((i) => i.date <= asOf);
   for (const cr of credits) {
     const c = byContact.get(cr.contact_id);
     if (!c || c.total_cents <= 0) continue;
-    let remaining = cr.gross_cents;
+    // FIFO-offset the items too so item-level outstanding reconciles with the
+    // contact/bucket totals after netting (a €400 credit on a €1000 invoice
+    // must show the item at €600, not €1000). Independent pass: the buckets
+    // below consume their OWN copy of the credit so both stay correct.
+    let itemRemaining = cr.gross_cents;
+    // items are newest-first (listInvoices ORDER BY id DESC) — offset the
+    // OLDEST debt first (FIFO), matching the bucket pass below
+    for (let n = c.items.length - 1; n >= 0 && itemRemaining > 0; n -= 1) {
+      const item = c.items[n];
+      const take = Math.min(item.outstanding_cents, itemRemaining);
+      item.outstanding_cents -= take;
+      itemRemaining -= take;
+    }
+    let bucketRemaining = cr.gross_cents;
     for (const b of ['d90plus', 'd90', 'd60', 'd30', 'current']) {
-      if (remaining <= 0) break;
-      const take = Math.min(c.buckets[b], remaining);
+      if (bucketRemaining <= 0) break;
+      const take = Math.min(c.buckets[b], bucketRemaining);
       c.buckets[b] -= take;
-      remaining -= take;
+      bucketRemaining -= take;
     }
     c.total_cents = Object.values(c.buckets).reduce((s, v) => s + v, 0);
   }

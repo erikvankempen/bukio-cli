@@ -84,7 +84,12 @@ export function parseCamt053(xmlText) {
 
     for (const ntry of entryList) {
       const amount = cents(ntry?.Amt);
-      if (amount == null) continue;
+      if (amount == null) {
+        // a statement whose Ntry has no parseable <Amt> is corrupt — silently
+        // skipping it would import a partial statement and make the account
+        // balance diverge from the bank's without any warning
+        throw bankError('INVALID_CAMT', 'Ntry without a valid cbc:Amt — the statement is corrupt; fix it before importing');
+      }
       const direction = String(ntry?.CdtDbtInd ?? '').toUpperCase();
       const date = isoDate(ntry?.BookgDt?.Dt ?? ntry?.ValDt?.Dt ?? ntry?.BookgDt?.Dbt);
       // The bank's own entry reference (AcctSvcrRef) is unique per entry and

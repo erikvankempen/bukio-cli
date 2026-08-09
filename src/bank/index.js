@@ -103,6 +103,12 @@ export function importTransactions(db, { iban, transactions, name = null, accoun
     if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== t.date) {
       throw bankError('INVALID_DATE', `transaction date '${t.date}' is not a valid calendar date`);
     }
+    // a float/undefined amount would store REAL/NULL and silently corrupt the
+    // account balance SUM — validate here like the date (postFromTransaction
+    // would fail later, but only at post time, after the corruption exists)
+    if (!Number.isInteger(t.amount_cents)) {
+      throw bankError('INVALID_AMOUNT', `transaction amount '${t.amount_cents}' must be an integer in cents`);
+    }
   }
   const account = getOrCreateBankAccount(db, { iban, name, accountCode });
   const insertTx = db.prepare(`

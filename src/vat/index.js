@@ -110,8 +110,14 @@ export function expandVatPostings(db, specs) {
       // Reverse charge / privégebruik: 0% codes, but the VAT due on the
       // verlegde levering / private use is computed at the standard rate (21%).
       const effectiveRateBp = (vat.type === 'reverse' || vat.type === 'private') ? 2100 : vat.rate_bp;
-      const vatAmount = Math.round(Math.abs(spec.amountCents * effectiveRateBp / 10000))
-        * Math.sign(spec.amountCents);
+      // private use (@P) is ALWAYS a deemed supply — the VAT is owed (credit
+      // 2500), regardless of the posting's sign. Following the posting's sign
+      // here would turn a debit-signed private-use booking (e.g. an expense
+      // taken privately) into a 2500 DEBIT that reduces te-betalen and makes
+      // the readout report negative 1d/5a — understating the position.
+      const vatAmount = vat.type === 'private'
+        ? -Math.round(Math.abs(spec.amountCents * effectiveRateBp / 10000))
+        : Math.round(Math.abs(spec.amountCents * effectiveRateBp / 10000)) * Math.sign(spec.amountCents);
 
       const isOutput = account.type === 'income' || vat.type === 'private';
       const vatAccountCode = (vat.type === 'reverse' || isOutput) ? '2500' : '1500';
@@ -266,7 +272,10 @@ export function obReadout(db, { period }) {
         f['5b'] += r.vat_amount_cents;
       }
     } else if (r.type === 'private') {
-      f['1d'] += -r.amount_cents;
+      // privégebruik is a deemed supply: the base (1d) is always positive and
+      // the VAT (5a) is always owed — the readout must not inherit the sign
+      // of whatever side the user booked the posting on
+      f['1d'] += Math.abs(r.amount_cents);
       f['5a'] += -r.vat_amount_cents;
     }
     // type 'margin' is excluded from the return

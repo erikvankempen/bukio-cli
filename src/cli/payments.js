@@ -289,7 +289,7 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const r = exportPaymentBatch(db, { id: Number(opts.id), schema: opts.schema ?? null, actor: ctx.actor, dryRun: opts.dryRun });
-          if (r.xml && opts.out) {
+          if (r.xml && opts.out && !opts.dryRun) {
             mkdirSync(dirname(opts.out) || '.', { recursive: true });
             writeFileSync(opts.out, r.xml);
           }

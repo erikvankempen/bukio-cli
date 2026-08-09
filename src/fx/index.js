@@ -106,7 +106,7 @@ export function listFxRates(db, { currency = null, limit = 50 } = {}) {
  * (stored as source='ECB' for reuse). Throws FX_RATE_NOT_FOUND /
  * ECB_RATE_NOT_AVAILABLE when nothing is available.
  */
-export async function resolveRate(db, { currency, rate, date, actor = 'human', noFetch = false }) {
+export async function resolveRate(db, { currency, rate, date, actor = 'human', noFetch = false, dryRun = false }) {
   if (!currency) return null;
   if (rate != null) return parseRate(rate);
   const stored = getFxRate(db, { currency, date });
@@ -118,7 +118,12 @@ export async function resolveRate(db, { currency, rate, date, actor = 'human', n
   if (!fetched) {
     throw fxError('ECB_RATE_NOT_AVAILABLE', `no ECB reference rate for ${currency} on/before ${date} (not in the ECB set, or before 1999)`);
   }
-  setFxRate(db, { currency, date: fetched.date, rate: fetched.rateX10000, source: 'ECB', actor });
+  // a dry-run must not write: the plan promises "nothing written", so the
+  // fetched rate is returned for the calculation but NOT persisted (the
+  // execute pass stores it via setFxRate then)
+  if (!dryRun) {
+    setFxRate(db, { currency, date: fetched.date, rate: fetched.rateX10000, source: 'ECB', actor });
+  }
   return fetched.rateX10000;
 }
 

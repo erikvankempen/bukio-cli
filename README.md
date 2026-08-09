@@ -10,7 +10,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-580%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-594%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -1005,30 +1005,33 @@ and good faith; it is not legal advice.
 ## AI Development Cost & Token Usage
 
 The entire project was built with AI assistance. For full transparency, here
-is the measured token consumption and its cost at **official DeepSeek API list
-prices** (`deepseek-v4-flash`, per 1M tokens): **$0.14** input (cache miss),
-**$0.0028** input (cache hit), **$0.28** output. Reasoning tokens are billed
-at the output rate. Data is captured by the `bukio-token-track` tool from the
-agent's session telemetry (snapshot 2026-08-08, 22:06).
+is the measured token consumption and its cost at **official list prices**
+(per 1M tokens; OpenCode Go / DeepSeek API, Aug 2026): **DeepSeek V4 Flash**
+**$0.14** input (cache miss), **$0.0028** cached input, **$0.28** output;
+**MiMo-V2.5-Pro** **$0.435** input, **$0.003625** cached input, **$0.87**
+output. Reasoning tokens are billed at the output rate. Data is captured by
+the `bukio-token-track` tool from the agent's session telemetry — including
+delegation subagent sessions (snapshot 2026-08-09, 04:17).
 
 **Proven stack:** bukio-cli is developed and operated end-to-end with
-**Hermes Agent** (Nous Research) running **DeepSeek V4 Flash** via OpenCode
-Go — every development session in the tracker below ran on that model, and
-the live day-to-day operations (bank imports, invoice booking, month-end
-checks) run on the same stack against this same codebase.
+**Hermes Agent** (Nous Research) via OpenCode Go. The main development
+sessions ran **DeepSeek V4 Flash** (a small number of calls via the DeepSeek
+API directly); the parallel code-review subagents (delegation batches) ran
+**MiMo-V2.5-Pro**, also via OpenCode Go. The live day-to-day operations
+(bank imports, invoice booking, month-end checks) run on the same stack
+against this same codebase.
 
-### Token usage — totals per token type
+### Token usage — per model
 
-| Token type | Tokens | Est. cost |
-|---|---|---|
-| Input (cache miss) | 13.58M | $1.90 |
-| Cached input (cache hit) | 1,025.15M | $2.87 |
-| Output | 3.48M | $0.97 |
-| Reasoning (at output rate) | 1.56M | $0.44 |
-| **Total** | **1,043.77M** | **$6.18** |
+| Model | API calls | Input | Cached input | Output | Reasoning | Est. cost |
+|---|---|---|---|---|---|---|
+| DeepSeek V4 Flash | 5,508 | 15.88M | 1,330.64M | 4.05M | 1.92M | $7.62 |
+| MiMo-V2.5-Pro (review subagents) | 574 | 6.82M | 42.12M | 1.06M | — | $4.05 |
+| **Total** | **6,090** | **22.71M** | **1,372.86M** | **5.11M** | **1.92M** | **$11.67** |
 
-**$6.18 total** at DeepSeek list prices for the entire project (4,442 API
-calls across all development sessions).
+**$11.67 total** at official list prices for the entire project (6,090 API
+calls across all development sessions, ≈ 1.40B tokens). An additional 8 API
+calls (≈ 9K tokens) ran on MiMo-V2.5 at ≈ $0.00.
 
 ### Owner time (contributed, unpaid)
 
@@ -1053,28 +1056,28 @@ Stated plainly, so nothing is hidden:
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
 - **It was free:** the ≈ €338 is an imputed opportunity cost, not money paid.
-  My out-of-pocket spend remains **$6.18** in API costs.
+  My out-of-pocket spend remains **$11.67** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
-  conventional code review of a 22.5 KLOC codebase would take; treat them as
+  conventional code review of a 23.3 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
 
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **22,467 non-blank, non-comment lines of JavaScript**
-across 101 files (12,942 in `src/`, 9,525 in `test/`), i.e. **22.47 KLOC**
+model (Boehm, 1981): **23,253 non-blank, non-comment lines of JavaScript**
+across 105 files (13,420 in `src/`, 9,833 in `test/`), i.e. **23.25 KLOC**
 (measured with `scc` v3.7.0).
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 63.0 PM | 12.1 months | ~5 developers | ≈ €567K |
-| Semi-detached | 97.9 PM | 12.4 months | ~8 developers | ≈ €881K |
-| Embedded | 150.7 PM | 12.4 months | ~12 developers | ≈ €1,356K |
+| Organic | 65.3 PM | 12.2 months | ~5 developers | ≈ €588K |
+| Semi-detached | 101.8 PM | 12.6 months | ~8 developers | ≈ €916K |
+| Embedded | 157.2 PM | 12.6 months | ~12 developers | ≈ €1,415K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 63–151
-person-months (≈ €567K–€1,356K)**; the AI-assisted build consumed **$6.18 in
+**Comparison:** a conventional team building this would estimate **≈ 65–157
+person-months (≈ €588K–€1,415K)**; the AI-assisted build consumed **$11.67 in
 API costs plus ≈ €338 of my review-and-direction time (contributed, unpaid
 — see above)** over five evenings and a Saturday — still a tiny fraction of
 the conventional estimate.

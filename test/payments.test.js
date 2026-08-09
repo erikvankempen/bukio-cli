@@ -13,7 +13,7 @@ import { createContact, updateContact, listContacts } from '../src/invoice/index
 import {
   addPayable, listPayables, markPayablePaid,
   createPaymentBatch, createPaymentBatchFromCsv, exportPaymentBatch,
-  deletePaymentBatch, getPaymentBatch, buildPain001, parseBatchCsv,
+  deletePaymentBatch, getPaymentBatch, buildPain001, parseBatchCsv, addMandate,
 } from '../src/payments/index.js';
 import { listEntries } from '../src/core/entries.js';
 
@@ -295,4 +295,34 @@ test('parseBatchCsv: comma-delimited rows keep the comma delimiter even when a f
   assert.equal(r.lines.length, 1);
   assert.equal(r.lines[0].contact, 'A&B; Trading');
   assert.equal(r.lines[0].amountCents, 10000);
+});
+
+test('addPayable: the same (contact, invoice_ref) twice is rejected while unpaid (double-payment guard)', () => {
+  const v = vendor();
+  addPayable(db, { contact: v.id, invoiceRef: 'F-2026-01', date: '2026-06-01', amountCents: 10000, actor: 'agent:test' });
+  assert.throws(
+    () => addPayable(db, { contact: v.id, invoiceRef: 'F-2026-01', date: '2026-06-01', amountCents: 10000, actor: 'agent:test' }),
+    { code: 'PAYABLE_DUPLICATE' },
+  );
+  // the same ref from a DIFFERENT contact is fine
+  const v2 = createContact(db, { name: 'Ander BV', iban: 'NL02ABNA0123456789', actor: 'agent:test' });
+  assert.doesNotThrow(() => addPayable(db, { contact: v2.id, invoiceRef: 'F-2026-01', date: '2026-06-01', amountCents: 10000, actor: 'agent:test' }));
+});
+
+test('createPaymentBatch: direct-debit lines require a SEPA mandate (pain.008 MndtId)', () => {
+  const v = vendor();
+  assert.throws(
+    () => createPaymentBatch(db, {
+      date: '2026-06-01', kind: 'direct_debit', debitIban: IBAN,
+      lines: [{ contact: v.id, amountCents: 10000 }], actor: 'agent:test',
+    }),
+    { code: 'BATCH_VALIDATION_FAILED' },
+  );
+  // with a mandate the same batch succeeds and carries the mandate into the XML
+  addMandate(db, { contactId: v.id, mandateRef: 'M-001', mandateDate: '2026-01-01', scheme: 'core', actor: 'agent:test' });
+  const batch = createPaymentBatch(db, {
+    date: '2026-06-01', kind: 'direct_debit', debitIban: IBAN,
+    lines: [{ contact: v.id, amountCents: 10000 }], actor: 'agent:test',
+  });
+  assert.ok(batch.lines[0].mandate_ref === 'M-001', 'the line must carry the resolved mandate');
 });

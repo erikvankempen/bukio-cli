@@ -149,7 +149,11 @@ tool({
   name: 'audit', description: 'append-only audit log', schema: {
     type: 'object', properties: { by: { type: 'string' }, since: { type: 'string' }, limit: { type: 'number' } },
   },
-  handler: (db, args) => ({ entries: auditList(db, { since: args.since ?? null, actor: args.by ?? null, limit: args.limit ?? 50 }) }),
+  handler: (db, args) => {
+    const limit = args.limit ?? 50;
+    if (!Number.isInteger(limit) || limit < 0) throw new McpError('INVALID_LIMIT', `limit must be a non-negative integer, got '${limit}'`);
+    return { entries: auditList(db, { since: args.since ?? null, actor: args.by ?? null, limit }) };
+  },
 });
 tool({
   name: 'compliance', description: 'compliance calendar for a year (OB/ICP deadlines, jaarrekening deposit)', schema: {
@@ -162,15 +166,32 @@ tool({
   },
 });
 tool({
-  name: 'invoices', description: 'outstanding + recent invoices', schema: {
-    type: 'object', properties: { limit: { type: 'number' } },
+  name: 'invoices',
+  description: 'list invoices — optional status filter (draft|sent|paid|overdue|void) and type filter (sales|credit); returns newest first',
+  schema: {
+    type: 'object', properties: {
+      limit: { type: 'number' }, status: { type: 'string' }, type: { type: 'string' },
+    },
   },
   handler: (db, args) => {
     const limit = args.limit ?? 50;
     if (!Number.isInteger(limit) || limit < 0) throw new McpError('INVALID_LIMIT', `limit must be a non-negative integer, got '${limit}'`);
-    return {
-      invoices: db.prepare('SELECT * FROM invoices ORDER BY id DESC LIMIT ?').all(limit),
-    };
+    const where = [];
+    const params = [];
+    if (args.status) {
+      if (!['draft', 'sent', 'paid', 'overdue', 'void'].includes(args.status)) {
+        throw new McpError('INVALID_STATUS', `status must be one of draft|sent|paid|overdue|void, got '${args.status}'`);
+      }
+      where.push('status = ?'); params.push(args.status);
+    }
+    if (args.type) {
+      if (!['sales', 'credit'].includes(args.type)) {
+        throw new McpError('INVALID_TYPE', `type must be 'sales' or 'credit', got '${args.type}'`);
+      }
+      where.push('invoice_type = ?'); params.push(args.type);
+    }
+    const sql = `SELECT * FROM invoices ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`;
+    return { invoices: db.prepare(sql).all(...params, limit) };
   },
 });
 
@@ -192,7 +213,7 @@ tool({
     const specs = parsePostingSpecs(args.postings);
     const converted = args.currency ? toEurPostings(specs, {
       currency: args.currency,
-      rateX10000: await resolveRate(db, { currency: args.currency, rate: args.rate, date: args.date, actor: args.actor ?? ctx.actor }),
+      rateX10000: await resolveRate(db, { currency: args.currency, rate: args.rate, date: args.date, actor: args.actor ?? ctx.actor, dryRun: Boolean(args.dryRun) }),
     }) : specs;
     const resolved = resolvePostings(db, converted);
     const sum = resolved.reduce((s, p) => s + p.amountCents, 0);
@@ -281,7 +302,7 @@ tool({
     const specs = parseVatPostingSpecs(args.postings);
     const converted = args.currency ? toEurPostings(specs, {
       currency: args.currency,
-      rateX10000: await resolveRate(db, { currency: args.currency, rate: args.rate, date: args.date, actor: args.actor ?? ctx.actor }),
+      rateX10000: await resolveRate(db, { currency: args.currency, rate: args.rate, date: args.date, actor: args.actor ?? ctx.actor, dryRun: Boolean(args.dryRun) }),
     }) : specs;
     const expanded = expandVatPostings(db, converted);
     // validate the DB-free invariants in dry-run too (parity with entry_add):
@@ -299,6 +320,14 @@ tool({
     const sum = expanded.reduce((s, p) => s + p.amountCents, 0);
     if (sum !== 0) {
       throw new McpError('UNBALANCED', `postings do not sum to zero (sum = ${sum})`);
+    }
+    // parity with entry_add: createEntry also rejects zero-amount postings
+    // (INVALID_AMOUNT_CENTS) — validate them in dry-run so the plan never
+    // precedes a failing execute
+    for (const p of expanded) {
+      if (!Number.isInteger(p.amountCents) || p.amountCents === 0) {
+        throw new McpError('INVALID_AMOUNT_CENTS', `posting ${p.code} must be a non-zero integer amount in cents`);
+      }
     }
     const plan = {
       action: 'vat.book', date: args.date, description: args.description, currency: args.currency ?? null,

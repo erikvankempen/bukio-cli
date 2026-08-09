@@ -18,8 +18,8 @@ import { validateDate } from '../core/entries.js';
 import { toEurPostings, resolveRate } from '../fx/index.js';
 
 /** Convert posting specs to EUR when --currency given; auto rate lookup + ECB fallback. */
-async function applyFxToSpecs(db, specs, { currency, rate, date, actor }) {
-  const rateX10000 = await resolveRate(db, { currency, rate, date, actor });
+async function applyFxToSpecs(db, specs, { currency, rate, date, actor, dryRun = false }) {
+  const rateX10000 = await resolveRate(db, { currency, rate, date, actor, dryRun });
   return toEurPostings(specs, { currency, rateX10000 });
 }
 
@@ -143,6 +143,13 @@ export function make(program) {
             const sum = expanded.reduce((s, p) => s + p.amountCents, 0);
             if (sum !== 0) {
               throw Object.assign(new Error(`postings do not sum to zero (sum = ${sum})`), { code: 'UNBALANCED' });
+            }
+            // parity with entry add: createEntry also rejects zero-amount
+            // postings (INVALID_AMOUNT_CENTS) — validate them in dry-run
+            for (const p of expanded) {
+              if (!Number.isInteger(p.amountCents) || p.amountCents === 0) {
+                throw dbError('INVALID_AMOUNT_CENTS', `posting ${p.code} must be a non-zero integer amount in cents`);
+              }
             }
             output(ctx, {
               action: 'book VAT entry (expanded)',
