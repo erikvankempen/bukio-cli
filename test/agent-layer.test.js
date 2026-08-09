@@ -18,6 +18,7 @@ import {
 import { complianceStatus, markFiled, quarterDeadline, jaarrekeningDeadline } from '../src/compliance/index.js';
 import { fetchEcbRate, parseSdmxObservations, setEcbFetcher, clearEcbFetcher } from '../src/fx/ecb.js';
 import { addAsset } from '../src/assets/index.js';
+import { createContact, createInvoice, finalizeInvoice } from '../src/invoice/index.js';
 
 const SDMX_USD = `<?xml version="1.0" encoding="UTF-8"?>
 <message:GenericData xmlns:message="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message" xmlns:generic="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/generic">
@@ -407,6 +408,47 @@ test('MCP: initialize + tools/list + read-only calls work end-to-end', async () 
     const journalTool = tools.result.tools.find((t) => t.name === 'journal');
     assert.ok(journalTool, 'journal tool exists');
     assert.deepEqual(journalTool.inputSchema.required, ['year']);
+  } finally {
+    await mcp.close();
+  }
+});
+
+test('MCP: invoices tool derives the overdue status (regression)', async () => {
+  const tmp = await import('node:fs/promises');
+  const dir = await tmp.mkdtemp('/tmp/mcp-test-');
+  const dbPath = `${dir}/x.db`;
+  const fileDb = openDb(dbPath);
+  seedDefaultChart(fileDb);
+  fileDb.prepare(`
+    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
+            'Industrieweg 12', '2712 CD', 'Zoetermeer', 1)
+  `).run();
+  enableVatModule(fileDb);
+  const contact = createContact(fileDb, { name: 'Klant BV', address: 'Straat 1', city: 'Amsterdam', actor: 'agent:test' });
+  // due 2026-07-01 — in the past → derived status 'overdue' (never stored)
+  const inv = createInvoice(fileDb, { contactId: contact.id, date: '2026-06-01', dueDays: 30, lines: ['Ding @ 100.00 @21'], actor: 'agent:test' });
+  const fin = finalizeInvoice(fileDb, { id: inv.id, actor: 'agent:test' });
+  fileDb.close();
+
+  const mcp = mcpSession(dbPath);
+  try {
+    await mcp.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+
+    const overdue = await mcp.call('tools/call', { name: 'invoices', arguments: { status: 'overdue' } });
+    assert.equal(overdue.result.isError, false);
+    const odata = JSON.parse(overdue.result.content[0].text);
+    assert.equal(odata.invoices.length, 1, 'the overdue invoice must appear via status=overdue');
+    assert.equal(odata.invoices[0].invoice_number, fin.invoice.invoice_number);
+
+    // the stored status is 'sent' — the same invoice shows up there too
+    const sent = await mcp.call('tools/call', { name: 'invoices', arguments: { status: 'sent' } });
+    const sdata = JSON.parse(sent.result.content[0].text);
+    assert.equal(sdata.invoices.length, 1);
+
+    // invalid status still rejected
+    const bad = await mcp.call('tools/call', { name: 'invoices', arguments: { status: 'bogus' } });
+    assert.equal(bad.result.isError, true);
   } finally {
     await mcp.close();
   }

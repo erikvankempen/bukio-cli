@@ -23,7 +23,7 @@ import {
 } from '../core/entries.js';
 import { bookVatEntry, expandVatPostings, obReadout, parseVatPostingSpecs } from '../vat/index.js';
 import {
-  createContact, createInvoice, finalizeInvoice, creditInvoice, markPaid, getInvoice,
+  createContact, createInvoice, finalizeInvoice, creditInvoice, markPaid, getInvoice, listInvoices,
 } from '../invoice/index.js';
 import { runDue, previewDue } from '../recurring/index.js';
 import { register, addAsset, runDue as assetsRunDue, disposeAsset } from '../assets/index.js';
@@ -176,22 +176,18 @@ tool({
   handler: (db, args) => {
     const limit = args.limit ?? 50;
     if (!Number.isInteger(limit) || limit < 0) throw new McpError('INVALID_LIMIT', `limit must be a non-negative integer, got '${limit}'`);
-    const where = [];
-    const params = [];
-    if (args.status) {
-      if (!['draft', 'sent', 'paid', 'overdue', 'void'].includes(args.status)) {
-        throw new McpError('INVALID_STATUS', `status must be one of draft|sent|paid|overdue|void, got '${args.status}'`);
-      }
-      where.push('status = ?'); params.push(args.status);
+    if (args.status && !['draft', 'sent', 'paid', 'overdue', 'void'].includes(args.status)) {
+      throw new McpError('INVALID_STATUS', `status must be one of draft|sent|paid|overdue|void, got '${args.status}'`);
     }
-    if (args.type) {
-      if (!['sales', 'credit'].includes(args.type)) {
-        throw new McpError('INVALID_TYPE', `type must be 'sales' or 'credit', got '${args.type}'`);
-      }
-      where.push('invoice_type = ?'); params.push(args.type);
+    if (args.type && !['sales', 'credit'].includes(args.type)) {
+      throw new McpError('INVALID_TYPE', `type must be 'sales' or 'credit', got '${args.type}'`);
     }
-    const sql = `SELECT * FROM invoices ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY id DESC LIMIT ?`;
-    return { invoices: db.prepare(sql).all(...params, limit) };
+    // listInvoices, NOT a raw `status = ?` filter: 'overdue' is a DERIVED
+    // status (sent + past due) that is never stored — a raw SQL filter
+    // would silently return an empty list for the tool's own documented
+    // status value (the CLI path already routes through listInvoices)
+    const rows = listInvoices(db, { status: args.status ?? null, type: args.type ?? null });
+    return { invoices: rows.slice(0, limit) };
   },
 });
 

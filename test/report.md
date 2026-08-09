@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-09 07:16:47 UTC — **✅ 597 passing · 0 failing (597 tests)**
+**Latest run:** 2026-08-09 07:21:03 UTC — **✅ 598 passing · 0 failing (598 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -31,7 +31,7 @@
 
 ### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar
 
-22 passing · 0 failing
+23 passing · 0 failing
 
     - ✅ fx: parseRate and convertFx — integer math, round-half-up
     - ✅ fx: setFxRate upsert + audit; getFxRate exact then latest-on/before
@@ -49,6 +49,7 @@
     - ✅ compliance: calendar shows obligations, statuses flip with filings
     - ✅ compliance: closed books show on the jaarrekening obligation
     - ✅ MCP: initialize + tools/list + read-only calls work end-to-end
+    - ✅ MCP: invoices tool derives the overdue status (regression)
     - ✅ MCP: non-object JSON-RPC messages get Invalid Request, server survives
     - ✅ MCP: mutations are plan-only by default; execute books with the actor
     - ✅ MCP: assets_run books DEPRECIATION, not recurring entries (import-collision regression)
