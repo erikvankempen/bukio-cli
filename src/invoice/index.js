@@ -415,7 +415,7 @@ export function contactStatement(db, { contactId, asOf = null }) {
       description: isCredit ? `Creditnota ${i.invoice_number ?? ''}`.trim() : (i.description ?? `Factuur ${i.invoice_number}`),
       debit_cents: isCredit ? 0 : i.gross_cents, credit_cents: isCredit ? i.gross_cents : 0, balance_cents: 0,
     });
-    for (const p of i.payments) {
+    for (const p of i.payments.filter((x) => x.date <= asOfDate)) {
       // payments on a credit note are refunds we paid — reversed polarity
       rows.push({
         date: p.date, kind: 'payment', ref: i.invoice_number,

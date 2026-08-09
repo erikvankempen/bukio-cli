@@ -9,7 +9,6 @@
 // then resets to origin/main on explicit --yes. The company database (if
 // one exists) gets an audit row; the books themselves are never touched.
 import path from 'node:path';
-import { existsSync } from 'node:fs';
 import { ensureDb, makeCtx, output, fail } from './util.js';
 import { planUpdate, runUpdate, resolveRepoRoot } from '../update/index.js';
 
@@ -26,10 +25,10 @@ export function make(program) {
       try {
         const repoPath = opts.repo ? path.resolve(opts.repo) : resolveRepoRoot();
         // the company DB is only used for the audit row; update works without
-        // one — and it must NOT create the file (openDb would create it and
-        // run every migration, even in --dry-run; a missing ~/.bukio/ dir
-        // even throws SQLITE_CANTOPEN). Use null and let the audit skip.
-        const db = existsSync(ctx.dbPath) ? ensureDb(ctx) : null;
+        // one — ensureDb({mustExist:false}) returns null for a missing file
+        // and never creates it (openDb would create + migrate, even in
+        // --dry-run, and a missing ~/.bukio/ dir would throw SQLITE_CANTOPEN)
+        const db = ensureDb(ctx, { mustExist: false });
         try {
           if (ctx.dryRun) {
             const plan = planUpdate({ repoPath, verifyRemote: !opts.trustRemote });

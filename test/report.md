@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-09 02:08:36 UTC — **✅ 594 passing · 0 failing (594 tests)**
+**Latest run:** 2026-08-09 07:16:47 UTC — **✅ 597 passing · 0 failing (597 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -213,7 +213,7 @@
 
 ### edge-cases.test.js — rounding, boundaries, idempotency, lifecycle violations, dry-run hygiene
 
-36 passing · 0 failing
+37 passing · 0 failing
 
     - ✅ ledger: unbalanced, zero-amount, too-few postings rejected
     - ✅ ledger: same account on both sides is legal
@@ -251,6 +251,7 @@
     - ✅ icp: RE base uses the DISCOUNTED amount (agrees with the OB 2a base)
     - ✅ fx: setFxRate with a raw float rate parses as 1.0875, not 1.0875 x10000
     - ✅ all mutating paths leave no trace in dry-run
+    - ✅ ensureDb(mustExist:false) returns null and never creates the database file
 
 ### entries.test.js — journal entries: add/post/reverse, immutability
 
@@ -622,7 +623,7 @@
 
 ### reports-v014.test.js — aging buckets, contact statements, sales analytics (by contact/item)
 
-11 passing · 0 failing
+12 passing · 0 failing
 
     - ✅ aging debtors: buckets, totals, paid excluded, contacts sorted by total
     - ✅ aging debtors: invoices issued AFTER the as-of date are excluded, item totals netted by credits
@@ -631,6 +632,7 @@
     - ✅ aging validation: bad as-of and kind rejected
     - ✅ contact statement: running balance ends at outstanding; supplier side negative
     - ✅ contact statement: credit notes reduce the balance (regression)
+    - ✅ contact statement: payments after the as-of date are excluded (as-of leak regression)
     - ✅ sales by contact: net/vat/gross from the totals engine; credit notes excluded
     - ✅ sales by item: catalog items group by item_id, ad-hoc lines by description
     - ✅ cli: report aging + sales + contact statement e2e with csv export
@@ -746,7 +748,7 @@
 
 ### year-end.test.js — annual close, jaarrekening micro/klein, ICP
 
-20 passing · 0 failing
+21 passing · 0 failing
 
     - ✅ year-end close: posts closing + appropriation, balanced, source closing
     - ✅ year-end close: reversing the closing entries re-opens the year (documented undo)
@@ -763,6 +765,7 @@
     - ✅ jaarrekening: PDF html renders account detail without NaN
     - ✅ jaarrekening: pnl includes the Afschrijvingen line for WAFS.41
     - ✅ jaarrekening PDF: renders (playwright)
+    - ✅ jaarrekening PDF: esc() escapes double quotes (attribute-injection regression)
     - ✅ OB readout: R purchase -> 3a/4a, RE purchase -> 3b/4b, RE sale -> 2a
     - ✅ OB readout: verlegde EU sale (RE invoice) reports 2a
     - ✅ ICP readout: EU customers with RE lines, totals per customer

@@ -242,6 +242,26 @@ test('contact statement: credit notes reduce the balance (regression)', () => {
   assert.equal(st.balance_cents, 0); // 100.00 invoice − 100.00 creditnote
 });
 
+test('contact statement: payments after the as-of date are excluded (as-of leak regression)', () => {
+  const inv = makeFinalized(t.contacts.acme.id, { date: '2026-07-01', lines: ['Ding @ 100.00'] });
+  // one payment BEFORE the as-of, one AFTER
+  markPaid(db, { id: inv.invoice.id, date: '2026-07-20', amountCents: 2000, actor: 'agent:test' });
+  markPaid(db, { id: inv.invoice.id, date: '2026-08-20', amountCents: 3000, actor: 'agent:test' });
+
+  const r = contactStatement(db, { contactId: t.contacts.acme.id, asOf: '2026-08-08' });
+  const payments = r.rows.filter((x) => x.kind === 'payment');
+  assert.equal(payments.length, 1, 'only the pre-as-of payment appears at as-of 2026-08-08');
+  assert.equal(payments[0].credit_cents, 2000);
+  assert.equal(r.balance_cents, 10000 - 2000, 'the July payment must not reduce the as-of balance');
+
+  // without asOf the statement is the full history up to today — the
+  // August payment is in the future, so use an explicit as-of for the
+  // full-history check: both payments show
+  const full = contactStatement(db, { contactId: t.contacts.acme.id, asOf: '2026-09-30' });
+  assert.equal(full.rows.filter((x) => x.kind === 'payment').length, 2);
+  assert.equal(full.balance_cents, 10000 - 2000 - 3000);
+});
+
 test('sales by contact: net/vat/gross from the totals engine; credit notes excluded', () => {
   makeFinalized(t.contacts.acme.id, { date: '2026-01-10', lines: ['Ding @ 100.00'] }); // 0% vat-off → net 100.00
   makeFinalized(t.contacts.acme.id, { date: '2026-03-15', lines: ['Ding @ 50.00'], dueDays: 30 });

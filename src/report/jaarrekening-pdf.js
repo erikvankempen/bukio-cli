@@ -12,7 +12,9 @@ import { formatAmount } from '../core/money.js';
 import { pdfError } from '../invoice/pdf.js';
 
 function esc(s) {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // quotes too (like every other esc() in the codebase): user data may end
+  // up inside an HTML attribute — a raw " would break out of it
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function sideLines(lines) {

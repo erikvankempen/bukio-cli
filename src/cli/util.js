@@ -65,6 +65,11 @@ export function ensureDb(ctx, { create = false, mustExist = true } = {}) {
       mkdirSync(path.dirname(ctx.dbPath), { recursive: true });
     } else if (mustExist) {
       throw dbError('NO_DATABASE', `no database at ${ctx.dbPath} — run 'bukio init' first`);
+    } else {
+      // tolerate a missing DB — do NOT open it: openDb() would CREATE the
+      // file and run every migration (even in --dry-run), and a missing
+      // parent dir would throw SQLITE_CANTOPEN instead of "no database"
+      return null;
     }
   }
   return openDb(ctx.dbPath);

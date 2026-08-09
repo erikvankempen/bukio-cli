@@ -283,6 +283,15 @@ test('jaarrekening PDF: renders (playwright)', async () => {
   assert.ok(pdf.bytes > 5000);
 });
 
+test('jaarrekening PDF: esc() escapes double quotes (attribute-injection regression)', () => {
+  entry('2026-03-01', 'Omzet', [{ code: '1100', amountCents: 12100 }, { code: '8000', amountCents: -10000 }, { code: '2500', amountCents: -2100 }]);
+  db.prepare('UPDATE company SET name = ? WHERE id = 1').run('Test "Bedrijf" BV');
+  const r = jaarrekening(db, { year: 2026, model: 'klein' });
+  const html = jaarrekeningHtml(r);
+  assert.ok(html.includes('Test &quot;Bedrijf&quot; BV'), 'company name must be HTML-escaped');
+  assert.ok(!html.includes('Test "Bedrijf" BV'), 'raw quotes must not reach the HTML');
+});
+
 test('OB readout: R purchase -> 3a/4a, RE purchase -> 3b/4b, RE sale -> 2a', () => {
   // binnenlandse verlegde inkoop
   bookVatEntry(db, {

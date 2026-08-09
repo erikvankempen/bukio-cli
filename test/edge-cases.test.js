@@ -8,7 +8,11 @@
 // lifecycle violations, idempotency. Each test asserts real behaviour only.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { openDb } from '../src/core/db.js';
+import { ensureDb } from '../src/cli/util.js';
 import { seedDefaultChart } from '../src/core/accounts.js';
 import { createEntry, postEntry, getEntry, reverseEntry } from '../src/core/entries.js';
 import { enableVatModule, bookVatEntry, parseVatPostingSpecs, obReadout } from '../src/vat/index.js';
@@ -478,4 +482,16 @@ test('all mutating paths leave no trace in dry-run', () => {
   assert.equal(db.prepare("SELECT COUNT(*) c FROM journal_entries WHERE source='recurring'").get().c, 0);
   yearEndClose(db, { year: 2026, dryRun: true });
   assert.equal(db.prepare("SELECT COUNT(*) c FROM journal_entries WHERE source='closing'").get().c, 0);
+});
+
+test('ensureDb(mustExist:false) returns null and never creates the database file', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-nodb-'));
+  const missing = path.join(dir, 'absent.db');
+  const ctx = { dbPath: missing, json: true, actor: 'human:test', dryRun: true };
+  const db = ensureDb(ctx, { mustExist: false });
+  assert.equal(db, null, 'a missing DB must yield null, not a handle');
+  assert.equal(existsSync(missing), false, 'the file must not be created');
+  // the default (mustExist:true) still throws NO_DATABASE
+  assert.throws(() => ensureDb(ctx), (e) => e.code === 'NO_DATABASE');
+  rmSync(dir, { recursive: true, force: true });
 });
