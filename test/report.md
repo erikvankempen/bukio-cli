@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-09 07:21:03 UTC — **✅ 598 passing · 0 failing (598 tests)**
+**Latest run:** 2026-08-09 07:36:51 UTC — **✅ 600 passing · 0 failing (600 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -159,7 +159,7 @@
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
-26 passing · 0 failing
+27 passing · 0 failing
 
     - ✅ init --dry-run: shows plan, creates nothing
     - ✅ init: creates company + 30-account chart with VAT on
@@ -187,6 +187,7 @@
     - ✅ entry post --dry-run: rejects non-draft entries instead of a green plan
     - ✅ entry reverse --dry-run: rejects drafts (NOT_POSTED) and double reversals
     - ✅ vat book --dry-run: validates date and description like the execute path
+    - ✅ version: --version and the MCP serverInfo match package.json (drift guard)
 
 ### company.test.js — company show/update
 
@@ -499,7 +500,7 @@
 
 ### invoice.test.js — invoicing: lifecycle, 12-vereisten, credit notes, payments, reminders
 
-26 passing · 0 failing
+27 passing · 0 failing
 
     - ✅ parseLineSpec: qty, description, price, vat
     - ✅ createInvoice: draft with line math (2x 150 @21 = 300 net, 63 vat)
@@ -527,6 +528,7 @@
     - ✅ invoiceReminders: credit notes are not reminder candidates
     - ✅ validateCompliance: VAT-exempt company without btw-id can still invoice
     - ✅ validateCompliance: VAT company without btw-id still fails SUPPLIER_INCOMPLETE
+    - ✅ createContact: dashed IBAN is stored in the canonical dash-free form (normalizer parity)
 
 ### money.test.js — integer-cents money helpers
 

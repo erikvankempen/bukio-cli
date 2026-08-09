@@ -611,3 +611,14 @@ test('vat book --dry-run: validates date and description like the execute path',
   assert.equal(r.code, 1);
   assert.equal(r.out.error.code, 'INVALID_DATE');
 });
+
+test('version: --version and the MCP serverInfo match package.json (drift guard)', () => {
+  const pkg = JSON.parse(readFileSync(path.join(path.dirname(BIN), '..', 'package.json'), 'utf8'));
+  // the CLI version string comes from the binary itself
+  const out = execFileSync(process.execPath, [BIN, '--version'], { encoding: 'utf8' }).trim();
+  assert.equal(out, pkg.version, `bukio --version must equal package.json (${pkg.version})`);
+  // the MCP serverInfo version is a separate literal — grep the source so a
+  // release bump cannot silently drift one of the three version strings
+  const mcpSrc = readFileSync(path.join(path.dirname(BIN), '..', 'src', 'cli', 'mcp.js'), 'utf8');
+  assert.ok(mcpSrc.includes(`version: '${pkg.version}'`), `mcp.js serverInfo must carry ${pkg.version}`);
+});

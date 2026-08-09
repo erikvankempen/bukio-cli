@@ -14,7 +14,7 @@ import { enableVatModule } from '../src/vat/index.js';
 import {
   buildInvoicePostings, createContact, createInvoice, creditInvoice,
   finalizeInvoice, getInvoice, invoiceReminders, markPaid, nextInvoiceNumber, parseLineSpec,
-  validateCompliance,
+  updateContact, validateCompliance,
 } from '../src/invoice/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { importTransactions, autoMatch } from '../src/bank/index.js';
@@ -497,4 +497,19 @@ test('validateCompliance: VAT company without btw-id still fails SUPPLIER_INCOMP
   db.prepare('UPDATE company SET btw_id = NULL WHERE id = 1').run(); // vat_module stays on
   addContact();
   assert.throws(() => finalizeInvoice(db, { id: mkInvoice().id, actor: 'agent:test' }), { code: 'SUPPLIER_INCOMPLETE' });
+});
+
+test('createContact: dashed IBAN is stored in the canonical dash-free form (normalizer parity)', () => {
+  // same class as the round-14 bank normalizer fix: createContact used to
+  // strip only spaces (keeping dashes) while updateContact strips dashes
+  // too — the same field stored in two shapes depending on the command
+  const c = createContact(db, {
+    name: 'Dash BV', address: 'Straat 1', city: 'Amsterdam',
+    iban: 'NL91-ABNA-0417-1643-00', actor: 'agent:test',
+  });
+  assert.equal(c.iban, 'NL91ABNA0417164300', 'dashes must be stripped at create');
+  // a later plain update must resolve to the SAME stored row, not a duplicate
+  const updated = updateContact(db, { id: c.id, city: 'Utrecht', actor: 'agent:test' });
+  assert.equal(updated.iban, 'NL91ABNA0417164300');
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM contacts WHERE iban = ?').get('NL91ABNA0417164300').c, 1);
 });

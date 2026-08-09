@@ -280,7 +280,10 @@ export function createContact(db, {
 }) {
   if (!name || typeof name !== 'string' || !name.trim()) throw invoiceError('INVALID_NAME', 'contact needs a name');
   if (iban != null && !isValidIban(iban)) throw invoiceError('INVALID_IBAN', `'${iban}' is not a valid IBAN`);
-  const cleanIban = iban ? iban.trim().replace(/\s+/g, '') : null;
+  // canonical storage form — same as updateContact and every consumer
+  // (normalizeIban strips spaces AND dashes; a space-only strip kept dashes,
+  // so create vs update stored the same IBAN in two different shapes)
+  const cleanIban = iban != null ? normalizeIban(iban) : null;
   if (dryRun) {
     return {
       action: 'contact.create', name, address, postalCode, city, country, email,
