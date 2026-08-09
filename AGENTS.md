@@ -15,7 +15,6 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 7. **Money is integer cents.** `amount_cents` in JSON is the truth. `amount` strings are for humans. No floats, ever.
 8. **Archive every source document.** When booking an invoice (or any posted document — purchase invoice, credit note, bank proof), copy the original PDF/image/XML to `~/.bukio/invoices/` next to the live DB before finishing, named `YYYY-MM-DD_<vendor-slug>_<invoice-number>.<ext>` (see 6.17). The books then carry their paper trail.
 9. **Every source file carries the license header.** New `.js`/`.mjs` files start with the standard header — project name, copyright Erik van Kempen, `SPDX-License-Identifier: Apache-2.0` — copied verbatim from any existing `src/` file (shebang files keep the shebang on line 1, header after). Never drop, edit, or reorder it.
-10. **Every change lands in `CHANGELOG.md`.** New features/fixes/renames go under `[Unreleased]` (the `dev` branch) with Added/Changed/Fixed sections; at release they move to a version heading matching `package.json`. No commit that changes behaviour ships without a changelog entry.
 
 ---
 

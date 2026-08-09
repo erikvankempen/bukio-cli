@@ -242,4 +242,4 @@ merged to `main` and released.
 
 ---
 
-_Kept up to date on every change; see AGENTS.md house rules._
+_Kept up to date on every change — see the bukio-cli-development skill for the changelog convention._

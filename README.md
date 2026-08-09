@@ -807,6 +807,8 @@ npm test          # node --test — discovers test/*.test.js
 
 The suite covers: money parsing, posting engine invariants, reversal semantics, DB triggers (balance, immutability, append-only audit), trial balance math, and end-to-end CLI flows against temporary databases.
 
+The version history is recorded in [CHANGELOG.md](CHANGELOG.md); the agent manual for driving the tool lives in [AGENTS.md](AGENTS.md).
+
 ---
 
 ## Error Codes
