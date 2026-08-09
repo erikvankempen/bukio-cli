@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-09 08:00:45 UTC — **✅ 602 passing · 0 failing (602 tests)**
+**Latest run:** 2026-08-09 08:06:14 UTC — **✅ 603 passing · 0 failing (603 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -31,7 +31,7 @@
 
 ### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar
 
-23 passing · 0 failing
+24 passing · 0 failing
 
     - ✅ fx: parseRate and convertFx — integer math, round-half-up
     - ✅ fx: setFxRate upsert + audit; getFxRate exact then latest-on/before
@@ -44,6 +44,7 @@
     - ✅ fx: missing rate auto-fetches from ECB, stores it, and reuses it
     - ✅ fx: BUKIO_FX_NO_FETCH blocks the ECB fallback
     - ✅ fx: ECB has no rate for the currency -> ECB_RATE_NOT_AVAILABLE
+    - ✅ MCP: resolveMcpFx never stores the fetched ECB rate on a plan-only call (dry-run write regression)
     - ✅ compliance: quarterly deadlines
     - ✅ compliance: jaarrekening deadline is 13 months after the fiscal year end
     - ✅ compliance: calendar shows obligations, statuses flip with filings

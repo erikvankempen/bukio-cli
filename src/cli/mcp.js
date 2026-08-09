@@ -71,6 +71,22 @@ function guardExecute(ctx, args) {
   }
 }
 
+/**
+ * Resolve posting specs to EUR when a currency is given. The rate lookup
+ * must NOT store anything on a plan-only call — the dry-run flag derives
+ * from the MODE (modeOf), never from `args.dryRun`, which is not declared
+ * in any tool schema and can therefore never be set by a client (a dead
+ * flag made every dry-run store the ECB-fetched rate + an audit row).
+ */
+export async function resolveMcpFx(db, specs, args, ctx) {
+  if (!args.currency) return specs;
+  const rateX10000 = await resolveRate(db, {
+    currency: args.currency, rate: args.rate, date: args.date,
+    actor: args.actor ?? ctx.actor, dryRun: modeOf(args) === 'dry-run',
+  });
+  return toEurPostings(specs, { currency: args.currency, rateX10000 });
+}
+
 function fmtMoney(cents) {
   return (cents / 100).toFixed(2);
 }
@@ -207,10 +223,7 @@ tool({
   handler: async (db, args, ctx) => {
     guardExecute(ctx, args);
     const specs = parsePostingSpecs(args.postings);
-    const converted = args.currency ? toEurPostings(specs, {
-      currency: args.currency,
-      rateX10000: await resolveRate(db, { currency: args.currency, rate: args.rate, date: args.date, actor: args.actor ?? ctx.actor, dryRun: Boolean(args.dryRun) }),
-    }) : specs;
+    const converted = await resolveMcpFx(db, specs, args, ctx);
     const resolved = resolvePostings(db, converted);
     const sum = resolved.reduce((s, p) => s + p.amountCents, 0);
     // validate the DB-free invariants in dry-run too — the old plan echoed
@@ -296,10 +309,7 @@ tool({
   handler: async (db, args, ctx) => {
     guardExecute(ctx, args);
     const specs = parseVatPostingSpecs(args.postings);
-    const converted = args.currency ? toEurPostings(specs, {
-      currency: args.currency,
-      rateX10000: await resolveRate(db, { currency: args.currency, rate: args.rate, date: args.date, actor: args.actor ?? ctx.actor, dryRun: Boolean(args.dryRun) }),
-    }) : specs;
+    const converted = await resolveMcpFx(db, specs, args, ctx);
     const expanded = expandVatPostings(db, converted);
     // validate the DB-free invariants in dry-run too (parity with entry_add):
     // expandVatPostings validated codes/accounts, but date/description/count

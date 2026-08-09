@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { openDb } from '../src/core/db.js';
 import { seedDefaultChart } from '../src/core/accounts.js';
-import { createEntry, postEntry, getEntry, reverseEntry } from '../src/core/entries.js';
+import { createEntry, postEntry, getEntry, reverseEntry, parsePostingSpecs } from '../src/core/entries.js';
 import { enableVatModule, bookVatEntry, parseVatPostingSpecs, obReadout } from '../src/vat/index.js';
 import {
   setFxRate, getFxRate, convertFx, parseRate, toEurPostings, listFxRates, resolveRate,
@@ -19,6 +19,7 @@ import { complianceStatus, markFiled, quarterDeadline, jaarrekeningDeadline } fr
 import { fetchEcbRate, parseSdmxObservations, setEcbFetcher, clearEcbFetcher } from '../src/fx/ecb.js';
 import { addAsset } from '../src/assets/index.js';
 import { createContact, createInvoice, finalizeInvoice } from '../src/invoice/index.js';
+import { resolveMcpFx } from '../src/cli/mcp.js';
 
 const SDMX_USD = `<?xml version="1.0" encoding="UTF-8"?>
 <message:GenericData xmlns:message="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message" xmlns:generic="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/generic">
@@ -240,6 +241,31 @@ test('fx: ECB has no rate for the currency -> ECB_RATE_NOT_AVAILABLE', async () 
   setEcbFetcher(okStub('<?xml version="1.0"?><message:GenericData></message:GenericData>'));
   try {
     await assert.rejects(() => resolveRate(db, { currency: 'USD', date: '2026-08-01', actor: 'a' }), { code: 'ECB_RATE_NOT_AVAILABLE' });
+  } finally {
+    clearEcbFetcher();
+  }
+});
+
+test('MCP: resolveMcpFx never stores the fetched ECB rate on a plan-only call (dry-run write regression)', async () => {
+  // the entry_add/vat_book handlers used to pass dryRun: Boolean(args.dryRun)
+  // — a flag NOT in any tool schema, so always false — making every plan-only
+  // call fetch and STORE the ECB rate (+ audit row). The flag must derive
+  // from the mode; execute stores, dry-run does not.
+  setEcbFetcher(okStub(SDMX_USD));
+  try {
+    const specs = parsePostingSpecs(['1100:100.00', '8000:-100.00']);
+    // default mode (no mode arg) = plan-only
+    const plan = await resolveMcpFx(db, specs, { currency: 'USD', date: '2026-08-06' }, { actor: 'agent:test' });
+    assert.equal(plan.length, 2);
+    assert.equal(db.prepare('SELECT COUNT(*) c FROM fx_rates').get().c, 0, 'no rate stored on a plan-only call');
+    assert.equal(db.prepare("SELECT COUNT(*) c FROM audit_log WHERE action = 'fx.set'").get().c, 0, 'no fx.set audit row on a plan-only call');
+    // explicit dry-run mode behaves identically
+    await resolveMcpFx(db, specs, { currency: 'USD', date: '2026-08-06', mode: 'dry-run' }, { actor: 'agent:test' });
+    assert.equal(db.prepare('SELECT COUNT(*) c FROM fx_rates').get().c, 0);
+    // execute mode stores the fetched rate for reuse
+    await resolveMcpFx(db, specs, { currency: 'USD', date: '2026-08-06', mode: 'execute' }, { actor: 'agent:test' });
+    assert.equal(db.prepare('SELECT COUNT(*) c FROM fx_rates').get().c, 1, 'execute stores the fetched rate');
+    assert.equal(db.prepare("SELECT COUNT(*) c FROM audit_log WHERE action = 'fx.set'").get().c, 1);
   } finally {
     clearEcbFetcher();
   }
