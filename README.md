@@ -1034,19 +1034,20 @@ against this same codebase.
 calls across all development sessions, ≈ 1.46B tokens). An additional 8 API
 calls (≈ 9K tokens) ran on MiMo-V2.5 at ≈ $0.00.
 
-### Owner time (contributed, unpaid)
+### Developer Time (contributed, unpaid)
 
 Beyond API spend, this project took my review-and-direction time: five
 evenings after work (Aug 4–7, 2026), ≈ 1 hour of effective time per
-evening — plus Saturday (Aug 8, 2026), ≈ 2.5 clock hours of review and
-direction — i.e. roughly **7.5 hours total**, all contributed unpaid.
+evening — plus Saturday (Aug 8, 2026) and Sunday (Aug 9, 2026), ≈ 2.5 clock
+hours of review and direction each — i.e. roughly **10 hours total**, all
+contributed unpaid.
 
 At a **senior** Dutch software-developer rate of **≈ €45/hour** (Amsterdam
 senior average, 2026: €45/h
 [Glassdoor](https://www.glassdoor.com/Salaries/amsterdam-netherlands-senior-software-engineer-salary-SRCH_IL.0,21_IM1112_KO22,46.htm),
 €45.50/h
 [SalaryExpert](https://www.salaryexpert.com/salary/job/software-developer/netherlands/amsterdam);
-the national average is lower), my time is worth **≈ €338**.
+the national average is lower), my time is worth **≈ €450**.
 
 Stated plainly, so nothing is hidden:
 
@@ -1056,7 +1057,7 @@ Stated plainly, so nothing is hidden:
   professional rate overstates the market value of my review time by a wide
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
-- **It was free:** the ≈ €338 is an imputed opportunity cost, not money paid.
+- **It was free:** the ≈ €450 is an imputed opportunity cost, not money paid.
   My out-of-pocket spend remains **$11.93** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
   conventional code review of a 23.3 KLOC codebase would take; treat them as
@@ -1079,8 +1080,8 @@ across 105 files (13,429 in `src/`, 9,960 in `test/`), i.e. **23.39 KLOC**
 
 **Comparison:** a conventional team building this would estimate **≈ 66–158
 person-months (≈ €591K–€1,424K)**; the AI-assisted build consumed **$11.93 in
-API costs plus ≈ €338 of my review-and-direction time (contributed, unpaid
-— see above)** over five evenings and a Saturday — still a tiny fraction of
+API costs plus ≈ €450 of my review-and-direction time (contributed, unpaid
+— see above)** over five evenings, a Saturday and a Sunday — still a tiny fraction of
 the conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.
