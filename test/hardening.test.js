@@ -1688,10 +1688,10 @@ test('fx set rejects a day-overflow date (it used to store 2026-02-30 in fx_rate
   assert.throws(() => setFxRate(db, { currency: 'USD', date: '2026-02-30', rate: '1.0875', actor: 'agent:test' }), (e) => e.code === 'INVALID_DATE');
 });
 
-test('report balans rejects a garbage as-of (it silently read as "forever" before)', () => {
+test('report balance-sheet rejects a garbage as-of (it silently read as "forever" before)', () => {
   const dbPath = tmpDb();
   cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
-  const bad = cli(dbPath, ['report', 'balans', '--as-of', 'garbage']);
+  const bad = cli(dbPath, ['report', 'balance-sheet', '--as-of', 'garbage']);
   assert.equal(bad.code, 1);
   assert.equal(bad.out.error.code, 'INVALID_DATE');
   // module boundary too

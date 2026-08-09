@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-09 08:06:14 UTC — **✅ 603 passing · 0 failing (603 tests)**
+**Latest run:** 2026-08-09 17:07:06 UTC — **✅ 616 passing · 0 failing (616 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -160,7 +160,7 @@
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
-27 passing · 0 failing
+28 passing · 0 failing
 
     - ✅ init --dry-run: shows plan, creates nothing
     - ✅ init: creates company + 30-account chart with VAT on
@@ -174,8 +174,9 @@
     - ✅ --actor is recorded on entries and audit
     - ✅ account add/list/show/deactivate flow
     - ✅ account import: dry-run validates, real import creates
-    - ✅ report balans/pnl/journal: JSON + CSV + XLSX export
-    - ✅ report balans --as-of is respected
+    - ✅ report balance-sheet/pnl/journal: JSON + CSV + XLSX export
+    - ✅ report balance-sheet --as-of is respected
+    - ✅ report balans stays available as a deprecated alias
     - ✅ backup + restore roundtrip
     - ✅ bank import (CAMT + CSV), idempotency, match --post, ignore
     - ✅ bank match --auto links posted entries (exact)
@@ -189,6 +190,23 @@
     - ✅ entry reverse --dry-run: rejects drafts (NOT_POSTED) and double reversals
     - ✅ vat book --dry-run: validates date and description like the execute path
     - ✅ version: --version and the MCP serverInfo match package.json (drift guard)
+
+### company-simulation.test.js — 
+
+12 passing · 0 failing
+
+    - ✅ stage 1: init (dry-run then real), capital, bank account, company profile
+    - ✅ stage 2: contacts (NL/EU customers, NL/EU suppliers) + items catalog
+    - ✅ stage 3: sales with discounts, mixed rates, verlegde EU levering, credit note
+    - ✅ stage 4: purchases — 21%, EU verlegd (RE), binnenlands verlegd (R)
+    - ✅ stage 5: bank import + auto-match — 9 transactions reconcile
+    - ✅ stage 6: Q1 OB readout — 1a/1b/2a/3a/3b/4a/4b/5a/5b/5d
+    - ✅ stage 7: Q1 vat file + settle — position 2510, whole-euro payment, rounding to 4700
+    - ✅ stage 8: P&L, sales by contact, aging, contact statement, month-end check
+    - ✅ stage 9: Q2 — sale + purchase, second readout/file/settle cycle
+    - ✅ stage 10: payables + SEPA batch — two suppliers in one pain.001
+    - ✅ stage 11: year-end close, jaarrekening micro, ICP readout
+    - ✅ stage 12: final verification — balanced books, bank, audit, backup
 
 ### company.test.js — company show/update
 
@@ -385,7 +403,7 @@
     - ✅ entry add rejects day-overflow dates (2026-02-30 was posted before)
     - ✅ import opening-balances rejects a day-overflow --date
     - ✅ fx set rejects a day-overflow date (it used to store 2026-02-30 in fx_rates)
-    - ✅ report balans rejects a garbage as-of (it silently read as "forever" before)
+    - ✅ report balance-sheet rejects a garbage as-of (it silently read as "forever" before)
     - ✅ report pnl / journal / trial-balance reject a garbage year (no abc-01-01 ranges)
     - ✅ entry list rejects garbage date bounds (--date-to garbage returned ALL entries before)
     - ✅ import opening-balances accepts the documented optional header row (2- and 3-column)
@@ -644,7 +662,7 @@
     - ✅ cli: report aging + sales + contact statement e2e with csv export
     - ✅ mcp: report_aging and report_sales expose the same shapes
 
-### reports.test.js — balans, P&L, journal
+### reports.test.js — balance sheet, P&L, journal
 
 9 passing · 0 failing
 

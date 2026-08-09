@@ -44,7 +44,7 @@ const DESCRIPTIONS = {
   'agent-layer.test.js': 'MCP server, FX/ECB, tool gates, compliance calendar',
   'recurring-invoice.test.js': 'subscription invoice templates',
   'recurring.test.js': 'recurring entries engine: schedules, depreciation, accruals',
-  'reports.test.js': 'balans, P&L, journal',
+  'reports.test.js': 'balance sheet, P&L, journal',
   'reports-v014.test.js': 'aging buckets, contact statements, sales analytics (by contact/item)',
   'smtp.test.js': 'zero-dependency SMTP client + invoice email: auth, STARTTLS, MIME/PDF attachment, dry-run, audit',
   'trial-balance.test.js': 'trial balance invariants',

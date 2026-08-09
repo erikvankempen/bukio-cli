@@ -226,14 +226,14 @@ test('account import: dry-run validates, real import creates', () => {
   assert.equal(real.skipped, 1);
 });
 
-test('report balans/pnl/journal: JSON + CSV + XLSX export', () => {
+test('report balance-sheet/pnl/journal: JSON + CSV + XLSX export', () => {
   const dbPath = tmpDb();
   run(dbPath, ['init', '--name', 'A', '--json']);
   run(dbPath, ['entry', 'add', '--date', '2026-01-05', '--desc', 'Startkapitaal', '--postings', '1100:10000.00,3000:-10000.00', '--post', '--json']);
   run(dbPath, ['entry', 'add', '--date', '2026-02-10', '--desc', 'Omzet', '--postings', '1100:1210.00,8000:-1210.00', '--post', '--json']);
   run(dbPath, ['entry', 'add', '--date', '2026-03-01', '--desc', 'Kantoorartikelen', '--postings', '4300:250.00,1100:-250.00', '--post', '--json']);
 
-  const b = run(dbPath, ['report', 'balans', '--as-of', '2026-12-31', '--json']).out.data;
+  const b = run(dbPath, ['report', 'balance-sheet', '--as-of', '2026-12-31', '--json']).out.data;
   assert.equal(b.balanced, true);
   assert.equal(b.assets.total, '10960.00');
   assert.equal(b.liabilities_and_equity.result, '960.00');
@@ -265,21 +265,32 @@ test('report balans/pnl/journal: JSON + CSV + XLSX export', () => {
   assert.equal(noOut.out.error.code, 'OUT_REQUIRED');
 });
 
-test('report balans --as-of is respected', () => {
+test('report balance-sheet --as-of is respected', () => {
   const dbPath = tmpDb();
   run(dbPath, ['init', '--name', 'A', '--json']);
   run(dbPath, ['entry', 'add', '--date', '2026-01-05', '--desc', 'Startkapitaal', '--postings', '1100:1000.00,3000:-1000.00', '--post', '--json']);
   run(dbPath, ['entry', 'add', '--date', '2026-06-01', '--desc', 'Omzet', '--postings', '1100:500.00,8000:-500.00', '--post', '--json']);
 
-  const early = run(dbPath, ['report', 'balans', '--as-of', '2026-03-01', '--json']).out.data;
+  const early = run(dbPath, ['report', 'balance-sheet', '--as-of', '2026-03-01', '--json']).out.data;
   assert.equal(early.as_of, '2026-03-01');
   assert.equal(early.assets.total, '1000.00'); // omzet not yet booked
   assert.equal(early.liabilities_and_equity.result, '0.00');
 
-  const late = run(dbPath, ['report', 'balans', '--as-of', '2026-12-31', '--json']).out.data;
+  const late = run(dbPath, ['report', 'balance-sheet', '--as-of', '2026-12-31', '--json']).out.data;
   assert.equal(late.as_of, '2026-12-31');
   assert.equal(late.assets.total, '1500.00');
   assert.equal(late.liabilities_and_equity.result, '500.00');
+});
+
+test('report balans stays available as a deprecated alias', () => {
+  const dbPath = tmpDb();
+  run(dbPath, ['init', '--name', 'A', '--json']);
+  run(dbPath, ['entry', 'add', '--date', '2026-01-05', '--desc', 'Startkapitaal', '--postings', '1100:1000.00,3000:-1000.00', '--post', '--json']);
+  const legacy = run(dbPath, ['report', 'balans', '--as-of', '2026-12-31', '--json']).out.data;
+  const modern = run(dbPath, ['report', 'balance-sheet', '--as-of', '2026-12-31', '--json']).out.data;
+  assert.equal(legacy.balanced, true);
+  assert.equal(legacy.assets.total, modern.assets.total);
+  assert.equal(legacy.liabilities_and_equity.result, modern.liabilities_and_equity.result);
 });
 
 test('backup + restore roundtrip', () => {

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// bukio report — trial balance, balans, pnl, journal; CSV/XLSX export.
+// bukio report — trial balance, balance sheet, pnl, journal; CSV/XLSX export.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { formatAmount } from '../core/money.js';
@@ -118,7 +118,8 @@ export function make(program) {
     });
 
   report
-    .command('balans')
+    .command('balance-sheet')
+    .alias('balans') // deprecated alias, kept for compatibility
     .description('balance sheet as of a date (assets = liabilities + equity + result)')
     .option('--as-of <yyyy-mm-dd>', 'balance date')
     .option('--format <format>', 'json|csv|xlsx|human')
@@ -159,7 +160,7 @@ export function make(program) {
             ],
             csvRows: flatRows,
             sheets: (d) => [{
-              name: 'Balans',
+              name: 'Balance Sheet',
               columns: [
                 { header: 'side', key: 'side' }, { header: 'rgs', key: 'rgs' }, { header: 'group', key: 'group' },
                 { header: 'code', key: 'code' }, { header: 'name', key: 'name' }, { header: 'amount', key: 'amount' },
@@ -167,7 +168,7 @@ export function make(program) {
               rows: flatRows(d),
             }],
             render: (d) => {
-              console.log(`BALANS as of ${d.as_of}`);
+              console.log(`BALANCE SHEET as of ${d.as_of}`);
               console.log('ACTIVA');
               for (const s of d.assets.sections) {
                 console.log(`  ${s.label} (${s.rgs_code})`);

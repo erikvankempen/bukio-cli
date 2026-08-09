@@ -272,9 +272,9 @@ Per-account debit/credit/net totals from **posted** entries, with a final BALANC
 | `--format <format>` | human (json with `--json`) | `json` \| `csv` \| `xlsx` \| `human` |
 | `--out <path>` | stdout | Output file (required for xlsx) |
 
-### `bukio report balans`
+### `bukio report balance-sheet`
 
-Balance sheet as of a date, grouped by RGS hoofdgroep (Materiële vaste activa, Voorraden, Vorderingen, Liquide middelen / Eigen vermogen, Kortlopende schulden, …). Includes the computed **Nog te verdelen resultaat** (net result of income/expense accounts). Invariant: **total assets = total liabilities + equity + result** — the report says `BALANCED` or `UNBALANCED!`.
+Balance sheet as of a date, grouped by RGS hoofdgroep (Materiële vaste activa, Voorraden, Vorderingen, Liquide middelen / Eigen vermogen, Kortlopende schulden, …). Includes the computed **Nog te verdelen resultaat** (net result of income/expense accounts). Invariant: **total assets = total liabilities + equity + result** — the report says `BALANCED` or `UNBALANCED!`. (`balans` is a deprecated alias.)
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -307,7 +307,7 @@ Journal export — one row per posting with account info, for a period. Ideal fo
 | `--out <path>` | stdout | Output file (required for xlsx) |
 
 ```bash
-bukio report balans --as-of 2026-12-31
+bukio report balance-sheet --as-of 2026-12-31
 bukio report pnl --year 2026 --format xlsx --out ~/exports/pnl-2026.xlsx
 bukio report journal --year 2026 --format csv --out ~/exports/journal-2026.csv
 ```
@@ -500,7 +500,7 @@ The agent layer (Phase 5).
 
 | Command | Purpose |
 |---------|---------|
-| `mcp` | **MCP server over stdio** (JSON-RPC 2.0, newline-delimited): `company_info`, `trial_balance`, `balans`, `pnl`, `journal`, `accounts`, `vat_readout`, `icp_readout`, `audit`, `compliance`, `invoices` (read-only) + `entry_add/post/reverse`, `vat_book`, `invoice_create/finalize/credit/pay`, `recurring_run`, `year_end_close`, `fx_set`, `contact_add` (mutations). **Mutations are plan-only unless `mode:"execute"`**; `BUKIO_MCP_READONLY=1` blocks execution entirely. Every execute books with the caller's `actor` and lands in the audit log. NL query = an agent on top of these tools |
+| `mcp` | **MCP server over stdio** (JSON-RPC 2.0, newline-delimited): `company_info`, `trial_balance`, `balance_sheet`, `pnl`, `journal`, `accounts`, `vat_readout`, `icp_readout`, `audit`, `compliance`, `invoices` (read-only) + `entry_add/post/reverse`, `vat_book`, `invoice_create/finalize/credit/pay`, `recurring_run`, `year_end_close`, `fx_set`, `contact_add` (mutations). **Mutations are plan-only unless `mode:"execute"`**; `BUKIO_MCP_READONLY=1` blocks execution entirely. Every execute books with the caller's `actor` and lands in the audit log. NL query = an agent on top of these tools |
 | `fx set --currency USD --date D --rate 1.0875` | Store a rate (1 EUR = N units of foreign currency, 4 decimals max). Upsert; audited |
 | `fx fetch --currency USD [--date D]` | **Fetch the ECB reference rate** (free, no key) for a currency on/before a date and store it (source `ECB`). Weekends/holidays fall back to the last business day; unknown currency or pre-1999 → `ECB_RATE_NOT_AVAILABLE` |
 | `fx list [--limit N]` / `fx show --currency USD [--limit N]` | Rate store inspection (all currencies, or one currency's history) |
@@ -914,7 +914,7 @@ bukio entry add --desc "Kantoorartikelen (gecorrigeerd)" --postings "4200:250.00
 **Month-end sanity check**
 ```bash
 bukio report trial-balance --year 2026 --json   # must be balanced: true
-bukio report balans --as-of 2026-12-31          # must say BALANCED
+bukio report balance-sheet --as-of 2026-12-31   # must say BALANCED
 bukio report pnl --year 2026                    # result = revenue - costs
 bukio audit --since 2026-08-01 --by agent:bartholomeus
 ```
@@ -922,7 +922,7 @@ bukio audit --since 2026-08-01 --by agent:bartholomeus
 **Hand the year to your boekhouder**
 ```bash
 bukio report journal --year 2026 --format xlsx --out ~/exports/journal-2026.xlsx
-bukio report balans --as-of 2026-12-31 --format csv --out ~/exports/balans-2026.csv
+bukio report balance-sheet --as-of 2026-12-31 --format csv --out ~/exports/balance-sheet-2026.csv
 bukio report pnl --year 2026 --format xlsx --out ~/exports/pnl-2026.xlsx
 ```
 

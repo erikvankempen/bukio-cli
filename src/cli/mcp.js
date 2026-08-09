@@ -114,7 +114,7 @@ tool({
   },
 });
 tool({
-  name: 'balans', description: 'balance sheet as of a date (balanced must be true)', schema: {
+  name: 'balance_sheet', description: 'balance sheet as of a date (balanced must be true)', schema: {
     type: 'object', properties: { as_of: { type: 'string', description: 'YYYY-MM-DD' } },
   },
   handler: (db, args) => balans(db, { asOf: args.as_of }),
