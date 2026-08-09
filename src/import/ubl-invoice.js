@@ -151,6 +151,12 @@ export function importUblInvoice(db, {
   // --- monetary totals ------------------------------------------------------
   const totals = inv['cac:LegalMonetaryTotal'];
   const currencyRaw = inv['cbc:DocumentCurrencyCode'];
+  // EN 16931 BT-5 is mandatory (1..1) — an absent element is a malformed
+  // document, not an implicit EUR (a missing currency on a non-EUR invoice
+  // would silently create a payable in the wrong currency)
+  if (!currencyRaw) {
+    errors.push({ line: 0, error: 'INVALID_UBL_INVOICE: cbc:DocumentCurrencyCode is missing (EN 16931 BT-5)' });
+  }
   const currency = currencyRaw ? String(currencyRaw).trim().toUpperCase() : 'EUR';
   if (currency !== 'EUR') {
     errors.push({ line: 0, error: `INVALID_UBL_INVOICE: cbc:DocumentCurrencyCode '${currency}' — only EUR invoices can be imported (payables are EUR-only)` });

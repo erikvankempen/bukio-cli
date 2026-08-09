@@ -356,3 +356,15 @@ test('importUblInvoice: missing cbc:InvoiceTypeCode (EN 16931 BT-3) is rejected'
   );
   assert.equal(payables().length, 0); // nothing registered
 });
+
+test('importUblInvoice: missing cbc:DocumentCurrencyCode (EN 16931 BT-5) is rejected', () => {
+  const xml = ublInvoice().replace(/<cbc:DocumentCurrencyCode>EUR<\/cbc:DocumentCurrencyCode>/, '');
+  assert.throws(
+    () => importUblInvoice(db, { xmlText: xml, actor: 'agent:test' }),
+    (err) => {
+      if (err.code !== 'IMPORT_VALIDATION_FAILED') return false;
+      return err.details?.some((d) => /DocumentCurrencyCode is missing/.test(d.error));
+    },
+  );
+  assert.equal(payables().length, 0); // nothing registered
+});
