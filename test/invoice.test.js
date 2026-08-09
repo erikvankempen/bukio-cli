@@ -303,6 +303,21 @@ test('UBL: credit note uses CreditNote root + type 381 (Peppol BIS 3.0)', () => 
   assert.equal(billingRef['InvoiceDocumentReference']['ID'], '2026-0001');
 });
 
+test('UBL: credit note BT-10 buyer reference carries the original klantkenmerk (not the invoice number)', () => {
+  addContact();
+  const inv = mkInvoice({ reference: 'PO-2026-099' });
+  finalizeInvoice(db, { id: inv.id });
+  const credit = creditInvoice(db, { id: inv.id });
+  finalizeInvoice(db, { id: credit.id });
+  const creditRow = getInvoice(db, credit.id);
+  assert.equal(creditRow.reference, 'PO-2026-099'); // buyer reference carried over
+  const xml = invoiceToUbl(db, creditRow);
+  // BT-10: buyer reference = the klantkenmerk
+  assert.match(xml, /<cbc:BuyerReference>PO-2026-099<\/cbc:BuyerReference>/);
+  // BT-25: BillingReference = the ORIGINAL invoice number, distinct from BT-10
+  assert.match(xml, /<cac:BillingReference>[\s\S]*?<cbc:ID>2026-0001<\/cbc:ID>/);
+});
+
 test('UBL: XML control characters in descriptions are stripped (Peppol-safe)', () => {
   addContact();
   // a description containing a NUL byte must not corrupt the XML document

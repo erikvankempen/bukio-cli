@@ -802,7 +802,7 @@ export function creditInvoice(db, { id, date = null, reason = null, actor = 'hum
       action: 'invoice.credit', for_invoice: id, reason,
       date: date ?? new Date().toISOString().slice(0, 10),
       description: reason ?? `Creditfactuur voor ${original.invoice_number}`,
-      reference: original.invoice_number, dryRun: true,
+      reference: original.reference ?? original.invoice_number, dryRun: true,
     };
   }
 
@@ -817,7 +817,10 @@ export function creditInvoice(db, { id, date = null, reason = null, actor = 'hum
     date: date ?? new Date().toISOString().slice(0, 10),
     dueDays: null,
     description: reason ?? `Creditfactuur voor ${original.invoice_number}`,
-    reference: original.invoice_number,
+    // carry the buyer reference (klantkenmerk) so BT-10 on the credit note
+    // matches the original — the preceding-invoice number for BT-25 is
+    // derived in the UBL builder via credit_for_invoice_id
+    reference: original.reference ?? original.invoice_number,
     discountType: original.discount_type, discountValue: original.discount_value,
     language: original.language ?? 'nl',
     actor,

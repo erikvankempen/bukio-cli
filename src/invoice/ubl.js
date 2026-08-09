@@ -67,6 +67,13 @@ function addressBlock(partyName, p, taxId = null) {
  */
 export function invoiceToUbl(db, invoice) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
+  // BT-25 (preceding invoice): the credit note's BillingReference must carry
+  // the ORIGINAL invoice number, not the buyer reference. Look it up via
+  // credit_for_invoice_id — the invoice's own reference field is the buyer
+  // reference (klantkenmerk) and may differ.
+  const creditBillingRef = invoice.invoice_type === 'credit' && invoice.credit_for_invoice_id
+    ? (db.prepare('SELECT invoice_number FROM invoices WHERE id = ?').get(invoice.credit_for_invoice_id)?.invoice_number ?? null)
+    : null;
   const contact = invoice.contact;
   const isCredit = invoice.invoice_type === 'credit';
   const typeCode = isCredit ? '381' : '380';
@@ -207,10 +214,10 @@ export function invoiceToUbl(db, invoice) {
   ${invoice.notes ? `<cbc:Note>${esc(invoice.notes)}</cbc:Note>` : ''}
   <cbc:DocumentCurrencyCode>${currency}</cbc:DocumentCurrencyCode>
   ${invoice.reference ? `<cbc:BuyerReference>${esc(invoice.reference)}</cbc:BuyerReference>` : ''}
-  ${isCredit && invoice.reference ? `
+  ${isCredit && creditBillingRef ? `
   <cac:BillingReference>
     <cac:InvoiceDocumentReference>
-      <cbc:ID>${esc(invoice.reference)}</cbc:ID>
+      <cbc:ID>${esc(creditBillingRef)}</cbc:ID>
     </cac:InvoiceDocumentReference>
   </cac:BillingReference>` : ''}
   <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.btw_id)}</cac:AccountingSupplierParty>

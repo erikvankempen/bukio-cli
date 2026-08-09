@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-09 00:13:21 UTC — **✅ 579 passing · 0 failing (579 tests)**
+**Latest run:** 2026-08-09 00:19:33 UTC — **✅ 580 passing · 0 failing (580 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -490,7 +490,7 @@
 
 ### invoice.test.js — invoicing: lifecycle, 12-vereisten, credit notes, payments, reminders
 
-22 passing · 0 failing
+23 passing · 0 failing
 
     - ✅ parseLineSpec: qty, description, price, vat
     - ✅ createInvoice: draft with line math (2x 150 @21 = 300 net, 63 vat)
@@ -506,6 +506,7 @@
     - ✅ UBL: Peppol BIS 3.0 structure
     - ✅ UBL: seller + buyer EndpointID (BT-34/BT-49) when KVK numbers are present
     - ✅ UBL: credit note uses CreditNote root + type 381 (Peppol BIS 3.0)
+    - ✅ UBL: credit note BT-10 buyer reference carries the original klantkenmerk (not the invoice number)
     - ✅ UBL: XML control characters in descriptions are stripped (Peppol-safe)
     - ✅ bank auto-match: incoming payment pays the invoice and posts Bank/Debiteuren
     - ✅ buildInvoicePostings: sales vs credit sign flip
