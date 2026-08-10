@@ -162,6 +162,8 @@ bukio --actor human:erik actor unlock        # 12 h by default; actor lock clear
 
 Agent/system keys (plain files) and sessions sign with **zero ceremony** — an agent or cron job that has the key file on disk is signed automatically. Enforcement (`actor enforce --on`) only adds a requirement: unsigned or unverifiable commands are refused *before anything is written*, instead of running logged as `unsigned`. See AGENTS.md §6.20 for the full walkthrough and the refusal→fix table.
 
+> **Strong recommendation: one OS user per agent.** Signing proves *which key* signed — not *which process* used it. Two agents running under the same OS user can read each other's key files (`~/.bukio/keys/…`) and impersonate each other undetectably. If you run several agents on one machine, give each its own OS account (or container) with its own `BUKIO_CONFIG_DIR`, so the filesystem itself keeps the keys apart. This is the same trust boundary SSH keys have — the OS user is the real security boundary.
+
 ### The audit log
 
 An **append-only** log of every mutation: actor, action, command, JSON args, outcome, and affected entry IDs. Database triggers block UPDATE and DELETE — the log cannot be rewritten after the fact. Read it with `bukio audit`.
