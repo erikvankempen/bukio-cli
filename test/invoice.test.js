@@ -45,7 +45,7 @@ function addContact(vatId = null) {
 
 function mkInvoice(overrides = {}) {
   return createInvoice(db, {
-    contactId: 1, date: '2026-07-10', lines: ['2x Consultancy @ 150.00 @21'],
+    contactId: 1, date: daysFromNow(-2), lines: ['2x Consultancy @ 150.00 @21'],
     ...overrides,
   });
 }
@@ -207,18 +207,18 @@ test('payments: partial then full -> paid; overpayment rejected', () => {
   const inv = mkInvoice();
   finalizeInvoice(db, { id: inv.id });
 
-  const partial = markPaid(db, { id: inv.id, date: '2026-07-20', amountCents: 20000 });
+  const partial = markPaid(db, { id: inv.id, date: daysFromNow(-1), amountCents: 20000 });
   assert.equal(partial.status, 'sent');
   assert.equal(partial.paid_cents, 20000);
 
-  const paid = markPaid(db, { id: inv.id, date: '2026-07-25', amountCents: 16300 });
+  const paid = markPaid(db, { id: inv.id, date: daysFromNow(-1), amountCents: 16300 });
   assert.equal(paid.status, 'paid');
 
-  assert.throws(() => markPaid(db, { id: inv.id, date: '2026-07-26', amountCents: 100 }), { code: 'NOT_PAYABLE' });
+  assert.throws(() => markPaid(db, { id: inv.id, date: daysFromNow(-1), amountCents: 100 }), { code: 'NOT_PAYABLE' });
   // overpayment
   const inv2 = mkInvoice();
   finalizeInvoice(db, { id: inv2.id });
-  assert.throws(() => markPaid(db, { id: inv2.id, date: '2026-07-20', amountCents: 40000 }), { code: 'OVERPAYMENT' });
+  assert.throws(() => markPaid(db, { id: inv2.id, date: daysFromNow(-1), amountCents: 40000 }), { code: 'OVERPAYMENT' });
 });
 
 test('nextInvoiceNumber: year-scoped sequence', () => {
@@ -241,7 +241,7 @@ test('UBL: Peppol BIS 3.0 structure', () => {
   assert.equal(root['CustomizationID'], 'urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0');
   assert.equal(root['ID'], '2026-0001');
   assert.equal(root['InvoiceTypeCode'], '380');
-  assert.equal(root['IssueDate'], '2026-07-10');
+  assert.equal(root['IssueDate'], inv.date);
   assert.equal(root['AccountingSupplierParty']['Party']['PartyName']['Name'], 'Demo BV');
   assert.equal(root['AccountingCustomerParty']['Party']['PartyName']['Name'], 'ACME B.V.');
   // CompanyID carries a schemeID attribute -> object form in fast-xml-parser

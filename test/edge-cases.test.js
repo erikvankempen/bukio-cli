@@ -57,6 +57,12 @@ function addContact(vatId = null) {
   });
 }
 
+// Relative date helper — invoice status derives 'overdue' at read time
+// (sent + past due), so fixtures must stay relative to the wall clock.
+function daysFromNow(days) {
+  return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+}
+
 beforeEach(() => {
   setup();
 });
@@ -286,15 +292,15 @@ test('bank: Rabo CSV with Af/Bij and Dutch decimals parses correctly', () => {
 
 test('bank: auto-match prefers an exact entry over an invoice for the same amount', () => {
   addContact();
-  const inv = createInvoice(db, { contactId: 1, date: '2026-07-10', lines: ['1x Werk @ 100.00 @21'] });
+  const inv = createInvoice(db, { contactId: 1, date: daysFromNow(-2), lines: ['1x Werk @ 100.00 @21'] });
   finalizeInvoice(db, { id: inv.id }); // gross 121.00 on 1200, not on 1100
   // manually book the receipt on the bank account (e.g. cashflow entry)
-  entry('2026-07-18', 'Ontvangst', [{ code: '1100', amountCents: 12100 }, { code: '1200', amountCents: -12100 }]);
+  entry(daysFromNow(-1), 'Ontvangst', [{ code: '1100', amountCents: 12100 }, { code: '1200', amountCents: -12100 }]);
   importTransactions(db, {
     iban: IBAN,
     transactions: parseCamt053(CAMT_DUP
       .replace('100.00', '121.00')
-      .replace('2026-06-01', '2026-07-18')
+      .replace('2026-06-01', daysFromNow(-1))
       .replace('Factuur 1', 'Factuur 2026-0001')),
   });
   const r = autoMatch(db, { actor: 'agent:test' });
