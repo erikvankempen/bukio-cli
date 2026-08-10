@@ -128,6 +128,50 @@ merged to `main` and released.
   README gains an "In practice — what you actually do" block; §3 quick
   reference rows for `actor register` / `actor enforce` aligned with the
   operator-gated enrolment and enrolled-only `--off`.
+- **Actor authorizations Tier 0.5** (per-actor segregation of duties,
+  builds on Tier 0 signing): capability families + roles instead of a
+  per-command matrix.
+  - Migration 020: `actor_roles` table (actor, role with a CHECK on
+    `owner|bookkeeper|payments|tax|assets|readonly`, granted_by,
+    granted_at) + the per-company `authz_mode` setting; the role→
+    capability map lives in code (`src/core/authz.js`), not the DB.
+  - `src/core/authz.js`: 20 capability families, role→capability map,
+    command→capability for the full CLI surface + every MCP mutating
+    tool (`entry add --post` → `entry.post` via the actual mutation),
+    `canAct` (fail-closed: unmapped commands deny), SoD conflict-pair
+    warnings (`bookkeeper`+`payments`, `bookkeeper`+`tax`,
+    `payments`+`tax`, `entry.post`+`payments.sepa`; the owner role is
+    exempt), the exemption set (self-service: register/verify/own
+    roles/can/self-revoke + the signing-exempt commands), and
+    `checkAuthz` — the gate that runs in `signPayload` after signature
+    verification, refusing with `AUTHZ_DENIED` before anything is
+    written (dry-run included).
+  - CLI: `actor authz --on|--off` (implies signing enforcement; the
+    flipper becomes owner — bootstrap without deadlock; `--off` needs
+    the owner role), `actor roles grant/revoke <role> --for <who>`
+    (grants warn softly on SoD conflicts; the LAST owner can never be
+    revoked — `LAST_OWNER`), `actor roles [--for <who>]` (self-service
+    for your own roles), `actor can '<cmd>' [--for <who>]` (capability
+    check, actual-mutation aware), `actor who-can '<cmd>'` (the SoD
+    review matrix), and `actor revoke --target <who> --reason` — the
+    owner-mediated key kill, owner role required regardless of authz
+    mode. Note: the memo's `--actor <who>` grantee flag became
+    `--for <who>` — the identity flag `--actor` is the root commander
+    option and cannot be re-declared on a subcommand (commander would
+    silently bind the value to the root and corrupt the signing
+    identity).
+  - MCP: mutating tool calls gate through the same `signPayload`
+    capabilities (`entry_add post:true` → `entry.post`; read-only tools
+    are not gated); fixed a Tier 0 gap — the MCP server now honours
+    `BUKIO_ACTOR` env (was hardcoded `agent:mcp`, which broke signing
+    under enforcement for env-driven sessions).
+  - `buildSignedArgs` keeps meaningful `--for`/`--target` options in the
+    signed payload (the grant target is tamper-evident on the audit
+    row).
+  - Docs: README "Authorizations & segregation of duties" section +
+    `actor` command table rows + roadmap row; AGENTS.md §3 rows, §7
+    error codes (`AUTHZ_DENIED`, `INVALID_AUTHZ`, `INVALID_ROLE`,
+    `ROLE_NOT_GRANTED`, `LAST_OWNER`) and the §6.21 walkthrough.
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases

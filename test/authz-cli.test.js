@@ -490,3 +490,72 @@ test('MCP gate: vat_book maps to vat.book — a payments actor is refused', asyn
   assert.ok(err.error.message.includes('vat.book'));
   await b.close();
 });
+
+// --- lifecycle e2e (Tier 0.5 task 8) -----------------------------------------
+
+const VALID_TEST_IBAN = 'NL91ABNA0417164300'; // mod-97 valid SEPA test IBAN
+
+test('lifecycle: owner bootstraps authz, splits bookkeeping/payments, the SoD boundary holds end-to-end', () => {
+  const c = setupCompany();
+  // 1. owner completes the company profile + contact (SEPA needs both)
+  const iban = runCli(['--json', '--actor', 'agent:owner', 'company', 'update', '--iban', VALID_TEST_IBAN, '--name', 'SoD BV', '--db', c.dbPath], c.env('agent:owner'));
+  assert.equal(iban.status, 0, iban.stderr);
+  const contact = runCli(['--json', '--actor', 'agent:owner', 'contact', 'add', '--name', 'Vendor', '--iban', VALID_TEST_IBAN, '--db', c.dbPath], c.env('agent:owner'));
+  assert.equal(contact.status, 0, contact.stderr);
+
+  // 2. bootstrap: authz --on → flipper owner + enforcement on
+  const on = runCli(['--json', '--actor', 'agent:owner', 'actor', 'authz', '--on', '--db', c.dbPath], c.env('agent:owner'));
+  assert.equal(on.status, 0, on.stderr);
+  assert.equal(json(on).data.owner, 'agent:owner');
+
+  // 3. grants (owner only): bookkeeper → A, payments → B
+  const gA = runCli(['--json', '--actor', 'agent:owner', 'actor', 'roles', 'grant', 'bookkeeper', '--for', 'agent:bookkeeper-a', '--db', c.dbPath], c.env('agent:owner'));
+  assert.equal(gA.status, 0, gA.stderr);
+  const gB = runCli(['--json', '--actor', 'agent:owner', 'actor', 'roles', 'grant', 'payments', '--for', 'agent:payments-b', '--db', c.dbPath], c.env('agent:owner'));
+  assert.equal(gB.status, 0, gB.stderr);
+
+  // 4. A (bookkeeper) drafts AND posts
+  const draft = runCli(['--json', '--actor', 'agent:bookkeeper-a', 'entry', 'add', '--date', '2026-08-01', '--desc', 'Inkoop', '--postings', '4300:100.00,1100:-100.00', '--db', c.dbPath], c.env('agent:bookkeeper-a'));
+  assert.equal(draft.status, 0, draft.stderr);
+  const posted = runCli(['--json', '--actor', 'agent:bookkeeper-a', 'entry', 'post', '--id', '1', '--db', c.dbPath], c.env('agent:bookkeeper-a'));
+  assert.equal(posted.status, 0, posted.stderr);
+
+  // 5. B (payments): payables + SEPA batch — money OUT is B's job
+  const payable = runCli(['--json', '--actor', 'agent:payments-b', 'payments', 'payables', 'add', '--contact', '1', '--ref', 'INV-1', '--date', '2026-08-01', '--amount', '100.00', '--db', c.dbPath], c.env('agent:payments-b'));
+  assert.equal(payable.status, 0, payable.stderr);
+  const batch = runCli(['--json', '--actor', 'agent:payments-b', 'payments', 'batch', 'create', '--type', 'transfer', '--payable', '1', '--db', c.dbPath], c.env('agent:payments-b'));
+  assert.equal(batch.status, 0, batch.stderr);
+
+  // 6. cross-capability refusals: A cannot pay, B cannot book
+  const aPay = runCli(['--json', '--actor', 'agent:bookkeeper-a', 'payments', 'batch', 'create', '--type', 'transfer', '--payable', '1', '--db', c.dbPath], c.env('agent:bookkeeper-a'));
+  assert.equal(aPay.status, 1);
+  assert.equal(json(aPay).error.code, 'AUTHZ_DENIED');
+  const bBook = runCli(['--json', '--actor', 'agent:payments-b', 'entry', 'add', '--post', '--date', '2026-08-02', '--desc', 'nope', '--postings', '4300:10.00,1100:-10.00', '--db', c.dbPath], c.env('agent:payments-b'));
+  assert.equal(bBook.status, 1);
+  assert.equal(json(bBook).error.code, 'AUTHZ_DENIED');
+
+  // 7. SoD warning visible on a conflicting grant (payments onto A)
+  const conflict = runCli(['--json', '--actor', 'agent:owner', 'actor', 'roles', 'grant', 'payments', '--for', 'agent:bookkeeper-a', '--db', c.dbPath], c.env('agent:owner'));
+  assert.equal(conflict.status, 0, conflict.stderr);
+  assert.ok(json(conflict).data.warnings.some((w) => w.includes('bookkeeper + payments')), JSON.stringify(json(conflict).data.warnings));
+
+  // 8. who-can 'entry post' → owner + A only
+  const who = runCli(['--json', '--actor', 'agent:owner', 'actor', 'who-can', 'entry post', '--db', c.dbPath], c.env('agent:owner'));
+  const allowed = json(who).data.actors.filter((a) => a.allowed).map((a) => a.actor);
+  assert.ok(allowed.includes('agent:owner'));
+  assert.ok(allowed.includes('agent:bookkeeper-a'));
+  assert.ok(!allowed.includes('agent:payments-b'), `B must NOT be able to post: ${JSON.stringify(allowed)}`);
+
+  // 9. the trail stays cryptographically clean through the whole scenario
+  const verify = runCli(['--json', '--actor', 'agent:owner', 'audit', 'verify', '--db', c.dbPath], c.env('agent:owner'));
+  assert.equal(verify.status, 0, verify.stderr);
+  const summary = json(verify).data.summary;
+  assert.equal(summary.tampered, 0, JSON.stringify(summary));
+  assert.equal(summary.invalid_signature, 0, JSON.stringify(summary));
+  assert.equal(summary.unknown_key, 0, JSON.stringify(summary));
+
+  // 10. authz --off by the owner closes the scenario; enforcement stays on
+  const off = runCli(['--json', '--actor', 'agent:owner', 'actor', 'authz', '--off', '--db', c.dbPath], c.env('agent:owner'));
+  assert.equal(off.status, 0, off.stderr);
+  assert.equal(json(off).data.enforce, 'on');
+});

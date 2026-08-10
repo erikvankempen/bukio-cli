@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-10 21:59:16 UTC — **✅ 746 passing · 0 failing (746 tests)**
+**Latest run:** 2026-08-10 22:07:23 UTC — **✅ 747 passing · 0 failing (747 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -17,7 +17,7 @@
     - ✅ importChartCsv: quoted values with commas parse
     - ✅ listAccounts: type filter and includeInactive
 
-### actor-registry.test.js — per-company actor key registry: enrol/revoke (history kept), rotation, enforce flag, per-DB independence
+### actor-registry.test.js — per-company actor key registry: enrol/revoke (history kept), rotation, enforce flag, per-DB independence + Tier 0.5 role registry (grant/revoke/getRoles, authz flag, last-owner guard)
 
 18 passing · 0 failing
 
@@ -185,9 +185,9 @@
     - ✅ verifyTrail: works on a copied DB file with no external files (self-contained)
     - ✅ verifyTrail: --since filters rows by timestamp
 
-### authz-cli.test.js — 
+### authz-cli.test.js — Tier 0.5 authorizations end-to-end: actor authz/roles/can/who-can CLI, the AUTHZ_DENIED gate (dry-run parity, deny-by-default, authz implies enforce), MCP tool gate (no mutation on refusal, read-only unaffected), owner-mediated revoke, full SoD lifecycle
 
-24 passing · 0 failing
+25 passing · 0 failing
 
     - ✅ authz --on: sets authz on, implies signing enforcement, grants the flipper owner
     - ✅ authz --on --dry-run: nothing is written (no owner, no mode change)
@@ -213,8 +213,9 @@
     - ✅ MCP gate: tool calls map to the same capabilities; refusals mutate nothing
     - ✅ MCP gate: read-only tools are unaffected (not gated) — a role-less actor can still read
     - ✅ MCP gate: vat_book maps to vat.book — a payments actor is refused
+    - ✅ lifecycle: owner bootstraps authz, splits bookkeeping/payments, the SoD boundary holds end-to-end
 
-### authz.test.js — 
+### authz.test.js — Tier 0.5 capability map: command→capability coverage (§3 + full CLI + MCP tools), canAct matrix, SoD warnings, exemption set, authz gate (unit)
 
 18 passing · 0 failing
 

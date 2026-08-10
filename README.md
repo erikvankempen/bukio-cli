@@ -10,7 +10,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-696%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-747%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -163,6 +163,56 @@ bukio --actor human:erik actor unlock        # 12 h by default; actor lock clear
 Agent/system keys (plain files) and sessions sign with **zero ceremony** — an agent or cron job that has the key file on disk is signed automatically. Enforcement (`actor enforce --on`) only adds a requirement: unsigned or unverifiable commands are refused *before anything is written*, instead of running logged as `unsigned`. See AGENTS.md §6.20 for the full walkthrough and the refusal→fix table.
 
 > **Strong recommendation: one OS user per agent.** Signing proves *which key* signed — not *which process* used it. Two agents running under the same OS user can read each other's key files (`~/.bukio/keys/…`) and impersonate each other undetectably. If you run several agents on one machine, give each its own OS account (or container) with its own `BUKIO_CONFIG_DIR`, so the filesystem itself keeps the keys apart. This is the same trust boundary SSH keys have — the OS user is the real security boundary.
+
+### Authorizations & segregation of duties
+
+Signing proves **who** ran a command; authorizations control **what kinds
+of commands** an actor may run. `bukio actor authz --on` turns on
+**per-actor authorizations** for a company: from then on every command
+needs a role granting its capability — deny-by-default, refused with
+`AUTHZ_DENIED` in the sign gate *before anything is written* (dry-run
+included). This is how segregation of duties (SoD) is enforced: the actor
+who drafts is not the one who posts, the one who books is not the one who
+files tax or authorises payments.
+
+The granularity is **capability families + roles**, not a per-command
+matrix. Roles: `owner` (everything), `bookkeeper` (chart, entries,
+contacts, invoices, bank import+match, VAT booking, assets, recurring, FX,
+reports), `payments` (bank import+match, SEPA money-out, reports), `tax`
+(VAT booking+filing, month/year close, XAF export, reports), `assets`,
+`readonly`. The role→capability map lives in the code, versioned with the
+binary — one grant line the owner can read:
+
+```bash
+# one-time bootstrap: authz --on implies enforcement and makes the
+# flipper the owner (enrol all agents BEFORE flipping — first enrolment
+# is refused under enforcement)
+bukio actor authz --on
+bukio actor roles grant bookkeeper --for agent:invoicing
+bukio actor roles grant payments    --for agent:payments
+# conflicts warn softly (bookkeeper+payments, bookkeeper+tax, ...)
+# the review lens: who can run this command?
+bukio actor who-can 'entry post'
+```
+
+- Grants are **owner-only** under authz; listing your own roles
+  (`actor roles`) and checking your own commands (`actor can '<cmd>'`)
+  are self-service, so a refused agent can always see why.
+- A **conflicting grant warns but does not block** — legitimate
+  single-operator setups exist (the owner has everything anyway); the
+  warning keeps the review in front of the eye, `who-can` makes the
+  matrix visible.
+- **Owner-mediated key revoke**: `actor revoke --target <who> --reason`
+  lets the operator kill a compromised agent key — owner role required
+  **regardless** of authz mode.
+- The MCP server gates its mutating tool calls with the **same**
+  capabilities (read-only tools are not gated). `entry_add` with
+  `post:true` needs `entry.post`, like the CLI.
+- Turn it off with `actor authz --off` (owner only); signing enforcement
+  stays on, roles become inert configuration. The last owner can never be
+  revoked, so authz can always be turned off.
+
+Full walkthrough: AGENTS.md §6.21.
 
 ### The audit log
 
@@ -676,8 +726,12 @@ Key management for actor identity & signing (see [Actor identity & signing](#act
 | `actor keygen [--force] [--dry-run]` | Generate an Ed25519 keypair for the `--actor`: human keys are passphrase-encrypted (`BUKIO_SIGNING_PASSPHRASE` or interactive prompt), agent/system keys are plain files. `--force` replaces an existing key (rotation). |
 | `actor register [--dry-run]` | Enrol the actor's local key into the **current company's** DB. Per-company: repeat for every company DB the actor works in. **First enrolment is refused under enforcement** — onboard with `enforce --off` → `register` → `--on`; re-enrolment after revocation (rotation) works under enforcement. |
 | `actor list` | List enrolled keys in the current company's DB — active and revoked (with reason), full history. |
-| `actor revoke --reason <text> [--dry-run]` | Revoke the actor's own key in the current company's DB (self-revoke; the row is retained as history). |
+| `actor revoke --reason <text> [--target <who>] [--dry-run]` | Revoke an actor's key in the current company's DB (the row is retained as history). Default: your own key. `--target <who>` is the **owner-mediated kill** of a compromised key — owner role required **regardless** of authz mode. |
 | `actor enforce --on \| --off` | Turn signature enforcement on/off for the current company's DB. **Only an enrolled actor can turn it off** (audited; the deliberate recovery valve — see the enforcement bullet above). |
+| `actor authz --on \| --off [--dry-run]` | Toggle **per-actor authorizations** (segregation of duties). `--on` implies signing enforcement and grants the flipper the `owner` role (bootstrap); `--off` needs the owner role (enforcement stays on). |
+| `actor roles [--for <who>]` / `roles grant <role> --for <who>` / `roles revoke <role> --for <who>` | Role grants (owner only under authz; listing your own roles is self-service). Grants warn softly on segregation-of-duties conflicts. The LAST owner can never be revoked. |
+| `actor can '<cmd>' [--for <who>]` | Capability check — `ok` or `AUTHZ_DENIED` with the missing capability. Self-service for your own checks; `--for <who>` is owner-only. Accepts `entry add --post` and `mcp:entry_add`. |
+| `actor who-can '<cmd>'` | Which actors can run a command — the SoD review matrix (owner only under authz). |
 | `actor unlock [--ttl-hours <n>]` | Human keys only: decrypt the passphrase-protected key into a short-lived session key (default 12 h, max 168). |
 | `actor lock` | Clear the session key — the human must authenticate again. |
 | `actor verify` | Show the actor's key state: key file present? enrolled? session valid? enforcement? |
@@ -688,6 +742,9 @@ BUKIO_SIGNING_PASSPHRASE=… bukio actor keygen   # as human:erik — encrypted
 bukio actor unlock --ttl-hours 12        # human session
 bukio actor register                     # enrol into THIS company's DB
 bukio actor enforce --on                 # from now on: unsigned = refused
+bukio actor authz --on                   # authorizations: roles gate every command
+bukio actor roles grant bookkeeper --for agent:invoicing
+bukio actor who-can 'entry post'         # the SoD review matrix
 ```
 
 ---
@@ -1190,6 +1247,7 @@ context. If your agent is unable to help, shoot me a message at
 | 10 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
 | 11 | Items catalog + discounts + invoice languages: `item` CRUD, `invoice create --items/--discount-*/--language`, fractional quantities, per-line + total discounts with per-rate VAT allocation, VAT breakdown per rate on PDF/UBL, company logo on the PDF | Invoice from a reusable catalog with discounts, in Dutch or English, with the company logo — **✅ done (v0.13.0, 433 tests green)** | planned |
 | 12 | Inbound e-invoicing + delivery + cash management: attachments in-DB (`attach`), encrypted/rotated backups, aging/statement/sales reports, `import invoice` (EN 16931/Peppol UBL → payables), `invoice email` (SMTP), SEPA direct debit (`mandate` + pain.008) | The 2027 e-invoice mandate both ways: receive UBL invoices, email the PDF, collect by incasso — **✅ done (v0.14.1, 603 tests green)** | planned |
+| 13 | Actor security layers: **Tier 0** signed actor commands (per-company key registry, enforcement, `audit verify`) + **Tier 0.5 per-actor authorizations** — capability families + roles (`actor authz`, `actor roles`, `actor can`, `actor who-can`), deny-by-default segregation-of-duties gate in the sign gate (CLI + MCP), owner-mediated key revoke | Every command signed and attributable; agents act only within their role — the actor who books is not the one who files or pays — **✅ done (dev branch, 746 tests green)** | done |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 

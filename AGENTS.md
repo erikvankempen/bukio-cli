@@ -677,6 +677,81 @@ registered in *that* company's DB.
 | `ACTOR_KEY_UNKNOWN` | key exists, not enrolled in this company | `actor register` (first enrolment: operator flips `enforce --off` → register → `--on`) |
 | `ACTOR_KEY_REVOKED` | key was revoked here | rotate: `actor keygen --force` + `actor register` |
 | `PASSPHRASE_REQUIRED` | encrypted human key, no session/passphrase | `actor unlock` or set `BUKIO_SIGNING_PASSPHRASE` |
+| `AUTHZ_DENIED` | authorizations on, actor lacks the capability (or the command is unmapped — fail closed); also `actor revoke --target` without the owner role | `actor roles` (own roles), `actor can '<cmd>'` (why), ask the owner to `roles grant` |
+
+### 6.21 Authorizations & segregation of duties (Tier 0.5)
+
+Signing proves **who** ran a command; authorizations control **what kinds
+of commands** an actor may run, so one actor can no longer do both sides of
+a sensitive pair (create *and* post, book *and* file tax, move the ledger
+*and* authorise money out). The granularity is **capability families +
+roles**, not a per-command matrix — one grant line the owner can read:
+
+| Role | Capabilities | Typical holder |
+|------|--------------|----------------|
+| `owner` | **all** | `human:erik` |
+| `bookkeeper` | admin.chart, entry.draft, entry.post, contacts.manage, invoice.manage, bank.import, bank.match, vat.book, assets.manage, recurring.manage, fx.manage, report.read | `human:erik`, `agent:bookkeeping` |
+| `payments` | bank.import, bank.match, payments.sepa, report.read | `agent:payments` |
+| `tax` | vat.book, vat.file, close.month, close.year, export.manage, report.read | `agent:tax` |
+| `assets` | assets.manage, report.read | `agent:assets` |
+| `readonly` | report.read | auditor, `system:watchdog` |
+
+(There is also a documented *automation template* for working agents:
+entry.draft, contacts.manage, invoice.manage, bank.import,
+recurring.manage, report.read — the operator adds `entry.post`
+deliberately when the agent is trusted to book.)
+
+**Enable it (one-time, audited).** `actor authz --on` turns on signing
+enforcement (it implies it — permissions without proven identity are
+meaningless) and **grants the flipper the `owner` role** (bootstrap — no
+deadlock, no pre-seeding). Enrol every agent's key **before** flipping:
+
+```bash
+# enrol the agents first (first enrolment is refused under enforcement)
+BUKIO_ACTOR=agent:invoicing bukio actor keygen && bukio actor register
+BUKIO_ACTOR=agent:payments  bukio actor keygen && bukio actor register
+
+# flip: the flipper becomes owner, enforcement switches on
+bukio --actor human:erik actor authz --on
+
+# grant roles (owner only under authz); a conflicting grant warns softly
+bukio actor roles grant bookkeeper --for agent:invoicing
+bukio actor roles grant payments    --for agent:payments
+```
+
+> `--for <who>` names the actor a role goes to. The identity flag
+> `--actor` is the global option — it cannot be re-used for the grantee
+> (a subcommand option with the same name would be silently bound to the
+> global and corrupt the signing identity), so the grantee flag is `--for`.
+
+**What changes.** Under authz, **every** non-exempt command needs a role
+carrying its capability — deny-by-default. Refusals happen in the sign
+gate, **before anything is written** (dry-run included):
+
+- `AUTHZ_DENIED` names the actor, the missing capability and the roles it
+  has: `actor agent:invoicing has no capability 'vat.file' in this company
+  (roles: bookkeeper) — ask the owner to grant it`.
+- Self-service stays free for any enrolled actor: `actor verify`,
+  `actor can '<cmd>'` (your own checks), `actor roles` (your own), and
+  revoking your own key. Seeing **others'** roles (`roles --for`),
+  `actor can --for`, `actor who-can`, granting/revoking roles, and
+  `authz --off` are owner territory.
+- The owner-mediated key kill: `actor revoke --target <who> --reason` —
+  owner role required **regardless** of authz mode (a compromised agent
+  key is killed by the operator, not only by itself).
+
+**Review the separation (SoD).** The review lens is `who-can` — the whole
+matrix for one command:
+
+```bash
+bukio actor who-can 'entry post'          # only owner + bookkeeper
+bukio actor who-can 'payments batch create'  # only owner + payments
+```
+
+**Turn it off.** `actor authz --off` (owner only) returns to Tier 0 —
+signing enforcement stays on, roles become inert configuration. The LAST
+owner can never be revoked (`LAST_OWNER`), so a company can always turn
+authz off.
 
 ## 7. Error codes you will meet
 

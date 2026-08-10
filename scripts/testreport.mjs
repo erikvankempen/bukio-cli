@@ -24,10 +24,12 @@ const files = readdirSync(path.join(root, 'test')).filter((f) => f.endsWith('.te
 const DESCRIPTIONS = {
   'accounts.test.js': 'chart of accounts CRUD + CSV chart import',
   'actor.test.js': 'named-actor enforcement, actor identity CLI + sign-and-verify gate (record/enforce modes, stale/replay/registry refusals) + full Tier 0 lifecycle (enrol→enforce→lock→revoke→rotate→verify→company B)',
-  'actor-registry.test.js': 'per-company actor key registry: enrol/revoke (history kept), rotation, enforce flag, per-DB independence',
+  'actor-registry.test.js': 'per-company actor key registry: enrol/revoke (history kept), rotation, enforce flag, per-DB independence + Tier 0.5 role registry (grant/revoke/getRoles, authz flag, last-owner guard)',
   'assets.test.js': 'fixed assets: schemes, mid-life adoption, runs, disposal, activastaat',
   'attachments.test.js': 'in-DB/file document attachments: add/list/show/remove, 25 MB cap, dedupe, metadata-only lists, audit',
   'audit.test.js': 'audit log record/list, append-only trigger, migration 018/019, signature columns + verifyTrail classification matrix',
+  'authz-cli.test.js': 'Tier 0.5 authorizations end-to-end: actor authz/roles/can/who-can CLI, the AUTHZ_DENIED gate (dry-run parity, deny-by-default, authz implies enforce), MCP tool gate (no mutation on refusal, read-only unaffected), owner-mediated revoke, full SoD lifecycle',
+  'authz.test.js': 'Tier 0.5 capability map: command→capability coverage (§3 + full CLI + MCP tools), canAct matrix, SoD warnings, exemption set, authz gate (unit)',
   'backup.test.js': 'encrypted backups (AES-256-GCM), keep-N rotation, tamper detection, audited restore',
   'bank.test.js': 'CAMT.053/CSV import, idempotency, matching/reconciliation',
   'canonical.test.js': 'canonical command digest: stable sorted-key JSON, sha256, excludes identity/output flags, includes --dry-run',
