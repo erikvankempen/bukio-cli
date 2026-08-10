@@ -15,6 +15,10 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 7. **Money is integer cents.** `amount_cents` in JSON is the truth. `amount` strings are for humans. No floats, ever.
 8. **Archive every source document.** When booking an invoice (or any posted document — purchase invoice, credit note, bank proof), copy the original PDF/image/XML to `~/.bukio/invoices/` next to the live DB before finishing, named `YYYY-MM-DD_<vendor-slug>_<invoice-number>.<ext>` (see 6.17). The books then carry their paper trail.
 9. **Every source file carries the license header.** New `.js`/`.mjs` files start with the standard header — project name, copyright Erik van Kempen, `SPDX-License-Identifier: Apache-2.0` — copied verbatim from any existing `src/` file (shebang files keep the shebang on line 1, header after). Never drop, edit, or reorder it.
+10. **Signing is required once a company enforces it.** `bukio actor enforce --on` makes a valid actor signature mandatory: unsigned or unverifiable commands are refused *before anything is written*. Never work around an enforced company — not with `--dry-run` (also refused), not with a different `--actor` (must be enrolled), not by disabling the gate. `actor enforce --off` is the operator's recovery hatch — ask first.
+11. **Enrol per company.** An actor's key is enrolled per company DB (`bukio actor register` runs against the *current* `--db`). Register in every company the actor works in; a key valid in one company is not valid in another. If a command is refused with `ACTOR_KEY_UNKNOWN`/`ACTOR_KEY_REVOKED`, run `bukio actor verify` and fix enrolment or rotate (`actor keygen --force` + `actor register`).
+12. **Human keys are passphrase-protected; use sessions.** `human:` keys are encrypted — run `bukio actor unlock` once per session (default 12 h, `--ttl-hours` to change) or set `BUKIO_SIGNING_PASSPHRASE`; `actor lock` clears the session. Never store a passphrase in a script next to the key; prefer the session for interactive work.
+13. **Cron/system actors sign from their key file.** `system:`/`agent:` keys are plain files — a cron job or agent that has the key file signs automatically. Give unattended jobs their own actor (`system:backup`, `system:cron`) with its own enrolled key, so the audit trail shows *which* system acted. `--sign-key <path>` overrides the key file; the resolution order is `--sign-key` → session → `BUKIO_SIGNING_PASSPHRASE` → `<config>/keys/<role>-<name>.key`.
 
 ---
 
@@ -25,6 +29,8 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | Database path | `--db <path>` or env `BUKIO_DB` (default `~/.bukio/bukio.db`) |
 | Actor | `--actor <who>` or env `BUKIO_ACTOR` — **required**, format `'<role>:<name>'` (e.g. `agent:bartholomeus`, `human:erik`) |
 | JSON output | `--json` (global flag — works before or after the subcommand) |
+| Signing key | `--sign-key <path>`, or the actor's session, or `BUKIO_SIGNING_PASSPHRASE` (human keys), or the actor's key file at `<config>/keys/<role>-<name>.key` — in that order |
+| Config dir | env `BUKIO_CONFIG_DIR` (default `~/.bukio`) — keys in `keys/`, sessions in `sessions/`, nonce cache `nonces.json` |
 
 > **Single company per database.** One company = one database file. To work on company B, point `--db` at its file. Never mix companies in one database.
 

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-10 19:19:17 UTC — **✅ 695 passing · 0 failing (695 tests)**
+**Latest run:** 2026-08-10 19:39:25 UTC — **✅ 696 passing · 0 failing (696 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -32,9 +32,9 @@
     - ✅ registry is per company DB: same actor, independent enrolments
     - ✅ registry persists to disk and survives reopen (file-backed DB)
 
-### actor.test.js — named-actor enforcement, actor identity CLI + sign-and-verify gate (record/enforce modes, stale/replay/registry refusals)
+### actor.test.js — named-actor enforcement, actor identity CLI + sign-and-verify gate (record/enforce modes, stale/replay/registry refusals) + full Tier 0 lifecycle (enrol→enforce→lock→revoke→rotate→verify→company B)
 
-32 passing · 0 failing
+33 passing · 0 failing
 
     - ✅ isValidActor: role:name formats
     - ✅ actorError: helpful messages for missing and malformed actors
@@ -68,6 +68,7 @@
     - ✅ verifySignatureBundle: stale timestamp -> SIGNATURE_STALE under enforce
     - ✅ verifySignatureBundle: reused nonce -> NONCE_REUSED even in record mode
     - ✅ verifySignatureBundle: record mode tolerates unknown/revoked/invalid as unsigned
+    - ✅ lifecycle: keygen(unlock)→register→enforce→signed→refused→lock→revoke→rotate→verify→company B
 
 ### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar, MCP signed execution (verified rows, enforce refusal, nonces, per-DB registry)
 

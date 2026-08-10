@@ -10,7 +10,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-603%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-696%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -131,6 +131,16 @@ draft ──post──▶ posted ──reverse──▶ (original stays posted)
 ### Actors
 
 Every mutation records an **actor** — every command requires a named identity in the form `'<role>:<name>'`: `human:erik` when you act yourself, `agent:bartholomeus` when an agent acts. A bare `human` or `agent` is rejected. Actors appear on entries (`created_by`) and in the audit log, so a human can always see exactly what an agent did.
+
+### Actor identity & signing
+
+Every actor can hold an **Ed25519 key pair**. Once an actor has a key and it is enrolled in a company database, every command that actor runs is digitally **signed** — the signature covers a canonical digest of the command, its arguments, a timestamp and a one-time nonce, and is stored on the audit-log row for that action. `bukio audit verify` recomputes the digest and re-checks every signature against the company's key registry, so a tampered audit log or a forged command is detectable after the fact.
+
+- **Keys** — `bukio actor keygen` writes `<config>/keys/<role>-<name>.key`. Agent and system keys are plain files; **human keys are passphrase-encrypted** and are unlocked per session with `bukio actor unlock` (12 h by default, `--ttl-hours` to change) or by setting `BUKIO_SIGNING_PASSPHRASE`. `bukio actor lock` clears the session.
+- **Enrolment is per company** — `bukio actor register` enrols the actor's local key into the current company's database (`actor_keys`). An actor working in several companies repeats this for each database; every company's registry and enforcement state are independent.
+- **Enforcement** — signing is *recorded* by default (`record` mode: signed commands log `verified`, unsigned ones still run and log `unsigned`). `bukio actor enforce --on` makes a valid signature **required**: unsigned or unverifiable commands are refused before anything is written — including through the MCP server, whose mutating tool calls are signed the same way. `actor enforce --off` is the recovery escape hatch.
+- **Revocation & rotation** — `bukio actor revoke --reason …` revokes the actor's key in the current company (the row is retained as history, so audit rows signed with it stay verifiable as `revoked`). Rotate with `bukio actor keygen --force` + `actor register` — the fresh key is enrolled as a new registry row and historical rows remain provable.
+- **Explicit key** — `--sign-key <path>` (or the session key / `BUKIO_SIGNING_PASSPHRASE` / the actor's key file, in that order) chooses which private key signs the command.
 
 ### The audit log
 
@@ -619,6 +629,45 @@ bukio audit --since 2026-08-01         # everything this month
 bukio audit --format xlsx --out ~/exports/audit-2026.xlsx --limit 1000   # for the boekhouder
 ```
 
+### `bukio audit verify`
+
+Re-verify the signed audit trail against the company's key registry. For every row, the canonical digest is recomputed from the stored signed args and the signature is re-checked. Reads only the database — a **copied** DB file verifies self-contained, with no key files present.
+
+Each row gets one of: `ok` · `unsigned` (legacy/pre-signing rows — not an error) · `revoked` (signature verifies, key since revoked — valid at the time) · `tampered` (args no longer produce the signed digest) · `invalid-signature` · `unknown-key`. The summary prints counts; **exit code is 1** when tampered/invalid/unknown-key rows exist (handy for scheduled checks).
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--since <iso-ts>` | — | Only rows at/after this timestamp |
+| `--limit <n>` | all | Check only the newest N rows |
+
+```bash
+bukio audit verify --json        # full report
+bukio audit verify               # summary + problem rows
+```
+
+### `bukio actor`
+
+Key management for actor identity & signing (see [Actor identity & signing](#actor-identity--signing)). All `actor` commands are **exempt from signing** — they are the bootstrap that makes signing possible.
+
+| Command | Description |
+|---------|-------------|
+| `actor keygen [--force] [--dry-run]` | Generate an Ed25519 keypair for the `--actor`: human keys are passphrase-encrypted (`BUKIO_SIGNING_PASSPHRASE` or interactive prompt), agent/system keys are plain files. `--force` replaces an existing key (rotation). |
+| `actor register [--dry-run]` | Enrol the actor's local key into the **current company's** DB. Per-company: repeat for every company DB the actor works in. |
+| `actor list` | List enrolled keys in the current company's DB — active and revoked (with reason), full history. |
+| `actor revoke --reason <text> [--dry-run]` | Revoke the actor's own key in the current company's DB (self-revoke; the row is retained as history). |
+| `actor enforce --on \| --off` | Turn signature enforcement on/off for the current company's DB. `--off` is the recovery escape hatch. |
+| `actor unlock [--ttl-hours <n>]` | Human keys only: decrypt the passphrase-protected key into a short-lived session key (default 12 h, max 168). |
+| `actor lock` | Clear the session key — the human must authenticate again. |
+| `actor verify` | Show the actor's key state: key file present? enrolled? session valid? enforcement? |
+
+```bash
+bukio actor keygen                       # as agent:bartholomeus — plain key file
+BUKIO_SIGNING_PASSPHRASE=… bukio actor keygen   # as human:erik — encrypted
+bukio actor unlock --ttl-hours 12        # human session
+bukio actor register                     # enrol into THIS company's DB
+bukio actor enforce --on                 # from now on: unsigned = refused
+```
+
 ---
 
 ## Global Flags
@@ -628,6 +677,9 @@ bukio audit --format xlsx --out ~/exports/audit-2026.xlsx --limit 1000   # for t
 | `--json` | — | off | Machine-readable JSON output (see below) |
 | `--db <path>` | `BUKIO_DB` | `~/.bukio/bukio.db` | Database file |
 | `--actor <who>` | `BUKIO_ACTOR` | *(required)* | Acting entity — `'<role>:<name>'`, e.g. `agent:bartholomeus`, `human:erik` |
+| `--sign-key <path>` | — | actor session → `BUKIO_SIGNING_PASSPHRASE` → actor key file | Explicit private key to sign with; by default the signing key resolves in that order |
+| — | `BUKIO_SIGNING_PASSPHRASE` | — | Passphrase for human (encrypted) keys — used by keygen/unlock and by the sign gate when no session exists |
+| config dir | `BUKIO_CONFIG_DIR` | `~/.bukio` | Where keys (`keys/`) and sessions (`sessions/`) live |
 
 ### JSON output contract
 

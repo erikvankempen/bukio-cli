@@ -84,6 +84,20 @@ merged to `main` and released.
   from the CLI preAction gate — it mutates nothing and must be able to START
   under enforce; the per-tool gate is what enforces. `audit verify` accepts
   MCP-signed rows (verified cross-surface).
+- Actor identity Tier 0, task 9: **lifecycle coverage + documentation** —
+  one end-to-end scenario test walks a real enrolment: keygen (agent plain,
+  human passphrase-encrypted) → unlock → register → enforce on → signed
+  commands run (both actors) → unsigned refused → lock (passphrase required
+  again) → revoke → rotation (keygen --force + register — `actor register`
+  is now signing-exempt as bootstrap, alongside keygen/unlock/lock, so
+  re-enrolment after revocation works under enforce) → `audit verify` clean
+  (old rows `revoked`, new rows `ok`, zero tampered/invalid/unknown) →
+  company B independence (same key: refused until enrolled, then verified;
+  B's fresh registry shows no leaked revocation). README gains the "Actor
+  identity & signing" section, `bukio actor` + `bukio audit verify` command
+  references, and signing rows in the global flags table; AGENTS.md gains
+  house rules 10–13 (enforcement, per-company enrolment, human sessions,
+  cron/system keys); the README test badge is synced to the live count.
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases

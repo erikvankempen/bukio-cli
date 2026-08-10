@@ -594,3 +594,101 @@ test('verifySignatureBundle: record mode tolerates unknown/revoked/invalid as un
     }
   }
 });
+
+// --- Task 9: full Tier 0 lifecycle scenario ---------------------------------
+
+test('lifecycle: keygen(unlock)→register→enforce→signed→refused→lock→revoke→rotate→verify→company B', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-lifecycle-'));
+  const dbA = path.join(dir, 'a.db');
+  const dbB = path.join(dir, 'b.db');
+  const cfg = path.join(dir, 'cfg');
+  const PASS = 'lifecycle-passphrase-42';
+  const base = { ...process.env, BUKIO_CONFIG_DIR: cfg, BUKIO_ACTOR: 'agent:test' };
+  const run = (dbPath, args, extraEnv = {}) => {
+    const r = runCli(['--db', dbPath, '--json', ...args], { ...base, ...extraEnv });
+    assert.equal(r.status, 0, `expected ok: ${r.stdout}${r.stderr}`);
+    return JSON.parse(r.stdout);
+  };
+  const runFail = (dbPath, args, extraEnv = {}) => {
+    const r = runCli(['--db', dbPath, '--json', ...args], { ...base, ...extraEnv });
+    assert.equal(r.status, 1, `expected failure: ${r.stdout}`);
+    return JSON.parse(r.stdout);
+  };
+  const sigCounts = (dbPath) => {
+    const h = openDb(dbPath);
+    try {
+      return Object.fromEntries(h.prepare('SELECT sig_status, COUNT(*) c FROM audit_log GROUP BY sig_status').all().map((r) => [r.sig_status, r.c]));
+    } finally {
+      h.close();
+    }
+  };
+  const entry = (who, desc, dbPath, extraEnv = {}) => run(dbPath, ['--actor', who, 'entry', 'add', '--date', '2026-08-10', '--desc', desc, '--postings', '1100:100.00,8000:-100.00', '--post'], extraEnv);
+
+  // 1. init companies A and B
+  run(dbA, ['--actor', 'human:erik', 'init', '--name', 'A']);
+  run(dbB, ['--actor', 'human:erik', 'init', '--name', 'B']);
+
+  // 2. keygen both actors: agent = plain key file, human = passphrase-encrypted
+  run(dbA, ['--actor', 'agent:bartholomeus', 'actor', 'keygen']);
+  run(dbA, ['--actor', 'human:erik', 'actor', 'keygen'], { BUKIO_SIGNING_PASSPHRASE: PASS });
+
+  // 3. unlock the human key into a session
+  run(dbA, ['--actor', 'human:erik', 'actor', 'unlock', '--ttl-hours', '12'], { BUKIO_SIGNING_PASSPHRASE: PASS });
+
+  // 4. register both actors in company A (per-company enrolment)
+  run(dbA, ['--actor', 'agent:bartholomeus', 'actor', 'register']);
+  run(dbA, ['--actor', 'human:erik', 'actor', 'register'], { BUKIO_SIGNING_PASSPHRASE: PASS });
+
+  // 5. enforce signing in company A
+  run(dbA, ['--actor', 'human:erik', 'actor', 'enforce', '--on'], { BUKIO_SIGNING_PASSPHRASE: PASS });
+
+  // 6. signed commands run: agent via its key file, human via the session
+  entry('agent:bartholomeus', 'signed by agent', dbA);
+  entry('human:erik', 'signed by human', dbA);
+  const afterSigned = sigCounts(dbA);
+  assert.ok((afterSigned.verified ?? 0) >= 4, `both actors' rows verified: ${JSON.stringify(afterSigned)}`);
+
+  // 7. an actor without key material is refused — nothing is written
+  const refused = runFail(dbA, ['--actor', 'agent:test', 'entry', 'add', '--date', '2026-08-10', '--desc', 'x', '--postings', '1100:10.00,8000:-10.00']);
+  assert.equal(refused.error.code, 'SIGNATURE_REQUIRED');
+
+  // 8. lock the human session: without the passphrase the human is refused,
+  //    with the passphrase the key file still works
+  run(dbA, ['--actor', 'human:erik', 'actor', 'lock'], { BUKIO_SIGNING_PASSPHRASE: PASS });
+  const locked = runFail(dbA, ['--actor', 'human:erik', 'entry', 'add', '--date', '2026-08-10', '--desc', 'x', '--postings', '1100:10.00,8000:-10.00']);
+  assert.equal(locked.error.code, 'PASSPHRASE_REQUIRED');
+  entry('human:erik', 'signed with passphrase after lock', dbA, { BUKIO_SIGNING_PASSPHRASE: PASS });
+  assert.ok((sigCounts(dbA).verified ?? 0) >= 6, 'passphrase path verifies after lock');
+
+  // 9. revoke the agent key (self-revoke): agent commands are now refused
+  run(dbA, ['--actor', 'agent:bartholomeus', 'actor', 'revoke', '--reason', 'rotation']);
+  const revoked = runFail(dbA, ['--actor', 'agent:bartholomeus', 'entry', 'add', '--date', '2026-08-10', '--desc', 'x', '--postings', '1100:10.00,8000:-10.00']);
+  assert.equal(revoked.error.code, 'ACTOR_KEY_REVOKED');
+
+  // 10. rotation: new key on disk, enrolled as a fresh registry row
+  run(dbA, ['--actor', 'agent:bartholomeus', 'actor', 'keygen', '--force']);
+  run(dbA, ['--actor', 'agent:bartholomeus', 'actor', 'register']);
+  entry('agent:bartholomeus', 'signed with rotated key', dbA);
+
+  // 11. audit verify is clean: old key's rows are 'revoked', new rows 'ok',
+  //     zero tampered / invalid / unknown
+  const verify = run(dbA, ['--actor', 'agent:bartholomeus', 'audit', 'verify']);
+  assert.equal(verify.data.summary.tampered, 0, JSON.stringify(verify.data.summary));
+  assert.equal(verify.data.summary.invalid_signature, 0);
+  assert.equal(verify.data.summary.unknown_key, 0);
+  assert.ok(verify.data.summary.ok >= 3, `new rows verified: ${JSON.stringify(verify.data.summary)}`);
+  assert.ok(verify.data.summary.revoked >= 2, `old rows flagged revoked: ${JSON.stringify(verify.data.summary)}`);
+
+  // 12. company B is independent: not enrolled -> ACTOR_KEY_UNKNOWN; after
+  //     register the rotated key verifies there too
+  run(dbB, ['--actor', 'human:erik', 'actor', 'enforce', '--on'], { BUKIO_SIGNING_PASSPHRASE: PASS });
+  const notEnrolled = runFail(dbB, ['--actor', 'agent:bartholomeus', 'entry', 'add', '--date', '2026-08-10', '--desc', 'x', '--postings', '1100:10.00,8000:-10.00']);
+  assert.equal(notEnrolled.error.code, 'ACTOR_KEY_UNKNOWN');
+  run(dbB, ['--actor', 'agent:bartholomeus', 'actor', 'register']);
+  entry('agent:bartholomeus', 'signed in company B', dbB);
+  const bCounts = sigCounts(dbB);
+  assert.ok((bCounts.verified ?? 0) >= 2, `B verifies the same rotated key: ${JSON.stringify(bCounts)}`);
+  // B's registry is separate: A's revocation state did not leak into B
+  const bVerify = run(dbB, ['--actor', 'agent:bartholomeus', 'audit', 'verify']);
+  assert.equal(bVerify.data.summary.revoked, 0, 'B has no revoked rows (fresh registry)');
+});

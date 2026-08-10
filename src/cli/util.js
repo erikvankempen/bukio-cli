@@ -279,7 +279,11 @@ export function resolveSigningKey(actor, signKeyPath, enforce) {
 
 /** Bootstrap/recovery commands cannot (or must not) be signed. */
 export function isSigningExempt(commandPath, opts) {
-  if (['actor keygen', 'actor unlock', 'actor lock'].includes(commandPath)) return true;
+  // key management is bootstrap: keygen creates the key, register enrols it
+  // (the FIRST enrolment and the post-rotation re-enrolment both happen when
+  // the registry has no ACTIVE key for the actor, so the gate must not
+  // demand a verifiable signature from it)
+  if (['actor keygen', 'actor register', 'actor unlock', 'actor lock'].includes(commandPath)) return true;
   // turning enforcement OFF is the escape hatch when keys are broken
   if (commandPath === 'actor enforce' && opts.off) return true;
   // the MCP server command starts a bridge — it mutates nothing itself, and
