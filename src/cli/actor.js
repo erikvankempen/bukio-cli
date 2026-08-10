@@ -10,10 +10,11 @@
 // sessions/<role>-<name>.key for short-lived human unlocks. The registry
 // itself is per-company (actor_keys table in the company DB).
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
-import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import {
+  ensureDb, makeCtx, output, fail, table, configDir, keyFilePath, sessionFilePath, readSessionKey,
+} from './util.js';
 import {
   generateKeyPair, keyidOf, isEncrypted, publicKeyFromPrivate, decryptPrivateKey,
 } from '../core/sign.js';
@@ -30,35 +31,6 @@ export function actorCliError(code, message) {
   const e = new Error(message);
   e.code = code;
   return e;
-}
-
-/** Config dir for keys/sessions: BUKIO_CONFIG_DIR or ~/.bukio. */
-export function configDir() {
-  return process.env.BUKIO_CONFIG_DIR || path.join(os.homedir(), '.bukio');
-}
-
-export function keyFilePath(actor) {
-  return path.join(configDir(), 'keys', `${actor.replace(':', '-')}.key`);
-}
-
-export function sessionFilePath(actor) {
-  return path.join(configDir(), 'sessions', `${actor.replace(':', '-')}.key`);
-}
-
-/**
- * Read the short-lived session key for an actor. Returns
- * { keyPem, expiresAt } or null when missing, malformed or expired
- * (expired counts as locked — the sign gate refuses on null).
- */
-export function readSessionKey(actor) {
-  try {
-    const raw = JSON.parse(readFileSync(sessionFilePath(actor), 'utf8'));
-    if (!raw.keyPem || !raw.expiresAt) return null;
-    if (new Date(raw.expiresAt).getTime() <= Date.now()) return null;
-    return { keyPem: raw.keyPem, expiresAt: raw.expiresAt };
-  } catch {
-    return null;
-  }
 }
 
 function writePrivateKeyFile(file, pem) {

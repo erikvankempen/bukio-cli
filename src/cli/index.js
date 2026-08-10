@@ -33,6 +33,8 @@ import { make as attachCmd } from './attach.js';
 import { make as updateCmd } from './update.js';
 import { make as actorCmd } from './actor.js';
 import { actorError } from '../core/actor.js';
+import { signCommand } from './util.js';
+import { setPendingSignature } from '../audit/index.js';
 
 export async function runCli(argv) {
   const program = new Command();
@@ -43,6 +45,7 @@ export async function runCli(argv) {
     .option('--json', 'machine-readable JSON output')
     .option('--db <path>', 'database file', process.env.BUKIO_DB || path.join(os.homedir(), '.bukio', 'bukio.db'))
     .option('--actor <who>', "acting entity '<role>:<name>' — e.g. agent:bartholomeus, human:erik (or BUKIO_ACTOR env; required)", undefined)
+    .option('--sign-key <path>', 'explicit private-key file to sign with (default: the actor\'s key in <config>/keys)', undefined)
     .showHelpAfterError();
 
   initCmd(program);
@@ -72,7 +75,11 @@ export async function runCli(argv) {
 
   // Named-actor enforcement: every action must identify as '<role>:<name>'
   // (agent:bartholomeus, human:erik) so the audit trail always names who acted.
-  program.hook('preAction', (_thisCmd, actionCmd) => {
+  // Then the Tier 0 sign gate: build the canonical digest, auto-sign, verify
+  // against the per-company registry, and refuse before dispatch when the
+  // company enforces signing. The signature bundle lands on the command's
+  // audit row(s) via setPendingSignature.
+  program.hook('preAction', async (_thisCmd, actionCmd) => {
     const o = actionCmd.optsWithGlobals();
     const issue = actorError(o.actor ?? process.env.BUKIO_ACTOR ?? null);
     if (issue) {
@@ -81,6 +88,22 @@ export async function runCli(argv) {
         process.exit(1);
       }
       program.error(`error [${issue.code}]: ${issue.message}`, { exitCode: 1 });
+    }
+    const ctx = {
+      json: Boolean(o.json),
+      dbPath: o.db,
+      actor: o.actor ?? process.env.BUKIO_ACTOR,
+      dryRun: Boolean(o.dryRun),
+    };
+    try {
+      setPendingSignature(signCommand(ctx, actionCmd));
+    } catch (err) {
+      const error = { code: err.code || 'ERROR', message: err.message };
+      if (o.json) {
+        console.log(JSON.stringify({ ok: false, error }));
+        process.exit(1);
+      }
+      program.error(`error [${error.code}]: ${error.message}`, { exitCode: 1 });
     }
   });
 

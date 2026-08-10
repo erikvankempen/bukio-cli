@@ -5,12 +5,35 @@
  */
 
 // Audit log — append-only record of every mutation (human or agent).
+//
+// Signature plumbing (Tier 0): the CLI sign gate runs before every action
+// and sets the signature bundle for the command; the first record() call of
+// that command picks it up so the audit row carries digest/signature/
+// keyid/nonce/timestamp. Commands without a signature stay 'unsigned' —
+// an honest "claimed, not yet provable" label.
+
+let pendingSignature = null;
+
+/** Set the signature bundle for the command about to run (called by the
+ * sign gate before dispatch). */
+export function setPendingSignature(sig) {
+  pendingSignature = sig ?? null;
+}
 
 export function record(db, {
   actor, action, command = null, args = null, outcome = 'ok', entryIds = [],
   digestHash = null, sigKeyid = null, sigNonce = null, sigTs = null, sig = null,
-  sigStatus = 'unsigned',
+  sigStatus = null,
 }) {
+  const s = pendingSignature ?? {};
+  const fields = {
+    digestHash: digestHash ?? s.digestHash ?? null,
+    sigKeyid: sigKeyid ?? s.sigKeyid ?? null,
+    sigNonce: sigNonce ?? s.sigNonce ?? null,
+    sigTs: sigTs ?? s.sigTs ?? null,
+    sig: sig ?? s.sig ?? null,
+    sigStatus: sigStatus ?? s.sigStatus ?? 'unsigned',
+  };
   db.prepare(
     `INSERT INTO audit_log (actor, action, command, args_json, outcome, entry_ids,
                             digest_hash, sig_keyid, sig_nonce, sig_ts, sig, sig_status)
@@ -22,7 +45,7 @@ export function record(db, {
     args == null ? null : JSON.stringify(args),
     String(outcome),
     entryIds.length ? JSON.stringify(entryIds) : null,
-    digestHash, sigKeyid, sigNonce, sigTs, sig, sigStatus,
+    fields.digestHash, fields.sigKeyid, fields.sigNonce, fields.sigTs, fields.sig, fields.sigStatus,
   );
 }
 

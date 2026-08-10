@@ -12,7 +12,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { isValidActor, actorError } from '../src/core/actor.js';
 import { openDb } from '../src/core/db.js';
-import { readSessionKey, sessionFilePath } from '../src/cli/actor.js';
+import { readSessionKey, sessionFilePath, verifySignatureBundle, isNonceUsed } from '../src/cli/util.js';
+import { buildDigest } from '../src/core/canonical.js';
+import { generateKeyPair, sign } from '../src/core/sign.js';
+import { enrolActor, revokeActor } from '../src/core/actor-registry.js';
 
 function tmpDb() {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-actor-test-'));
@@ -329,5 +332,261 @@ test('readSessionKey: expired or missing session files count as locked', () => {
   } finally {
     if (prev === undefined) delete process.env.BUKIO_CONFIG_DIR;
     else process.env.BUKIO_CONFIG_DIR = prev;
+  }
+});
+
+// --- sign-and-verify gate (Task 5) ----------------------------------------
+
+const ENTRY_ARGS = ['entry', 'add', '--date', '2026-08-10', '--desc', 'Gate test', '--postings', '1100:100.00,8000:-100.00', '--post'];
+
+function lastAuditRow(dbPath) {
+  const handle = openDb(dbPath);
+  try {
+    return handle.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT 1').get();
+  } finally {
+    handle.close();
+  }
+}
+
+function entryCount(dbPath) {
+  const handle = openDb(dbPath);
+  try {
+    return handle.prepare('SELECT COUNT(*) c FROM journal_entries').get().c;
+  } finally {
+    handle.close();
+  }
+}
+
+/** init + keygen agent + register agent (enforce still off). */
+function setupEnrolledAgent(cfg, db) {
+  const base = { BUKIO_CONFIG_DIR: cfg, BUKIO_ACTOR: '' };
+  assert.equal(runCli(['--actor', 'human:erik', 'init', '--name', 'X', '--db', db], base).status, 0);
+  runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'keygen'], { BUKIO_CONFIG_DIR: cfg });
+  const reg = runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'register', '--db', db], base);
+  assert.equal(reg.status, 0, reg.stderr);
+  return base;
+}
+
+test('sign gate: record mode + enrolled key -> command runs, audit row verified', () => {
+  const cfg = tmpConfig();
+  const db = tmpDb();
+  const base = setupEnrolledAgent(cfg, db);
+  const r = runCli(['--json', '--actor', 'agent:bartholomeus', ...ENTRY_ARGS, '--db', db], base);
+  assert.equal(r.status, 0, r.stderr);
+  const row = lastAuditRow(db);
+  assert.equal(row.sig_status, 'verified');
+  assert.match(row.digest_hash, /^[0-9a-f]{64}$/);
+  assert.match(row.sig_keyid, /^[0-9a-f]{32}$/);
+  assert.ok(row.sig);
+  assert.ok(row.sig_nonce);
+  assert.ok(row.sig_ts);
+});
+
+test('sign gate: record mode + no key -> runs, logged unsigned', () => {
+  const cfg = tmpConfig();
+  const db = tmpDb();
+  const base = { BUKIO_CONFIG_DIR: cfg, BUKIO_ACTOR: '' };
+  assert.equal(runCli(['--actor', 'human:erik', 'init', '--name', 'X', '--db', db], base).status, 0);
+  const r = runCli(['--json', '--actor', 'system:month-end', ...ENTRY_ARGS, '--db', db], base);
+  assert.equal(r.status, 0, r.stderr);
+  const row = lastAuditRow(db);
+  assert.equal(row.sig_status, 'unsigned');
+  assert.equal(row.sig, null);
+});
+
+test('sign gate: enforce on + no key -> SIGNATURE_REQUIRED, nothing mutated (JSON contract)', () => {
+  const cfg = tmpConfig();
+  const db = tmpDb();
+  const base = setupEnrolledAgent(cfg, db);
+  const on = runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'enforce', '--on', '--db', db], base);
+  assert.equal(on.status, 0, on.stderr);
+
+  const r = runCli(['--json', '--actor', 'system:month-end', ...ENTRY_ARGS, '--db', db], base);
+  assert.equal(r.status, 1);
+  const err = JSON.parse(r.stdout).error;
+  assert.equal(err.code, 'SIGNATURE_REQUIRED');
+  assert.equal(entryCount(db), 0); // nothing mutated
+});
+
+test('sign gate: enforce on + wrong key -> SIGNATURE_INVALID', () => {
+  const cfg = tmpConfig();
+  const db = tmpDb();
+  const base = setupEnrolledAgent(cfg, db);
+  runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'enforce', '--on', '--db', db], base);
+  // rotate the local key WITHOUT re-registering -> local key != registered key
+  runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'keygen', '--force'], { BUKIO_CONFIG_DIR: cfg });
+  const r = runCli(['--json', '--actor', 'agent:bartholomeus', ...ENTRY_ARGS, '--db', db], base);
+  assert.equal(r.status, 1);
+  assert.equal(JSON.parse(r.stdout).error.code, 'SIGNATURE_INVALID');
+  assert.equal(entryCount(db), 0);
+});
+
+test('sign gate: locked human key -> PASSPHRASE_REQUIRED; env passphrase unlocks', () => {
+  const cfg = tmpConfig();
+  const db = tmpDb();
+  const withPass = { BUKIO_CONFIG_DIR: cfg, BUKIO_SIGNING_PASSPHRASE: 'hunter2' };
+  assert.equal(runCli(['--actor', 'human:erik', 'init', '--name', 'X', '--db', db], { BUKIO_CONFIG_DIR: cfg, BUKIO_ACTOR: '' }).status, 0);
+  assert.equal(runCli(['--json', '--actor', 'human:erik', 'actor', 'keygen'], withPass).status, 0);
+  assert.equal(runCli(['--json', '--actor', 'human:erik', 'actor', 'register', '--db', db], withPass).status, 0);
+  assert.equal(runCli(['--json', '--actor', 'human:erik', 'actor', 'enforce', '--on', '--db', db], withPass).status, 0);
+
+  const locked = runCli(['--json', '--actor', 'human:erik', ...ENTRY_ARGS, '--db', db],
+    envWithoutSigningPassphrase({ BUKIO_CONFIG_DIR: cfg }));
+  assert.equal(locked.status, 1);
+  assert.equal(JSON.parse(locked.stdout).error.code, 'PASSPHRASE_REQUIRED');
+
+  const unlocked = runCli(['--json', '--actor', 'human:erik', ...ENTRY_ARGS, '--db', db], withPass);
+  assert.equal(unlocked.status, 0, unlocked.stderr);
+  assert.equal(lastAuditRow(db).sig_status, 'verified');
+});
+
+test('sign gate: unknown actor key -> ACTOR_KEY_UNKNOWN', () => {
+  const cfg = tmpConfig();
+  const db = tmpDb();
+  const base = setupEnrolledAgent(cfg, db);
+  runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'enforce', '--on', '--db', db], base);
+  // a key file exists for this actor, but it was never registered
+  runCli(['--json', '--actor', 'system:cron', 'actor', 'keygen'], { BUKIO_CONFIG_DIR: cfg });
+  const r = runCli(['--json', '--actor', 'system:cron', ...ENTRY_ARGS, '--db', db], base);
+  assert.equal(r.status, 1);
+  assert.equal(JSON.parse(r.stdout).error.code, 'ACTOR_KEY_UNKNOWN');
+});
+
+test('sign gate: revoked key -> ACTOR_KEY_REVOKED', () => {
+  const cfg = tmpConfig();
+  const db = tmpDb();
+  const base = setupEnrolledAgent(cfg, db);
+  runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'enforce', '--on', '--db', db], base);
+  // the gate verified the signature BEFORE the action, so the actor can
+  // revoke its own key; the next command must be refused
+  const revoke = runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'revoke', '--db', db, '--reason', 'test'], base);
+  assert.equal(revoke.status, 0, revoke.stderr);
+  const r = runCli(['--json', '--actor', 'agent:bartholomeus', ...ENTRY_ARGS, '--db', db], base);
+  assert.equal(r.status, 1);
+  assert.equal(JSON.parse(r.stdout).error.code, 'ACTOR_KEY_REVOKED');
+});
+
+test('sign gate: --dry-run fails identically before any mutation', () => {
+  const cfg = tmpConfig();
+  const db = tmpDb();
+  const base = setupEnrolledAgent(cfg, db);
+  runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'enforce', '--on', '--db', db], base);
+  const r = runCli(['--json', '--actor', 'system:month-end', 'entry', 'add', '--date', '2026-08-10', '--desc', 'X', '--postings', '1100:100.00,8000:-100.00', '--dry-run', '--db', db], base);
+  assert.equal(r.status, 1);
+  assert.equal(JSON.parse(r.stdout).error.code, 'SIGNATURE_REQUIRED');
+  assert.equal(entryCount(db), 0);
+});
+
+test('sign gate: exempt commands keep working under enforcement (keygen, enforce --off)', () => {
+  const cfg = tmpConfig();
+  const db = tmpDb();
+  const base = setupEnrolledAgent(cfg, db);
+  runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'enforce', '--on', '--db', db], base);
+  // keygen is exempt (its own key does not exist yet)
+  const kg = runCli(['--json', '--actor', 'system:new', 'actor', 'keygen'], { BUKIO_CONFIG_DIR: cfg });
+  assert.equal(kg.status, 0, kg.stderr);
+  // enforce --off is the recovery escape hatch and works unsigned
+  const off = runCli(['--json', '--actor', 'system:new', 'actor', 'enforce', '--off', '--db', db], base);
+  assert.equal(off.status, 0, off.stderr);
+  // enforcement is off again: unsigned commands run
+  const r = runCli(['--json', '--actor', 'system:new', ...ENTRY_ARGS, '--db', db], base);
+  assert.equal(r.status, 0, r.stderr);
+});
+
+// --- verifySignatureBundle unit checks (stale / replay / registry states) ---
+
+test('verifySignatureBundle: stale timestamp -> SIGNATURE_STALE under enforce', () => {
+  const db = openDb(':memory:');
+  try {
+    const { publicKey, privateKey, keyid } = generateKeyPair();
+    enrolActor(db, { actor: 'agent:bartholomeus', keyid, publicKey });
+    const digest = buildDigest({ actor: 'agent:bartholomeus', cmd: 'entry add', args: {}, ts: '2026-08-10T12:00:00.000Z', nonce: 'fresh-1' });
+    const sig = sign(digest, privateKey);
+    const r = verifySignatureBundle(db, {
+      actor: 'agent:bartholomeus', digest, sig, keyid, ts: '2026-08-10T12:00:00.000Z', nonce: 'fresh-1', enforce: true,
+    });
+    assert.equal(r.ok, false);
+    assert.equal(r.code, 'SIGNATURE_STALE');
+  } finally {
+    db.close();
+  }
+});
+
+test('verifySignatureBundle: reused nonce -> NONCE_REUSED even in record mode', () => {
+  const cfg = tmpConfig();
+  const prev = process.env.BUKIO_CONFIG_DIR;
+  process.env.BUKIO_CONFIG_DIR = cfg;
+  try {
+    const db = openDb(':memory:');
+    try {
+      const { publicKey, privateKey, keyid } = generateKeyPair();
+      enrolActor(db, { actor: 'agent:bartholomeus', keyid, publicKey });
+      const ts = new Date().toISOString();
+      const digest = buildDigest({ actor: 'agent:bartholomeus', cmd: 'entry add', args: {}, ts, nonce: 'same-nonce' });
+      const sig = sign(digest, privateKey);
+      const bundle = { actor: 'agent:bartholomeus', digest, sig, keyid, ts, nonce: 'same-nonce', enforce: false };
+      const first = verifySignatureBundle(db, bundle);
+      assert.equal(first.ok, true);
+      assert.equal(first.status, 'verified');
+      assert.ok(isNonceUsed(keyid, 'same-nonce'));
+      const second = verifySignatureBundle(db, bundle);
+      assert.equal(second.ok, false);
+      assert.equal(second.code, 'NONCE_REUSED');
+    } finally {
+      db.close();
+    }
+  } finally {
+    if (prev === undefined) delete process.env.BUKIO_CONFIG_DIR;
+    else process.env.BUKIO_CONFIG_DIR = prev;
+  }
+});
+
+test('verifySignatureBundle: record mode tolerates unknown/revoked/invalid as unsigned', () => {
+  const ts = new Date().toISOString();
+  // unknown actor -> unsigned, still ok
+  {
+    const db = openDb(':memory:');
+    try {
+      const { privateKey, keyid } = generateKeyPair();
+      const digest = buildDigest({ actor: 'agent:bartholomeus', cmd: 'entry add', args: {}, ts, nonce: 'n-unk' });
+      const sig = sign(digest, privateKey);
+      const r = verifySignatureBundle(db, { actor: 'agent:bartholomeus', digest, sig, keyid, ts, nonce: 'n-unk', enforce: false });
+      assert.equal(r.ok, true);
+      assert.equal(r.status, 'unsigned');
+    } finally {
+      db.close();
+    }
+  }
+  // revoked -> unsigned
+  {
+    const db = openDb(':memory:');
+    try {
+      const { publicKey, privateKey, keyid } = generateKeyPair();
+      enrolActor(db, { actor: 'agent:bartholomeus', keyid, publicKey });
+      revokeActor(db, { actor: 'agent:bartholomeus', reason: 'test' });
+      const digest = buildDigest({ actor: 'agent:bartholomeus', cmd: 'entry add', args: {}, ts, nonce: 'n-rev' });
+      const sig = sign(digest, privateKey);
+      const r = verifySignatureBundle(db, { actor: 'agent:bartholomeus', digest, sig, keyid, ts, nonce: 'n-rev', enforce: false });
+      assert.equal(r.ok, true);
+      assert.equal(r.status, 'unsigned');
+    } finally {
+      db.close();
+    }
+  }
+  // wrong key (signed by a key that is not the enrolled one) -> unsigned
+  {
+    const db = openDb(':memory:');
+    try {
+      const enrolled = generateKeyPair();
+      const imposter = generateKeyPair();
+      enrolActor(db, { actor: 'agent:bartholomeus', keyid: enrolled.keyid, publicKey: enrolled.publicKey });
+      const digest = buildDigest({ actor: 'agent:bartholomeus', cmd: 'entry add', args: {}, ts, nonce: 'n-wrong' });
+      const sig = sign(digest, imposter.privateKey);
+      const r = verifySignatureBundle(db, { actor: 'agent:bartholomeus', digest, sig, keyid: imposter.keyid, ts, nonce: 'n-wrong', enforce: false });
+      assert.equal(r.ok, true);
+      assert.equal(r.status, 'unsigned');
+    } finally {
+      db.close();
+    }
   }
 });

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-10 17:23:42 UTC — **✅ 665 passing · 0 failing (665 tests)**
+**Latest run:** 2026-08-10 18:14:31 UTC — **✅ 677 passing · 0 failing (677 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -32,9 +32,9 @@
     - ✅ registry is per company DB: same actor, independent enrolments
     - ✅ registry persists to disk and survives reopen (file-backed DB)
 
-### actor.test.js — named-actor enforcement + actor identity CLI (keygen/register/list/revoke/enforce/unlock/lock/verify, session keys)
+### actor.test.js — named-actor enforcement, actor identity CLI + sign-and-verify gate (record/enforce modes, stale/replay/registry refusals)
 
-20 passing · 0 failing
+32 passing · 0 failing
 
     - ✅ isValidActor: role:name formats
     - ✅ actorError: helpful messages for missing and malformed actors
@@ -56,6 +56,18 @@
     - ✅ actor verify: reports key state against the current company registry
     - ✅ actor commands reject invalid actor strings with INVALID_ACTOR
     - ✅ readSessionKey: expired or missing session files count as locked
+    - ✅ sign gate: record mode + enrolled key -> command runs, audit row verified
+    - ✅ sign gate: record mode + no key -> runs, logged unsigned
+    - ✅ sign gate: enforce on + no key -> SIGNATURE_REQUIRED, nothing mutated (JSON contract)
+    - ✅ sign gate: enforce on + wrong key -> SIGNATURE_INVALID
+    - ✅ sign gate: locked human key -> PASSPHRASE_REQUIRED; env passphrase unlocks
+    - ✅ sign gate: unknown actor key -> ACTOR_KEY_UNKNOWN
+    - ✅ sign gate: revoked key -> ACTOR_KEY_REVOKED
+    - ✅ sign gate: --dry-run fails identically before any mutation
+    - ✅ sign gate: exempt commands keep working under enforcement (keygen, enforce --off)
+    - ✅ verifySignatureBundle: stale timestamp -> SIGNATURE_STALE under enforce
+    - ✅ verifySignatureBundle: reused nonce -> NONCE_REUSED even in record mode
+    - ✅ verifySignatureBundle: record mode tolerates unknown/revoked/invalid as unsigned
 
 ### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar
 

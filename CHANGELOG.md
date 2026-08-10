@@ -44,6 +44,21 @@ merged to `main` and released.
   `--ttl-hours`), and `verify`. Key/session paths honour `BUKIO_CONFIG_DIR`
   (default `~/.bukio/`). All commands support `--json` and `--dry-run`;
   `sign.js` gains `publicKeyFromPrivate` + `decryptPrivateKey`.
+- Actor identity Tier 0, task 5: **the sign-and-verify gate** — every CLI
+  command is now digitally signed by its declared actor and verified against
+  the per-company registry before dispatch. `src/cli/util.js` gains
+  `signCommand`/`verifySignatureBundle`: canonical digest (Task 2) →
+  auto-sign via `--sign-key`, session key, `BUKIO_SIGNING_PASSPHRASE` or the
+  actor key file → verify against `actor_keys` with a ±5 min timestamp
+  window and a 24 h nonce cache (`<config>/nonces.json`, replay refused in
+  every mode). `record` mode (default) is backwards compatible: unsigned or
+  unverifiable commands run and are logged `sig_status = unsigned`;
+  `enforce` mode refuses with `SIGNATURE_REQUIRED` / `SIGNATURE_INVALID` /
+  `SIGNATURE_STALE` / `NONCE_REUSED` / `ACTOR_KEY_UNKNOWN` /
+  `ACTOR_KEY_REVOKED` before anything mutates (`--dry-run` fails
+  identically). Bootstrap commands (`actor keygen`/`unlock`/`lock`) and the
+  `actor enforce --off` recovery hatch are exempt; audit rows carry
+  digest/signature/keyid/nonce/timestamp via `audit.setPendingSignature`.
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases
