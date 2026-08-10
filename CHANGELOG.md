@@ -106,6 +106,17 @@ merged to `main` and released.
   identity cannot be self-registered behind an enforced company — enrolment
   stays an operator-gated, audited act. Lifecycle test extended: company B
   asserts the refusal and the full operator-gated onboarding.
+- Actor identity Tier 0, security tightening (review follow-up 2): **`actor
+  enforce --off` is no longer exempt either** — only an *enrolled* actor
+  with a valid signature may disable enforcement (`ACTOR_KEY_UNKNOWN` /
+  `SIGNATURE_REQUIRED` for everyone else). This closes the last unautho-
+  rised path into an enforced company (off → keygen → register → on).
+  Accepted consequence, documented in README + AGENTS.md: if *all* enrolled
+  keys are lost, the CLI is locked out on that company (recover via backup,
+  or the owner edits the DB directly). Tests updated: the enforce toggle
+  test enrols the operator first; the exempt-commands test now asserts the
+  refusal and the enrolled-actor path; the lifecycle test's company B walks
+  the full operator-gated onboarding.
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases

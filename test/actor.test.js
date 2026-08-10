@@ -221,16 +221,20 @@ test('actor enforce: --on/--off toggles the per-company flag and audits it', () 
   const db = tmpDb();
   const base = { BUKIO_CONFIG_DIR: cfg, BUKIO_ACTOR: '' };
   runCli(['--actor', 'human:erik', 'init', '--name', 'X', '--db', db], base);
+  // an enrolled actor is needed to flip enforcement OFF (only enrolled
+  // actors may disable enforcement)
+  runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'keygen'], { BUKIO_CONFIG_DIR: cfg });
+  runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'register', '--db', db], base);
   const handle = openDb(db);
   try {
     assert.equal(handle.prepare("SELECT value FROM settings WHERE key = 'signing_enforce'").get(), undefined);
   } finally {
     handle.close();
   }
-  const on = runCli(['--json', '--actor', 'human:erik', 'actor', 'enforce', '--on', '--db', db], base);
+  const on = runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'enforce', '--on', '--db', db], base);
   assert.equal(on.status, 0, on.stderr);
   assert.equal(JSON.parse(on.stdout).data.enforce, 'on');
-  const off = runCli(['--json', '--actor', 'human:erik', 'actor', 'enforce', '--off', '--db', db], base);
+  const off = runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'enforce', '--off', '--db', db], base);
   assert.equal(off.status, 0, off.stderr);
   assert.equal(JSON.parse(off.stdout).data.enforce, 'off');
   // both flips are audited
@@ -481,7 +485,7 @@ test('sign gate: --dry-run fails identically before any mutation', () => {
   assert.equal(entryCount(db), 0);
 });
 
-test('sign gate: exempt commands keep working under enforcement (keygen, enforce --off)', () => {
+test('sign gate: keygen stays exempt under enforcement; enforce --off needs an enrolled actor', () => {
   const cfg = tmpConfig();
   const db = tmpDb();
   const base = setupEnrolledAgent(cfg, db);
@@ -489,9 +493,14 @@ test('sign gate: exempt commands keep working under enforcement (keygen, enforce
   // keygen is exempt (its own key does not exist yet)
   const kg = runCli(['--json', '--actor', 'system:new', 'actor', 'keygen'], { BUKIO_CONFIG_DIR: cfg });
   assert.equal(kg.status, 0, kg.stderr);
-  // enforce --off is the recovery escape hatch and works unsigned
+  // enforce --off is NOT exempt: system:new has a key file but is not
+  // enrolled -> refused (only an enrolled actor may disable enforcement)
   const off = runCli(['--json', '--actor', 'system:new', 'actor', 'enforce', '--off', '--db', db], base);
-  assert.equal(off.status, 0, off.stderr);
+  assert.equal(off.status, 1);
+  assert.equal(JSON.parse(off.stdout).error.code, 'ACTOR_KEY_UNKNOWN');
+  // the enrolled agent CAN disable enforcement
+  const off2 = runCli(['--json', '--actor', 'agent:bartholomeus', 'actor', 'enforce', '--off', '--db', db], base);
+  assert.equal(off2.status, 0, off2.stderr);
   // enforcement is off again: unsigned commands run
   const r = runCli(['--json', '--actor', 'system:new', ...ENTRY_ARGS, '--db', db], base);
   assert.equal(r.status, 0, r.stderr);
@@ -680,14 +689,20 @@ test('lifecycle: keygen(unlock)→register→enforce→signed→refused→lock�
   assert.ok(verify.data.summary.revoked >= 2, `old rows flagged revoked: ${JSON.stringify(verify.data.summary)}`);
 
   // 12. company B is independent: enforcement + enrolment don't leak from A.
-  //     Under enforce, FIRST enrolment is refused too (operator-gated) —
-  //     the audited onboarding is: enforce off -> register -> enforce on.
+  //     Only an ENROLLED actor may disable enforcement — onboarding a new
+  //     actor is operator-gated: register the operator first (enforce off
+  //     in a fresh company), enforce on, then flip off -> register -> on.
+  run(dbB, ['--actor', 'human:erik', 'actor', 'register'], { BUKIO_SIGNING_PASSPHRASE: PASS }); // operator enrolled first (register needs the passphrase to read the encrypted key)
   run(dbB, ['--actor', 'human:erik', 'actor', 'enforce', '--on'], { BUKIO_SIGNING_PASSPHRASE: PASS });
   const notEnrolled = runFail(dbB, ['--actor', 'agent:bartholomeus', 'entry', 'add', '--date', '2026-08-10', '--desc', 'x', '--postings', '1100:10.00,8000:-10.00']);
   assert.equal(notEnrolled.error.code, 'ACTOR_KEY_UNKNOWN');
   const firstRegister = runFail(dbB, ['--actor', 'agent:bartholomeus', 'actor', 'register']);
   assert.equal(firstRegister.error.code, 'ACTOR_KEY_UNKNOWN', 'first enrolment under enforce is operator-gated');
-  run(dbB, ['--actor', 'human:erik', 'actor', 'enforce', '--off']); // recovery hatch, no key needed
+  // an actor WITHOUT key material cannot disable enforcement either
+  const offRefused = runFail(dbB, ['--actor', 'agent:test', 'actor', 'enforce', '--off']);
+  assert.equal(offRefused.error.code, 'SIGNATURE_REQUIRED', 'enforce --off requires an enrolled actor');
+  // the enrolled operator flips enforcement off -> agent enrols -> back on
+  run(dbB, ['--actor', 'human:erik', 'actor', 'enforce', '--off'], { BUKIO_SIGNING_PASSPHRASE: PASS });
   run(dbB, ['--actor', 'agent:bartholomeus', 'actor', 'register']);
   run(dbB, ['--actor', 'human:erik', 'actor', 'enforce', '--on'], { BUKIO_SIGNING_PASSPHRASE: PASS });
   entry('agent:bartholomeus', 'signed in company B', dbB);

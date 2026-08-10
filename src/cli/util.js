@@ -277,16 +277,15 @@ export function resolveSigningKey(actor, signKeyPath, enforce) {
   return { keyPem: pem, keyid: keyidOf(publicKeyFromPrivate(pem)) };
 }
 
-/** Bootstrap/recovery commands cannot (or must not) be signed. */
+/** Bootstrap commands that must work without a valid signature. */
 export function isSigningExempt(commandPath, opts) {
   // key CREATION and session handling are pure bootstrap (files only, no
   // registry state): keygen writes a key file, unlock/lock manage the
   // session. `actor register` is NOT exempt here — it mutates the company
   // registry, so its exemption is decided in signCommand() and limited to
-  // rotation re-enrolment (actor currently revoked).
+  // rotation re-enrolment (actor currently revoked). `actor enforce --off`
+  // is NOT exempt either — only an enrolled actor may disable enforcement.
   if (['actor keygen', 'actor unlock', 'actor lock'].includes(commandPath)) return true;
-  // turning enforcement OFF is the escape hatch when keys are broken
-  if (commandPath === 'actor enforce' && opts.off) return true;
   // the MCP server command starts a bridge — it mutates nothing itself, and
   // every mutating tool call is signed individually (mcp: gate in mcp.js),
   // so under enforce the server must still be able to START
