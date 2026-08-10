@@ -29,6 +29,7 @@ const DESCRIPTIONS = {
   'audit.test.js': 'append-only audit log invariants',
   'backup.test.js': 'encrypted backups (AES-256-GCM), keep-N rotation, tamper detection, audited restore',
   'bank.test.js': 'CAMT.053/CSV import, idempotency, matching/reconciliation',
+  'canonical.test.js': 'canonical command digest: stable sorted-key JSON, sha256, excludes identity/output flags, includes --dry-run',
   'cli.test.js': 'CLI end-to-end: init, entries, reports, backup/restore',
   'company.test.js': 'company show/update',
   'direct-debit.test.js': 'SEPA direct debit: mandate register, pain.008.001.02 export, FRST/RCUR, CORE/B2B split',

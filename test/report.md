@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-10 16:30:54 UTC — **✅ 626 passing · 0 failing (626 tests)**
+**Latest run:** 2026-08-10 16:35:48 UTC — **✅ 633 passing · 0 failing (633 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -157,6 +157,18 @@
     - ✅ suggestUnmatched: proposes expense/income accounts
     - ✅ parseBankCsv: Dutch DD-MM-YYYY and compact YYYYMMDD dates normalize to ISO
     - ✅ parseBankCsv: an unparseable date is skipped and reported, never silently dropped
+
+### canonical.test.js — canonical command digest: stable sorted-key JSON, sha256, excludes identity/output flags, includes --dry-run
+
+7 passing · 0 failing
+
+    - ✅ canonical: same input -> same digest regardless of key order
+    - ✅ canonical: different args -> different digest
+    - ✅ canonical: different actor, cmd, ts or nonce -> different digest
+    - ✅ canonical: excludes --actor, --sign-key and --json from the signed args
+    - ✅ canonical: includes --dry-run in the signed args
+    - ✅ canonical: nested args (postings, lines) are stable and order-insensitive
+    - ✅ canonical: canonicalJson is deterministic pretty-printed JSON with sorted keys
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 

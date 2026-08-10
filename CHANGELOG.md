@@ -16,6 +16,12 @@ merged to `main` and released.
   a stable keyid fingerprint (`sha256` of the SPKI DER bytes, first 16 bytes
   as 32 hex chars). Signed commands and the `audit verify` trail build on
   this module in later tasks.
+- Actor identity Tier 0, task 2: `src/core/canonical.js` — deterministic
+  sha256 digest of the canonical command shape `{ v, actor, cmd, args, ts,
+  nonce }` (sorted-key JSON; identity/output flags `--actor`, `--sign-key`,
+  `--json` are excluded from the signed args, `--dry-run` is included).
+  Every signed command signs this digest; `audit verify` recomputes it from
+  the stored args to detect tampering.
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases
