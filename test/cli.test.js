@@ -623,6 +623,23 @@ test('vat book --dry-run: validates date and description like the execute path',
   assert.equal(r.out.error.code, 'INVALID_DATE');
 });
 
+test('actor: help lists the identity subcommands', () => {
+  const help = runText(tmpDb(), ['actor', '--help']);
+  for (const cmd of ['keygen', 'register', 'list', 'revoke', 'enforce', 'unlock', 'lock', 'verify']) {
+    assert.ok(help.includes(cmd), `actor help must mention '${cmd}'`);
+  }
+  // an unknown subcommand exits non-zero with help
+  assert.throws(() => runText(tmpDb(), ['actor', 'frobnicate']));
+});
+
+test('actor enforce: needs exactly one of --on/--off (INVALID_ENFORCE, JSON contract)', () => {
+  const dbPath = tmpDb();
+  const { code, out } = run(dbPath, ['actor', 'enforce', '--json'], { expectFail: true });
+  assert.equal(code, 1);
+  assert.equal(out.ok, false);
+  assert.equal(out.error.code, 'INVALID_ENFORCE');
+});
+
 test('version: --version and the MCP serverInfo match package.json (drift guard)', () => {
   const pkg = JSON.parse(readFileSync(path.join(path.dirname(BIN), '..', 'package.json'), 'utf8'));
   // the CLI version string comes from the binary itself

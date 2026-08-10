@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-10 16:52:01 UTC — **✅ 647 passing · 0 failing (647 tests)**
+**Latest run:** 2026-08-10 17:23:42 UTC — **✅ 665 passing · 0 failing (665 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -32,9 +32,9 @@
     - ✅ registry is per company DB: same actor, independent enrolments
     - ✅ registry persists to disk and survives reopen (file-backed DB)
 
-### actor.test.js — named-actor enforcement (`<role>:<name>` required)
+### actor.test.js — named-actor enforcement + actor identity CLI (keygen/register/list/revoke/enforce/unlock/lock/verify, session keys)
 
-7 passing · 0 failing
+20 passing · 0 failing
 
     - ✅ isValidActor: role:name formats
     - ✅ actorError: helpful messages for missing and malformed actors
@@ -43,6 +43,19 @@
     - ✅ CLI: named actor works; JSON error shape on --json
     - ✅ CLI: BUKIO_ACTOR env satisfies the requirement
     - ✅ CLI: BUKIO_ACTOR env is recorded in the audit trail
+    - ✅ actor keygen: agent key writes a plain 0600 key file (BUKIO_CONFIG_DIR respected)
+    - ✅ actor keygen: human key is passphrase-encrypted via BUKIO_SIGNING_PASSPHRASE
+    - ✅ actor keygen: refuses to overwrite; --force replaces (rotation)
+    - ✅ actor keygen: human key without a passphrase in a non-interactive shell fails PASSPHRASE_REQUIRED
+    - ✅ actor register: enrols the local key into the current company DB and audits it
+    - ✅ actor revoke: requires a reason; revoke marks the row and audits it
+    - ✅ actor enforce: --on/--off toggles the per-company flag and audits it
+    - ✅ actor unlock: wrong passphrase -> PASSPHRASE_INVALID; correct -> session key with expiry; lock clears it
+    - ✅ actor unlock: agent keys are not unlocked per session
+    - ✅ actor list: shows enrolled and revoked actors
+    - ✅ actor verify: reports key state against the current company registry
+    - ✅ actor commands reject invalid actor strings with INVALID_ACTOR
+    - ✅ readSessionKey: expired or missing session files count as locked
 
 ### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar
 
@@ -191,7 +204,7 @@
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
-28 passing · 0 failing
+30 passing · 0 failing
 
     - ✅ init --dry-run: shows plan, creates nothing
     - ✅ init: creates company + 30-account chart with VAT on
@@ -220,6 +233,8 @@
     - ✅ entry post --dry-run: rejects non-draft entries instead of a green plan
     - ✅ entry reverse --dry-run: rejects drafts (NOT_POSTED) and double reversals
     - ✅ vat book --dry-run: validates date and description like the execute path
+    - ✅ actor: help lists the identity subcommands
+    - ✅ actor enforce: needs exactly one of --on/--off (INVALID_ENFORCE, JSON contract)
     - ✅ version: --version and the MCP serverInfo match package.json (drift guard)
 
 ### company-simulation.test.js — 
@@ -718,7 +733,7 @@
 
 ### sign.test.js — ed25519 sign/verify/keyid module: keygen (plain + passphrase-encrypted PKCS8), roundtrip, tamper/wrong-key rejection
 
-10 passing · 0 failing
+13 passing · 0 failing
 
     - ✅ sign/verify: roundtrip with a plain key
     - ✅ sign/verify: works with Buffer data too
@@ -730,6 +745,9 @@
     - ✅ keygen: passphrase-encrypted key refuses to sign without the passphrase
     - ✅ keygen: passphrase-encrypted key signs with the right passphrase and verifies
     - ✅ keyid: fingerprint is identical for plain and passphrase keys sharing a public key
+    - ✅ publicKeyFromPrivate: plain key derives its own public key (same keyid)
+    - ✅ publicKeyFromPrivate: encrypted key needs the passphrase, wrong one throws
+    - ✅ decryptPrivateKey: returns a plain PKCS8 PEM usable for signing; wrong passphrase throws
 
 ### smtp.test.js — zero-dependency SMTP client + invoice email: auth, STARTTLS, MIME/PDF attachment, dry-run, audit
 

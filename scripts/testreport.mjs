@@ -23,7 +23,7 @@ const files = readdirSync(path.join(root, 'test')).filter((f) => f.endsWith('.te
 // Short description per test file — the suite's coverage map.
 const DESCRIPTIONS = {
   'accounts.test.js': 'chart of accounts CRUD + CSV chart import',
-  'actor.test.js': 'named-actor enforcement (`<role>:<name>` required)',
+  'actor.test.js': 'named-actor enforcement + actor identity CLI (keygen/register/list/revoke/enforce/unlock/lock/verify, session keys)',
   'actor-registry.test.js': 'per-company actor key registry: enrol/revoke (history kept), rotation, enforce flag, per-DB independence',
   'assets.test.js': 'fixed assets: schemes, mid-life adoption, runs, disposal, activastaat',
   'attachments.test.js': 'in-DB/file document attachments: add/list/show/remove, 25 MB cap, dedupe, metadata-only lists, audit',

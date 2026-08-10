@@ -6,7 +6,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPair, keyidOf, sign, verify, isEncrypted } from '../src/core/sign.js';
+import {
+  generateKeyPair, keyidOf, sign, verify, isEncrypted,
+  publicKeyFromPrivate, decryptPrivateKey,
+} from '../src/core/sign.js';
 
 test('sign/verify: roundtrip with a plain key', () => {
   const { publicKey, privateKey } = generateKeyPair();
@@ -76,4 +79,29 @@ test('keyid: fingerprint is identical for plain and passphrase keys sharing a pu
   // different keypairs -> different fingerprints; same public key -> same fingerprint
   assert.notEqual(keyidOf(plain.publicKey), keyidOf(encrypted.publicKey));
   assert.equal(keyidOf(encrypted.publicKey), keyidOf(encrypted.publicKey));
+});
+
+test('publicKeyFromPrivate: plain key derives its own public key (same keyid)', () => {
+  const { publicKey, privateKey } = generateKeyPair();
+  const derived = publicKeyFromPrivate(privateKey);
+  assert.equal(derived, publicKey);
+  assert.equal(keyidOf(derived), keyidOf(publicKey));
+});
+
+test('publicKeyFromPrivate: encrypted key needs the passphrase, wrong one throws', () => {
+  const { publicKey, privateKey } = generateKeyPair({ passphrase: 's3cret' });
+  assert.equal(publicKeyFromPrivate(privateKey, { passphrase: 's3cret' }), publicKey);
+  assert.throws(() => publicKeyFromPrivate(privateKey));
+  assert.throws(() => publicKeyFromPrivate(privateKey, { passphrase: 'nope' }));
+});
+
+test('decryptPrivateKey: returns a plain PKCS8 PEM usable for signing; wrong passphrase throws', () => {
+  const { publicKey, privateKey } = generateKeyPair({ passphrase: 's3cret' });
+  const plain = decryptPrivateKey(privateKey, { passphrase: 's3cret' });
+  assert.ok(!isEncrypted(plain));
+  assert.ok(plain.includes('-----BEGIN PRIVATE KEY-----'));
+  assert.equal(keyidOf(publicKeyFromPrivate(plain)), keyidOf(publicKey));
+  const sig = sign('data', plain);
+  assert.equal(verify('data', sig, publicKey), true);
+  assert.throws(() => decryptPrivateKey(privateKey, { passphrase: 'wrong' }));
 });

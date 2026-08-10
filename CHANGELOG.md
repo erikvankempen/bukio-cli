@@ -34,6 +34,16 @@ merged to `main` and released.
   reason — history preserved), re-enrol after revocation as the rotation
   flow, `canAct` check, and the per-company `signing_enforce` flag
   (default off).
+- Actor identity Tier 0, task 4: `bukio actor` CLI — `keygen` (Ed25519
+  keypair; human keys passphrase-encrypted via `BUKIO_SIGNING_PASSPHRASE` or
+  interactive prompt, agent/system keys plain files, 0600/0700 permissions,
+  `--force` to rotate), `register` (enrol the local key into the current
+  company DB, audited), `list`, `revoke --reason` (row retained for
+  history, audited), `enforce --on|--off` (per-company, audited),
+  `unlock`/`lock` (short-lived session keys, default 12 h,
+  `--ttl-hours`), and `verify`. Key/session paths honour `BUKIO_CONFIG_DIR`
+  (default `~/.bukio/`). All commands support `--json` and `--dry-run`;
+  `sign.js` gains `publicKeyFromPrivate` + `decryptPrivateKey`.
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases

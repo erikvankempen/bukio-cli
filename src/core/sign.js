@@ -86,6 +86,35 @@ export function isEncrypted(privateKeyPem) {
   return privateKeyPem.includes('BEGIN ENCRYPTED PRIVATE KEY');
 }
 
+/**
+ * Derive the SPKI public-key PEM from a private key (e.g. to register a key
+ * generated earlier). Throws on a wrong passphrase for encrypted keys.
+ *
+ * @param {string} privateKeyPem - PKCS8 PEM (possibly passphrase-encrypted).
+ * @param {object} [opts]
+ * @param {string} [opts.passphrase] - required to read an encrypted key.
+ * @returns {string} SPKI PEM.
+ */
+export function publicKeyFromPrivate(privateKeyPem, { passphrase } = {}) {
+  const key = passphrase ? { key: privateKeyPem, passphrase } : privateKeyPem;
+  return crypto.createPublicKey(key).export({ type: 'spki', format: 'pem' });
+}
+
+/**
+ * Decrypt a passphrase-encrypted key into a plain PKCS8 PEM (used by
+ * `actor unlock` to build the short-lived session key). Throws on a wrong
+ * passphrase.
+ *
+ * @param {string} privateKeyPem - PKCS8 PEM.
+ * @param {object} [opts]
+ * @param {string} [opts.passphrase] - required for encrypted keys.
+ * @returns {string} unencrypted PKCS8 PEM.
+ */
+export function decryptPrivateKey(privateKeyPem, { passphrase } = {}) {
+  const key = passphrase ? { key: privateKeyPem, passphrase } : privateKeyPem;
+  return crypto.createPrivateKey(key).export({ type: 'pkcs8', format: 'pem' });
+}
+
 function toBuffer(data) {
   if (Buffer.isBuffer(data)) return data;
   if (data instanceof Uint8Array) return Buffer.from(data);
