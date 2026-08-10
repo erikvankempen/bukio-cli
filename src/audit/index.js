@@ -6,9 +6,15 @@
 
 // Audit log — append-only record of every mutation (human or agent).
 
-export function record(db, { actor, action, command = null, args = null, outcome = 'ok', entryIds = [] }) {
+export function record(db, {
+  actor, action, command = null, args = null, outcome = 'ok', entryIds = [],
+  digestHash = null, sigKeyid = null, sigNonce = null, sigTs = null, sig = null,
+  sigStatus = 'unsigned',
+}) {
   db.prepare(
-    'INSERT INTO audit_log (actor, action, command, args_json, outcome, entry_ids) VALUES (?, ?, ?, ?, ?, ?)',
+    `INSERT INTO audit_log (actor, action, command, args_json, outcome, entry_ids,
+                            digest_hash, sig_keyid, sig_nonce, sig_ts, sig, sig_status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     String(actor),
     String(action),
@@ -16,6 +22,7 @@ export function record(db, { actor, action, command = null, args = null, outcome
     args == null ? null : JSON.stringify(args),
     String(outcome),
     entryIds.length ? JSON.stringify(entryIds) : null,
+    digestHash, sigKeyid, sigNonce, sigTs, sig, sigStatus,
   );
 }
 

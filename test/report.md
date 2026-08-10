@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-10 16:35:48 UTC — **✅ 633 passing · 0 failing (633 tests)**
+**Latest run:** 2026-08-10 16:43:15 UTC — **✅ 637 passing · 0 failing (637 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -110,11 +110,15 @@
 
 ### audit.test.js — append-only audit log invariants
 
-3 passing · 0 failing
+7 passing · 0 failing
 
     - ✅ record + list with filters
     - ✅ audit log is append-only: UPDATE and DELETE are blocked
     - ✅ args null is stored and read back as null
+    - ✅ migration 018: fresh DB gains the six signature columns + actor_keys + settings
+    - ✅ migration 018: existing DB keeps legacy rows with sig_status = unsigned
+    - ✅ migration 018: re-running migrate on the current version is a no-op
+    - ✅ record: signature fields are stored and read back; plain records default to unsigned
 
 ### backup.test.js — encrypted backups (AES-256-GCM), keep-N rotation, tamper detection, audited restore
 

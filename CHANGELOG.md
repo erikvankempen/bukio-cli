@@ -22,6 +22,12 @@ merged to `main` and released.
   `--json` are excluded from the signed args, `--dry-run` is included).
   Every signed command signs this digest; `audit verify` recomputes it from
   the stored args to detect tampering.
+- Actor identity Tier 0, task 6: schema migration 018 — per-company
+  `actor_keys` registry (Ed25519 public keys, revoked rows retained for
+  history) + `settings` table with the `signing_enforce` flag, and six
+  audit-log signature columns (`digest_hash`, `sig_keyid`, `sig_nonce`,
+  `sig_ts`, `sig`, `sig_status`). Additive only: legacy audit rows read back
+  with `sig_status = 'unsigned'` (claimed, not yet provable).
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases
