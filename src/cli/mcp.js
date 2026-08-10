@@ -16,7 +16,8 @@ import { balans } from '../report/balans.js';
 import { pnl } from '../report/pnl.js';
 import { journal } from '../report/journal.js';
 import { listAccounts } from '../core/accounts.js';
-import { dbError } from './util.js';
+import { dbError, signPayload } from './util.js';
+import { setPendingSignature } from '../audit/index.js';
 import {
   createEntry, postEntry, reverseEntry, getEntry, resolvePostings,
   parsePostingSpecs, validateDate,
@@ -69,6 +70,40 @@ function guardExecute(ctx, args) {
   if (modeOf(args) === 'execute' && args.actor && !isValidActor(args.actor)) {
     throw new McpError('INVALID_ACTOR', `invalid actor '${args.actor}' — must be '<role>:<name>' (e.g. agent:bartholomeus)`);
   }
+}
+
+// --- sign gate for tool calls (Tier 0, Task 8) ----------------------------
+//
+// Every MUTATING tool call is signed by its actor before the handler runs —
+// exactly like the CLI's preAction gate, sharing signPayload so the digest
+// scheme, nonce cache and ±5 min window are identical. Enforcement state of
+// the company DB applies equally: under `actor enforce on` an unsigned or
+// unverifiable call is refused with the same error codes as the CLI, before
+// any mutation or plan is produced. Record mode (default) still signs when
+// key material exists — the audit rows the handler records then carry
+// sig_status=verified. The signed payload is the tool call itself:
+// cmd = `mcp:<tool_name>`, args = the tool arguments minus the identity
+// flag `actor` (the same exclusion as the CLI's --actor). Read-only tools
+// are not gated (they record nothing).
+
+/** Tool args minus the identity flag — the exact signed payload. */
+function signedToolArgs(args) {
+  const out = {};
+  for (const [k, v] of Object.entries(args ?? {})) {
+    if (k === 'actor') continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** Sign a mutating tool call; throws a sign-gate error on enforcement refusal. */
+function gateToolCall(db, ctx, toolName, args) {
+  const bundle = signPayload({ actor: args?.actor ?? ctx.actor }, {
+    cmd: `mcp:${toolName}`,
+    args: signedToolArgs(args),
+    db,
+  });
+  setPendingSignature(bundle);
 }
 
 /**
@@ -932,6 +967,11 @@ function dispatch(db, ctx, msg) {
       const t = TOOLS.find((x) => x.name === params.name);
       if (!t) return Promise.resolve(rpcError(id, -32602, `unknown tool '${params.name}'`));
       return Promise.resolve()
+        .then(() => {
+          // Tier 0: sign mutating calls before the handler runs (enforce
+          // refusals throw here, before any mutation or plan)
+          if (t.mutating) gateToolCall(db, ctx, t.name, params.arguments ?? {});
+        })
         .then(() => t.handler(db, params.arguments ?? {}, ctx))
         .then((result) => rpcResponse(id, { content: json(result), isError: false }))
         .catch((err) => rpcResponse(id, {

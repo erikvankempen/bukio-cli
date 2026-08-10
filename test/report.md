@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-10 19:02:18 UTC — **✅ 690 passing · 0 failing (690 tests)**
+**Latest run:** 2026-08-10 19:19:17 UTC — **✅ 695 passing · 0 failing (695 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -69,9 +69,9 @@
     - ✅ verifySignatureBundle: reused nonce -> NONCE_REUSED even in record mode
     - ✅ verifySignatureBundle: record mode tolerates unknown/revoked/invalid as unsigned
 
-### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar
+### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar, MCP signed execution (verified rows, enforce refusal, nonces, per-DB registry)
 
-24 passing · 0 failing
+29 passing · 0 failing
 
     - ✅ fx: parseRate and convertFx — integer math, round-half-up
     - ✅ fx: setFxRate upsert + audit; getFxRate exact then latest-on/before
@@ -97,6 +97,11 @@
     - ✅ MCP: contact_add preserves postal_code and vat_id (regression)
     - ✅ MCP: BUKIO_MCP_READONLY blocks execution
     - ✅ fx resolveRate: a dry-run must not persist the fetched ECB rate
+    - ✅ MCP: signed execute call -> audit row verified; audit verify reports ok
+    - ✅ MCP: enforce on + missing key -> error response, no mutation (dry-run too)
+    - ✅ MCP: repeated signed calls verify (fresh nonces, no replay refusal)
+    - ✅ MCP: malformed actor still rejected (INVALID_ACTOR)
+    - ✅ MCP: a second company DB uses its own registry/enforce state
 
 ### assets.test.js — fixed assets: schemes, mid-life adoption, runs, disposal, activastaat
 

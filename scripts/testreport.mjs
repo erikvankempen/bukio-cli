@@ -43,7 +43,7 @@ const DESCRIPTIONS = {
   'money.test.js': 'integer-cents money helpers',
   'month-end.test.js': 'month-end close check',
   'payments.test.js': 'SEPA payment batches: payables, pain.001 export',
-  'agent-layer.test.js': 'MCP server, FX/ECB, tool gates, compliance calendar',
+  'agent-layer.test.js': 'MCP server, FX/ECB, tool gates, compliance calendar, MCP signed execution (verified rows, enforce refusal, nonces, per-DB registry)',
   'recurring-invoice.test.js': 'subscription invoice templates',
   'recurring.test.js': 'recurring entries engine: schedules, depreciation, accruals',
   'reports.test.js': 'balance sheet, P&L, journal',

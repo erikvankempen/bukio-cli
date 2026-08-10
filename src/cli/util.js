@@ -282,6 +282,10 @@ export function isSigningExempt(commandPath, opts) {
   if (['actor keygen', 'actor unlock', 'actor lock'].includes(commandPath)) return true;
   // turning enforcement OFF is the escape hatch when keys are broken
   if (commandPath === 'actor enforce' && opts.off) return true;
+  // the MCP server command starts a bridge — it mutates nothing itself, and
+  // every mutating tool call is signed individually (mcp: gate in mcp.js),
+  // so under enforce the server must still be able to START
+  if (commandPath === 'mcp') return true;
   return false;
 }
 
@@ -328,32 +332,52 @@ export function signCommand(ctx, command) {
   const opts = command.optsWithGlobals();
   const commandPath = commandPathOf(command);
   if (isSigningExempt(commandPath, opts)) return { sigStatus: 'unsigned' };
-
-  const ts = new Date().toISOString();
-  const nonce = crypto.randomUUID();
-  const signedArgs = buildSignedArgs(opts, command);
-  const digest = buildDigest({ actor: ctx.actor, cmd: commandPath, args: signedArgs, ts, nonce });
-
   const db = openIfExists(ctx.dbPath);
   try {
-    const enforce = db ? getEnforce(db) === 'on' : false;
-    const key = resolveSigningKey(ctx.actor, opts.signKey ?? null, enforce);
-    if (!key) {
-      return { sigStatus: 'unsigned' };
-    }
-
-    const sig = sign(digest, key.keyPem);
-    const result = verifySignatureBundle(db, {
-      actor: ctx.actor, digest, sig, keyid: key.keyid, ts, nonce, enforce,
+    return signPayload(ctx, {
+      cmd: commandPath,
+      args: buildSignedArgs(opts, command),
+      db,
+      signKey: opts.signKey ?? null,
     });
-    if (!result.ok) throw signGateError(result.code, messageFor(result.code, ctx.actor));
-    return {
-      digestHash: digest, sigKeyid: key.keyid, sigNonce: nonce, sigTs: ts, sig,
-      sigStatus: result.status, signedArgs, signedCommand: commandPath,
-    };
   } finally {
     if (db) db.close();
   }
+}
+
+/**
+ * Build and verify a signed payload (CLI command or MCP tool call) and
+ * return the audit-row signature fields. Record mode with no key material
+ * returns { sigStatus: 'unsigned' }; enforcement refusals throw a
+ * sign-gate error BEFORE any mutation can happen.
+ *
+ * @param {object} ctx - { actor } — the actor the payload is signed by.
+ * @param {object} opts
+ * @param {string} opts.cmd - canonical command string ('entry add',
+ *   'mcp:entry_add') — stored on the audit row as `command`.
+ * @param {object} opts.args - the exact signed args (stored as args_json).
+ * @param {object|null} opts.db - open company DB for the registry/enforce
+ *   check (null = no DB: record mode).
+ * @param {string|null} [opts.signKey] - explicit key path (CLI --sign-key).
+ * @returns {{digestHash, sigKeyid, sigNonce, sigTs, sig, sigStatus,
+ *   signedArgs, signedCommand}}
+ */
+export function signPayload(ctx, { cmd, args, db, signKey = null }) {
+  const ts = new Date().toISOString();
+  const nonce = crypto.randomUUID();
+  const digest = buildDigest({ actor: ctx.actor, cmd, args, ts, nonce });
+  const enforce = db ? getEnforce(db) === 'on' : false;
+  const key = resolveSigningKey(ctx.actor, signKey, enforce);
+  if (!key) return { sigStatus: 'unsigned' };
+  const sig = sign(digest, key.keyPem);
+  const result = verifySignatureBundle(db, {
+    actor: ctx.actor, digest, sig, keyid: key.keyid, ts, nonce, enforce,
+  });
+  if (!result.ok) throw signGateError(result.code, messageFor(result.code, ctx.actor));
+  return {
+    digestHash: digest, sigKeyid: key.keyid, sigNonce: nonce, sigTs: ts, sig,
+    sigStatus: result.status, signedArgs: args, signedCommand: cmd,
+  };
 }
 
 function messageFor(code, actor) {

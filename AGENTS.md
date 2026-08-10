@@ -86,7 +86,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio fx fetch --currency USD [--date D]` | ECB reference rate (free, no key) on/before a date, stored as source=ECB. |
 | `bukio fx list` / `show --currency USD [--limit N]` | Rate store inspection. |
 | `bukio entry add / vat book --currency USD [--rate R]` | Foreign-currency purchase invoices -> EUR at booking. Rate resolves: --rate -> stored -> ECB auto-fetch (BUKIO_FX_NO_FETCH=1 disables). Postings keep fx_currency/fx_amount_cents. |
-| `bukio mcp` | MCP server over stdio (plan-only mutations unless mode=execute; BUKIO_MCP_READONLY=1 blocks them). |
+| `bukio mcp` | MCP server over stdio (plan-only mutations unless mode=execute; BUKIO_MCP_READONLY=1 blocks them). **Every mutating tool call is signed by its actor** (payload `mcp:<tool_name>`, same digest scheme/nonce cache as the CLI); per-company enforcement applies — under `actor enforce on` unsigned calls are refused with the same error codes as the CLI. Read-only tools are not gated. |
 | `bukio compliance status --year YYYY` / `mark --type ICP\|JAARREKENING --period ...` | Filing deadlines (OB/ICP/jaarrekening) + manual filing registry. |
 | `bukio import opening-balances --file F [--date yyyy-mm-dd] [--dry-run]` | Import opening balances as ONE posted Beginbalans entry (CSV `code,amount` or `code,debet,credit`). Sum must be zero. Re-run fails `OPENING_ALREADY_IMPORTED`. |
 | `bukio import journal --file F [--create-missing] [--dry-run]` | SnelStart/Exact-style journal CSV (aliases, `;` delimiter, Dutch amounts). One posted entry per boekstuknummer; idempotent. |

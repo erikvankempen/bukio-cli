@@ -72,6 +72,18 @@ merged to `main` and released.
   `(actor, keyid)` primary key — revoked keys are RETAINED as history, so
   audit rows signed by a rotated key stay verifiable (`getKeyByKeyid`);
   `actor list` shows the full key history.
+- Actor identity Tier 0, task 8: **MCP signed execution** — every mutating
+  MCP tool call is signed by its actor before the handler runs, sharing the
+  CLI's gate via a new `signPayload()` helper in `src/cli/util.js` (the CLI's
+  `signCommand` now delegates to it, so the digest scheme, ±5 min window and
+  nonce cache are byte-identical across both surfaces). Payload: `cmd =
+  mcp:<tool_name>`, args = the tool arguments minus the identity flag;
+  enforcement state of the company DB applies equally (unsigned/unverifiable
+  calls refused with the same error codes as the CLI, before any mutation or
+  plan). Read-only tools are not gated. The `mcp` command itself is exempt
+  from the CLI preAction gate — it mutates nothing and must be able to START
+  under enforce; the per-tool gate is what enforces. `audit verify` accepts
+  MCP-signed rows (verified cross-surface).
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases

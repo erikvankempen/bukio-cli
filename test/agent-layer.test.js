@@ -7,7 +7,11 @@
 // Agent-layer tests — FX translation, MCP server (real child process), compliance.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/core/db.js';
 import { seedDefaultChart } from '../src/core/accounts.js';
 import { createEntry, postEntry, getEntry, reverseEntry, parsePostingSpecs } from '../src/core/entries.js';
@@ -335,10 +339,15 @@ test('compliance: closed books show on the jaarrekening obligation', async () =>
 
 // --- MCP server (real stdio child process) ----------------------------------
 
-function mcpSession(dbPath) {
+function mcpSession(dbPath, opts = {}) {
+  // the sign gate (Task 8) reads keys + the nonce cache from the config
+  // dir — ALWAYS pin a scratch one so the tests never touch ~/.bukio
+  const configDir = opts.configDir ?? mkdtempSync(path.join(os.tmpdir(), 'bukio-mcp-cfg-'));
   const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', dbPath], {
     cwd: process.cwd(),
-    env: { ...process.env, BUKIO_ACTOR: 'agent:test' },
+    env: {
+      ...process.env, BUKIO_ACTOR: 'agent:test', BUKIO_CONFIG_DIR: configDir, ...opts.env,
+    },
   });
   let buf = '';
   const pending = [];
@@ -709,5 +718,188 @@ test('fx resolveRate: a dry-run must not persist the fetched ECB rate', async ()
     assert.equal(listFxRates(db).length, 1, 'execute persists the fetched rate');
   } finally {
     clearEcbFetcher();
+  }
+});
+
+// --- MCP signed execution (Tier 0, Task 8) ---------------------------------
+
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+
+/** Scratch company + config dir; agent:bartholomeus keygen'd and enrolled. */
+function signedCompany() {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-mcp-signed-'));
+  const dbPath = path.join(dir, 'company.db');
+  const configDir = path.join(dir, 'cfg');
+  const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_CONFIG_DIR: configDir, BUKIO_ACTOR: 'agent:test' };
+  const cli = (args) => execFileSync(process.execPath, [BIN, '--json', ...args], { env, encoding: 'utf8' });
+  cli(['--actor', 'human:erik', 'init', '--name', 'X']);
+  cli(['--actor', 'agent:bartholomeus', 'actor', 'keygen']);
+  cli(['--actor', 'agent:bartholomeus', 'actor', 'register']);
+  return { dbPath, configDir, env, cli };
+}
+
+function entryCount(dbPath) {
+  const h = openDb(dbPath);
+  try {
+    return h.prepare('SELECT COUNT(*) c FROM journal_entries').get().c;
+  } finally {
+    h.close();
+  }
+}
+
+function lastAuditRow(dbPath) {
+  const h = openDb(dbPath);
+  try {
+    return h.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT 1').get();
+  } finally {
+    h.close();
+  }
+}
+
+const ENTRY_ARGS = {
+  date: '2026-08-10', description: 'MCP signed entry',
+  postings: ['1100:100.00', '8000:-100.00'], mode: 'execute', post: true,
+};
+
+test('MCP: signed execute call -> audit row verified; audit verify reports ok', async () => {
+  const { dbPath, configDir } = signedCompany();
+  const mcp = mcpSession(dbPath, { configDir, env: { BUKIO_ACTOR: 'agent:bartholomeus' } });
+  try {
+    await mcp.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const res = await mcp.call('tools/call', {
+      name: 'entry_add', arguments: { ...ENTRY_ARGS, actor: 'agent:bartholomeus' },
+    });
+    assert.equal(res.error, undefined, JSON.stringify(res));
+    const data = JSON.parse(res.result.content[0].text);
+    assert.equal(data.mode, 'execute');
+    assert.ok(data.entry_id > 0);
+  } finally {
+    await mcp.close();
+  }
+  const row = lastAuditRow(dbPath);
+  assert.equal(row.sig_status, 'verified');
+  assert.equal(row.command, 'mcp:entry_add'); // signed command string
+  assert.ok(row.digest_hash && row.sig && row.sig_keyid, 'signature bundle stored');
+  // the CLI verifier accepts the MCP-signed row (cross-surface, shared digest scheme)
+  const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_CONFIG_DIR: configDir, BUKIO_ACTOR: 'agent:test' };
+  const out = JSON.parse(execFileSync(process.execPath, [BIN, '--json', 'audit', 'verify'], { env, encoding: 'utf8' }));
+  // entry.create + entry.post both verified (one signed tool call, two rows)
+  assert.equal(out.data.summary.ok, 2, JSON.stringify(out.data.summary));
+  assert.equal(out.data.summary.tampered, 0);
+});
+
+test('MCP: enforce on + missing key -> error response, no mutation (dry-run too)', async () => {
+  const { dbPath, configDir, cli } = signedCompany();
+  cli(['--actor', 'human:erik', 'actor', 'enforce', '--on']);
+  const mcp = mcpSession(dbPath, { configDir, env: { BUKIO_ACTOR: 'agent:test' } }); // no key material for agent:test
+  try {
+    await mcp.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    // execute is refused before any mutation
+    const res = await mcp.call('tools/call', {
+      name: 'entry_add', arguments: { ...ENTRY_ARGS, actor: 'agent:test' },
+    });
+    assert.equal(res.result.isError, true);
+    const data = JSON.parse(res.result.content[0].text);
+    assert.equal(data.ok, false);
+    assert.equal(data.error.code, 'SIGNATURE_REQUIRED');
+    assert.equal(entryCount(dbPath), 0, 'no entry may be created');
+    // dry-run (the default mode) is refused identically — same as the CLI
+    const plan = await mcp.call('tools/call', {
+      name: 'entry_add',
+      arguments: { date: '2026-08-10', description: 'plan', postings: ['1100:100.00', '8000:-100.00'], actor: 'agent:test' },
+    });
+    assert.equal(plan.result.isError, true);
+    assert.equal(JSON.parse(plan.result.content[0].text).error.code, 'SIGNATURE_REQUIRED');
+  } finally {
+    await mcp.close();
+  }
+});
+
+test('MCP: repeated signed calls verify (fresh nonces, no replay refusal)', async () => {
+  const { dbPath, configDir } = signedCompany();
+  const mcp = mcpSession(dbPath, { configDir, env: { BUKIO_ACTOR: 'agent:bartholomeus' } });
+  try {
+    await mcp.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    for (let i = 0; i < 2; i += 1) {
+      const res = await mcp.call('tools/call', {
+        name: 'entry_add', arguments: { ...ENTRY_ARGS, description: `MCP entry ${i}`, actor: 'agent:bartholomeus' },
+      });
+      assert.equal(res.error, undefined, JSON.stringify(res));
+    }
+  } finally {
+    await mcp.close();
+  }
+  const h = openDb(dbPath);
+  try {
+    const rows = h.prepare("SELECT sig_status FROM audit_log WHERE action = 'entry.create' ORDER BY id").all();
+    assert.deepEqual(rows.map((r) => r.sig_status), ['verified', 'verified']);
+  } finally {
+    h.close();
+  }
+  // the shared nonce cache was written (same file the CLI uses)
+  const nonces = JSON.parse(readFileSync(path.join(configDir, 'nonces.json'), 'utf8'));
+  const entries = Object.values(nonces).reduce((n, byKey) => n + Object.keys(byKey).length, 0);
+  assert.ok(entries >= 2, `nonces recorded per signed call (got ${entries})`);
+});
+
+test('MCP: malformed actor still rejected (INVALID_ACTOR)', async () => {
+  const { dbPath, configDir } = signedCompany();
+  const mcp = mcpSession(dbPath, { configDir });
+  try {
+    await mcp.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const res = await mcp.call('tools/call', {
+      name: 'entry_add', arguments: { ...ENTRY_ARGS, actor: 'agent' }, // missing ':name'
+    });
+    assert.equal(res.result.isError, true);
+    assert.equal(JSON.parse(res.result.content[0].text).error.code, 'INVALID_ACTOR');
+    assert.equal(entryCount(dbPath), 0);
+  } finally {
+    await mcp.close();
+  }
+});
+
+test('MCP: a second company DB uses its own registry/enforce state', async () => {
+  const { dbPath: dbA, configDir } = signedCompany();
+  // company B: enforce OFF, agent:bartholomeus NOT enrolled
+  const dirB = mkdtempSync(path.join(os.tmpdir(), 'bukio-mcp-second-'));
+  const dbB = path.join(dirB, 'company.db');
+  const envB = { ...process.env, BUKIO_DB: dbB, BUKIO_CONFIG_DIR: configDir, BUKIO_ACTOR: 'agent:test' };
+  execFileSync(process.execPath, [BIN, '--json', '--actor', 'human:erik', 'init', '--name', 'Y'], { env: envB, encoding: 'utf8' });
+
+  // A: enforce on — signed calls run, verified
+  execFileSync(process.execPath, [BIN, '--json', '--actor', 'human:erik', 'actor', 'enforce', '--on'], { env: { ...process.env, BUKIO_DB: dbA, BUKIO_CONFIG_DIR: configDir, BUKIO_ACTOR: 'agent:test' }, encoding: 'utf8' });
+  const mcpA = mcpSession(dbA, { configDir, env: { BUKIO_ACTOR: 'agent:bartholomeus' } });
+  try {
+    await mcpA.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const res = await mcpA.call('tools/call', {
+      name: 'entry_add', arguments: { ...ENTRY_ARGS, description: 'in A', actor: 'agent:bartholomeus' },
+    });
+    assert.equal(res.error, undefined, JSON.stringify(res));
+  } finally {
+    await mcpA.close();
+  }
+  const hA = openDb(dbA);
+  try {
+    assert.equal(hA.prepare("SELECT sig_status FROM audit_log WHERE action = 'entry.create' ORDER BY id DESC LIMIT 1").get().sig_status, 'verified');
+  } finally {
+    hA.close();
+  }
+
+  // B: same key, enforce off, not enrolled -> unsigned rows but still runs
+  const mcpB = mcpSession(dbB, { configDir, env: { BUKIO_ACTOR: 'agent:bartholomeus' } });
+  try {
+    await mcpB.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    const res = await mcpB.call('tools/call', {
+      name: 'entry_add', arguments: { ...ENTRY_ARGS, description: 'in B', actor: 'agent:bartholomeus' },
+    });
+    assert.equal(res.error, undefined, JSON.stringify(res));
+  } finally {
+    await mcpB.close();
+  }
+  const hB = openDb(dbB);
+  try {
+    assert.equal(hB.prepare("SELECT sig_status FROM audit_log WHERE action = 'entry.create' ORDER BY id DESC LIMIT 1").get().sig_status, 'unsigned');
+  } finally {
+    hB.close();
   }
 });
