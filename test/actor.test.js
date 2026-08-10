@@ -59,8 +59,12 @@ test('actorError: helpful messages for missing and malformed actors', () => {
 });
 
 function runCli(args, env = {}) {
+  // ALWAYS pin a scratch DB: without this, a forgotten --db in any call
+  // silently runs against ~/.bukio/bukio.db (the live company DB).
+  const hasDb = args.includes('--db') || env.BUKIO_DB !== undefined;
   return spawnSync(process.execPath, ['bin/bukio.js', ...args], {
-    cwd: process.cwd(), encoding: 'utf8', env: { ...process.env, ...env },
+    cwd: process.cwd(), encoding: 'utf8',
+    env: { ...process.env, ...env, ...(hasDb ? {} : { BUKIO_DB: tmpDb() }) },
   });
 }
 
