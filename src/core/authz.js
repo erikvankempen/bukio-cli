@@ -353,8 +353,12 @@ export function isAuthzExempt(cmd, args = {}) {
   if (['actor keygen', 'actor unlock', 'actor lock', 'mcp'].includes(cmd)) return true;
   if (cmd === 'actor register') return true;
   if (cmd === 'actor verify') return true;
-  if (cmd === 'actor roles' && !args.actor) return true; // own roles
-  if (cmd === 'actor can' && !args.actor) return true; // own capability
+  // NOTE: the "other actor" option is `--for <who>` (the identity flag
+  // `--actor` is the root commander option and cannot be re-declared on a
+  // subcommand — commander would silently bind the value to the root and
+  // corrupt the signing identity). args.for is undefined for self-checks.
+  if (cmd === 'actor roles' && !args.for) return true; // own roles
+  if (cmd === 'actor can' && !args.for) return true; // own capability
   if (cmd === 'actor revoke' && !args.target) return true; // self-revoke stays as-is
   return false;
 }

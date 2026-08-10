@@ -68,7 +68,7 @@ test('migration 018: fresh DB gains the six signature columns + actor_keys + set
   const keys = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
   assert.ok(keys.includes('actor_keys'));
   assert.ok(keys.includes('settings'));
-  assert.equal(db.pragma('user_version', { simple: true }), 19);
+  assert.equal(db.pragma('user_version', { simple: true }), 20);
 });
 
 test('migration 019: actor_keys gains a composite (actor, keyid) primary key', () => {
@@ -87,6 +87,10 @@ test('migration 019: a v18 DB with single-row actor_keys upgrades without data l
     actor TEXT PRIMARY KEY, keyid TEXT NOT NULL, public_key TEXT NOT NULL,
     enrolled_at TEXT NOT NULL, revoked_at TEXT, revoked_reason TEXT
   )`);
+  // a real v18 DB carries the 018 additions: settings (signing_enforce)
+  // + the audit signature columns; migration 020 reads settings, so the
+  // fixture must include it
+  raw.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)');
   raw.prepare('INSERT INTO actor_keys (actor, keyid, public_key, enrolled_at, revoked_at, revoked_reason) VALUES (?, ?, ?, ?, ?, ?)')
     .run('agent:bartholomeus', 'ab'.repeat(16), 'PUBKEY-PEM', '2026-08-10T00:00:00.000Z', '2026-08-10T01:00:00.000Z', 'test');
   raw.close();

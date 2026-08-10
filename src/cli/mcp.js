@@ -991,7 +991,12 @@ export function make(program) {
     .action(async (opts, command) => {
       const ctx = {
         dbPath: command.optsWithGlobals().db ?? process.env.BUKIO_DB,
-        actor: command.optsWithGlobals().actor ?? 'agent:mcp',
+        // same resolution as the CLI's makeCtx: --actor flag, then
+        // BUKIO_ACTOR env, then the generic fallback — without the env
+        // honouring, an MCP session under BUKIO_ACTOR signed every tool
+        // call as 'agent:mcp' (wrong key → SIGNATURE_REQUIRED under
+        // enforce, and wrong audit attribution in record mode)
+        actor: command.optsWithGlobals().actor ?? process.env.BUKIO_ACTOR ?? 'agent:mcp',
         readonly: process.env.BUKIO_MCP_READONLY === '1',
       };
       // same guard as the CLI's ensureDb: a missing path must NOT be

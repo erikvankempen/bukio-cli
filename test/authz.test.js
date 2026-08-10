@@ -242,9 +242,11 @@ test('isAuthzExempt: self-service + bootstrap commands are exempt; owner actions
   assert.equal(isAuthzExempt('actor roles', {}), true); // self
   assert.equal(isAuthzExempt('actor can', {}), true); // self
   assert.equal(isAuthzExempt('actor revoke', { reason: 'x' }), true); // self-revoke
-  // the same commands aimed at OTHERS are owner territory
-  assert.equal(isAuthzExempt('actor roles', { actor: 'agent:other' }), false);
-  assert.equal(isAuthzExempt('actor can', { actor: 'agent:other' }), false);
+  // the same commands aimed at OTHERS are owner territory (the "other
+  // actor" option is `--for` — `--actor` is the root identity flag and
+  // cannot be re-declared on a subcommand)
+  assert.equal(isAuthzExempt('actor roles', { for: 'agent:other' }), false);
+  assert.equal(isAuthzExempt('actor can', { for: 'agent:other' }), false);
   assert.equal(isAuthzExempt('actor revoke', { target: 'agent:other' }), false);
   // everything else is checked
   assert.equal(isAuthzExempt('entry add'), false);

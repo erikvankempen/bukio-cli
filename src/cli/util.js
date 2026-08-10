@@ -15,6 +15,7 @@ import {
   sign, verify, keyidOf, isEncrypted, publicKeyFromPrivate, decryptPrivateKey,
 } from '../core/sign.js';
 import { getActorKey, getAnyActorKey, getEnforce } from '../core/actor-registry.js';
+import { checkAuthz } from '../core/authz.js';
 
 export function dbError(code, message) {
   const e = new Error(message);
@@ -301,11 +302,19 @@ export function commandPathOf(command) {
   return parts[0] === 'bukio' ? parts.slice(1).join(' ') : parts.join(' ');
 }
 
-/** Signed args = commander options minus identity/output flags, plus positionals. */
-function buildSignedArgs(opts, command) {
+/**
+ * Signed args = commander options minus identity/output flags, plus positionals.
+ * The identity flag `--actor` is stripped ONLY when its value is the acting
+ * actor itself (or unset): commands like `actor roles grant --actor <who>`
+ * use `--actor` as a MEANINGFUL option naming the grant target, and the
+ * signed payload must cover it (otherwise the audit row would not document
+ * WHO was granted — a tamper-evidence hole).
+ */
+function buildSignedArgs(opts, command, ctxActor) {
   const args = {};
   for (const [k, v] of Object.entries(opts)) {
-    if (k === 'actor' || k === 'signKey' || k === 'json') continue;
+    if (k === 'signKey' || k === 'json') continue;
+    if (k === 'actor' && (v === undefined || v === ctxActor)) continue;
     args[k] = v;
   }
   if (command.args && command.args.length) args.positionals = command.args;
@@ -348,7 +357,7 @@ export function signCommand(ctx, command) {
       if (!any || any.revoked_at === null) {
         return signPayload(ctx, {
           cmd: commandPath,
-          args: buildSignedArgs(opts, command),
+          args: buildSignedArgs(opts, command, ctx.actor),
           db,
           signKey: opts.signKey ?? null,
         });
@@ -357,7 +366,7 @@ export function signCommand(ctx, command) {
     }
     return signPayload(ctx, {
       cmd: commandPath,
-      args: buildSignedArgs(opts, command),
+      args: buildSignedArgs(opts, command, ctx.actor),
       db,
       signKey: opts.signKey ?? null,
     });
@@ -370,7 +379,11 @@ export function signCommand(ctx, command) {
  * Build and verify a signed payload (CLI command or MCP tool call) and
  * return the audit-row signature fields. Record mode with no key material
  * returns { sigStatus: 'unsigned' }; enforcement refusals throw a
- * sign-gate error BEFORE any mutation can happen.
+ * sign-gate error BEFORE any mutation can happen. After the signature
+ * verifies, the Tier 0.5 authz gate runs (checkAuthz): under authz mode
+ * the actor needs a role granting the command's capability, or the
+ * command is refused with AUTHZ_DENIED — dry-run included (a plan is
+ * refused the same way the real run is).
  *
  * @param {object} ctx - { actor } — the actor the payload is signed by.
  * @param {object} opts
@@ -395,6 +408,10 @@ export function signPayload(ctx, { cmd, args, db, signKey = null }) {
     actor: ctx.actor, digest, sig, keyid: key.keyid, ts, nonce, enforce,
   });
   if (!result.ok) throw signGateError(result.code, messageFor(result.code, ctx.actor));
+  // Tier 0.5 authz gate: after the signature verifies, refuse before any
+  // mutation when the actor lacks the command's capability (dry-run
+  // included — D6). Unmapped commands deny (fail closed).
+  checkAuthz(db, ctx.actor, cmd, args);
   return {
     digestHash: digest, sigKeyid: key.keyid, sigNonce: nonce, sigTs: ts, sig,
     sigStatus: result.status, signedArgs: args, signedCommand: cmd,

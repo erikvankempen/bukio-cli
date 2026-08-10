@@ -21,7 +21,11 @@ import {
 import { isValidActor } from '../core/actor.js';
 import {
   enrolActor, revokeActor, getActorKey, setEnforce, getEnforce, canAct,
+  setAuthz, getAuthz, grantRole, revokeRole, getRoles, hasRole, listRoleGrants,
 } from '../core/actor-registry.js';
+import {
+  capabilityOf, canAct as canActCapability, sodWarnings, ROLES as VALID_ROLES,
+} from '../core/authz.js';
 import { record } from '../audit/index.js';
 
 const DEFAULT_TTL_HOURS = 12;
@@ -206,19 +210,21 @@ export function make(program) {
 
   actor
     .command('revoke')
-    .description("revoke an actor's key in the current company's DB (row retained for history)")
+    .description("revoke an actor's key in the current company's DB (row retained for history). Default: your own key. --target <who> is the OWNER-mediated kill of a compromised key (owner role required, regardless of authz mode).")
     .option('--reason <text>', 'revocation reason (required)')
+    .option('--target <who>', "revoke ANOTHER actor's key — owner mediated (requires the owner role)")
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
-        const who = ctx.actor;
+        const who = opts.target ?? ctx.actor;
+        if (!isValidActor(who)) throw actorCliError('INVALID_ACTOR', `'${who}' is not a valid '<role>:<name>' actor`);
         const db = ensureDb(ctx);
         try {
-          const data = { actor: who, reason: opts.reason, ...(ctx.dryRun ? { dryRun: true } : {}) };
+          const data = { actor: who, reason: opts.reason, ...(opts.target ? { revoked_by: ctx.actor } : {}), ...(ctx.dryRun ? { dryRun: true } : {}) };
           if (ctx.dryRun) {
             output(ctx, data, (d) => {
-              console.log(`plan: revoke ${d.actor}`);
+              console.log(`plan: revoke ${d.actor}${d.revoked_by ? ` (by ${d.revoked_by})` : ''}`);
               if (d.reason) console.log(`  reason: ${d.reason}`);
               console.log('(dry run — nothing written)');
             });
@@ -227,10 +233,10 @@ export function make(program) {
           const row = revokeActor(db, { actor: who, reason: opts.reason });
           record(db, {
             actor: ctx.actor, action: 'actor.revoke', command: 'actor revoke',
-            args: { actor: who, reason: opts.reason }, outcome: 'ok',
+            args: { actor: who, reason: opts.reason, ...(opts.target ? { revoked_by: ctx.actor } : {}) }, outcome: 'ok',
           });
-          output(ctx, { actor: who, keyid: row.keyid, revoked_at: row.revoked_at, reason: opts.reason }, (d) => {
-            console.log(`revoked ${d.actor} (keyid ${d.keyid}) — reason: ${d.reason}`);
+          output(ctx, { actor: who, keyid: row.keyid, revoked_at: row.revoked_at, reason: opts.reason, ...(opts.target ? { revoked_by: ctx.actor } : {}) }, (d) => {
+            console.log(`revoked ${d.actor} (keyid ${d.keyid})${d.revoked_by ? ` — by ${d.revoked_by}` : ''} — reason: ${d.reason}`);
           });
         } finally {
           db.close();
@@ -350,6 +356,286 @@ export function make(program) {
         output(ctx, data, (d) => {
           console.log(d.removed ? `locked ${d.actor} — session key removed` : `${d.actor} has no session key`);
         });
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  actor
+    .command('authz')
+    .description("toggle per-actor authorizations (segregation of duties) for this company. --on implies signing enforcement and grants the flipper the owner role (bootstrap, D3); --off needs the owner role.")
+    .option('--on', 'enable authorizations: every non-exempt command needs a role granting its capability (deny-by-default)')
+    .option('--off', 'disable authorizations (owner only; signing enforcement stays on)')
+    .option('--dry-run', 'show the plan without writing')
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        if (opts.on === opts.off) {
+          throw actorCliError('INVALID_AUTHZ', 'pass exactly one of --on or --off');
+        }
+        const on = Boolean(opts.on);
+        const db = ensureDb(ctx);
+        try {
+          const currentlyOn = getAuthz(db) === 'on';
+          const data = {
+            authz: on ? 'on' : 'off',
+            ...(on && !currentlyOn ? { enforce: 'on (implied)', owner_granted: ctx.actor } : {}),
+            ...(ctx.dryRun ? { dryRun: true } : {}),
+          };
+          if (ctx.dryRun) {
+            output(ctx, data, (d) => {
+              console.log(`plan: authorizations ${d.authz}`);
+              if (d.owner_granted) {
+                console.log(`  owner role will be granted to ${d.owner_granted} (bootstrap — the flipper becomes owner)`);
+                console.log('  signing enforcement will be switched on (authz implies enforce)');
+              }
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
+          if (on && !currentlyOn) {
+            db.transaction(() => {
+              setEnforce(db, true); // D1: authz implies enforce
+              setAuthz(db, true);
+              if (!hasRole(db, ctx.actor, 'owner')) {
+                grantRole(db, { actor: ctx.actor, role: 'owner', grantedBy: ctx.actor }); // D3: flipper becomes owner
+              }
+            })();
+            record(db, {
+              actor: ctx.actor, action: 'actor.authz', command: 'actor authz',
+              args: { authz: 'on', enforce: 'on', owner: ctx.actor }, outcome: 'ok',
+            });
+          } else {
+            setAuthz(db, on);
+            record(db, {
+              actor: ctx.actor, action: 'actor.authz', command: 'actor authz',
+              args: { authz: on ? 'on' : 'off' }, outcome: 'ok',
+            });
+          }
+          output(ctx, {
+            authz: getAuthz(db),
+            enforce: getEnforce(db),
+            ...(on && !currentlyOn ? { owner: ctx.actor } : {}),
+          }, (d) => {
+            console.log(`per-actor authorizations are now ${d.authz} for this company`);
+            if (d.owner) {
+              console.log(`  owner role granted to ${d.owner} (bootstrap)`);
+              console.log('  signing enforcement switched on (authz implies enforce)');
+            }
+            console.log(`  signing enforcement: ${d.enforce}`);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  const roles = actor
+    .command('roles')
+    .description("role grants (segregation of duties): list your own roles, or --for <who> to see another's (owner only under authz)")
+    .option('--for <who>', "show another actor's roles (owner only under authz)", undefined)
+    .action((opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const who = opts.for ?? ctx.actor;
+        if (!isValidActor(who)) throw actorCliError('INVALID_ACTOR', `'${who}' is not a valid '<role>:<name>' actor`);
+        const db = ensureDb(ctx);
+        try {
+          const roles = getRoles(db, who);
+          output(ctx, { actor: who, roles }, (d) => {
+            if (d.roles.length === 0) {
+              console.log(`${d.actor} holds no roles (deny-by-default under authz: only self-service checks work)`);
+              return;
+            }
+            console.log(`${d.actor}: ${d.roles.join(', ')}`);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  roles
+    .command('grant')
+    .description(`grant a role to an actor (owner only under authz). Warns on segregation-of-duties conflicts — the warning is soft, the owner decides. Roles: ${VALID_ROLES.join('|')}`)
+    .argument('<role>', `one of ${VALID_ROLES.join('|')}`)
+    .option('--for <who>', "actor to grant the role to, e.g. 'agent:invoicing' (required)")
+    .option('--dry-run', 'show the plan without writing')
+    .action((role, opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        // NOTE: `--for` is declared on the parent `roles` command — the
+        // identity flag `--actor` is the root option and cannot be
+        // re-declared here (commander binds the value to the root and the
+        // signing identity would be corrupted)
+        const target = command.parent.opts().for;
+        if (!target) {
+          throw actorCliError('INVALID_ACTOR', "missing required option '--for <who>' — the actor to grant the role to");
+        }
+        if (!VALID_ROLES.includes(role)) {
+          throw actorCliError('INVALID_ROLE', `'${role}' is not a role — use one of ${VALID_ROLES.join('|')}`);
+        }
+        if (!isValidActor(target)) throw actorCliError('INVALID_ACTOR', `'${target}' is not a valid '<role>:<name>' actor`);
+        const db = ensureDb(ctx);
+        try {
+          const after = [...new Set([...getRoles(db, target), role])].sort();
+          const warnings = sodWarnings(after);
+          const data = { actor: target, role, roles: after, warnings, ...(ctx.dryRun ? { dryRun: true } : {}) };
+          if (ctx.dryRun) {
+            output(ctx, data, (d) => {
+              console.log(`plan: grant ${d.role} to ${d.actor}`);
+              console.log(`  resulting roles: ${d.roles.join(', ') || '(none)'}`);
+              for (const w of d.warnings) console.log(`  ⚠ SoD: ${w}`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
+          grantRole(db, { actor: target, role, grantedBy: ctx.actor });
+          record(db, {
+            actor: ctx.actor, action: 'actor.roles.grant', command: 'actor roles grant',
+            args: { role, actor: target }, outcome: 'ok',
+          });
+          output(ctx, data, (d) => {
+            console.log(`granted ${d.role} to ${d.actor} (roles: ${d.roles.join(', ') || 'none'})`);
+            for (const w of d.warnings) console.log(`  ⚠ SoD: ${w}`);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  roles
+    .command('revoke')
+    .description('remove a role from an actor (owner only under authz). The LAST owner can never be revoked.')
+    .argument('<role>', `one of ${VALID_ROLES.join('|')}`)
+    .option('--for <who>', 'actor to revoke the role from (required)')
+    .option('--dry-run', 'show the plan without writing')
+    .action((role, opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const target = command.parent.opts().for;
+        if (!target) {
+          throw actorCliError('INVALID_ACTOR', "missing required option '--for <who>' — the actor to revoke the role from");
+        }
+        if (!VALID_ROLES.includes(role)) {
+          throw actorCliError('INVALID_ROLE', `'${role}' is not a role — use one of ${VALID_ROLES.join('|')}`);
+        }
+        if (!isValidActor(target)) throw actorCliError('INVALID_ACTOR', `'${target}' is not a valid '<role>:<name>' actor`);
+        const db = ensureDb(ctx);
+        try {
+          const after = getRoles(db, target).filter((r) => r !== role).sort();
+          const data = { actor: target, role, roles: after, ...(ctx.dryRun ? { dryRun: true } : {}) };
+          if (ctx.dryRun) {
+            output(ctx, data, (d) => {
+              console.log(`plan: revoke ${d.role} from ${d.actor}`);
+              console.log(`  resulting roles: ${d.roles.join(', ') || '(none)'}`);
+              console.log('(dry run — nothing written)');
+            });
+            return;
+          }
+          revokeRole(db, { actor: target, role });
+          record(db, {
+            actor: ctx.actor, action: 'actor.roles.revoke', command: 'actor roles revoke',
+            args: { role, actor: target }, outcome: 'ok',
+          });
+          output(ctx, data, (d) => {
+            console.log(`revoked ${d.role} from ${d.actor} (roles: ${d.roles.join(', ') || 'none'})`);
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  actor
+    .command('can')
+    .description("capability check: is the command allowed for the actor? Self-service for your own checks; --for <who> is owner only under authz. Accepts 'entry add --post' or 'mcp:entry_add'.")
+    .argument('<command>', "command path, e.g. 'entry add', 'entry add --post', 'vat file' or 'mcp:entry_add'")
+    .option('--for <who>', 'check another actor (owner only under authz)', undefined)
+    .action((commandArg, opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const who = opts.for ?? ctx.actor;
+        const tokens = String(commandArg).trim().split(/\s+/);
+        if (tokens[0] === 'bukio') tokens.shift();
+        const flags = tokens.filter((t) => t.startsWith('-'));
+        const words = tokens.filter((t) => !t.startsWith('-'));
+        const path = words.join(' ');
+        const args = { positionals: [commandArg] };
+        if (flags.includes('--post')) args.post = true;
+        if (flags.includes('--target')) args.target = true;
+        const capability = capabilityOf(path, args);
+        const db = ensureDb(ctx);
+        try {
+          const allowed = capability ? canActCapability(db, who, capability) : false;
+          const roles = getRoles(db, who);
+          output(ctx, {
+            actor: who, command: commandArg, capability, allowed, roles,
+            ...(capability && !allowed ? { denied_reason: `no capability '${capability}'` } : {}),
+            ...(!capability ? { denied_reason: 'no capability mapping (fail closed)' } : {}),
+          }, (d) => {
+            if (d.allowed) {
+              console.log(`ok — ${d.actor} can run '${d.command}' (capability: ${d.capability}, roles: ${d.roles.join(', ') || 'none'})`);
+            } else {
+              console.log(`AUTHZ_DENIED — ${d.actor} cannot run '${d.command}': ${d.denied_reason}`);
+              if (d.roles.length) console.log(`  roles: ${d.roles.join(', ')}`);
+              console.log('  ask the owner to grant a role that carries this capability');
+            }
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  actor
+    .command('who-can')
+    .description("which actors can run a command (segregation-of-duties review; owner only under authz)")
+    .argument('<command>', "command path, e.g. 'entry post' or 'payments batch create'")
+    .action((commandArg, opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const tokens = String(commandArg).trim().split(/\s+/);
+        if (tokens[0] === 'bukio') tokens.shift();
+        const flags = tokens.filter((t) => t.startsWith('-'));
+        const words = tokens.filter((t) => !t.startsWith('-'));
+        const path = words.join(' ');
+        const args = { positionals: [commandArg] };
+        if (flags.includes('--post')) args.post = true;
+        const capability = capabilityOf(path, args);
+        const db = ensureDb(ctx);
+        try {
+          // every actor that holds a role, plus every enrolled actor
+          const names = new Set([...listRoleGrants(db).map((r) => r.actor)]);
+          for (const a of db.prepare('SELECT DISTINCT actor FROM actor_keys').all()) names.add(a.actor);
+          const actors = [...names].sort().map((actor) => {
+            const roles = getRoles(db, actor);
+            return { actor, roles, allowed: capability ? canActCapability(db, actor, capability) : false };
+          });
+          output(ctx, { command: commandArg, capability, actors }, (d) => {
+            console.log(`'${d.command}' → capability: ${d.capability ?? '(none — fail closed)'}`);
+            if (d.actors.length === 0) {
+              console.log('  no actors hold roles or keys in this company');
+              return;
+            }
+            for (const a of d.actors) {
+              console.log(`  ${a.allowed ? '✔' : '✘'} ${a.actor} (${a.roles.join(', ') || 'no roles'})`);
+            }
+          });
+        } finally {
+          db.close();
+        }
       } catch (err) {
         fail(ctx, err);
       }

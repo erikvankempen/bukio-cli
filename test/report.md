@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-10 20:03:46 UTC — **✅ 696 passing · 0 failing (696 tests)**
+**Latest run:** 2026-08-10 21:59:16 UTC — **✅ 746 passing · 0 failing (746 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -19,7 +19,7 @@
 
 ### actor-registry.test.js — per-company actor key registry: enrol/revoke (history kept), rotation, enforce flag, per-DB independence
 
-10 passing · 0 failing
+18 passing · 0 failing
 
     - ✅ enrol: new actor writes a registry row with keyid, public key and timestamp
     - ✅ enrol: duplicate enrol while an active key exists fails ALREADY_ENROLLED
@@ -31,6 +31,14 @@
     - ✅ enforce: flag defaults to off, toggles per DB, and is independent
     - ✅ registry is per company DB: same actor, independent enrolments
     - ✅ registry persists to disk and survives reopen (file-backed DB)
+    - ✅ authz: flag defaults to off, toggles per DB, and is independent
+    - ✅ grantRole: writes a row with granted_by/granted_at; idempotent on repeat
+    - ✅ grantRole: rejects invalid actors and invalid roles
+    - ✅ revokeRole: removes the row; revoking a role not held fails ROLE_NOT_GRANTED
+    - ✅ revokeRole: the LAST owner can never be revoked (flipper-bootstrap guarantee)
+    - ✅ roles: per-company independence — grants in one DB do not leak to another
+    - ✅ listRoleGrants: every grant row with grantor + timestamp
+    - ✅ roles: authz flag and role grants persist to disk and survive reopen
 
 ### actor.test.js — named-actor enforcement, actor identity CLI + sign-and-verify gate (record/enforce modes, stale/replay/registry refusals) + full Tier 0 lifecycle (enrol→enforce→lock→revoke→rotate→verify→company B)
 
@@ -176,6 +184,58 @@
     - ✅ verifyTrail: --limit checks only the newest N rows
     - ✅ verifyTrail: works on a copied DB file with no external files (self-contained)
     - ✅ verifyTrail: --since filters rows by timestamp
+
+### authz-cli.test.js — 
+
+24 passing · 0 failing
+
+    - ✅ authz --on: sets authz on, implies signing enforcement, grants the flipper owner
+    - ✅ authz --on --dry-run: nothing is written (no owner, no mode change)
+    - ✅ authz: exactly one of --on/--off is required (INVALID_AUTHZ)
+    - ✅ authz --off: the owner turns authz off; signing enforcement STAYS on
+    - ✅ authz --off: a non-owner is refused AUTHZ_DENIED under authz
+    - ✅ roles grant/revoke: audit rows + SoD warning on a conflicting grant
+    - ✅ roles revoke: ROLE_NOT_GRANTED on absent role; LAST_OWNER guards the last owner
+    - ✅ roles: invalid role and invalid grantee are rejected
+    - ✅ roles: self-service list for any enrolled actor; --actor <other> is owner only
+    - ✅ roles grant/revoke: work for any enrolled actor when authz is OFF (roles are inert data)
+    - ✅ actor can: self-service capability check with the ACTUAL mutation
+    - ✅ actor can --actor <other>: owner only under authz
+    - ✅ who-can: the SoD review lens — owner sees the full matrix
+    - ✅ gate: an actor with the right role acts; wrong capability is refused AUTHZ_DENIED before any mutation
+    - ✅ gate: B (payments) can create a SEPA batch but not post entries
+    - ✅ gate: deny-by-default — a role-less actor can only self-service
+    - ✅ gate: dry-run is refused identically (D6 — a plan needs the capability)
+    - ✅ gate: reads are gated too — a role-less actor cannot run report trial-balance
+    - ✅ gate: entry add --post needs entry.post — the ACTUAL mutation decides
+    - ✅ revoke --target: owner kills a compromised key; the target is refused everywhere after
+    - ✅ revoke --target: needs the OWNER role REGARDLESS of authz mode (D8)
+    - ✅ MCP gate: tool calls map to the same capabilities; refusals mutate nothing
+    - ✅ MCP gate: read-only tools are unaffected (not gated) — a role-less actor can still read
+    - ✅ MCP gate: vat_book maps to vat.book — a payments actor is refused
+
+### authz.test.js — 
+
+18 passing · 0 failing
+
+    - ✅ capabilityOf: entry add resolves by the ACTUAL mutation (--post)
+    - ✅ capabilityOf: every documented §3 command maps to exactly one capability
+    - ✅ capabilityOf: every real CLI command path maps or is authz-exempt
+    - ✅ capabilityOf: every MCP mutating tool maps to exactly one capability
+    - ✅ capabilityOf: unmapped commands return null (fail closed)
+    - ✅ canAct: deny-by-default — no roles grants nothing
+    - ✅ canAct: owner passes EVERYTHING; roles grant only their capabilities
+    - ✅ canAct: fail closed — a null capability is never granted
+    - ✅ role definitions are consistent: every listed capability is a real capability
+    - ✅ sodWarnings: the documented conflict pairs warn; clean sets stay quiet
+    - ✅ sodWarnings: every documented pair is real (map stays in sync)
+    - ✅ isAuthzExempt: self-service + bootstrap commands are exempt; owner actions are not
+    - ✅ checkAuthz: authz off (default) → no refusals
+    - ✅ checkAuthz: unmapped command denies under authz (fail closed)
+    - ✅ checkAuthz: AUTHZ_DENIED message names the actor, missing capability and roles
+    - ✅ checkAuthz: dry-run is refused identically (capability required for the plan)
+    - ✅ checkAuthz: owner-mediated revoke needs the owner role REGARDLESS of authz mode (D8)
+    - ✅ checkAuthz: no DB → no authz state → never refuses
 
 ### backup.test.js — encrypted backups (AES-256-GCM), keep-N rotation, tamper detection, audited restore
 
