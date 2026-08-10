@@ -46,6 +46,7 @@ const DESCRIPTIONS = {
   'recurring.test.js': 'recurring entries engine: schedules, depreciation, accruals',
   'reports.test.js': 'balance sheet, P&L, journal',
   'reports-v014.test.js': 'aging buckets, contact statements, sales analytics (by contact/item)',
+  'sign.test.js': 'ed25519 sign/verify/keyid module: keygen (plain + passphrase-encrypted PKCS8), roundtrip, tamper/wrong-key rejection',
   'smtp.test.js': 'zero-dependency SMTP client + invoice email: auth, STARTTLS, MIME/PDF attachment, dry-run, audit',
   'trial-balance.test.js': 'trial balance invariants',
   'vat.test.js': 'optional VAT module: codes, vat book, OB readout 1a–5d',

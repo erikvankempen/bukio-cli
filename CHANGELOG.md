@@ -10,6 +10,12 @@ merged to `main` and released.
 
 ### Added
 
+- Actor identity Tier 0, task 1: `src/core/sign.js` — Ed25519 keypair
+  generation (plain and passphrase-encrypted PKCS8 via aes-256-cbc), signing
+  and verification (RFC 8032, `node:crypto` only — no new dependencies), and
+  a stable keyid fingerprint (`sha256` of the SPKI DER bytes, first 16 bytes
+  as 32 hex chars). Signed commands and the `audit verify` trail build on
+  this module in later tasks.
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases

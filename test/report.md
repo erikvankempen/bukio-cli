@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-09 17:07:06 UTC — **✅ 616 passing · 0 failing (616 tests)**
+**Latest run:** 2026-08-10 16:18:03 UTC — **❌ 621 passing · 5 failing (626 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -234,7 +234,7 @@
 
 ### edge-cases.test.js — rounding, boundaries, idempotency, lifecycle violations, dry-run hygiene
 
-37 passing · 0 failing
+36 passing · 1 failing
 
     - ✅ ledger: unbalanced, zero-amount, too-few postings rejected
     - ✅ ledger: same account on both sides is legal
@@ -257,7 +257,7 @@
     - ✅ recurring: depreciation with residual value — final run absorbs the remainder
     - ✅ bank: import is idempotent — same statement twice = 0 duplicates on re-import
     - ✅ bank: Rabo CSV with Af/Bij and Dutch decimals parses correctly
-    - ✅ bank: auto-match prefers an exact entry over an invoice for the same amount
+    - ❌ bank: auto-match prefers an exact entry over an invoice for the same amount
     - ✅ bank: partial payment does not auto-match the invoice
     - ✅ vat: mixed rates in one entry, monthly period readout
     - ✅ vat: private use (P) -> 1d/5a at the standard rate (21%)
@@ -521,18 +521,18 @@
 
 ### invoice.test.js — invoicing: lifecycle, 12-vereisten, credit notes, payments, reminders
 
-27 passing · 0 failing
+23 passing · 4 failing
 
     - ✅ parseLineSpec: qty, description, price, vat
     - ✅ createInvoice: draft with line math (2x 150 @21 = 300 net, 63 vat)
     - ✅ createInvoice: guards
     - ✅ validateCompliance: 12 vereisten — supplier and customer data required
-    - ✅ finalize: assigns sequential number and books Debiteuren/Omzet/btw
+    - ❌ finalize: assigns sequential number and books Debiteuren/Omzet/btw
     - ✅ finalize: multiple VAT rates -> per-rate postings, exact vat
     - ✅ finalize: VAT module off -> net-only booking, no vat postings
     - ✅ finalize: already finalized is rejected; dry-run writes nothing
     - ✅ credit note: reversed booking, sequence continues
-    - ✅ payments: partial then full -> paid; overpayment rejected
+    - ❌ payments: partial then full -> paid; overpayment rejected
     - ✅ nextInvoiceNumber: year-scoped sequence
     - ✅ UBL: Peppol BIS 3.0 structure
     - ✅ UBL: seller + buyer EndpointID (BT-34/BT-49) when KVK numbers are present
@@ -541,13 +541,13 @@
     - ✅ UBL: no empty PayeeFinancialAccount when the company has no IBAN (BG-17 cbc:ID 1..1)
     - ✅ UBL: credit note BT-10 buyer reference carries the original klantkenmerk (not the invoice number)
     - ✅ UBL: XML control characters in descriptions are stripped (Peppol-safe)
-    - ✅ bank auto-match: incoming payment pays the invoice and posts Bank/Debiteuren
+    - ❌ bank auto-match: incoming payment pays the invoice and posts Bank/Debiteuren
     - ✅ buildInvoicePostings: sales vs credit sign flip
     - ✅ buildInvoicePostings: VAT module off still honors per-line GL accounts (round 11)
     - ✅ invoiceReminders: overdue + due-soon, excludes paid and far-future
     - ✅ invoiceReminders: within-days controls the due-soon window
     - ✅ invoiceReminders: credit notes are not reminder candidates
-    - ✅ validateCompliance: VAT-exempt company without btw-id can still invoice
+    - ❌ validateCompliance: VAT-exempt company without btw-id can still invoice
     - ✅ validateCompliance: VAT company without btw-id still fails SUPPLIER_INCOMPLETE
     - ✅ createContact: dashed IBAN is stored in the canonical dash-free form (normalizer parity)
 
@@ -684,6 +684,21 @@
     - ✅ audit --format json prints JSON even without the global --json flag
     - ✅ bank match post --dry-run rejects an already-matched transaction and a missing account
     - ✅ vat book --dry-run rejects unbalanced postings (parity with entry add)
+
+### sign.test.js — ed25519 sign/verify/keyid module: keygen (plain + passphrase-encrypted PKCS8), roundtrip, tamper/wrong-key rejection
+
+10 passing · 0 failing
+
+    - ✅ sign/verify: roundtrip with a plain key
+    - ✅ sign/verify: works with Buffer data too
+    - ✅ sign/verify: wrong key fails
+    - ✅ sign/verify: tampered message fails
+    - ✅ sign/verify: malformed signature or key does not throw, returns false
+    - ✅ keyid: stable 32-hex fingerprint of the public key
+    - ✅ keygen: writes SPKI public and PKCS8 private PEM
+    - ✅ keygen: passphrase-encrypted key refuses to sign without the passphrase
+    - ✅ keygen: passphrase-encrypted key signs with the right passphrase and verifies
+    - ✅ keyid: fingerprint is identical for plain and passphrase keys sharing a public key
 
 ### smtp.test.js — zero-dependency SMTP client + invoice email: auth, STARTTLS, MIME/PDF attachment, dry-run, audit
 
