@@ -120,10 +120,10 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio audit [--by agent:bartholomeus] [--since ISO] [--limit N] [--format json\|csv\|xlsx] [--out PATH]` | Read the append-only audit log (newest first); export to csv/xlsx for an external advisor. |
 | `bukio audit verify [--since ISO] [--limit N]` | Re-verify the signed audit trail against the company registry: recompute the canonical digest from the stored signed args and check every signature. Per-row `ok | unsigned | revoked | tampered | invalid-signature | unknown-key`; a summary with counts. Reads only the DB (a copied file verifies self-contained). Exit 1 when tampered/invalid/unknown-key rows exist. |
 | `bukio actor keygen [--force] [--dry-run]` | Generate an Ed25519 keypair for the `--actor`: human keys are passphrase-encrypted (`BUKIO_SIGNING_PASSPHRASE` or interactive prompt), agent/system keys are plain files. Written to `<config>/keys/<role>-<name>.key` (0600). `--force` replaces an existing key (rotation). |
-| `bukio actor register [--dry-run]` | Enrol the actor's local key into the **current company's DB** (`actor_keys`). Per-company: repeat for every company DB the actor works in. |
+| `bukio actor register [--dry-run]` | Enrol the actor's local key into the **current company's DB** (`actor_keys`). Per-company: repeat for every company DB the actor works in. First enrolment is refused under enforcement (operator-gated: an enrolled actor flips `enforce --off` → register → `--on`); re-enrolment after revocation (rotation) works under enforcement. |
 | `bukio actor list` | List enrolled actors in the current company's DB (active/revoked + reason). |
 | `bukio actor revoke --reason TEXT [--dry-run]` | Revoke the actor's key in the current company's DB. The row is **retained** (with reason) so historical audit verification still works; the key stops authorising new commands. |
-| `bukio actor enforce --on\|--off [--dry-run]` | Toggle signed-command enforcement for this company (audited). `record` mode (default) verifies signatures when present; `enforce` mode refuses unsigned/invalid commands. |
+| `bukio actor enforce --on\|--off [--dry-run]` | Toggle signed-command enforcement for this company (audited). `record` mode (default) verifies signatures when present; `enforce` mode refuses unsigned/invalid commands. **Only an enrolled actor can turn `--off`** — the audited recovery valve. |
 | `bukio actor unlock [--ttl-hours N] [--dry-run]` / `actor lock` | Human-only: decrypt the passphrase-encrypted key into a short-lived session key (`<config>/sessions/<role>-<name>.key`, default 12 h). `lock` clears it early. |
 | `bukio actor verify` | Check an actor's key state (key file present, keyid, registered/active/revoked) against the current company's registry. |
 
@@ -614,6 +614,65 @@ tar -czf ~/exports/bukio-documenten-2026.tar.gz -C ~/.bukio invoices/
   importer reads them — **an exported file re-imports losslessly**.
 - Read-only: it writes the file and one `export.xaf` audit row; nothing else
   is touched.
+
+### 6.20 Signing & actor identity: what YOU do, when it signs
+
+Signing is **automatic once you are set up** — you never type a signature.
+This is the whole workflow:
+
+**One-time setup (per identity, per machine).** Create a key for every
+identity you act as, then enrol it in every company DB that identity works
+in:
+
+```bash
+# as the human owner — the key is passphrase-encrypted
+bukio --actor human:erik actor keygen      # prompts for a passphrase
+bukio --actor human:erik actor register    # enrol into THIS company's DB
+# repeat `actor register` for every other company DB the human works in
+
+# as an agent / system — the key is a plain file
+BUKIO_ACTOR=agent:bartholomeus bukio actor keygen
+BUKIO_ACTOR=agent:bartholomeus bukio actor register   # per company DB
+BUKIO_ACTOR=system:backup bukio actor keygen
+BUKIO_ACTOR=system:backup bukio actor register
+```
+
+**Per session (humans only).** `human:` keys are encrypted at rest; unlock
+the key for the session (default 12 h), `actor lock` clears it early:
+
+```bash
+bukio --actor human:erik actor unlock
+```
+
+**That's it.** From now on **every** command you run — reads *and* writes,
+`--dry-run` included — is signed automatically before it executes:
+
+- the exact command + arguments + timestamp + a fresh nonce are turned into
+  a canonical digest,
+- the digest is signed with the actor's key (resolution order: `--sign-key`
+  → session → `BUKIO_SIGNING_PASSPHRASE` → `<config>/keys/<role>-<name>.key`),
+- the signature is verified against the company's `actor_keys` registry and
+  stored on the audit row for that action (`sig_status` = `verified`).
+
+You can watch it happen: `bukio audit --json` shows `sig_status` per row,
+and `bukio actor verify` shows your key state (key file? enrolled? session?
+enforcement?).
+
+**Enforcement.** Default (`record` mode): unsigned commands still run and
+log `unsigned` — harmless, just not provable. When a company has
+`actor enforce --on`: unsigned, unverifiable, stale, replayed, unknown-key
+or revoked-key commands are **refused before anything is written** — the
+audit row records the attempt. Enforcement is per company: your key must be
+registered in *that* company's DB.
+
+**When it breaks — the error tells you what to do:**
+
+| Refusal | Meaning | Fix |
+|---------|---------|-----|
+| `SIGNATURE_REQUIRED` | no key material found | `actor keygen` (+ `unlock` for humans) |
+| `ACTOR_KEY_UNKNOWN` | key exists, not enrolled in this company | `actor register` (first enrolment: operator flips `enforce --off` → register → `--on`) |
+| `ACTOR_KEY_REVOKED` | key was revoked here | rotate: `actor keygen --force` + `actor register` |
+| `PASSPHRASE_REQUIRED` | encrypted human key, no session/passphrase | `actor unlock` or set `BUKIO_SIGNING_PASSPHRASE` |
 
 ## 7. Error codes you will meet
 

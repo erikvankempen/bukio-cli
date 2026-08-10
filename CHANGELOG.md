@@ -117,6 +117,17 @@ merged to `main` and released.
   test enrols the operator first; the exempt-commands test now asserts the
   refusal and the enrolled-actor path; the lifecycle test's company B walks
   the full operator-gated onboarding.
+- Actor identity Tier 0, docs clarity (review follow-up): the README and
+  AGENTS.md now walk through **what an actor actually does** — one-time
+  setup per identity (`actor keygen` + `actor register` per company DB),
+  per-session `actor unlock` for humans, then fully automatic signing of
+  every command (reads, writes, `--dry-run`): canonical digest → signature
+  → registry verification → audit row `verified`. AGENTS.md gains worked
+  example 6.20 with the refusal→fix table (`SIGNATURE_REQUIRED` /
+  `ACTOR_KEY_UNKNOWN` / `ACTOR_KEY_REVOKED` / `PASSPHRASE_REQUIRED`);
+  README gains an "In practice — what you actually do" block; §3 quick
+  reference rows for `actor register` / `actor enforce` aligned with the
+  operator-gated enrolment and enrolled-only `--off`.
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases

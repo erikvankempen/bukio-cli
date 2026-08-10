@@ -142,6 +142,26 @@ Every actor can hold an **Ed25519 key pair**. Once an actor has a key and it is 
 - **Revocation & rotation** — `bukio actor revoke --reason …` revokes the actor's key in the current company (the row is retained as history, so audit rows signed with it stay verifiable as `revoked`). Rotate with `bukio actor keygen --force` + `actor register` — the fresh key is enrolled as a new registry row and historical rows remain provable.
 - **Explicit key** — `--sign-key <path>` (or the session key / `BUKIO_SIGNING_PASSPHRASE` / the actor's key file, in that order) chooses which private key signs the command.
 
+**In practice — what you actually do:**
+
+```bash
+# ONE-TIME, per identity you act as:
+bukio --actor human:erik actor keygen        # human: prompts for a passphrase
+bukio --actor human:erik actor register      # enrol into THIS company's DB
+BUKIO_ACTOR=agent:bartholomeus bukio actor keygen
+BUKIO_ACTOR=agent:bartholomeus bukio actor register   # repeat per company DB
+
+# PER SESSION, humans only (their keys are encrypted at rest):
+bukio --actor human:erik actor unlock        # 12 h by default; actor lock clears it
+
+# THAT'S IT — every command now signs itself automatically.
+# No signature to type, nothing to pass: the gate signs before executing
+# (reads, writes and --dry-run alike), stamps the audit row verified, and
+# `bukio audit verify` can re-prove the whole trail at any time.
+```
+
+Agent/system keys (plain files) and sessions sign with **zero ceremony** — an agent or cron job that has the key file on disk is signed automatically. Enforcement (`actor enforce --on`) only adds a requirement: unsigned or unverifiable commands are refused *before anything is written*, instead of running logged as `unsigned`. See AGENTS.md §6.20 for the full walkthrough and the refusal→fix table.
+
 ### The audit log
 
 An **append-only** log of every mutation: actor, action, command, JSON args, outcome, and affected entry IDs. Database triggers block UPDATE and DELETE — the log cannot be rewritten after the fact. Read it with `bukio audit`.
