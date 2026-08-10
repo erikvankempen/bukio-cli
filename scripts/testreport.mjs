@@ -24,6 +24,7 @@ const files = readdirSync(path.join(root, 'test')).filter((f) => f.endsWith('.te
 const DESCRIPTIONS = {
   'accounts.test.js': 'chart of accounts CRUD + CSV chart import',
   'actor.test.js': 'named-actor enforcement (`<role>:<name>` required)',
+  'actor-registry.test.js': 'per-company actor key registry: enrol/revoke (history kept), rotation, enforce flag, per-DB independence',
   'assets.test.js': 'fixed assets: schemes, mid-life adoption, runs, disposal, activastaat',
   'attachments.test.js': 'in-DB/file document attachments: add/list/show/remove, 25 MB cap, dedupe, metadata-only lists, audit',
   'audit.test.js': 'append-only audit log invariants',

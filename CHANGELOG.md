@@ -28,6 +28,12 @@ merged to `main` and released.
   audit-log signature columns (`digest_hash`, `sig_keyid`, `sig_nonce`,
   `sig_ts`, `sig`, `sig_status`). Additive only: legacy audit rows read back
   with `sig_status = 'unsigned'` (claimed, not yet provable).
+- Actor identity Tier 0, task 3: `src/core/actor-registry.js` — DB-backed
+  per-company actor key registry (`actor_keys` + `settings` via migration
+  018): enrol (duplicate active key rejected), revoke (row retained with
+  reason — history preserved), re-enrol after revocation as the rotation
+  flow, `canAct` check, and the per-company `signing_enforce` flag
+  (default off).
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases

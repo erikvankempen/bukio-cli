@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-10 16:43:15 UTC — **✅ 637 passing · 0 failing (637 tests)**
+**Latest run:** 2026-08-10 16:52:01 UTC — **✅ 647 passing · 0 failing (647 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -16,6 +16,21 @@
     - ✅ importChartCsv: header validation
     - ✅ importChartCsv: quoted values with commas parse
     - ✅ listAccounts: type filter and includeInactive
+
+### actor-registry.test.js — per-company actor key registry: enrol/revoke (history kept), rotation, enforce flag, per-DB independence
+
+10 passing · 0 failing
+
+    - ✅ enrol: new actor writes a registry row with keyid, public key and timestamp
+    - ✅ enrol: duplicate enrol while an active key exists fails ALREADY_ENROLLED
+    - ✅ enrol: invalid actor or missing key material is rejected
+    - ✅ revoke: marks the row with reason and keeps it (history retained)
+    - ✅ revoke: requires a reason; unknown or already-revoked actors are rejected
+    - ✅ canAct: true for enrolled, false for unknown and revoked actors
+    - ✅ rotation: re-enrol after revocation replaces the key with a fresh one
+    - ✅ enforce: flag defaults to off, toggles per DB, and is independent
+    - ✅ registry is per company DB: same actor, independent enrolments
+    - ✅ registry persists to disk and survives reopen (file-backed DB)
 
 ### actor.test.js — named-actor enforcement (`<role>:<name>` required)
 
