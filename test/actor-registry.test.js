@@ -12,6 +12,7 @@ import path from 'node:path';
 import { openDb } from '../src/core/db.js';
 import {
   enrolActor, revokeActor, getActorKey, getKeyByKeyid, canAct, setEnforce, getEnforce,
+  setAuthz, getAuthz, grantRole, revokeRole, getRoles, hasRole, listRoleGrants,
 } from '../src/core/actor-registry.js';
 import { generateKeyPair, keyidOf } from '../src/core/sign.js';
 
@@ -149,5 +150,92 @@ test('registry persists to disk and survives reopen (file-backed DB)', () => {
   const reopened = openDb(p);
   assert.equal(getActorKey(reopened, 'system:month-end').keyid, keyid);
   assert.equal(getEnforce(reopened), 'on');
+  reopened.close();
+});
+
+// --- Tier 0.5: role registry (migration 020) --------------------------------
+
+test('authz: flag defaults to off, toggles per DB, and is independent', () => {
+  assert.equal(getAuthz(db), 'off');
+  setAuthz(db, true);
+  assert.equal(getAuthz(db), 'on');
+  setAuthz(db, false);
+  assert.equal(getAuthz(db), 'off');
+
+  const other = openDb(':memory:');
+  assert.equal(getAuthz(other), 'off');
+  setAuthz(other, true);
+  assert.equal(getAuthz(db), 'off'); // untouched
+  assert.equal(getAuthz(other), 'on');
+  other.close();
+});
+
+test('grantRole: writes a row with granted_by/granted_at; idempotent on repeat', () => {
+  const row = grantRole(db, { actor: 'agent:invoicing', role: 'bookkeeper', grantedBy: 'human:erik' });
+  assert.equal(row.actor, 'agent:invoicing');
+  assert.equal(row.role, 'bookkeeper');
+  assert.equal(row.granted_by, 'human:erik');
+  assert.ok(row.granted_at);
+  assert.deepEqual(getRoles(db, 'agent:invoicing'), ['bookkeeper']);
+  // repeat grant is a no-op, not an error
+  grantRole(db, { actor: 'agent:invoicing', role: 'bookkeeper', grantedBy: 'human:erik' });
+  assert.deepEqual(getRoles(db, 'agent:invoicing'), ['bookkeeper']);
+});
+
+test('grantRole: rejects invalid actors and invalid roles', () => {
+  assert.throws(() => grantRole(db, { actor: 'agent', role: 'bookkeeper', grantedBy: 'human:erik' }), { code: 'INVALID_ACTOR' });
+  assert.throws(() => grantRole(db, { actor: 'agent:invoicing', role: 'superuser', grantedBy: 'human:erik' }), { code: 'INVALID_ROLE' });
+  assert.throws(() => grantRole(db, { actor: 'agent:invoicing', role: 'bookkeeper', grantedBy: null }), { code: 'INVALID_ACTOR' });
+});
+
+test('revokeRole: removes the row; revoking a role not held fails ROLE_NOT_GRANTED', () => {
+  grantRole(db, { actor: 'agent:tax', role: 'tax', grantedBy: 'human:erik' });
+  revokeRole(db, { actor: 'agent:tax', role: 'tax' });
+  assert.deepEqual(getRoles(db, 'agent:tax'), []);
+  assert.throws(() => revokeRole(db, { actor: 'agent:tax', role: 'tax' }), { code: 'ROLE_NOT_GRANTED' });
+  assert.throws(() => revokeRole(db, { actor: 'agent:tax', role: 'bogus' }), { code: 'INVALID_ROLE' });
+});
+
+test('revokeRole: the LAST owner can never be revoked (flipper-bootstrap guarantee)', () => {
+  grantRole(db, { actor: 'human:erik', role: 'owner', grantedBy: 'human:erik' });
+  assert.throws(() => revokeRole(db, { actor: 'human:erik', role: 'owner' }), { code: 'LAST_OWNER' });
+  // once a second owner exists, the first may step down
+  grantRole(db, { actor: 'agent:backup', role: 'owner', grantedBy: 'human:erik' });
+  revokeRole(db, { actor: 'human:erik', role: 'owner' });
+  assert.deepEqual(getRoles(db, 'human:erik'), []);
+  assert.equal(hasRole(db, 'agent:backup', 'owner'), true);
+});
+
+test('roles: per-company independence — grants in one DB do not leak to another', () => {
+  grantRole(db, { actor: 'agent:invoicing', role: 'bookkeeper', grantedBy: 'human:erik' });
+  const other = openDb(':memory:');
+  assert.deepEqual(getRoles(other, 'agent:invoicing'), []);
+  assert.equal(hasRole(other, 'agent:invoicing', 'bookkeeper'), false);
+  grantRole(other, { actor: 'agent:invoicing', role: 'readonly', grantedBy: 'human:erik' });
+  assert.deepEqual(getRoles(db, 'agent:invoicing'), ['bookkeeper']); // DB A untouched
+  other.close();
+});
+
+test('listRoleGrants: every grant row with grantor + timestamp', () => {
+  grantRole(db, { actor: 'agent:invoicing', role: 'bookkeeper', grantedBy: 'human:erik' });
+  grantRole(db, { actor: 'agent:tax', role: 'tax', grantedBy: 'human:erik' });
+  const rows = listRoleGrants(db);
+  assert.equal(rows.length, 2);
+  const byActor = Object.fromEntries(rows.map((r) => [r.actor, r]));
+  assert.equal(byActor['agent:invoicing'].role, 'bookkeeper');
+  assert.equal(byActor['agent:tax'].granted_by, 'human:erik');
+});
+
+test('roles: authz flag and role grants persist to disk and survive reopen', () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-role-registry-'));
+  const p = path.join(dir, 'company.db');
+  const first = openDb(p);
+  setAuthz(first, true);
+  grantRole(first, { actor: 'human:erik', role: 'owner', grantedBy: 'human:erik' });
+  first.close();
+
+  const reopened = openDb(p);
+  assert.equal(getAuthz(reopened), 'on');
+  assert.equal(hasRole(reopened, 'human:erik', 'owner'), true);
   reopened.close();
 });
