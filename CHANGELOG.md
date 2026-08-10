@@ -88,16 +88,24 @@ merged to `main` and released.
   one end-to-end scenario test walks a real enrolment: keygen (agent plain,
   human passphrase-encrypted) → unlock → register → enforce on → signed
   commands run (both actors) → unsigned refused → lock (passphrase required
-  again) → revoke → rotation (keygen --force + register — `actor register`
-  is now signing-exempt as bootstrap, alongside keygen/unlock/lock, so
-  re-enrolment after revocation works under enforce) → `audit verify` clean
-  (old rows `revoked`, new rows `ok`, zero tampered/invalid/unknown) →
-  company B independence (same key: refused until enrolled, then verified;
+  again) → revoke → rotation (keygen --force + register) → `audit verify`
+  clean (old rows `revoked`, new rows `ok`, zero tampered/invalid/unknown)
+  → company B independence (same key: refused until enrolled, then verified;
   B's fresh registry shows no leaked revocation). README gains the "Actor
   identity & signing" section, `bukio actor` + `bukio audit verify` command
   references, and signing rows in the global flags table; AGENTS.md gains
   house rules 10–13 (enforcement, per-company enrolment, human sessions,
   cron/system keys); the README test badge is synced to the live count.
+- Actor identity Tier 0, security tightening (review follow-up): **`actor
+  register` is no longer blanket-exempt from signing.** The exemption is now
+  limited to *rotation re-enrolment* — an actor whose key was revoked (no
+  active key) may register under enforcement, because that is the only way
+  back in. **First-time enrolment under enforcement is refused**
+  (`ACTOR_KEY_UNKNOWN`, with a message pointing at the audited onboarding:
+  `enforce --off` → `register` → `enforce --on`), so a brand-new actor
+  identity cannot be self-registered behind an enforced company — enrolment
+  stays an operator-gated, audited act. Lifecycle test extended: company B
+  asserts the refusal and the full operator-gated onboarding.
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases

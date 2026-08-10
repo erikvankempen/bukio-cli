@@ -679,12 +679,17 @@ test('lifecycle: keygen(unlock)→register→enforce→signed→refused→lock�
   assert.ok(verify.data.summary.ok >= 3, `new rows verified: ${JSON.stringify(verify.data.summary)}`);
   assert.ok(verify.data.summary.revoked >= 2, `old rows flagged revoked: ${JSON.stringify(verify.data.summary)}`);
 
-  // 12. company B is independent: not enrolled -> ACTOR_KEY_UNKNOWN; after
-  //     register the rotated key verifies there too
+  // 12. company B is independent: enforcement + enrolment don't leak from A.
+  //     Under enforce, FIRST enrolment is refused too (operator-gated) —
+  //     the audited onboarding is: enforce off -> register -> enforce on.
   run(dbB, ['--actor', 'human:erik', 'actor', 'enforce', '--on'], { BUKIO_SIGNING_PASSPHRASE: PASS });
   const notEnrolled = runFail(dbB, ['--actor', 'agent:bartholomeus', 'entry', 'add', '--date', '2026-08-10', '--desc', 'x', '--postings', '1100:10.00,8000:-10.00']);
   assert.equal(notEnrolled.error.code, 'ACTOR_KEY_UNKNOWN');
+  const firstRegister = runFail(dbB, ['--actor', 'agent:bartholomeus', 'actor', 'register']);
+  assert.equal(firstRegister.error.code, 'ACTOR_KEY_UNKNOWN', 'first enrolment under enforce is operator-gated');
+  run(dbB, ['--actor', 'human:erik', 'actor', 'enforce', '--off']); // recovery hatch, no key needed
   run(dbB, ['--actor', 'agent:bartholomeus', 'actor', 'register']);
+  run(dbB, ['--actor', 'human:erik', 'actor', 'enforce', '--on'], { BUKIO_SIGNING_PASSPHRASE: PASS });
   entry('agent:bartholomeus', 'signed in company B', dbB);
   const bCounts = sigCounts(dbB);
   assert.ok((bCounts.verified ?? 0) >= 2, `B verifies the same rotated key: ${JSON.stringify(bCounts)}`);

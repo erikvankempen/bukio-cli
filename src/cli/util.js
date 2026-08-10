@@ -279,11 +279,12 @@ export function resolveSigningKey(actor, signKeyPath, enforce) {
 
 /** Bootstrap/recovery commands cannot (or must not) be signed. */
 export function isSigningExempt(commandPath, opts) {
-  // key management is bootstrap: keygen creates the key, register enrols it
-  // (the FIRST enrolment and the post-rotation re-enrolment both happen when
-  // the registry has no ACTIVE key for the actor, so the gate must not
-  // demand a verifiable signature from it)
-  if (['actor keygen', 'actor register', 'actor unlock', 'actor lock'].includes(commandPath)) return true;
+  // key CREATION and session handling are pure bootstrap (files only, no
+  // registry state): keygen writes a key file, unlock/lock manage the
+  // session. `actor register` is NOT exempt here — it mutates the company
+  // registry, so its exemption is decided in signCommand() and limited to
+  // rotation re-enrolment (actor currently revoked).
+  if (['actor keygen', 'actor unlock', 'actor lock'].includes(commandPath)) return true;
   // turning enforcement OFF is the escape hatch when keys are broken
   if (commandPath === 'actor enforce' && opts.off) return true;
   // the MCP server command starts a bridge — it mutates nothing itself, and
@@ -338,6 +339,23 @@ export function signCommand(ctx, command) {
   if (isSigningExempt(commandPath, opts)) return { sigStatus: 'unsigned' };
   const db = openIfExists(ctx.dbPath);
   try {
+    // rotation re-enrolment: `actor register` for an actor whose key was
+    // REVOKED (no active key) is the ONLY way back in — exempt it. First-
+    // time enrolment under enforce is REFUSED (ACTOR_KEY_UNKNOWN): a brand-
+    // new actor must be registered while enforce is off (the audited
+    // recovery hatch), so enrolment stays an operator-gated act.
+    if (commandPath === 'actor register' && db) {
+      const any = getAnyActorKey(db, ctx.actor);
+      if (!any || any.revoked_at === null) {
+        return signPayload(ctx, {
+          cmd: commandPath,
+          args: buildSignedArgs(opts, command),
+          db,
+          signKey: opts.signKey ?? null,
+        });
+      }
+      return { sigStatus: 'unsigned' };
+    }
     return signPayload(ctx, {
       cmd: commandPath,
       args: buildSignedArgs(opts, command),
@@ -386,7 +404,7 @@ export function signPayload(ctx, { cmd, args, db, signKey = null }) {
 
 function messageFor(code, actor) {
   const messages = {
-    ACTOR_KEY_UNKNOWN: `actor ${actor} has no enrolled key in this company's DB — run 'bukio actor register'`,
+    ACTOR_KEY_UNKNOWN: `actor ${actor} has no enrolled key in this company's DB — run 'bukio actor register' (a FIRST enrolment requires enforcement to be off: 'actor enforce --off', register, 'actor enforce --on')`,
     ACTOR_KEY_REVOKED: `the key for ${actor} is revoked in this company's DB — rotate with 'bukio actor keygen --force' + 'actor register'`,
     SIGNATURE_STALE: 'signature timestamp is outside the ±5 minute window',
     NONCE_REUSED: 'signature nonce was already used — a replayed command is refused',
