@@ -27,7 +27,7 @@ const DESCRIPTIONS = {
   'actor-registry.test.js': 'per-company actor key registry: enrol/revoke (history kept), rotation, enforce flag, per-DB independence',
   'assets.test.js': 'fixed assets: schemes, mid-life adoption, runs, disposal, activastaat',
   'attachments.test.js': 'in-DB/file document attachments: add/list/show/remove, 25 MB cap, dedupe, metadata-only lists, audit',
-  'audit.test.js': 'append-only audit log invariants',
+  'audit.test.js': 'audit log record/list, append-only trigger, migration 018/019, signature columns + verifyTrail classification matrix',
   'backup.test.js': 'encrypted backups (AES-256-GCM), keep-N rotation, tamper detection, audited restore',
   'bank.test.js': 'CAMT.053/CSV import, idempotency, matching/reconciliation',
   'canonical.test.js': 'canonical command digest: stable sorted-key JSON, sha256, excludes identity/output flags, includes --dry-run',

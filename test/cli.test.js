@@ -10,8 +10,12 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/core/db.js';
+import { record, setPendingSignature } from '../src/audit/index.js';
+import { buildDigest } from '../src/core/canonical.js';
+import { sign } from '../src/core/sign.js';
 
 const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
 
@@ -638,6 +642,68 @@ test('actor enforce: needs exactly one of --on/--off (INVALID_ENFORCE, JSON cont
   assert.equal(code, 1);
   assert.equal(out.ok, false);
   assert.equal(out.error.code, 'INVALID_ENFORCE');
+});
+
+// --- audit verify (Task 7) --------------------------------------------------
+
+/** Signed-company setup: init + keygen agent + register, enforce still off. */
+function setupSignedCompany(cfg) {
+  const dbPath = tmpDb();
+  const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test', BUKIO_CONFIG_DIR: cfg };
+  execFileSync(process.execPath, [BIN, '--actor', 'human:erik', 'init', '--name', 'X', '--json'], { env, encoding: 'utf8' });
+  execFileSync(process.execPath, [BIN, '--json', '--actor', 'agent:bartholomeus', 'actor', 'keygen'], { env, encoding: 'utf8' });
+  execFileSync(process.execPath, [BIN, '--json', '--actor', 'agent:bartholomeus', 'actor', 'register'], { env, encoding: 'utf8' });
+  execFileSync(process.execPath, [BIN, '--json', '--actor', 'agent:bartholomeus', 'entry', 'add', '--date', '2026-08-10', '--desc', 'Signed', '--postings', '1100:100.00,8000:-100.00', '--post'], { env, encoding: 'utf8' });
+  return { dbPath, env };
+}
+
+/** Record a row whose digest does not match its stored args (tampering). */
+function injectTamperedRow(dbPath) {
+  const db = openDb(dbPath);
+  try {
+    const ts = new Date().toISOString();
+    const nonce = crypto.randomUUID();
+    const args = { date: '2026-08-10', desc: 'original' };
+    const realDigest = buildDigest({ actor: 'agent:bartholomeus', cmd: 'entry add', args, ts, nonce });
+    const tamperedDigest = buildDigest({ actor: 'agent:bartholomeus', cmd: 'entry add', args: { date: '2026-08-10', desc: 'HACKED' }, ts, nonce });
+    const kp = crypto.generateKeyPairSync('ed25519');
+    setPendingSignature({
+      digestHash: tamperedDigest, sigKeyid: 'ff'.repeat(16), sigNonce: nonce, sigTs: ts,
+      sig: sign(realDigest, kp.privateKey.export({ type: 'pkcs8', format: 'pem' })), sigStatus: 'verified', signedArgs: args,
+    });
+    record(db, { actor: 'agent:bartholomeus', action: 'test.tampered', command: 'entry add', outcome: 'ok' });
+  } finally {
+    db.close();
+  }
+}
+
+test('audit verify: clean signed trail -> JSON summary, exit 0', () => {
+  const cfg = mkdtempSync(path.join(os.tmpdir(), 'bukio-verify-cli-'));
+  const { dbPath, env } = setupSignedCompany(cfg);
+  const out = execFileSync(process.execPath, [BIN, '--json', 'audit', 'verify'], { env, encoding: 'utf8' });
+  const data = JSON.parse(out).data;
+  assert.ok(data.summary.ok >= 1, `expected at least one verified row, got ${JSON.stringify(data.summary)}`);
+  assert.equal(data.summary.tampered, 0);
+  assert.equal(data.summary.invalid_signature, 0);
+  assert.equal(data.summary.unknown_key, 0);
+  assert.ok(data.rows.every((r) => ['ok', 'unsigned'].includes(r.status)));
+});
+
+test('audit verify: tampered row -> exit 1 with per-row status and counts', () => {
+  const cfg = mkdtempSync(path.join(os.tmpdir(), 'bukio-verify-cli-'));
+  const { dbPath, env } = setupSignedCompany(cfg);
+  injectTamperedRow(dbPath);
+  try {
+    execFileSync(process.execPath, [BIN, '--json', 'audit', 'verify'], { env, encoding: 'utf8' });
+    assert.fail('audit verify should exit 1 when the trail has problems');
+  } catch (err) {
+    assert.equal(err.status, 1);
+    const data = JSON.parse(err.stdout).data;
+    assert.equal(data.summary.tampered, 1);
+    const bad = data.rows.find((r) => r.status === 'tampered');
+    assert.ok(bad);
+    assert.equal(bad.action, 'test.tampered');
+  }
 });
 
 test('version: --version and the MCP serverInfo match package.json (drift guard)', () => {

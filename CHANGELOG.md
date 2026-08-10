@@ -59,6 +59,19 @@ merged to `main` and released.
   identically). Bootstrap commands (`actor keygen`/`unlock`/`lock`) and the
   `actor enforce --off` recovery hatch are exempt; audit rows carry
   digest/signature/keyid/nonce/timestamp via `audit.setPendingSignature`.
+- Actor identity Tier 0, task 7: **`bukio audit verify`** — re-verifies the
+  signed audit trail against the company registry. `src/audit/index.js`
+  gains `verifyTrail()`: recompute the canonical digest from the stored
+  signed args (+ the signed command path, now stored on the row) and
+  re-check every signature. Per-row `ok | unsigned | revoked (valid at the
+  time, since revoked) | tampered | invalid-signature | unknown-key` with
+  summary counts; exit 1 on tampered/invalid/unknown-key. Self-contained:
+  a copied DB file verifies with no external files. Signed rows now store
+  the EXACT signed args + command path in `args_json`/`command` so the
+  digest is recomputable. Migration 019: `actor_keys` gains a composite
+  `(actor, keyid)` primary key — revoked keys are RETAINED as history, so
+  audit rows signed by a rotated key stay verifiable (`getKeyByKeyid`);
+  `actor list` shows the full key history.
 - `test/company-simulation.test.js`: full-year end-to-end simulation of one
   fictitious company driven through the real CLI — sales with line/total
   discounts, mixed VAT rates, EU reverse charge, credit notes; purchases

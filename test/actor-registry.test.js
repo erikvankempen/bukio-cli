@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { openDb } from '../src/core/db.js';
 import {
-  enrolActor, revokeActor, getActorKey, canAct, setEnforce, getEnforce,
+  enrolActor, revokeActor, getActorKey, getKeyByKeyid, canAct, setEnforce, getEnforce,
 } from '../src/core/actor-registry.js';
 import { generateKeyPair, keyidOf } from '../src/core/sign.js';
 
@@ -63,7 +63,9 @@ test('revoke: marks the row with reason and keeps it (history retained)', () => 
   assert.ok(revoked.revoked_at);
   assert.equal(revoked.revoked_reason, 'key rotation');
   assert.equal(revoked.keyid, keyid); // row kept, not deleted
-  assert.equal(getActorKey(db, 'agent:bartholomeus').revoked_at, revoked.revoked_at);
+  // no active key remains; the revoked row is still findable by keyid
+  assert.equal(getActorKey(db, 'agent:bartholomeus'), null);
+  assert.equal(getKeyByKeyid(db, keyid).revoked_at, revoked.revoked_at);
 });
 
 test('revoke: requires a reason; unknown or already-revoked actors are rejected', () => {
@@ -73,7 +75,8 @@ test('revoke: requires a reason; unknown or already-revoked actors are rejected'
   assert.throws(() => revokeActor(db, { actor: 'human:erik', reason: 'nope' }), { code: 'NOT_ENROLLED' });
   enrolActor(db, { actor: 'human:erik', keyid, publicKey });
   revokeActor(db, { actor: 'human:erik', reason: 'lost laptop' });
-  assert.throws(() => revokeActor(db, { actor: 'human:erik', reason: 'again' }), { code: 'ALREADY_REVOKED' });
+  // no active key left, so a second revoke reports NOT_ENROLLED
+  assert.throws(() => revokeActor(db, { actor: 'human:erik', reason: 'again' }), { code: 'NOT_ENROLLED' });
 });
 
 test('canAct: true for enrolled, false for unknown and revoked actors', () => {
@@ -85,7 +88,7 @@ test('canAct: true for enrolled, false for unknown and revoked actors', () => {
   assert.equal(canAct(db, 'agent:bartholomeus'), false);
 });
 
-test('rotation: re-enrol after revocation replaces the key with a fresh one', () => {
+test('rotation: re-enrol after revocation adds a fresh active key; the old key row is retained', () => {
   const old = keyPair();
   const fresh = keyPair();
   enrolActor(db, { actor: 'human:erik', keyid: old.keyid, publicKey: old.publicKey });
@@ -94,9 +97,11 @@ test('rotation: re-enrol after revocation replaces the key with a fresh one', ()
   assert.equal(row.keyid, fresh.keyid);
   assert.equal(row.revoked_at, null);
   assert.equal(canAct(db, 'human:erik'), true);
-  // the old key is gone from the active row (history of the old key lives in
-  // the audit trail, which retains the old keyid per signature)
+  // the active row is the fresh key; the OLD key row stays as history so
+  // audit verify can still validate signatures made with it
   assert.equal(getActorKey(db, 'human:erik').keyid, fresh.keyid);
+  assert.equal(getKeyByKeyid(db, old.keyid).revoked_at !== null, true);
+  assert.equal(getKeyByKeyid(db, old.keyid).public_key, old.publicKey);
 });
 
 test('enforce: flag defaults to off, toggles per DB, and is independent', () => {

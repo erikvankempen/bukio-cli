@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-10 18:14:31 UTC — **✅ 677 passing · 0 failing (677 tests)**
+**Latest run:** 2026-08-10 18:43:52 UTC — **✅ 690 passing · 0 failing (690 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -27,7 +27,7 @@
     - ✅ revoke: marks the row with reason and keeps it (history retained)
     - ✅ revoke: requires a reason; unknown or already-revoked actors are rejected
     - ✅ canAct: true for enrolled, false for unknown and revoked actors
-    - ✅ rotation: re-enrol after revocation replaces the key with a fresh one
+    - ✅ rotation: re-enrol after revocation adds a fresh active key; the old key row is retained
     - ✅ enforce: flag defaults to off, toggles per DB, and is independent
     - ✅ registry is per company DB: same actor, independent enrolments
     - ✅ registry persists to disk and survives reopen (file-backed DB)
@@ -148,17 +148,28 @@
     - ✅ attachmentsDir convention: demo.db → demo-attachments/
     - ✅ file-mode attachments dir is created under the DB dir (regression)
 
-### audit.test.js — append-only audit log invariants
+### audit.test.js — audit log record/list, append-only trigger, migration 018/019, signature columns + verifyTrail classification matrix
 
-7 passing · 0 failing
+18 passing · 0 failing
 
     - ✅ record + list with filters
     - ✅ audit log is append-only: UPDATE and DELETE are blocked
     - ✅ args null is stored and read back as null
     - ✅ migration 018: fresh DB gains the six signature columns + actor_keys + settings
+    - ✅ migration 019: actor_keys gains a composite (actor, keyid) primary key
+    - ✅ migration 019: a v18 DB with single-row actor_keys upgrades without data loss
     - ✅ migration 018: existing DB keeps legacy rows with sig_status = unsigned
     - ✅ migration 018: re-running migrate on the current version is a no-op
     - ✅ record: signature fields are stored and read back; plain records default to unsigned
+    - ✅ verifyTrail: clean signed trail -> all ok with matching summary counts
+    - ✅ verifyTrail: tampered args_json -> tampered (digest no longer matches)
+    - ✅ verifyTrail: corrupted signature -> invalid-signature
+    - ✅ verifyTrail: keyid not in the registry -> unknown-key
+    - ✅ verifyTrail: signature from a since-revoked key -> revoked (valid at the time)
+    - ✅ verifyTrail: rotation keeps old rows verifiable (old revoked, new ok)
+    - ✅ verifyTrail: --limit checks only the newest N rows
+    - ✅ verifyTrail: works on a copied DB file with no external files (self-contained)
+    - ✅ verifyTrail: --since filters rows by timestamp
 
 ### backup.test.js — encrypted backups (AES-256-GCM), keep-N rotation, tamper detection, audited restore
 
@@ -216,7 +227,7 @@
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
-30 passing · 0 failing
+32 passing · 0 failing
 
     - ✅ init --dry-run: shows plan, creates nothing
     - ✅ init: creates company + 30-account chart with VAT on
@@ -247,6 +258,8 @@
     - ✅ vat book --dry-run: validates date and description like the execute path
     - ✅ actor: help lists the identity subcommands
     - ✅ actor enforce: needs exactly one of --on/--off (INVALID_ENFORCE, JSON contract)
+    - ✅ audit verify: clean signed trail -> JSON summary, exit 0
+    - ✅ audit verify: tampered row -> exit 1 with per-row status and counts
     - ✅ version: --version and the MCP serverInfo match package.json (drift guard)
 
 ### company-simulation.test.js — 

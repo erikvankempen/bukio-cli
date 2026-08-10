@@ -14,7 +14,7 @@ import { buildDigest } from '../core/canonical.js';
 import {
   sign, verify, keyidOf, isEncrypted, publicKeyFromPrivate, decryptPrivateKey,
 } from '../core/sign.js';
-import { getActorKey, getEnforce } from '../core/actor-registry.js';
+import { getActorKey, getAnyActorKey, getEnforce } from '../core/actor-registry.js';
 
 export function dbError(code, message) {
   const e = new Error(message);
@@ -197,13 +197,17 @@ export function rememberNonce(keyid, nonce) {
  * @returns {{ok: boolean, status: 'verified'|'unsigned', code?: string}}
  */
 export function verifySignatureBundle(db, { actor, digest, sig, keyid, ts, nonce, enforce }) {
-  const row = db ? getActorKey(db, actor) : null;
+  let row = db ? getActorKey(db, actor) : null; // the active key
+  if (!row && db) {
+    // no active key: distinguish 'never enrolled' from 'enrolled, since revoked'
+    const any = getAnyActorKey(db, actor);
+    if (any && any.revoked_at !== null) {
+      if (enforce) return { ok: false, status: 'unsigned', code: 'ACTOR_KEY_REVOKED' };
+      return { ok: true, status: 'unsigned' };
+    }
+  }
   if (!row) {
     if (enforce) return { ok: false, status: 'unsigned', code: 'ACTOR_KEY_UNKNOWN' };
-    return { ok: true, status: 'unsigned' };
-  }
-  if (row.revoked_at !== null) {
-    if (enforce) return { ok: false, status: 'unsigned', code: 'ACTOR_KEY_REVOKED' };
     return { ok: true, status: 'unsigned' };
   }
   const tsMs = Date.parse(ts);
@@ -327,7 +331,8 @@ export function signCommand(ctx, command) {
 
   const ts = new Date().toISOString();
   const nonce = crypto.randomUUID();
-  const digest = buildDigest({ actor: ctx.actor, cmd: commandPath, args: buildSignedArgs(opts, command), ts, nonce });
+  const signedArgs = buildSignedArgs(opts, command);
+  const digest = buildDigest({ actor: ctx.actor, cmd: commandPath, args: signedArgs, ts, nonce });
 
   const db = openIfExists(ctx.dbPath);
   try {
@@ -344,7 +349,7 @@ export function signCommand(ctx, command) {
     if (!result.ok) throw signGateError(result.code, messageFor(result.code, ctx.actor));
     return {
       digestHash: digest, sigKeyid: key.keyid, sigNonce: nonce, sigTs: ts, sig,
-      sigStatus: result.status,
+      sigStatus: result.status, signedArgs, signedCommand: commandPath,
     };
   } finally {
     if (db) db.close();
