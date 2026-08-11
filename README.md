@@ -10,7 +10,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-747%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-753%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -1145,7 +1145,7 @@ is the measured token consumption and its cost at **official list prices**
 **MiMo-V2.5-Pro** **$0.435** input, **$0.003625** cached input, **$0.87**
 output. Reasoning tokens are billed at the output rate. Data is captured by
 the `bukio-token-track` tool from the agent's session telemetry — including
-delegation subagent sessions (snapshot 2026-08-09, 10:07).
+delegation subagent sessions (snapshot 2026-08-11, 07:09).
 
 **Proven stack:** bukio-cli is developed and operated end-to-end with
 **Hermes Agent** (Nous Research) via OpenCode Go. The main development
@@ -1159,12 +1159,12 @@ against this same codebase.
 
 | Model | API calls | Input | Cached input | Output | Reasoning | Est. cost |
 |---|---|---|---|---|---|---|
-| DeepSeek V4 Flash | 5,682 | 16.35M | 1,385.95M | 4.15M | 1.98M | $7.89 |
+| DeepSeek V4 Flash | 6,581 | 18.51M | 1,566.68M | 4.87M | 2.38M | $9.01 |
 | MiMo-V2.5-Pro (review subagents) | 574 | 6.82M | 42.12M | 1.06M | — | $4.05 |
-| **Total** | **6,264** | **23.17M** | **1,428.07M** | **5.22M** | **1.98M** | **$11.93** |
+| **Total** | **7,163** | **25.34M** | **1,608.80M** | **5.94M** | **2.38M** | **$13.06** |
 
-**$11.93 total** at official list prices for the entire project (6,264 API
-calls across all development sessions, ≈ 1.46B tokens). An additional 8 API
+**$13.06 total** at official list prices for the entire project (7,163
+API calls across all development sessions, ≈ 1.64B tokens). An additional 8 API
 calls (≈ 9K tokens) ran on MiMo-V2.5 at ≈ $0.00.
 
 ### Developer Time (contributed, unpaid)
@@ -1191,28 +1191,29 @@ Stated plainly, so nothing is hidden:
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
 - **It was free:** the ≈ €450 is an imputed opportunity cost, not money paid.
-  My out-of-pocket spend remains **$11.93** in API costs.
+  My out-of-pocket spend remains **$13.06** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
-  conventional code review of a 23.3 KLOC codebase would take; treat them as
+  conventional code review of a 27.5 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
 
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **23,389 non-blank, non-comment lines of JavaScript**
-across 105 files (13,429 in `src/`, 9,960 in `test/`), i.e. **23.39 KLOC**
+model (Boehm, 1981): **27,505 non-blank, non-comment lines of JavaScript**
+across 119 files (14,908 in `src/`, 12,459 in `test/`, 138 in `bin/` +
+`scripts/`), i.e. **27.50 KLOC**
 (measured with `scc` v3.7.0).
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 65.7 PM | 12.3 months | ~5 developers | ≈ €591K |
-| Semi-detached | 102.5 PM | 12.6 months | ~8 developers | ≈ €923K |
-| Embedded | 158.2 PM | 12.6 months | ~12 developers | ≈ €1,424K |
+| Organic | 77.9 PM | 13.1 months | ~6 developers | ≈ €701K |
+| Semi-detached | 122.8 PM | 13.5 months | ~9 developers | ≈ €1,105K |
+| Embedded | 192.1 PM | 13.4 months | ~14 developers | ≈ €1,729K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 66–158
-person-months (≈ €591K–€1,424K)**; the AI-assisted build consumed **$11.93 in
+**Comparison:** a conventional team building this would estimate **≈ 78–192
+person-months (≈ €701K–€1,729K)**; the AI-assisted build consumed **$13.06 in
 API costs plus ≈ €450 of my review-and-direction time (contributed, unpaid
 — see above)** over five evenings, a Saturday and a Sunday — still a tiny fraction of
 the conventional estimate.
