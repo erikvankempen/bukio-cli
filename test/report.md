@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-11 06:26:50 UTC — **✅ 753 passing · 0 failing (753 tests)**
+**Latest run:** 2026-08-11 19:51:26 UTC — **✅ 773 passing · 0 failing (773 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -787,6 +787,31 @@
     - ✅ previewDue: read-only plan matches runDue
     - ✅ listTemplates: status filter
     - ✅ generated entries are immutable + trial balance stays balanced
+
+### remote.test.js — 
+
+20 passing · 0 failing
+
+    - ✅ server token: mints a single-use, actor-bound token (hashed at rest)
+    - ✅ remote register: enrols a client-only key (private key never leaves the client)
+    - ✅ remote register: a used token is refused (TOKEN_USED)
+    - ✅ remote register: an unknown / mismatched token is refused
+    - ✅ remote register: --token is required with --server (TOKEN_REQUIRED)
+    - ✅ remote register: an expired token is refused (TOKEN_EXPIRED)
+    - ✅ remote read: trial balance matches the local view (same device OK)
+    - ✅ remote mutation: posts an entry, the audit row carries the REAL signature
+    - ✅ remote mutation: dry-run parity (plan, no side effect)
+    - ✅ remote human output: byte-identical to local human output
+    - ✅ replay: the SAME envelope twice is refused (NONCE_REUSED)
+    - ✅ tamper: changing the signed argv breaks the signature (SIGNATURE_INVALID)
+    - ✅ enforcement: an unsigned envelope is refused under enforce (SIGNATURE_REQUIRED)
+    - ✅ authz: a readonly actor is refused a mutation (AUTHZ_DENIED)
+    - ✅ local-only commands refuse under --server (LOCAL_ONLY)
+    - ✅ health endpoint reports ok
+    - ✅ unknown route is 404
+    - ✅ unreachable server: clean REMOTE_UNREACHABLE error
+    - ✅ server token rejects a bad --ttl-hours value
+    - ✅ envelope can carry the --db of the CLIENT but the server DB is authoritative
 
 ### reports-v014.test.js — aging buckets, contact statements, sales analytics (by contact/item)
 

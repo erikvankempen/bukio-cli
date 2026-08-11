@@ -6,6 +6,48 @@ match `package.json` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
+## [Unreleased]
+
+### Added
+
+- **Remote access** (`bukio server` + global `--server <url>` / `BUKIO_SERVER`):
+  serve ONE company DB over HTTP(S) and drive it from any device — a phone,
+  a laptop, an agent on another VPS — while private signing keys stay on the
+  devices that own them.
+  - `bukio server start --listen <host:port> [--serve-db <path>]
+    [--tls-cert C --tls-key K]` — the daemon. Clients POST signed command
+    envelopes to `/rpc`; the server verifies each against the company
+    registry (Ed25519 signature over the canonical digest — same scheme as
+    local signed commands — plus ±5 min timestamp window, nonce replay
+    refusal and the Tier 0.5 authz gate) and runs it as a child CLI process.
+    Output is byte-identical to local mode; audit rows carry the REAL
+    signature, so `audit verify` validates remote commands exactly like local
+    ones. Like `mcp`, the daemon is a bridge and needs no signature.
+  - `bukio server token <actor> [--ttl-hours N]` — mint one-time enrolment
+    tokens (single-use, TTL, actor-bound, stored sha256-hashed). Operator
+    act on the server machine; redeem with `bukio actor register --server
+    <url> --token <t>`. The token replaces the local
+    enforce-off/register/enforce-on dance for remote first enrolment.
+  - Global `--server <url>` / `BUKIO_SERVER` turns ANY command into a signed
+    envelope: sign locally, verify + execute on the server, print the same
+    output. Local-only commands (`server *`, `mcp`, `init`, `update`, `actor
+    keygen/unlock/lock`) refuse with `LOCAL_ONLY`.
+  - Same-device operation: no `--server` is the unchanged local path;
+    `--server http://127.0.0.1:PORT` drives a local server identically.
+  - Transport: plain HTTP for trusted networks (localhost, Tailscale) or
+    native TLS via `--tls-cert/--tls-key`; envelope signatures provide
+    authentication and integrity. New error codes `LOCAL_ONLY`,
+    `REMOTE_UNREACHABLE`, `REMOTE_ERROR`, `TOKEN_REQUIRED/INVALID/EXPIRED/
+    USED/ACTOR_MISMATCH`, `BAD_JSON`, `BODY_TOO_LARGE`,
+    `INVALID_ENVELOPE`, `CMD_MISMATCH`, `INVALID_LISTEN`, `TLS_KEY_REQUIRED`,
+    `SERVER_EXEC` — all documented in AGENTS.md §7.
+  - New module `src/cli/server.js` (daemon + token minting), `src/cli/remote.js`
+    (client envelope build/sign/POST) — `node:http`/`node:https`/
+    `node:crypto` only, no new dependencies. 20 new e2e tests in
+    `test/remote.test.js` (enrolment, replay, tamper, enforcement, authz,
+    dry-run parity, human-output parity, same-device parity, LOCAL_ONLY,
+    health).
+
 ## [0.15.0] — 2026-08-11
 
 Resolves **[#1 — Audit trail actor attribution is self-asserted](https://github.com/erikvankempen/bukio-cli/issues/1)**:

@@ -32,6 +32,8 @@ import { make as itemCmd } from './item.js';
 import { make as attachCmd } from './attach.js';
 import { make as updateCmd } from './update.js';
 import { make as actorCmd } from './actor.js';
+import { make as serverCmd } from './server.js';
+import { remotePreAction } from './remote.js';
 import { actorError } from '../core/actor.js';
 import { signCommand } from './util.js';
 import { setPendingSignature } from '../audit/index.js';
@@ -41,11 +43,12 @@ export async function runCli(argv) {
   program
     .name('bukio')
     .description('Agent-first bookkeeping for Dutch SMEs — SQLite, VAT-optional')
-    .version('0.15.0')
+    .version('0.15.1')
     .option('--json', 'machine-readable JSON output')
     .option('--db <path>', 'database file', process.env.BUKIO_DB || path.join(os.homedir(), '.bukio', 'bukio.db'))
     .option('--actor <who>', "acting entity '<role>:<name>' — e.g. agent:bartholomeus, human:erik (or BUKIO_ACTOR env; required)", undefined)
     .option('--sign-key <path>', 'explicit private-key file to sign with (default: the actor\'s key in <config>/keys)', undefined)
+    .option('--server <url>', 'remote bukio server — POST a signed command envelope instead of running locally (or BUKIO_SERVER env)', undefined)
     .showHelpAfterError();
 
   initCmd(program);
@@ -72,6 +75,7 @@ export async function runCli(argv) {
   attachCmd(program);
   updateCmd(program);
   actorCmd(program);
+  serverCmd(program);
 
   // Named-actor enforcement: every action must identify as '<role>:<name>'
   // (agent:bartholomeus, human:erik) so the audit trail always names who acted.
@@ -79,7 +83,24 @@ export async function runCli(argv) {
   // against the per-company registry, and refuse before dispatch when the
   // company enforces signing. The signature bundle lands on the command's
   // audit row(s) via setPendingSignature.
+  //
+  // Three preAction modes:
+  //   child-exec  (BUKIO_REMOTE_EXEC=1) — spawned by a `server start` daemon
+  //               that ALREADY verified the envelope; attach the verified
+  //               signature bundle and run locally (no re-signing, no
+  //               re-verification).
+  //   remote      (--server <url> / BUKIO_SERVER) — this device signs the
+  //               envelope and the server runs it; output is byte-identical.
+  //   local       (default) — the classic sign-and-run path.
   program.hook('preAction', async (_thisCmd, actionCmd) => {
+    if (process.env.BUKIO_REMOTE_EXEC === '1') {
+      try {
+        setPendingSignature(JSON.parse(process.env.BUKIO_REMOTE_SIG ?? 'null'));
+      } catch {
+        setPendingSignature(null);
+      }
+      return;
+    }
     const o = actionCmd.optsWithGlobals();
     const issue = actorError(o.actor ?? process.env.BUKIO_ACTOR ?? null);
     if (issue) {
@@ -94,7 +115,23 @@ export async function runCli(argv) {
       dbPath: o.db,
       actor: o.actor ?? process.env.BUKIO_ACTOR,
       dryRun: Boolean(o.dryRun),
+      server: o.server ?? process.env.BUKIO_SERVER ?? null,
     };
+    if (ctx.server) {
+      try {
+        const code = await remotePreAction(ctx, actionCmd, argv.slice(2), ctx.server);
+        if (code !== undefined) process.exit(code);
+      } catch (err) {
+        const error = { code: err.code || 'ERROR', message: err.message };
+        if (o.json) {
+          console.log(JSON.stringify({ ok: false, error }));
+        } else {
+          console.error(`error [${error.code}]: ${error.message}`);
+        }
+        process.exit(1);
+      }
+      return;
+    }
     try {
       setPendingSignature(signCommand(ctx, actionCmd));
     } catch (err) {

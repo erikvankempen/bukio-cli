@@ -350,7 +350,7 @@ export function canAct(db, actor, capability) {
  * @returns {boolean}
  */
 export function isAuthzExempt(cmd, args = {}) {
-  if (['actor keygen', 'actor unlock', 'actor lock', 'mcp'].includes(cmd)) return true;
+  if (['actor keygen', 'actor unlock', 'actor lock', 'mcp', 'server start', 'server token'].includes(cmd)) return true;
   if (cmd === 'actor register') return true;
   if (cmd === 'actor verify') return true;
   // NOTE: the "other actor" option is `--for <who>` (the identity flag

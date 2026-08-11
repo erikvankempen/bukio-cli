@@ -10,7 +10,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-753%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-773%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -608,6 +608,25 @@ The agent layer (Phase 5).
 | `fx list [--limit N]` / `fx show --currency USD [--limit N]` | Rate store inspection (all currencies, or one currency's history) |
 | `entry add / vat book --currency USD [--rate R]` | **Foreign-currency purchase invoices**: spec amounts are in the foreign currency, converted to EUR (round-half-up) at booking; the rate is auto-looked-up (exact date, else latest on/before) when `--rate` is omitted. **Missing rates are fetched live from the ECB** and stored for reuse — one network call ever per currency/date. The ledger stores EUR; each posting keeps `fx_currency`/`fx_amount_cents` (the original amount) — reversals negate both. VAT legs are computed on the EUR amounts. `BUKIO_FX_NO_FETCH=1` disables the network fallback (offline/air-gapped use) |
 | `compliance status --year YYYY` | OB + ICP quarterly deadlines and the jaarrekening deposit (13 months after FY end, art. 2:394 BW) with filed/open/overdue status; `compliance mark --type ICP\|JAARREKENING --period ...` records a filing (OB uses `vat readout --mark-filed`) |
+
+### `bukio server` — remote access
+
+Host the books on one machine (an in-house server, a VPS) and drive them from
+anywhere — a phone, a laptop, another agent on a different VPS — while the
+private signing keys stay on the devices that own them.
+
+| Command | Purpose |
+|---------|---------|
+| `server start --listen <host:port> [--serve-db <path>] [--tls-cert C --tls-key K]` | Serve **ONE company DB** over HTTP(S). Clients POST signed command envelopes to `/rpc`; the server verifies each against the company registry (Ed25519 signature, ±5 min window, nonce replay refusal, authz) and runs it — output is **byte-identical to local mode** and audit rows carry the real signature (`audit verify` works server-side). Like `mcp`, the daemon itself is a bridge and needs no signature. Default `127.0.0.1:8787` — bind to a trusted network (localhost, a Tailscale IP) or use `--tls-cert/--tls-key` |
+| `server token <actor> [--ttl-hours N]` | Mint a **one-time enrolment token** (single-use, TTL, actor-bound, stored sha256-hashed). Operator act on the server machine |
+| `actor register --server <url> --token <t>` | Remote enrolment: the client's **public key** is enrolled; the private key never leaves the client. The token replaces the local enforce-off/register/enforce-on dance for remote first enrolment |
+| `--server <url>` (global) or `BUKIO_SERVER` | Run ANY command remotely: `bukio --server https://bukio.intranet entry add ...` — sign locally, verify + execute on the server |
+
+Local-only commands (`server *`, `mcp`, `init`, `update`, `actor
+keygen/unlock/lock`) refuse with `LOCAL_ONLY` under `--server`. Same-device
+use works too: point `--server` at `http://127.0.0.1:PORT` on the same host.
+File outputs (PDF/XLSX exports, attachments) land on the server host — that
+is where the books live.
 
 ### `bukio import` / `bukio month-end` / `bukio invoice reminders`
 

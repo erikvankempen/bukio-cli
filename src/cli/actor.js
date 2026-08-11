@@ -125,8 +125,9 @@ export function make(program) {
 
   actor
     .command('register')
-    .description("enrol the actor's local key into the current company's DB")
+    .description("enrol the actor's key: locally into the current company's DB, or remotely via '--server <url>' + '--token <t>' (mint the token with 'bukio server token' on the server machine)")
     .option('--dry-run', 'show the plan without writing')
+    .option('--token <t>', 'one-time enrolment token (required with --server)')
     .action(async (opts, command) => {
       const ctx = makeCtx(command);
       try {
@@ -145,6 +146,38 @@ export function make(program) {
           throw actorCliError('PASSPHRASE_INVALID', `could not read the key for ${who} — wrong passphrase or corrupt key file`);
         }
         const keyid = keyidOf(publicKey);
+        if (ctx.server) {
+          // Remote enrolment: the one-time token IS the operator gate (it
+          // replaces the local enforce-off/register/enforce-on dance).
+          if (!opts.token) {
+            throw actorCliError('TOKEN_REQUIRED', `remote registration needs --token <t> — mint one with 'bukio server token ${who}' on the server machine`);
+          }
+          if (ctx.dryRun) {
+            output(ctx, { actor: who, keyid, server: ctx.server, dryRun: true }, (d) => {
+              console.log(`plan: register ${d.actor} (keyid ${d.keyid}) at ${d.server}`);
+              console.log('(dry run — nothing sent)');
+            });
+            return;
+          }
+          let res;
+          try {
+            res = await fetch(`${ctx.server.replace(/\/$/, '')}/register`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ actor: who, keyid, publicKey, token: opts.token }),
+            });
+          } catch (err) {
+            throw actorCliError('REMOTE_UNREACHABLE', `cannot reach ${ctx.server}: ${err.message}`);
+          }
+          const body = await res.json().catch(() => null);
+          if (!res.ok || !body?.ok) {
+            throw actorCliError(body?.error?.code ?? 'REMOTE_ERROR', body?.error?.message ?? `registration failed (HTTP ${res.status})`);
+          }
+          output(ctx, { ...body.data, server: ctx.server }, (d) => {
+            console.log(`enrolled ${d.actor} (keyid ${d.keyid}) at ${d.server} — remote commands with '--server ${d.server}' will now verify`);
+          });
+          return;
+        }
         const db = ensureDb(ctx);
         try {
           const data = { actor: who, keyid, enrolled: !ctx.dryRun, ...(ctx.dryRun ? { dryRun: true } : {}) };

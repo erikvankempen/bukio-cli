@@ -66,6 +66,7 @@ const CLI_PATHS = [
   'report aging', 'report sales',
   'update', 'vat enable', 'vat codes', 'vat book', 'vat readout', 'vat file', 'vat settle',
   'year-end close', 'year-end status', 'year-end report', 'jaarrekening report', 'mcp',
+  'server start', 'server token',
 ];
 
 // --- capability mapping ------------------------------------------------------

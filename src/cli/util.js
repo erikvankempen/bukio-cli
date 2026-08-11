@@ -62,6 +62,7 @@ export function makeCtx(command) {
     dbPath: o.db,
     actor: o.actor ?? process.env.BUKIO_ACTOR ?? null,
     dryRun: Boolean(o.dryRun),
+    server: o.server ?? process.env.BUKIO_SERVER ?? null,
   };
 }
 
@@ -124,6 +125,42 @@ export function table(rows, cols) {
   console.log(line(cols.map((c) => c.label)));
   console.log(widths.map((w) => '-'.repeat(w)).join('  '));
   for (const r of rows) console.log(line(cols.map((c) => r[c.key] ?? '')));
+}
+
+/** Global transport flags stripped from a transmitted argv (the server's DB
+ * and URL are authoritative; the signing key stays local). Shared by the
+ * remote client (before signing) and the remote server (defense in depth —
+ * a hostile envelope's argv must not redirect the child to another DB). */
+export const TRANSPORT_FLAGS = new Set(['--server', '--db', '--sign-key']);
+
+/**
+ * Remove transport flags (+ their values) from a raw argv. Supports both
+ * `--flag value` and `--flag=value` forms. Everything after a bare `--`
+ * is positional and kept verbatim.
+ */
+export function sanitizeArgv(argv) {
+  const out = [];
+  let positional = false;
+  for (let i = 0; i < argv.length; i++) {
+    const tok = argv[i];
+    if (!positional && tok === '--') {
+      positional = true;
+      out.push(tok);
+      continue;
+    }
+    if (!positional) {
+      const eq = tok.startsWith('--') && tok.includes('=') ? tok.indexOf('=') : -1;
+      const flag = eq > -1 ? tok.slice(0, eq) : tok;
+      if (TRANSPORT_FLAGS.has(flag)) {
+        if (eq > -1) continue; // --server=URL form: drop the whole token
+        // --flag value form: drop the next token too IF it is not another flag
+        if (i + 1 < argv.length && !argv[i + 1].startsWith('-')) i++;
+        continue;
+      }
+    }
+    out.push(tok);
+  }
+  return out;
 }
 
 // --- sign-and-verify gate (Tier 0) -----------------------------------------
@@ -291,6 +328,11 @@ export function isSigningExempt(commandPath, opts) {
   // every mutating tool call is signed individually (mcp: gate in mcp.js),
   // so under enforce the server must still be able to START
   if (commandPath === 'mcp') return true;
+  // the remote server command starts a bridge too — every /rpc command is
+  // signed individually, so the daemon itself needs no signature; `server
+  // token` mints single-use enrolment tokens (bootstrap, like keygen — it
+  // must work before any key exists in the company registry)
+  if (commandPath === 'server start' || commandPath === 'server token') return true;
   return false;
 }
 
@@ -309,12 +351,22 @@ export function commandPathOf(command) {
  * use `--actor` as a MEANINGFUL option naming the grant target, and the
  * signed payload must cover it (otherwise the audit row would not document
  * WHO was granted — a tamper-evidence hole).
+ *
+ * @param {object} opts - commander opts (optsWithGlobals).
+ * @param {object} command - the commander action command.
+ * @param {string} ctxActor - the acting actor.
+ * @param {string[]} [extraExclude=[]] - additional option keys to strip
+ *   (remote mode strips transport-level `db`/`server`: the server's DB is
+ *   authoritative, so the client's --db/--server are not part of the
+ *   operation's semantics — same rationale as actor/signKey/json).
+ * @returns {object} the signed args object.
  */
-function buildSignedArgs(opts, command, ctxActor) {
+export function buildSignedArgs(opts, command, ctxActor, extraExclude = []) {
   const args = {};
   for (const [k, v] of Object.entries(opts)) {
     if (k === 'signKey' || k === 'json') continue;
     if (k === 'actor' && (v === undefined || v === ctxActor)) continue;
+    if (extraExclude.includes(k)) continue;
     args[k] = v;
   }
   if (command.args && command.args.length) args.positionals = command.args;
