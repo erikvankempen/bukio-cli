@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-11 04:36:35 UTC — **✅ 751 passing · 0 failing (751 tests)**
+**Latest run:** 2026-08-11 04:54:59 UTC — **✅ 753 passing · 0 failing (753 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -80,7 +80,7 @@
 
 ### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar, MCP signed execution (verified rows, enforce refusal, nonces, per-DB registry)
 
-29 passing · 0 failing
+30 passing · 0 failing
 
     - ✅ fx: parseRate and convertFx — integer math, round-half-up
     - ✅ fx: setFxRate upsert + audit; getFxRate exact then latest-on/before
@@ -99,6 +99,7 @@
     - ✅ compliance: calendar shows obligations, statuses flip with filings
     - ✅ compliance: closed books show on the jaarrekening obligation
     - ✅ MCP: initialize + tools/list + read-only calls work end-to-end
+    - ✅ MCP: params:null on a call answers cleanly (no -32603 internal error)
     - ✅ MCP: invoices tool derives the overdue status (regression)
     - ✅ MCP: non-object JSON-RPC messages get Invalid Request, server survives
     - ✅ MCP: mutations are plan-only by default; execute books with the actor
@@ -164,7 +165,7 @@
 
 ### audit.test.js — audit log record/list, append-only trigger, migration 018/019, signature columns + verifyTrail classification matrix
 
-18 passing · 0 failing
+19 passing · 0 failing
 
     - ✅ record + list with filters
     - ✅ audit log is append-only: UPDATE and DELETE are blocked
@@ -176,6 +177,7 @@
     - ✅ migration 018: re-running migrate on the current version is a no-op
     - ✅ record: signature fields are stored and read back; plain records default to unsigned
     - ✅ verifyTrail: clean signed trail -> all ok with matching summary counts
+    - ✅ verifyTrail: negative or non-integer limit -> INVALID_LIMIT (parity with audit list)
     - ✅ verifyTrail: tampered args_json -> tampered (digest no longer matches)
     - ✅ verifyTrail: corrupted signature -> invalid-signature
     - ✅ verifyTrail: keyid not in the registry -> unknown-key

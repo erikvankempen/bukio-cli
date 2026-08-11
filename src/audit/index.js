@@ -127,6 +127,14 @@ function classifyRow(db, row) {
  * @returns {{rows: Array<object>, summary: object}} per-row status + counts.
  */
 export function verifyTrail(db, { since = null, limit = null } = {}) {
+  // a negative limit must not silently slice from the wrong end (slice(-(-5))
+  // == slice(5) — it would DROP the oldest 5 rows and check the rest); match
+  // the audit list() guard so the CLI surfaces INVALID_LIMIT consistently
+  if (limit !== null && (!Number.isInteger(limit) || limit < 0)) {
+    const e = new Error(`limit must be a non-negative integer, got '${limit}'`);
+    e.code = 'INVALID_LIMIT';
+    throw e;
+  }
   let rows = since
     ? db.prepare('SELECT * FROM audit_log WHERE ts >= ? ORDER BY id').all(since)
     : db.prepare('SELECT * FROM audit_log ORDER BY id').all();

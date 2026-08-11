@@ -200,6 +200,19 @@ test('verifyTrail: clean signed trail -> all ok with matching summary counts', (
   assert.deepEqual(rows.map((r) => r.status).sort(), ['ok', 'ok', 'unsigned']);
 });
 
+test('verifyTrail: negative or non-integer limit -> INVALID_LIMIT (parity with audit list)', () => {
+  // slice(-(-5)) == slice(5) would silently DROP the oldest 5 rows and
+  // verify the rest — the guard must refuse instead of checking the wrong set
+  assert.throws(() => verifyTrail(db, { limit: -5 }), { code: 'INVALID_LIMIT' });
+  assert.throws(() => verifyTrail(db, { limit: -1 }), { code: 'INVALID_LIMIT' });
+  assert.throws(() => verifyTrail(db, { limit: 3.7 }), { code: 'INVALID_LIMIT' });
+  assert.throws(() => verifyTrail(db, { limit: '5' }), { code: 'INVALID_LIMIT' });
+  // the guard must not reject the legit calls: null (all) and 0 (no-op)
+  assert.equal(verifyTrail(db).summary.total, 0);
+  assert.equal(verifyTrail(db, { limit: null }).summary.total, 0);
+  assert.equal(verifyTrail(db, { limit: 0 }).summary.total, 0);
+});
+
 test('verifyTrail: tampered args_json -> tampered (digest no longer matches)', () => {
   const key = enrol(db, 'agent:bartholomeus');
   // an attacker who can write rows stores a digest that does not match the

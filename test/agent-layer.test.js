@@ -448,6 +448,36 @@ test('MCP: initialize + tools/list + read-only calls work end-to-end', async () 
   }
 });
 
+test('MCP: params:null on a call answers cleanly (no -32603 internal error)', async () => {
+  const tmp = await import('node:fs/promises');
+  const dir = await tmp.mkdtemp('/tmp/mcp-test-');
+  const dbPath = `${dir}/x.db`;
+  const fileDb = openDb(dbPath);
+  seedDefaultChart(fileDb);
+  fileDb.prepare(`
+    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
+            'Industrieweg 12', '2712 CD', 'Zoetermeer', 1)
+  `).run();
+  fileDb.close();
+
+  const mcp = mcpSession(dbPath);
+  try {
+    await mcp.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
+    // some JSON-RPC clients send `"params": null` for no-argument calls —
+    // the server must not blow up with -32603 (the destructure default only
+    // covers `undefined`, so null used to throw on `params.name`)
+    const r = await mcp.raw('{"jsonrpc":"2.0","id":77,"method":"tools/call","params":null}');
+    assert.ok(r.error, 'the call must be answered with an error object');
+    assert.equal(r.error.code, -32602, 'null params must yield invalid-params, not -32603 internal error');
+    // and a null-params read that DOES carry the tool name still works
+    const ok = await mcp.raw('{"jsonrpc":"2.0","id":78,"method":"tools/call","params":{"name":"company_info","arguments":null}}');
+    assert.equal(ok.result.isError, false);
+  } finally {
+    await mcp.close();
+  }
+});
+
 test('MCP: invoices tool derives the overdue status (regression)', async () => {
   const tmp = await import('node:fs/promises');
   const dir = await tmp.mkdtemp('/tmp/mcp-test-');

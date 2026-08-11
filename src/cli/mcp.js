@@ -938,7 +938,12 @@ function rpcError(id, code, message) {
 }
 
 function dispatch(db, ctx, msg) {
-  const { id, method, params = {} } = msg;
+  // `params: null` (some JSON-RPC clients send it for no-argument calls)
+  // must not fall through to `params.name` — the destructure default only
+  // applies to `undefined`, so null would throw a TypeError here and surface
+  // as a -32603 internal error instead of a clean response
+  const { id, method } = msg;
+  const params = msg.params ?? {};
   switch (method) {
     case 'initialize':
       return Promise.resolve(rpcResponse(id, {
