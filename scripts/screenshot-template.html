@@ -43,7 +43,7 @@
 <div class="window">
   <div class="titlebar">
     <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
-    <span class="title"><b>bukio</b> — demo session · zsh · v0.11.1</span>
+    <span class="title"><b>bukio</b> — demo session · zsh · v0.15.1 · remote access</span>
   </div>
   <div class="body">
     <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio init --name "Demo BV" --legal-form bv --vat on</span></div>
@@ -133,7 +133,34 @@
     <div class="line">39  <span class="dim">2026-08-06T16:46:25.585Z</span>  agent:hermes  payments.batch.export  payments batch export  ok     </div>
     <div class="line">38  <span class="dim">2026-08-06T16:46:23.418Z</span>  agent:hermes  payments.batch.create  payments batch create  ok     </div>
     <div class="line">37  <span class="dim">2026-08-06T16:46:20.473Z</span>  agent:hermes  payables.add           payments payables add  ok     </div>
-    <div class="line">36  <span class="dim">2026-08-06T16:46:15.726Z</span>  agent:hermes  contact.create         contact add            ok     </div>
+    <div class="line">36  <span class="dim">2026-08-06T16:46:15.726Z</span>  agent:hermes  contact.create           contact add            ok     </div>
+    <div class="spacer"></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio server start --listen 127.0.0.1:8787 --serve-db ~/.bukio/demo.db --actor agent:hermes</span></div>
+    <div class="line"><span class="green">listening on 127.0.0.1:8787</span></div>
+    <div class="line dim">serving company DB: ~/.bukio/demo.db — clients POST signed envelopes; the server verifies and executes them</div>
+    <div class="spacer"></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio server token agent:phone --actor agent:hermes</span></div>
+    <div class="line">enrolment token for agent:phone <span class="dim">(single-use, 24h TTL):</span></div>
+    <div class="line"><span class="yellow">9m8FJE-acQ30PCdrHihscwcR6g16wcsZaOanT2ioS1M</span></div>
+    <div class="line dim">redeem with: bukio actor register --server &lt;url&gt; --token 9m8FJE-acQ30PCdrHihscwcR6g16wcsZaOanT2ioS1M</div>
+    <div class="spacer"></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio actor register --server http://127.0.0.1:8787 --token 9m8FJE-… --actor agent:phone</span></div>
+    <div class="line"><span class="green">enrolled agent:phone (keyid a00e2d607e779b3552c3c7872782289b) at http://127.0.0.1:8787</span></div>
+    <div class="line dim">— remote commands with '--server http://127.0.0.1:8787' will now verify (private key stays on the phone)</div>
+    <div class="spacer"></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio --server http://127.0.0.1:8787 entry add --date 2026-08-11 --desc "Startkapitaal" --postings "1100:10000.00,3000:-10000.00" --post --actor agent:phone</span></div>
+    <div class="line"><span class="green">entry #5  [posted]</span>  2026-08-11  Startkapitaal  <span class="dim">(signed on the phone, executed on the server)</span></div>
+    <div class="line">  1100  Bank                         10000.00</div>
+    <div class="line">  3000  Eigen vermogen               -10000.00</div>
+    <div class="line dim">                                  --------</div>
+    <div class="line dim">                                  0.00  (sum)</div>
+    <div class="spacer"></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio --server http://127.0.0.1:8787 report trial-balance --actor agent:phone</span></div>
+    <div class="line">totals:  debit 10000.00  credit 10000.00  -&gt; <span class="green">BALANCED</span> <span class="dim">(byte-identical to local)</span></div>
+    <div class="spacer"></div>
+    <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cmd">bukio audit verify --actor agent:hermes</span></div>
+    <div class="line"><span class="green">audit verify: 6 rows — 2 ok, 4 unsigned, 0 revoked, 0 tampered, 0 invalid signature</span></div>
+    <div class="line dim">remote rows carry the REAL phone signature — 'audit verify' validates them exactly like local ones</div>
     <div class="spacer"></div>
     <div class="line"><span class="prompt" style="color:#3fb950">$ </span><span class="cursor">▊</span></div>
   </div>

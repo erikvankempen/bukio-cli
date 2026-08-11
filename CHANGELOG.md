@@ -47,6 +47,9 @@ merged to `main` and released.
     `test/remote.test.js` (enrolment, replay, tamper, enforcement, authz,
     dry-run parity, human-output parity, same-device parity, LOCAL_ONLY,
     health).
+  - README screenshot regenerated (v0.15.1) showing the remote-access flow
+    end-to-end: `server start` → `server token` → `actor register --server`
+    → `--server entry add` → remote trial balance → `audit verify`.
 
 ## [0.15.0] — 2026-08-11
 
