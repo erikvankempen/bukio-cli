@@ -767,36 +767,54 @@ export function finalizeInvoice(db, { id, actor = 'human', dryRun = false }) {
 
   validateCompliance(db, invoice);
   const year = invoice.date.slice(0, 4);
-  const number = nextInvoiceNumber(db, year);
   const postings = buildInvoicePostings(db, invoice);
 
   if (dryRun) {
     return {
-      invoice_number: number, postings,
+      // read-only peek: the real run allocates INSIDE its transaction, so a
+      // concurrent finalize may advance the sequence before this plan runs
+      invoice_number: nextInvoiceNumber(db, year), postings,
       net: invoice.net_cents, vat: invoice.vat_cents, gross: invoice.gross_cents,
       dryRun: true,
     };
   }
 
-  const tx = db.transaction(() => {
-    const entry = createEntry(db, {
-      date: invoice.date,
-      description: `Factuur ${number}${invoice.contact ? ` - ${invoice.contact.name}` : ''}`,
-      postings,
-      source: 'invoice',
-      sourceRef: `inv:${id}`,
-      actor,
-    });
-    const posted = postEntry(db, { id: entry.id, actor });
-    db.prepare('UPDATE invoices SET invoice_number = ?, status = ?, entry_id = ? WHERE id = ?')
-      .run(number, 'sent', posted.id, id);
-    record(db, {
-      actor, action: 'invoice.finalize', command: 'invoice finalize',
-      args: { id, invoice_number: number, gross: invoice.gross_cents }, outcome: 'ok', entryIds: [posted.id],
-    });
-    return posted;
-  });
-  const posted = tx();
+  // The number is allocated INSIDE the transaction, atomically with the
+  // booking: reading MAX before the tx would let two concurrent finalizes
+  // (two processes on a WAL db) compute the same number — the loser's UPDATE
+  // trips the UNIQUE constraint and surfaces a raw SQLite error instead of
+  // just picking the next number. The retry loop absorbs that exact race:
+  // a collision rolls the whole tx back (entry included), the next attempt
+  // re-reads MAX (now including the winner's number) and books cleanly.
+  let posted;
+  let attempts = 0;
+  for (;;) {
+    try {
+      posted = db.transaction(() => {
+        const number = nextInvoiceNumber(db, year);
+        const entry = createEntry(db, {
+          date: invoice.date,
+          description: `Factuur ${number}${invoice.contact ? ` - ${invoice.contact.name}` : ''}`,
+          postings,
+          source: 'invoice',
+          sourceRef: `inv:${id}`,
+          actor,
+        });
+        const p = postEntry(db, { id: entry.id, actor });
+        db.prepare('UPDATE invoices SET invoice_number = ?, status = ?, entry_id = ? WHERE id = ?')
+          .run(number, 'sent', p.id, id);
+        record(db, {
+          actor, action: 'invoice.finalize', command: 'invoice finalize',
+          args: { id, invoice_number: number, gross: invoice.gross_cents }, outcome: 'ok', entryIds: [p.id],
+        });
+        return p;
+      })();
+      break;
+    } catch (err) {
+      const collision = String(err.message).includes('UNIQUE constraint failed: invoices.invoice_number');
+      if (!collision || ++attempts >= 5) throw err;
+    }
+  }
   return { invoice: getInvoice(db, id), entry: posted, dryRun: false };
 }
 
@@ -873,14 +891,20 @@ export function markPaid(db, { id, date, amountCents, method = 'bank', bankTxId 
     };
   }
 
-  db.prepare('INSERT INTO invoice_payments (invoice_id, date, amount_cents, method, bank_tx_id, created_by) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, date, amountCents, method, bankTxId, actor);
-  const paidNow = invoice.paid_cents + amountCents;
-  if (paidNow >= invoice.gross_cents) {
-    db.prepare("UPDATE invoices SET status = 'paid' WHERE id = ?").run(id);
-  }
-  record(db, { actor, action: 'invoice.pay', command: 'invoice pay', args: { id, amountCents }, outcome: 'ok' });
-  return getInvoice(db, id);
+  // payment insert + status transition commit together: a crash between the
+  // two would leave a recorded payment with the invoice still 'sent' — the
+  // books would then disagree with the invoice status, and a re-run of the
+  // same payment would be blocked by OVERPAYMENT with no clear explanation
+  return db.transaction(() => {
+    db.prepare('INSERT INTO invoice_payments (invoice_id, date, amount_cents, method, bank_tx_id, created_by) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, date, amountCents, method, bankTxId, actor);
+    const paidNow = invoice.paid_cents + amountCents;
+    if (paidNow >= invoice.gross_cents) {
+      db.prepare("UPDATE invoices SET status = 'paid' WHERE id = ?").run(id);
+    }
+    record(db, { actor, action: 'invoice.pay', command: 'invoice pay', args: { id, amountCents }, outcome: 'ok' });
+    return getInvoice(db, id);
+  })();
 }
 
 /**

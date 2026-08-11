@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-10 22:19:43 UTC — **✅ 747 passing · 0 failing (747 tests)**
+**Latest run:** 2026-08-11 04:36:35 UTC — **✅ 751 passing · 0 failing (751 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -659,7 +659,7 @@
 
 ### invoice.test.js — invoicing: lifecycle, 12-vereisten, credit notes, payments, reminders
 
-27 passing · 0 failing
+29 passing · 0 failing
 
     - ✅ parseLineSpec: qty, description, price, vat
     - ✅ createInvoice: draft with line math (2x 150 @21 = 300 net, 63 vat)
@@ -672,6 +672,8 @@
     - ✅ credit note: reversed booking, sequence continues
     - ✅ payments: partial then full -> paid; overpayment rejected
     - ✅ nextInvoiceNumber: year-scoped sequence
+    - ✅ finalize: a number collision inside the transaction is retried, not thrown
+    - ✅ markPaid: payment insert + status update are atomic (rollback leaves no payment)
     - ✅ UBL: Peppol BIS 3.0 structure
     - ✅ UBL: seller + buyer EndpointID (BT-34/BT-49) when KVK numbers are present
     - ✅ UBL: credit note uses CreditNote root + type 381 (Peppol BIS 3.0)
@@ -759,7 +761,7 @@
 
 ### recurring.test.js — recurring entries engine: schedules, depreciation, accruals
 
-21 passing · 0 failing
+22 passing · 0 failing
 
     - ✅ addPeriod: monthly/quarterly/yearly with day preserved
     - ✅ createTemplate: validates postings, balances, accounts
@@ -779,18 +781,20 @@
     - ✅ buildDepreciationTemplate: validation
     - ✅ vat-aware template: expansion stored, generation replays it
     - ✅ vat-aware template: requires VAT module on
+    - ✅ vat-aware template: object postings mixed into a tagged list are kept, not dropped
     - ✅ previewDue: read-only plan matches runDue
     - ✅ listTemplates: status filter
     - ✅ generated entries are immutable + trial balance stays balanced
 
 ### reports-v014.test.js — aging buckets, contact statements, sales analytics (by contact/item)
 
-12 passing · 0 failing
+13 passing · 0 failing
 
     - ✅ aging debtors: buckets, totals, paid excluded, contacts sorted by total
     - ✅ aging debtors: invoices issued AFTER the as-of date are excluded, item totals netted by credits
     - ✅ aging debtors: finalized credit notes reduce the outstanding, drafts do not
     - ✅ aging creditors: buckets + in_batch shown separately
+    - ✅ aging creditors: payables dated AFTER the as-of date are excluded
     - ✅ aging validation: bad as-of and kind rejected
     - ✅ contact statement: running balance ends at outstanding; supplier side negative
     - ✅ contact statement: credit notes reduce the balance (regression)

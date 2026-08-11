@@ -143,7 +143,17 @@ export function createTemplate(db, {
     let resolved;
     if (vatAware) {
       // Expansion through the VAT module validates codes + computes VAT legs.
-      resolved = expandVatPostings(db, parseVatPostingSpecs(raw.filter((p) => typeof p === 'string')));
+      // Object postings in the same list are ALREADY final form (the caller's
+      // responsibility — e.g. buildDepreciationTemplate passes objects without
+      // vatCode) and are appended as-is. The old code filtered to strings only,
+      // silently DROPPING any object postings mixed into a VAT-tagged list.
+      resolved = [
+        ...expandVatPostings(db, parseVatPostingSpecs(raw.filter((p) => typeof p === 'string'))),
+        ...raw.filter((p) => typeof p !== 'string').map((p) => ({
+          code: p.code, amountCents: p.amountCents,
+          vatCode: p.vatCode ?? null, vatAmountCents: p.vatAmountCents ?? null,
+        })),
+      ];
     } else {
       resolved = raw.flatMap((p) => {
         if (typeof p === 'string') {

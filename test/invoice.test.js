@@ -230,6 +230,65 @@ test('nextInvoiceNumber: year-scoped sequence', () => {
   assert.equal(nextInvoiceNumber(db, 2027), '2027-0001');
 });
 
+test('finalize: a number collision inside the transaction is retried, not thrown', () => {
+  // Simulate a racing process that took the next number between the MAX read
+  // and the UPDATE: the FIRST invoice-number UPDATE throws a UNIQUE error
+  // (as if the number was just claimed by another finalize). The retry loop
+  // must roll the attempt back and complete the finalize on the next try.
+  addContact();
+  const inv = mkInvoice();
+  const origPrepare = db.prepare.bind(db);
+  let collided = false;
+  db.prepare = (sql, ...rest) => {
+    const stmt = origPrepare(sql, ...rest);
+    if (/UPDATE invoices SET invoice_number/.test(sql) && !collided) {
+      collided = true;
+      return {
+        ...stmt,
+        run: () => {
+          const e = new Error('UNIQUE constraint failed: invoices.invoice_number');
+          e.code = 'SQLITE_CONSTRAINT_UNIQUE';
+          throw e;
+        },
+      };
+    }
+    return stmt;
+  };
+  try {
+    const result = finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+    assert.equal(result.invoice.invoice_number, '2026-0001');
+    assert.equal(result.invoice.status, 'sent');
+    // the failed attempt's entry was rolled back — exactly ONE booking entry
+    assert.equal(db.prepare("SELECT COUNT(*) c FROM journal_entries WHERE source = 'invoice'").get().c, 1);
+  } finally {
+    db.prepare = origPrepare;
+  }
+});
+
+test('markPaid: payment insert + status update are atomic (rollback leaves no payment)', () => {
+  // Simulate a crash between the payment INSERT and the status UPDATE: the
+  // UPDATE throws — the payment must NOT persist (old code left the payment
+  // recorded with the invoice still 'sent').
+  addContact();
+  const inv = mkInvoice();
+  finalizeInvoice(db, { id: inv.id });
+  const origPrepare = db.prepare.bind(db);
+  db.prepare = (sql, ...rest) => {
+    const stmt = origPrepare(sql, ...rest);
+    if (/UPDATE invoices SET status/.test(sql)) {
+      return { ...stmt, run: () => { throw new Error('simulated crash'); } };
+    }
+    return stmt;
+  };
+  try {
+    assert.throws(() => markPaid(db, { id: inv.id, date: daysFromNow(-1), amountCents: 36300 }));
+  } finally {
+    db.prepare = origPrepare;
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM invoice_payments').get().c, 0);
+  assert.equal(getInvoice(db, inv.id).status, 'sent');
+});
+
 test('UBL: Peppol BIS 3.0 structure', () => {
   addContact('NL999999999B01');
   const inv = mkInvoice();

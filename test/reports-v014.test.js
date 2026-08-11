@@ -195,6 +195,32 @@ test('aging creditors: buckets + in_batch shown separately', () => {
   assert.equal(sup.items.find((i) => i.ref === 'F-1').status, 'in_batch');
 });
 
+test('aging creditors: payables dated AFTER the as-of date are excluded', () => {
+  addPayable(db, {
+    contact: t.contacts.supplier.id, invoiceRef: 'F-1', date: '2026-05-01',
+    amountCents: 5000, actor: 'agent:test',
+  });
+  // a payable dated after the as-of date did not exist yet at as-of — a
+  // historical creditors aging must not show it (same rule as the debtors
+  // leg, which filters invoices by date <= asOf)
+  addPayable(db, {
+    contact: t.contacts.supplier.id, invoiceRef: 'F-2', date: '2026-09-15',
+    amountCents: 2500, actor: 'agent:test',
+  });
+
+  const r = aging(db, { asOf: '2026-08-08', kind: 'creditors' });
+  assert.equal(r.creditors.contacts.length, 1);
+  const sup = r.creditors.contacts[0];
+  assert.equal(sup.total_cents, 5000);
+  assert.equal(sup.items.length, 1);
+  assert.equal(sup.items[0].ref, 'F-1');
+  assert.equal(r.creditors.totals.total_cents, 5000);
+
+  // a later as-of sees both
+  const later = aging(db, { asOf: '2026-09-30', kind: 'creditors' });
+  assert.equal(later.creditors.contacts[0].total_cents, 7500);
+});
+
 test('aging validation: bad as-of and kind rejected', () => {
   assert.throws(() => aging(db, { asOf: 'garbage', kind: 'debtors' }), (e) => e.code === 'INVALID_DATE');
   assert.throws(() => aging(db, { asOf: '2026-02-30', kind: 'debtors' }), (e) => e.code === 'INVALID_DATE');

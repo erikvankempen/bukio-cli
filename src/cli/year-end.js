@@ -5,7 +5,6 @@
  */
 
 // bukio year-end + jaarrekening + icp — annual close and statutory reports (Phase 4).
-import { writeFileSync } from 'node:fs';
 import { formatAmount } from '../core/money.js';
 import { yearEndClose, yearEndStatus } from '../year-end/index.js';
 import { jaarrekening } from '../report/jaarrekening.js';

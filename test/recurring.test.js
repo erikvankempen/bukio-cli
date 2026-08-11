@@ -221,6 +221,30 @@ test('vat-aware template: requires VAT module on', () => {
   assert.throws(() => tpl({ postings: ['4340:100.00@21,1100:-121.00'] }), { code: 'VAT_MODULE_OFF' });
 });
 
+test('vat-aware template: object postings mixed into a tagged list are kept, not dropped', () => {
+  // a list with a VAT-tagged STRING plus an OBJECT posting must keep both —
+  // the old expansion filtered to strings only and silently dropped objects
+  enableVatModule(db);
+  const t = tpl({
+    name: 'Gemengd',
+    postings: ['4340:100.00@21', { code: '1100', amountCents: -12100 }],
+  });
+  assert.equal(t.vat_aware, 1);
+  const codes = t.postings.map((p) => p.code);
+  assert.ok(codes.includes('4340'), 'string posting expanded');
+  assert.ok(codes.includes('1500'), 'VAT leg added');
+  assert.ok(codes.includes('1100'), 'object posting kept');
+  // balanced: 100.00 net + 21.00 vat vs the 121.00 bank leg
+  const sum = t.postings.reduce((s, p) => s + p.amountCents, 0);
+  assert.equal(sum, 0);
+  // and it generates a posted, balanced entry
+  runDue(db, { asOf: '2026-01-31' });
+  const entry = getEntry(db, 1);
+  assert.equal(entry.state, 'posted');
+  const entrySum = entry.postings.reduce((s, p) => s + p.amount_cents, 0);
+  assert.equal(entrySum, 0);
+});
+
 test('previewDue: read-only plan matches runDue', () => {
   tpl();
   const plan = previewDue(db, { asOf: '2026-02-15' });

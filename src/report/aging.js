@@ -125,13 +125,18 @@ function debtorsAging(db, asOf) {
 
 /** Unpaid payables per contact; in_batch shown separately (money is leaving). */
 function creditorsAging(db, asOf) {
+  // as-of semantics: a payable dated AFTER the as-of date did not exist yet
+  // at as-of — the debtors leg filters invoices by date <= asOf, so the
+  // creditors leg must filter payables the same way (a historical aging
+  // would otherwise overstate what was owed at that date)
   const rows = db.prepare(`
     SELECT p.id, p.contact_id, p.invoice_ref, p.date, p.due_date, p.amount_cents, p.status,
            c.name AS contact_name
     FROM payables p LEFT JOIN contacts c ON c.id = p.contact_id
     WHERE p.status IN ('unpaid','in_batch')
+      AND p.date <= ?
     ORDER BY p.due_date, p.id
-  `).all();
+  `).all(asOf);
 
   const byContact = new Map();
   for (const p of rows) {
