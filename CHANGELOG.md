@@ -6,7 +6,14 @@ match `package.json` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
-## [Unreleased] — dev branch
+## [0.15.0] — 2026-08-11
+
+Resolves **[#1 — Audit trail actor attribution is self-asserted](https://github.com/erikvankempen/bukio-cli/issues/1)**:
+the recorded actor is now cryptographically verifiable (signed commands,
+`audit verify`, replay refusal), unverifiable actions are marked
+`unsigned` or refused under enforcement, and the mechanism works across
+CLI + MCP for all three roles — with per-actor authorizations
+(segregation of duties) layered on top.
 
 ### Added
 
@@ -190,6 +197,27 @@ merged to `main` and released.
   "Balance Sheet". The statutory Dutch term in the jaarrekening ("Balans per
   …") and the XAF `RekeningSoort` value `Balans` are official format names and
   were left untouched.
+
+### Fixed
+
+- Aging report: the creditors leg now honours `--as-of` (payables dated after
+  the as-of date were shown in historical positions — the debtors leg already
+  filtered, the creditors leg did not).
+- Invoice finalize: the sequential number is allocated **inside** the booking
+  transaction with a UNIQUE-collision retry — two concurrent finalizes (CLI +
+  MCP, or two processes on a WAL database) could allocate the same number and
+  surface a raw SQLite error instead of a clean retry.
+- `markPaid`: the payment insert and the status transition now commit in one
+  transaction — a crash between them left a recorded payment with the invoice
+  still `sent`.
+- Recurring `createTemplate`: object postings mixed into a VAT-tagged posting
+  list are kept instead of silently dropped by the expansion filter.
+- MCP server: `tools/call` with `params: null` (sent by some JSON-RPC clients)
+  answered with a -32603 internal error; it now returns a clean -32602
+  invalid-params reply.
+- `audit verify`: a negative `--limit` used to slice from the wrong end
+  (silently dropping the oldest rows); it is now rejected with
+  `INVALID_LIMIT`, matching `audit list`.
 
 ## [0.14.1] — 2026-08-09
 
