@@ -628,6 +628,57 @@ use works too: point `--server` at `http://127.0.0.1:PORT` on the same host.
 File outputs (PDF/XLSX exports, attachments) land on the server host — that
 is where the books live.
 
+#### Transport options (how the client reaches the server)
+
+The envelope signature is the security layer that matters (identity,
+integrity, replay). The transport's job is to keep the bytes private and to
+decide who may reach the port at all. Three supported ways, in order of
+preference:
+
+1. **SSH tunnel (recommended for humans).** The daemon binds to loopback
+   only (`--listen 127.0.0.1:8787` — the default — exposes nothing); the
+   client opens a tunnel and points `--server` at the local end:
+
+   ```bash
+   # server: bukio server start --listen 127.0.0.1:8787 --serve-db /srv/bukio/company.db --actor agent:op
+   # client: forward the port, then use it like any remote
+   ssh -N -L 8787:127.0.0.1:8787 user@server
+   bukio --server http://127.0.0.1:8787 report trial-balance --actor human:erik
+   ```
+
+   You get SSH's battle-tested encryption, host verification and key-based
+   access control, with **zero new listening ports** on the server. Access
+   control = who has an SSH key; every command is still signed by the
+   client's own actor key, so the audit trail keeps per-device attribution.
+   No TLS certificates to manage.
+
+2. **Tailscale / WireGuard (recommended for agents & always-on clients).**
+   Both machines join a private network (tailnet); the daemon binds to the
+   server's tailnet IP (`--listen 100.x.y.z:8787`) and is reachable only by
+   other tailnet members. Non-interactive clients (cron, agents on another
+   VPS) get a stable endpoint without needing an SSH session per call, and
+   the overlay encrypts everything in transit (mTLS by default on
+   Tailscale). Access control = the tailnet ACL.
+
+3. **Native TLS (direct exposure).** If the daemon must listen on a public
+   interface, serve HTTPS with `--tls-cert C --tls-key K` (self-signed is
+   fine — pin it on the clients) so the wire is encrypted. Access control
+   then rests on the envelope signature alone: anyone who can reach the port
+   can *try* commands, but only enrolled actors' signed commands execute
+   (and `actor enforce on` refuses everything unsigned).
+
+**Do not** run plain HTTP on a public interface — signatures prove *who
+signed* and that nothing was *altered*, but they do not hide the command
+contents from eavesdroppers. Plain HTTP is only safe on a network you
+already trust (loopback, a tailnet, a LAN).
+
+**Why not `ssh user@server "bukio …"` instead?** It works, but the command
+then runs with the *server-side* actor's key — every remote user collapses
+into one server identity, and the audit row no longer proves *which person
+or agent* on which device acted. That is the accountability problem the
+signing model exists to solve. SSH as the *transport* (option 1) gives you
+SSH's security **and** per-device attribution.
+
 ### `bukio import` / `bukio month-end` / `bukio invoice reminders`
 
 Imports & period automation (Phase 6).

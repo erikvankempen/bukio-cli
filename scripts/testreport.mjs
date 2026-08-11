@@ -12,7 +12,7 @@
 // `npm test` = this script: exit code mirrors the suite, summary lines are
 // printed for grepping, failures print the failing tests.
 import { spawn } from 'node:child_process';
-import { readdirSync, writeFileSync } from 'node:fs';
+import { readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
@@ -118,6 +118,20 @@ ${perFile}
 _Regenerated automatically on every \`npm test\`._
 `;
 writeFileSync(path.join(root, 'test', 'report.md'), report);
+
+// The e2e test files create their company DBs in fresh mkdtemp dirs under
+// /tmp (bukio-*). On this host /tmp is RAM-backed tmpfs, so ~3000 leaked
+// dirs (~1.5G) from repeated runs starved SQLite and killed session writes.
+// Clean any leftovers now that the suite is done — they are disposable
+// fixtures, never user data.
+try {
+  const tmp = os.tmpdir();
+  for (const entry of readdirSync(tmp)) {
+    if (entry.startsWith('bukio-')) rmSync(path.join(tmp, entry), { recursive: true, force: true });
+  }
+} catch {
+  // cleanup is best-effort — never fail the suite over it
+}
 
 console.log(`# tests ${tests}`);
 console.log(`# pass ${pass}`);

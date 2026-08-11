@@ -95,6 +95,26 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio mcp` | MCP server over stdio (plan-only mutations unless mode=execute; BUKIO_MCP_READONLY=1 blocks them). **Every mutating tool call is signed by its actor** (payload `mcp:<tool_name>`, same digest scheme/nonce cache as the CLI); per-company enforcement applies — under `actor enforce on` unsigned calls are refused with the same error codes as the CLI. Read-only tools are not gated. |
 | `bukio server start --listen <host:port> [--serve-db <path>] [--tls-cert C --tls-key K]` | Serve ONE company DB over HTTP(S): clients send signed command envelopes (`--server <url>` or `BUKIO_SERVER`), the server verifies them against the company registry (signature + ±5 min window + nonce replay + authz) and runs them. Byte-identical output to local mode; audit rows carry the REAL signature (`audit verify` works server-side). A bridge like `mcp` — needs no signature itself. Bind to a trusted network (localhost, tailnet) or use `--tls-cert/--tls-key`. |
 | `bukio server token <actor> [--ttl-hours N]` | Mint a one-time enrolment token for a remote actor (operator act on the server machine). Redeem on the client with `bukio actor register --server <url> --token <t>` — the private key never leaves the client. |
+
+**Remote transport (how clients reach the daemon):** the envelope signature
+is the security layer (identity, integrity, replay) — the transport only
+adds privacy and port access control. Three options, in order of preference:
+(1) **SSH tunnel** — daemon on `--listen 127.0.0.1:8787` (default, nothing
+exposed), client does `ssh -N -L 8787:127.0.0.1:8787 user@server` and points
+`--server http://127.0.0.1:8787` at the local end; zero new listening ports,
+SSH key-based access, per-device audit attribution intact. (2) **Tailscale /
+WireGuard** — daemon on the server's tailnet IP (`--listen 100.x.y.z:8787`),
+reachable only by tailnet members (overlay-encrypted, mTLS on Tailscale);
+best for agents/cron needing a stable always-on endpoint. (3) **Native TLS**
+— `--tls-cert/--tls-key` on a public interface (self-signed OK, pin it
+client-side); access control then rests on signatures alone, so run with
+`actor enforce on`. **Never** run plain HTTP on a public interface —
+signatures prove *who signed* and *nothing altered*, but do not hide command
+contents from eavesdroppers. And do not use `ssh user@server "bukio …"` as a
+substitute for `--server`: the command would run with the server-side
+actor's key, collapsing every remote user into one identity and destroying
+per-device audit attribution (the accountability the signing model exists
+for). SSH as a *tunnel* gives both.
 | `bukio compliance status --year YYYY` / `mark --type ICP\|JAARREKENING --period ...` | Filing deadlines (OB/ICP/jaarrekening) + manual filing registry. |
 | `bukio import opening-balances --file F [--date yyyy-mm-dd] [--dry-run]` | Import opening balances as ONE posted Beginbalans entry (CSV `code,amount` or `code,debet,credit`). Sum must be zero. Re-run fails `OPENING_ALREADY_IMPORTED`. |
 | `bukio import journal --file F [--create-missing] [--dry-run]` | SnelStart/Exact-style journal CSV (aliases, `;` delimiter, Dutch amounts). One posted entry per boekstuknummer; idempotent. |
