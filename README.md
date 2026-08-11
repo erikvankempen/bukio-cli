@@ -164,6 +164,26 @@ Agent/system keys (plain files) and sessions sign with **zero ceremony** — an 
 
 > **Strong recommendation: one OS user per agent.** Signing proves *which key* signed — not *which process* used it. Two agents running under the same OS user can read each other's key files (`~/.bukio/keys/…`) and impersonate each other undetectably. If you run several agents on one machine, give each its own OS account (or container) with its own `BUKIO_CONFIG_DIR`, so the filesystem itself keeps the keys apart. This is the same trust boundary SSH keys have — the OS user is the real security boundary.
 
+> **Confinement: an agent that can write the code can remove the gates.**
+> Signing and authorizations protect the *books*, not the *CLI itself*:
+> a process with write access to the source can strip the signature
+> checks, authz gates and enforcement — and no check *inside* the code
+> can stop it, because the verifier lives in the same file the attacker
+> can edit. Confinement is the only real prevention:
+>
+> - **Run each agent as its own non-root OS user.** The same boundary
+>   that keeps keys apart keeps the code apart: an agent user without
+>   write permission on the install cannot alter what it executes.
+> - **Install the CLI read-only.** Keep a release copy at a root-owned,
+>   agent-unwritable path (e.g. `/opt/bukio-cli`, `0755 root:root`, or a
+>   read-only bind mount / container volume) and put *that* on the
+>   agent's PATH. Development happens in the writable working tree; the
+>   agent runs the immutable install.
+> - **Detection as the backstop.** Verify installed files against a hash
+>   manifest stored on a *second* host (nightly cron), so any drift
+>   alerts you. That detects tampering after the fact — it does not
+>   prevent it. Prevention is the read-only install.
+
 ### Authorizations & segregation of duties
 
 Signing proves **who** ran a command; authorizations control **what kinds
@@ -1169,18 +1189,20 @@ calls (≈ 9K tokens) ran on MiMo-V2.5 at ≈ $0.00.
 
 ### Developer Time (contributed, unpaid)
 
-Beyond API spend, this project took my review-and-direction time: five
-evenings after work (Aug 4–7, 2026), ≈ 1 hour of effective time per
-evening — plus Saturday (Aug 8, 2026) and Sunday (Aug 9, 2026), ≈ 2.5 clock
-hours of review and direction each — i.e. roughly **10 hours total**, all
-contributed unpaid.
+Beyond API spend, this project took my review-and-direction time. Because
+the agent does the building, my own messages are the only interaction
+channel — so I measure my time by them: across the 17 working sessions
+(Aug 4–11, 2026) I sent **250 messages** (~43 K characters), each costed
+at **≈ 60 s of overhead** (reading, deciding, reviewing) plus composition
+time scaled by message length and complexity. That works out to
+**≈ 8.4 hours total**, all contributed unpaid.
 
 At a **senior** Dutch software-developer rate of **≈ €45/hour** (Amsterdam
 senior average, 2026: €45/h
 [Glassdoor](https://www.glassdoor.com/Salaries/amsterdam-netherlands-senior-software-engineer-salary-SRCH_IL.0,21_IM1112_KO22,46.htm),
 €45.50/h
 [SalaryExpert](https://www.salaryexpert.com/salary/job/software-developer/netherlands/amsterdam);
-the national average is lower), my time is worth **≈ €450**.
+the national average is lower), my time is worth **≈ €377**.
 
 Stated plainly, so nothing is hidden:
 
@@ -1190,7 +1212,7 @@ Stated plainly, so nothing is hidden:
   professional rate overstates the market value of my review time by a wide
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
-- **It was free:** the ≈ €450 is an imputed opportunity cost, not money paid.
+- **It was free:** the ≈ €377 is an imputed opportunity cost, not money paid.
   My out-of-pocket spend remains **$13.06** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
   conventional code review of a 27.5 KLOC codebase would take; treat them as
@@ -1214,8 +1236,8 @@ across 119 files (14,908 in `src/`, 12,459 in `test/`, 138 in `bin/` +
 
 **Comparison:** a conventional team building this would estimate **≈ 78–192
 person-months (≈ €701K–€1,729K)**; the AI-assisted build consumed **$13.06 in
-API costs plus ≈ €450 of my review-and-direction time (contributed, unpaid
-— see above)** over five evenings, a Saturday and a Sunday — still a tiny fraction of
+API costs plus ≈ €377 of my review-and-direction time (contributed, unpaid
+— see above)** over 17 working sessions in a single week — still a tiny fraction of
 the conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.
