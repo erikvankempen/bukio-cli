@@ -7,8 +7,9 @@
 --   Nothing has an FK to the rebuilt tables, so foreign_keys stays ON and
 --   the runner applies this file INSIDE its BEGIN/COMMIT transaction —
 --   the whole migration is atomic and crash-retry-safe.
--- * accounts: add the taxonomy discriminator column, backfilled 'rgs' where a
---   legacy RGS code is present. (The rgs_code -> taxonomy_code rename is
+-- * accounts: add the taxonomy discriminator column, backfilled 'rgs' for
+--   every existing row (uniform with createAccount's insert). (The
+--   rgs_code -> taxonomy_code rename is
 --   migration 022 — it is disruptive and must land atomically with the code
 --   churn.)
 -- * vat_returns / filings: widen `type` (drop the NL-only CHECK) — filing
@@ -73,7 +74,7 @@ ALTER TABLE company_new RENAME TO company;
 -- 2. accounts --------------------------------------------------------------
 
 ALTER TABLE accounts ADD COLUMN taxonomy TEXT;
-UPDATE accounts SET taxonomy = 'rgs' WHERE rgs_code IS NOT NULL;
+UPDATE accounts SET taxonomy = 'rgs' WHERE taxonomy IS NULL;
 
 -- 3. vat_returns (widen type; keep status CHECK + UNIQUE(type, period)) -----
 

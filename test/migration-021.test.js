@@ -42,6 +42,11 @@ function buildDbAt020() {
   db.prepare(
     "INSERT INTO accounts (code, name, type, normal_balance, rgs_code) VALUES ('8000', 'Omzet', 'income', 'credit', 'WOMZ.80')",
   ).run();
+  // a codeless account: the taxonomy backfill must cover it too (uniform
+  // with createAccount's unconditional 'rgs' insert)
+  db.prepare(
+    "INSERT INTO accounts (code, name, type, normal_balance) VALUES ('1990', 'Ongenummerd', 'asset', 'debit')",
+  ).run();
   db.prepare("INSERT INTO vat_returns (type, period, status) VALUES ('OB', '2026-Q2', 'draft')").run();
   db.prepare("INSERT INTO filings (type, period, filed_at) VALUES ('JAARREKENING', '2025', '2026-01-01')").run();
   db.close();
@@ -90,6 +95,9 @@ test('migrations 021+022 upgrade a 020 DB: new columns, CHECK removals, renames,
     const acc = db.prepare("SELECT taxonomy_code, taxonomy FROM accounts WHERE code = '8000'").get();
     assert.equal(acc.taxonomy_code, 'WOMZ.80');
     assert.equal(acc.taxonomy, 'rgs');
+    // uniform discriminator: codeless rows also get 'rgs' (same as createAccount)
+    const uncoded = db.prepare("SELECT taxonomy FROM accounts WHERE taxonomy_code IS NULL LIMIT 1").get();
+    assert.equal(uncoded.taxonomy, 'rgs');
 
     // vat_returns: type CHECK widened
     db.prepare("INSERT INTO vat_returns (type, period, status) VALUES ('VAT', '2026-Q2', 'draft')").run();
