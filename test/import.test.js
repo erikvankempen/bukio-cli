@@ -359,6 +359,10 @@ const AUDITFILE_XAF = `<?xml version="1.0" encoding="UTF-8"?>
 </AuditFile>`;
 
 test('xaf (AuditFile layout): imports transaction, creates + renames chart accounts', () => {
+  // the dry-run plan must carry the renamed key (producer + CLI render agree)
+  const plan = importXaf(db, { xmlText: AUDITFILE_XAF, dryRun: true });
+  assert.equal(plan.company.registration_id, '1'); // the file's <CompanyID>
+  assert.ok(!('kvk' in plan.company));
   const res = importXaf(db, { xmlText: AUDITFILE_XAF, actor: 'agent:test' });
   assert.equal(res.imported, 1);
   assert.equal(res.header.company_name, 'Demo BV');

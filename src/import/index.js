@@ -940,7 +940,7 @@ function importAuditFileLayout(db, { auditFile, actor, dryRun }) {
   const plan = {
     action: 'import xaf',
     company: {
-      name: fileName, kvk: fileKvk, fiscal_year: header.FiscalYear ?? null,
+      name: fileName, registration_id: fileKvk, fiscal_year: header.FiscalYear ?? null,
       period: `${header.StartDate ?? ''}..${header.EndDate ?? ''}`,
     },
     software: header.SoftwareDescription ? String(header.SoftwareDescription).trim() : null,
