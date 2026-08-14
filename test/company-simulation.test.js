@@ -433,10 +433,10 @@ test('stage 11: year-end close, jaarrekening micro, ICP readout', () => {
   assert.equal(tb('9900'), 0);
 
   // statutory micro accounts carry the same result
-  const jk = run(['jaarrekening', 'report', '--year', '2026', '--model', 'micro', '--format', 'json', '--json']);
-  assert.equal(jk.out.data.jaarrekening.balans.balanced, true);
-  assert.equal(jk.out.data.jaarrekening.balans.total_activa_cents, 2505976);
-  assert.equal(jk.out.data.jaarrekening.balans.total_passiva_cents, 2505976);
+  const jk = run(['financial-statements', 'report', '--year', '2026', '--model', 'micro', '--format', 'json', '--json']);
+  assert.equal(jk.out.data.financial_statements.balans.balanced, true);
+  assert.equal(jk.out.data.financial_statements.balans.total_activa_cents, 2505976);
+  assert.equal(jk.out.data.financial_statements.balans.total_passiva_cents, 2505976);
 
   // ICP: the verlegde EU levering to Berliner (2026-0003, 180.00)
   const icp = run(['icp', 'readout', '--period', '2026-Q1', '--json']);

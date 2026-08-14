@@ -86,7 +86,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio invoice email --id N [--to X] [--subject] [--body] [--no-pdf] [--dry-run]` | Email the finalized invoice PDF via SMTP (`BUKIO_SMTP_*` env — host/port/user/pass/from). Delivery is audited; status is `sent` from finalize onward. |
 | `bukio invoice peppol-send --id N [--endpoint URL] [--dry-run]` | POST the UBL to a Peppol access-point provider (env `BUKIO_PEPPOL_ENDPOINT` + `BUKIO_PEPPOL_TOKEN`). |
 | `bukio year-end status --year YYYY` / `close --year YYYY [--dry-run]` | Annual close: result -> 9900 -> 3000 (source 'closing'; P&L stays visible). |
-| `bukio jaarrekening report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx]` | Statutory annual accounts (KVK deposit package as PDF). |
+| `bukio financial-statements report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx]` | Statutory annual accounts (NL: KVK deposit package as PDF; deprecated alias `jaarrekening report`). |
 | `bukio icp readout --period 2026-Q3` | ICP listing: EU btw-verlegde supplies per customer (manual filing aid). |
 | `bukio fx set --currency USD --date D --rate 1.0875` | FX rate store (upsert, audited). |
 | `bukio fx fetch --currency USD [--date D]` | ECB reference rate (free, no key) on/before a date, stored as source=ECB. |
@@ -440,7 +440,7 @@ bukio year-end status --year 2026
 bukio year-end close --year 2026 --dry-run     # plan: result + postings
 bukio year-end close --year 2026               # result -> 9900 -> 3000
 # 2. statutory accounts + KVK deposit package
-bukio jaarrekening report --year 2026 --model klein --format pdf   # jaarrekening-2026-klein.pdf
+bukio financial-statements report --year 2026 --model klein --format pdf   # financial-statements-2026-klein.pdf
 # 3. quarterly EU listing (verlegde EU leveringen)
 bukio icp readout --period 2026-Q3
 # 4. the OB readout now also reports 2a (EU) and 3b (EU inkopen)

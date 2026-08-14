@@ -207,7 +207,7 @@ tool({
   },
 });
 tool({
-  name: 'compliance', description: 'compliance calendar for a year (OB/ICP deadlines, jaarrekening deposit)', schema: {
+  name: 'compliance', description: 'compliance calendar for a year (OB/ICP deadlines, financial statements deposit)', schema: {
     type: 'object', properties: { year: { type: 'string' } }, required: ['year'],
   },
   handler: (db, args) => {

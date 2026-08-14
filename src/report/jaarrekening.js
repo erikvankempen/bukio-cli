@@ -11,6 +11,7 @@
 import { balans } from './balans.js';
 import { pnl } from './pnl.js';
 import { formatAmount } from '../core/money.js';
+import { resolveProfile } from '../jurisdictions/index.js';
 import { fiscalYearWindow } from '../year-end/index.js';
 
 export function jaarrekeningError(code, message) {
@@ -19,34 +20,11 @@ export function jaarrekeningError(code, message) {
   return e;
 }
 
-const MODELS = ['micro', 'klein'];
-
-// statutory line labels per RGS hoofdgroep
-const ACTIVA_LINES = [
-  { rgs: 'BMVA.02', label: 'Materiële vaste activa' },
-  { rgs: 'BIVA.04', label: 'Immateriële vaste activa' },
-  { rgs: 'BFVA.03', label: 'Financiële vaste activa' },
-  { rgs: 'BVRD.30', label: 'Voorraden' },
-  { rgs: 'BVOR.11', label: 'Vorderingen' },
-  { rgs: 'BLIM.10', label: 'Liquide middelen' },
-];
-const PASSIVA_LINES = [
-  { rgs: 'BEIV.05', label: 'Eigen vermogen' },
-  { rgs: 'BVRZ.07', label: 'Voorzieningen' },
-  { rgs: 'BLAS.08', label: 'Langlopende schulden' },
-  { rgs: 'BSCH.12', label: 'Kortlopende schulden' },
-];
-const PNL_LINES = [
-  { rgs: 'WOMZ.80', label: 'Netto-omzet' },
-  { rgs: 'WOVB.82', label: 'Overige bedrijfsopbrengsten' },
-  { rgs: 'WKPR.70', label: 'Inkoopwaarde van de omzet' },
-  { rgs: 'WBED.42', label: 'Overige bedrijfskosten' },
-  { rgs: 'WAFS.41', label: 'Afschrijvingen' },
-  // the chart system tags financiële baten en lasten as WFBE.84 (rgsLabel);
-  // WBEL.60 is kept for imported charts that use the official code
-  { rgs: 'WFBE.84', label: 'Financiële baten en lasten' },
-  { rgs: 'WBEL.60', label: 'Belastingen' },
-];
+// Jaarrekening builders keyed by profile.reporting.format. NL is the only
+// format in Phase A ('auto'); future markets register their own layout.
+const JAARREKENING_FORMATS = {
+  auto: buildJaarrekeningAuto,
+};
 
 function groupSections(sections, lines) {
   const known = new Set(lines.map((l) => l.rgs));
@@ -84,6 +62,14 @@ function groupSections(sections, lines) {
 }
 
 export function jaarrekening(db, { year, model = 'klein' }) {
+  const { reporting } = resolveProfile(db);
+  const builder = JAARREKENING_FORMATS[reporting.format] ?? JAARREKENING_FORMATS.auto;
+  return builder(db, { year, model, reporting });
+}
+
+function buildJaarrekeningAuto(db, { year, model, reporting }) {
+  const MODELS = reporting.statutoryAccounts.models;
+  const LINES = reporting.statutoryAccounts.lines;
   if (!MODELS.includes(model)) throw jaarrekeningError('INVALID_MODEL', `model must be one of ${MODELS.join(', ')}`);
   if (!/^\d{4}$/.test(String(year))) throw jaarrekeningError('INVALID_YEAR', `year '${year}' must be YYYY`);
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
@@ -98,8 +84,8 @@ export function jaarrekening(db, { year, model = 'klein' }) {
   const asOf = `${year}-${String(fyeMonth).padStart(2, '0')}-${String(fyeDay).padStart(2, '0')}`;
   const b = balans(db, { asOf });
 
-  const activa = groupSections(b.assets.sections, ACTIVA_LINES);
-  const passivaSections = groupSections(b.liabilities_and_equity.sections, PASSIVA_LINES);
+  const activa = groupSections(b.assets.sections, LINES.activa);
+  const passivaSections = groupSections(b.liabilities_and_equity.sections, LINES.passiva);
   // onverdeeld resultaat folds into Eigen vermogen (pre-close) as its own line
   if (b.liabilities_and_equity.result_cents !== 0) {
     const ev = passivaSections.find((s) => s.taxonomy_code === 'BEIV.05');
@@ -151,7 +137,7 @@ export function jaarrekening(db, { year, model = 'klein' }) {
     // showed 9 wrong months and missed 3 months of the FY.
     const [pnlFrom, pnlTo] = fiscalYearWindow(db, year);
     const p = pnl(db, { from: pnlFrom, to: pnlTo });
-    const pnlLines = groupSections(p.sections, PNL_LINES);
+    const pnlLines = groupSections(p.sections, LINES.pnl);
     const omzet = pnlLines.find((l) => l.taxonomy_code === 'WOMZ.80')?.total_cents ?? 0;
     const overige = pnlLines.find((l) => l.taxonomy_code === 'WOVB.82')?.total_cents ?? 0;
     const inkoop = pnlLines.find((l) => l.taxonomy_code === 'WKPR.70')?.total_cents ?? 0;

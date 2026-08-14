@@ -6,7 +6,8 @@
 
 // Accounts — chart of accounts CRUD, CSV import, default chart seeding.
 import { readFileSync } from 'node:fs';
-import { DEFAULT_CHART, inferRgs } from './chart.js';
+import { inferRgs } from './chart.js';
+import { resolveProfile } from '../jurisdictions/index.js';
 
 const VALID_TYPES = ['asset', 'liability', 'equity', 'income', 'expense'];
 const VALID_NORMAL = ['debit', 'credit'];
@@ -62,7 +63,7 @@ export function listAccounts(db, { type = null, includeInactive = false } = {}) 
 /** Seed the default chart; skips codes that already exist. Returns count of new accounts. */
 export function seedDefaultChart(db) {
   let created = 0;
-  for (const a of DEFAULT_CHART) {
+  for (const a of resolveProfile(db).reporting.defaultChart) {
     if (getAccountByCode(db, a.code)) continue;
     createAccount(db, a);
     created += 1;

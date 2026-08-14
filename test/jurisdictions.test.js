@@ -316,3 +316,23 @@ test('M4: validateCompliance resolves the profile (unknown company country -> PR
     db.close();
   }
 });
+
+// --- Phase A M5: reporting path resolves the profile ------------------------
+
+test('M5: jaarrekening resolves the profile (unknown company country -> PROFILE_NOT_FOUND)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--vat', 'on']);
+  const db = openDb(dbPath);
+  db.prepare("UPDATE company SET country = 'ZZ' WHERE id = 1").run();
+  db.close();
+  const r = cli(dbPath, ['financial-statements', 'report', '--year', '2025'], { expectFail: true });
+  assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
+});
+
+test('M5: deprecated alias `jaarrekening report` still works and warns', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--vat', 'on']);
+  const r = cli(dbPath, ['jaarrekening', 'report', '--year', '2026', '--format', 'json']);
+  assert.equal(r.out.data.financial_statements.year, '2026');
+  assert.ok(r.out.data.warnings.some((w) => w.includes('jaarrekening is deprecated')));
+});

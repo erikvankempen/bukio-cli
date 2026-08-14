@@ -71,47 +71,66 @@ export function make(program) {
       }
     });
 
-  const jr = program.command('jaarrekening').description('statutory annual accounts (micro/klein)');
-  jr
+  const reportAction = (deprecated) => async (opts, command) => {
+    const ctx = makeCtx(command);
+    const warnings = deprecated ? ['jaarrekening is deprecated — use `financial-statements report`'] : undefined;
+    try {
+      const db = ensureDb(ctx);
+      try {
+        const report = jaarrekening(db, { year: opts.year, model: opts.model });
+        if (opts.format === 'json') {
+          // --format json is the declared default — it must emit JSON even
+          // without the global --json flag (parity with audit --format json)
+          console.log(JSON.stringify({
+            ok: true,
+            data: { financial_statements: report, ...(warnings ? { warnings } : {}) },
+          }, null, 2));
+          return;
+        }
+        if (opts.format === 'pdf') {
+          const outPath = opts.out ?? `financial-statements-${opts.year}-${opts.model}.pdf`;
+          const result = await jaarrekeningToPdf(report, { outPath });
+          output(ctx, { path: result.path, bytes: result.bytes, ...(warnings ? { warnings } : {}) },
+            (d) => console.log(`wrote ${d.path} (${d.bytes} bytes)`));
+          return;
+        }
+        if (opts.format === 'xlsx') {
+          const { renderJaarrekeningXlsx } = await import('../report/jaarrekening-xlsx.js');
+          const outPath = opts.out ?? `financial-statements-${opts.year}-${opts.model}.xlsx`;
+          const result = await renderJaarrekeningXlsx(report, { outPath });
+          output(ctx, { path: result.path, bytes: result.bytes, ...(warnings ? { warnings } : {}) },
+            (d) => console.log(`wrote ${d.path} (${d.bytes} bytes)`));
+          return;
+        }
+        throw Object.assign(new Error(`unknown format '${opts.format}' (use json|pdf|xlsx)`), { code: 'INVALID_FORMAT' });
+      } finally {
+        db.close();
+      }
+    } catch (err) {
+      fail(ctx, err);
+    }
+  };
+
+  const fsCmd = program.command('financial-statements').description('statutory annual accounts (micro/klein)');
+  fsCmd
     .command('report')
-    .description('annual accounts in the Dutch statutory layout')
+    .description('annual accounts in the jurisdiction statutory layout')
     .requiredOption('--year <yyyy>', 'fiscal year')
     .option('--model <micro|klein>', 'statutory model', 'klein')
     .option('--format <json|pdf|xlsx>', 'output format', 'json')
     .option('--out <path>', 'output path (pdf/xlsx)')
-    .action(async (opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const report = jaarrekening(db, { year: opts.year, model: opts.model });
-          if (opts.format === 'json') {
-            // --format json is the declared default — it must emit JSON even
-            // without the global --json flag (parity with audit --format json)
-            console.log(JSON.stringify({ ok: true, data: { jaarrekening: report } }, null, 2));
-            return;
-          }
-          if (opts.format === 'pdf') {
-            const outPath = opts.out ?? `jaarrekening-${opts.year}-${opts.model}.pdf`;
-            const result = await jaarrekeningToPdf(report, { outPath });
-            output(ctx, { path: result.path, bytes: result.bytes }, (d) => console.log(`wrote ${d.path} (${d.bytes} bytes)`));
-            return;
-          }
-          if (opts.format === 'xlsx') {
-            const { renderJaarrekeningXlsx } = await import('../report/jaarrekening-xlsx.js');
-            const outPath = opts.out ?? `jaarrekening-${opts.year}-${opts.model}.xlsx`;
-            const result = await renderJaarrekeningXlsx(report, { outPath });
-            output(ctx, { path: result.path, bytes: result.bytes }, (d) => console.log(`wrote ${d.path} (${d.bytes} bytes)`));
-            return;
-          }
-          throw Object.assign(new Error(`unknown format '${opts.format}' (use json|pdf|xlsx)`), { code: 'INVALID_FORMAT' });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action(reportAction(false));
+
+  // deprecated alias: the Dutch name is jurisdiction data, the command is not
+  const jr = program.command('jaarrekening').description('[deprecated] alias for financial-statements');
+  jr
+    .command('report')
+    .description('[deprecated] alias for financial-statements report')
+    .requiredOption('--year <yyyy>', 'fiscal year')
+    .option('--model <micro|klein>', 'statutory model', 'klein')
+    .option('--format <json|pdf|xlsx>', 'output format', 'json')
+    .option('--out <path>', 'output path (pdf/xlsx)')
+    .action(reportAction(true));
 
   const icp = program.command('icp').description('ICP listing (intracommunautaire prestaties)');
   icp

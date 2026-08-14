@@ -65,6 +65,7 @@ export default {
   },
 
   reporting: {
+    format: 'auto',
     taxonomy: 'rgs',
     // current RGS_LABELS verbatim (src/core/chart.js)
     labels: {
