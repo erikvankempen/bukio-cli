@@ -16,6 +16,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
+import { openDb } from '../src/core/db.js';
+import { validateCompliance } from '../src/invoice/index.js';
 import { getProfile, PLANNED, normalizeCountry, resolveProfile } from '../src/jurisdictions/index.js';
 
 const MIGRATIONS_DIR = path.join(import.meta.dirname, '..', 'migrations');
@@ -288,4 +290,29 @@ test('M3 company update: generic --registration-id/--tax-id work without warning
   assert.equal(r.out.data.company.registration_id, '11112222');
   assert.equal(r.out.data.company.tax_id, 'NL999999999B01');
   assert.equal(r.out.data.warnings, undefined);
+});
+
+// --- Phase A M4: profile indirection is live in the VAT + compliance paths --
+
+test('M4: obReadout resolves the profile (unknown company country -> PROFILE_NOT_FOUND)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--vat', 'on']);
+  const db = openDb(dbPath);
+  db.prepare("UPDATE company SET country = 'ZZ' WHERE id = 1").run();
+  db.close();
+  const r = cli(dbPath, ['vat', 'readout', '--period', '2026-Q2'], { expectFail: true });
+  assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
+});
+
+test('M4: validateCompliance resolves the profile (unknown company country -> PROFILE_NOT_FOUND)', () => {
+  const db = scratchDbAt(22);
+  try {
+    db.prepare("INSERT INTO company (name, country) VALUES ('Test BV', 'ZZ')").run();
+    assert.throws(
+      () => validateCompliance(db, { contact: { name: 'X', address: 'A', city: 'C' }, lines: [] }),
+      (e) => e.code === 'PROFILE_NOT_FOUND',
+    );
+  } finally {
+    db.close();
+  }
 });

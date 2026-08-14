@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-14 15:35:44 UTC — **❌ 795 passing · 2 failing (797 tests)**
+**Latest run:** 2026-08-14 15:47:07 UTC — **✅ 799 passing · 0 failing (799 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -465,7 +465,7 @@
 
 ### hardening.test.js — 
 
-85 passing · 1 failing
+86 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -551,7 +551,7 @@
     - ✅ MCP entry_reverse / invoice_credit / invoice_pay dry-runs validate like execute
     - ✅ init validates iban, vat choice and fiscal-year-end (garbage was stored silently)
     - ✅ account add/deactivate/reactivate/import are audited (they mutated silently before)
-    - ❌ every emitted error code in src/ is documented in AGENTS.md §7
+    - ✅ every emitted error code in src/ is documented in AGENTS.md §7
     - ✅ MCP on a missing database errors NO_DATABASE instead of silently creating an empty company
 
 ### import-invoice.test.js — inbound UBL (EN 16931/Peppol) invoice import into payables: idempotent, VAT reported not booked
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-22 passing · 0 failing
+24 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -719,6 +719,8 @@
     - ✅ M3 company update: --country with the SAME value passes the immutability gate
     - ✅ M3 company update: --kvk alias warns and updates registration_id
     - ✅ M3 company update: generic --registration-id/--tax-id work without warnings
+    - ✅ M4: obReadout resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M4: validateCompliance resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
 
 ### migration-021.test.js — 
 
@@ -824,7 +826,7 @@
 
 ### remote.test.js — 
 
-19 passing · 1 failing
+20 passing · 0 failing
 
     - ✅ server token: mints a single-use, actor-bound token (hashed at rest)
     - ✅ remote register: enrols a client-only key (private key never leaves the client)
@@ -841,7 +843,7 @@
     - ✅ enforcement: an unsigned envelope is refused under enforce (SIGNATURE_REQUIRED)
     - ✅ authz: a readonly actor is refused a mutation (AUTHZ_DENIED)
     - ✅ local-only commands refuse under --server (LOCAL_ONLY)
-    - ❌ health endpoint reports ok
+    - ✅ health endpoint reports ok
     - ✅ unknown route is 404
     - ✅ unreachable server: clean REMOTE_UNREACHABLE error
     - ✅ server token rejects a bad --ttl-hours value
