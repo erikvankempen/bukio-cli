@@ -13,6 +13,7 @@ import { record } from '../audit/index.js';
 import { enableVatModule } from '../vat/index.js';
 import { isValidIban } from '../core/iban.js';
 import { dbError, ensureDb, makeCtx, output, fail } from './util.js';
+import { getProfile } from '../jurisdictions/index.js';
 
 const LEGAL_FORMS = ['eenmanszaak', 'vof', 'bv', 'nv', 'stichting', 'vereniging'];
 const FY_END_RE = /^\d{2}-\d{2}$/;
@@ -22,9 +23,12 @@ export function make(program) {
     .command('init')
     .description('initialise a company database (file, company row, default chart)')
     .requiredOption('--name <name>', 'company name')
-    .option('--kvk <kvk>', 'KVK number')
+    .option('--country <CC>', 'country (ISO 3166-1 alpha-2)', 'NL')
+    .option('--registration-id <id>', 'company registration number (KVK for NL)')
+    .option('--tax-id <id>', 'tax identification number (btw-id for NL)')
+    .option('--kvk <kvk>', '[deprecated] alias for --registration-id')
     .option('--legal-form <form>', `legal form (${LEGAL_FORMS.join('|')})`, 'eenmanszaak')
-    .option('--btw-id <id>', 'BTW identification number')
+    .option('--btw-id <id>', '[deprecated] alias for --tax-id')
     .option('--iban <iban>', 'bank account (IBAN)')
     .option('--address <address>', 'street address (for compliant invoices)')
     .option('--postal-code <code>', 'postal code')
@@ -44,8 +48,15 @@ export function make(program) {
 }
 
 function buildCompany(opts) {
-  if (!LEGAL_FORMS.includes(opts.legalForm)) {
-    throw dbError('INVALID_LEGAL_FORM', `legal form '${opts.legalForm}' must be one of ${LEGAL_FORMS.join(', ')}`);
+  // jurisdiction profile: validates country (INVALID_COUNTRY /
+  // COUNTRY_NOT_SUPPORTED) and drives legal forms, the KOR gate, and the
+  // stored country/base_currency/locale/profile_version
+  const profile = getProfile(opts.country ?? 'NL');
+  if (!profile.meta.legalForms.includes(opts.legalForm)) {
+    throw dbError('INVALID_LEGAL_FORM', `legal form '${opts.legalForm}' must be one of ${profile.meta.legalForms.join(', ')}`);
+  }
+  if (opts.kor && profile.tax.smallBusinessScheme !== 'kor') {
+    throw dbError('INVALID_VAT_CHOICE', `--kor is not available for country ${profile.meta.country}`);
   }
   if (opts.vat !== 'on' && opts.vat !== 'off') {
     throw dbError('INVALID_VAT_CHOICE', `--vat must be 'on' or 'off', got '${opts.vat}'`);
@@ -64,11 +75,19 @@ function buildCompany(opts) {
   if (opts.iban && !isValidIban(opts.iban)) {
     throw dbError('INVALID_IBAN', `'${opts.iban}' is not a valid IBAN`);
   }
+  // deprecated aliases: --kvk -> --registration-id, --btw-id -> --tax-id
+  const warnings = [];
+  const registrationId = opts.registrationId != null
+    ? opts.registrationId
+    : (opts.kvk != null ? (warnings.push('--kvk is deprecated — use --registration-id'), opts.kvk) : null);
+  const taxId = opts.taxId != null
+    ? opts.taxId
+    : (opts.btwId != null ? (warnings.push('--btw-id is deprecated — use --tax-id'), opts.btwId) : null);
   return {
     name: opts.name,
-    kvk: opts.kvk ?? null,
+    registration_id: registrationId,
     legal_form: opts.legalForm,
-    btw_id: opts.btwId ?? null,
+    tax_id: taxId,
     iban: opts.iban ?? null,
     address: opts.address ?? null,
     postal_code: opts.postalCode ?? null,
@@ -76,13 +95,19 @@ function buildCompany(opts) {
     vat_module: opts.kor ? 0 : opts.vat === 'on' ? 1 : 0,
     kor_flag: opts.kor ? 1 : 0,
     fiscal_year_end: opts.fiscalYearEnd,
+    country: profile.meta.country,
+    base_currency: profile.meta.baseCurrency,
+    locale: profile.meta.locale,
+    profile_version: 1,
+    _warnings: warnings,
   };
 }
 
 function renderInit(data) {
   console.log(`company:  ${data.company.name} (${data.company.legal_form})`);
-  console.log(`kvk:      ${data.company.kvk ?? '-'}`);
-  console.log(`btw-id:   ${data.company.btw_id ?? '-'}`);
+  console.log(`country:  ${data.company.country} (${data.company.base_currency}, ${data.company.locale})`);
+  console.log(`reg-id:   ${data.company.registration_id ?? '-'}`);
+  console.log(`tax-id:   ${data.company.tax_id ?? '-'}`);
   console.log(`vat:      ${data.company.vat_module ? 'on' : 'off'}${data.company.kor_flag ? ' (KOR)' : ''}`);
   console.log(`db:       ${data.db}`);
   console.log(`chart:    ${data.chart.accounts} accounts (default chart)`);
@@ -101,6 +126,7 @@ function initAction(ctx, opts) {
       db: ctx.dbPath,
       db_exists: existsSync(ctx.dbPath),
       chart: { accounts: DEFAULT_CHART.length + (company.vat_module ? 2 : 0) },
+      ...(company._warnings.length ? { warnings: company._warnings } : {}),
       dryRun: true,
     }, renderInit);
     return;
@@ -116,11 +142,12 @@ function initAction(ctx, opts) {
   const db = ensureDb(ctx, { create: true });
   try {
     db.prepare(
-      `INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module, kor_flag, fiscal_year_end)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(company.name, company.kvk, company.legal_form, company.btw_id, company.iban,
+      `INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module, kor_flag, fiscal_year_end, country, base_currency, locale, profile_version)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(company.name, company.registration_id, company.legal_form, company.tax_id, company.iban,
       company.address, company.postal_code, company.city,
-      company.vat_module, company.kor_flag, company.fiscal_year_end);
+      company.vat_module, company.kor_flag, company.fiscal_year_end,
+      company.country, company.base_currency, company.locale, company.profile_version);
     const created = seedDefaultChart(db);
     let vatCreated = 0;
     if (company.vat_module) {
@@ -135,6 +162,7 @@ function initAction(ctx, opts) {
       company,
       db: ctx.dbPath,
       chart: { accounts: listAccounts(db).length, created: created + vatCreated },
+      ...(company._warnings.length ? { warnings: company._warnings } : {}),
       dryRun: false,
     }, renderInit);
   } finally {

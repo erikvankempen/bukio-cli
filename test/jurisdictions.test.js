@@ -10,9 +10,11 @@
 // legacy hardcoded constants exactly ("moved, not changed").
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { getProfile, PLANNED, normalizeCountry, resolveProfile } from '../src/jurisdictions/index.js';
 
@@ -187,4 +189,103 @@ test('resolveProfile throws for unsupported / unknown company countries (decisio
   } finally {
     dbZZ.close();
   }
+});
+
+// --- Phase A M3: init --country + generic identifier flags (CLI level) -----
+
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+
+function cli(dbPath, args, { expectFail = false } = {}) {
+  const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
+  const fullArgs = args.includes('--json') ? args : [...args, '--json'];
+  try {
+    const stdout = execFileSync(process.execPath, [BIN, ...fullArgs], { env, encoding: 'utf8' });
+    return { code: 0, out: JSON.parse(stdout) };
+  } catch (err) {
+    if (expectFail) return { code: err.status, out: JSON.parse(err.stdout || '{}'), err: err.stderr };
+    throw err;
+  }
+}
+
+function tmpDb() {
+  const dir = mkdtempSync(path.join(tmpdir(), 'bukio-jur-cli-'));
+  return path.join(dir, 'test.db');
+}
+
+test('M3 init: --country GB is rejected with COUNTRY_NOT_SUPPORTED', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Test BV', '--country', 'GB'], { expectFail: true });
+  assert.equal(r.code, 1);
+  assert.equal(r.out.error.code, 'COUNTRY_NOT_SUPPORTED');
+});
+
+test('M3 init: --country ZZ (valid code, no profile) is rejected with PROFILE_NOT_FOUND', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Test BV', '--country', 'ZZ'], { expectFail: true });
+  assert.equal(r.code, 1);
+  assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
+});
+
+test('M3 init: --country nl (lowercase) normalizes to NL and stores profile fields', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Test BV', '--country', 'nl', '--vat', 'on']);
+  assert.equal(r.out.data.company.country, 'NL');
+  assert.equal(r.out.data.company.base_currency, 'EUR');
+  assert.equal(r.out.data.company.locale, 'nl');
+  assert.equal(r.out.data.company.profile_version, 1);
+  const show = cli(dbPath, ['company', 'show']);
+  assert.equal(show.out.data.company.country, 'NL');
+  assert.equal(show.out.data.company.base_currency, 'EUR');
+  assert.equal(show.out.data.company.locale, 'nl');
+  assert.equal(show.out.data.company.profile_version, 1);
+});
+
+test('M3 init: generic --registration-id/--tax-id are stored; no deprecation warning', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678', '--tax-id', 'NL123456789B01']);
+  assert.equal(r.out.data.company.registration_id, '12345678');
+  assert.equal(r.out.data.company.tax_id, 'NL123456789B01');
+  assert.equal(r.out.data.warnings, undefined);
+});
+
+test('M3 init: legacy --kvk/--btw-id aliases map to the generic fields and warn', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678', '--btw-id', 'NL123456789B01']);
+  assert.equal(r.out.data.company.registration_id, '12345678');
+  assert.equal(r.out.data.company.tax_id, 'NL123456789B01');
+  assert.ok(r.out.data.warnings.some((w) => w.includes('--kvk is deprecated')));
+  assert.ok(r.out.data.warnings.some((w) => w.includes('--btw-id is deprecated')));
+});
+
+test('M3 company update: changing country is rejected with COUNTRY_IMMUTABLE', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV']);
+  const r = cli(dbPath, ['company', 'update', '--country', 'US'], { expectFail: true });
+  assert.equal(r.code, 1);
+  assert.equal(r.out.error.code, 'COUNTRY_IMMUTABLE');
+});
+
+test('M3 company update: --country with the SAME value passes the immutability gate', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV']);
+  const r = cli(dbPath, ['company', 'update', '--country', 'nl', '--city', 'Amsterdam']);
+  assert.equal(r.out.data.company.country, 'NL');
+  assert.equal(r.out.data.company.city, 'Amsterdam');
+});
+
+test('M3 company update: --kvk alias warns and updates registration_id', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV']);
+  const r = cli(dbPath, ['company', 'update', '--kvk', '87654321']);
+  assert.equal(r.out.data.company.registration_id, '87654321');
+  assert.ok(r.out.data.warnings.some((w) => w.includes('--kvk is deprecated')));
+});
+
+test('M3 company update: generic --registration-id/--tax-id work without warnings', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV']);
+  const r = cli(dbPath, ['company', 'update', '--registration-id', '11112222', '--tax-id', 'NL999999999B01']);
+  assert.equal(r.out.data.company.registration_id, '11112222');
+  assert.equal(r.out.data.company.tax_id, 'NL999999999B01');
+  assert.equal(r.out.data.warnings, undefined);
 });

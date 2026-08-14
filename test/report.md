@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-14 15:22:17 UTC — **❌ 787 passing · 1 failing (788 tests)**
+**Latest run:** 2026-08-14 15:35:44 UTC — **❌ 795 passing · 2 failing (797 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -465,7 +465,7 @@
 
 ### hardening.test.js — 
 
-86 passing · 0 failing
+85 passing · 1 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -551,7 +551,7 @@
     - ✅ MCP entry_reverse / invoice_credit / invoice_pay dry-runs validate like execute
     - ✅ init validates iban, vat choice and fiscal-year-end (garbage was stored silently)
     - ✅ account add/deactivate/reactivate/import are audited (they mutated silently before)
-    - ✅ every emitted error code in src/ is documented in AGENTS.md §7
+    - ❌ every emitted error code in src/ is documented in AGENTS.md §7
     - ✅ MCP on a missing database errors NO_DATABASE instead of silently creating an empty company
 
 ### import-invoice.test.js — inbound UBL (EN 16931/Peppol) invoice import into payables: idempotent, VAT reported not booked
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-13 passing · 0 failing
+22 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -710,6 +710,15 @@
     - ✅ resolveProfile defaults to NL on a pre-021 DB (no country column)
     - ✅ resolveProfile defaults to NL when no company row exists yet
     - ✅ resolveProfile throws for unsupported / unknown company countries (decision §9.1.6)
+    - ✅ M3 init: --country GB is rejected with COUNTRY_NOT_SUPPORTED
+    - ✅ M3 init: --country ZZ (valid code, no profile) is rejected with PROFILE_NOT_FOUND
+    - ✅ M3 init: --country nl (lowercase) normalizes to NL and stores profile fields
+    - ✅ M3 init: generic --registration-id/--tax-id are stored; no deprecation warning
+    - ✅ M3 init: legacy --kvk/--btw-id aliases map to the generic fields and warn
+    - ✅ M3 company update: changing country is rejected with COUNTRY_IMMUTABLE
+    - ✅ M3 company update: --country with the SAME value passes the immutability gate
+    - ✅ M3 company update: --kvk alias warns and updates registration_id
+    - ✅ M3 company update: generic --registration-id/--tax-id work without warnings
 
 ### migration-021.test.js — 
 
