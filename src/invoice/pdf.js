@@ -109,7 +109,7 @@ export function invoiceHtml(db, invoice) {
         <h1>${esc(company.name)}</h1>
         <p>${esc(company.address)}</p>
         <p>${esc(company.postal_code)} ${esc(company.city)}</p>
-        <p>${L('kvk')} ${esc(company.kvk)} · ${L('btw')} ${esc(company.btw_id)}</p>
+        <p>${L('kvk')} ${esc(company.registration_id)} · ${L('btw')} ${esc(company.tax_id)}</p>
       </div>
     </div>
     <div class="title">

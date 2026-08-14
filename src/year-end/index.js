@@ -153,7 +153,7 @@ export function yearEndClose(db, { year, actor = 'human', dryRun = false }) {
   const closeDate = fyTo;
   const tx = db.transaction(() => {
     if (resultCents !== 0 && !getAccountByCode(db, '9900')) {
-      createAccount(db, { code: '9900', name: 'Resultaat boekjaar', type: 'equity', normalBalance: 'credit', rgsCode: 'BEIV.05' });
+      createAccount(db, { code: '9900', name: 'Resultaat boekjaar', type: 'equity', normalBalance: 'credit', taxonomyCode: 'BEIV.05' });
     }
     const e1 = createEntry(db, {
       date: closeDate, description: `Afsluiting boekjaar ${year}`,

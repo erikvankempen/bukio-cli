@@ -672,10 +672,10 @@ export function validateCompliance(db, invoice) {
   // The supplier btw-id is a factuurvereiste only when the supplier HAS one
   // (art. 35a Wet OB) — a VAT-exempt business (vat module off, no btw-id)
   // must still be able to invoice.
-  const supplierHasVat = company.vat_module === 1 || Boolean(company.btw_id);
+  const supplierHasVat = company.vat_module === 1 || Boolean(company.tax_id);
   if (!company.name) missingSupplier.push('bedrijfsnaam');
-  if (supplierHasVat && !company.btw_id) missingSupplier.push('btw-id');
-  if (!company.kvk) missingSupplier.push('kvk-nummer');
+  if (supplierHasVat && !company.tax_id) missingSupplier.push('btw-id');
+  if (!company.registration_id) missingSupplier.push('kvk-nummer');
   if (!company.address) missingSupplier.push('adres');
   if (!company.postal_code) missingSupplier.push('postcode');
   if (!company.city) missingSupplier.push('plaats');
@@ -918,7 +918,7 @@ export function ensureFxDifferenceAccount(db, { actor = 'human' } = {}) {
   if (!account) {
     account = createAccount(db, {
       code: '4840', name: 'Koersverschillen', type: 'expense',
-      normalBalance: 'debit', rgsCode: 'WFBE.84',
+      normalBalance: 'debit', taxonomyCode: 'WFBE.84',
     });
     record(db, {
       actor, action: 'account.create', command: 'bank match',

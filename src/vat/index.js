@@ -15,8 +15,8 @@ import { formatAmount } from '../core/money.js';
 import { record } from '../audit/index.js';
 
 export const VAT_ACCOUNTS = [
-  { code: '1500', name: 'Te vorderen omzetbelasting', type: 'asset', normalBalance: 'debit', rgsCode: 'BVOR.11' },
-  { code: '2500', name: 'Te betalen omzetbelasting', type: 'liability', normalBalance: 'credit', rgsCode: 'BSCH.12' },
+  { code: '1500', name: 'Te vorderen omzetbelasting', type: 'asset', normalBalance: 'debit', taxonomyCode: 'BVOR.11' },
+  { code: '2500', name: 'Te betalen omzetbelasting', type: 'liability', normalBalance: 'credit', taxonomyCode: 'BSCH.12' },
 ];
 
 export const VAT_CODES = [
@@ -347,7 +347,7 @@ function ensureAfTeDragenAccount(db, account) {
   if (!getAccountByCode(db, resolved)) {
     createAccount(db, {
       code: resolved, name: AF_TE_DRAGEN_NAME, type: 'liability',
-      normalBalance: 'credit', rgsCode: 'BSCH.12',
+      normalBalance: 'credit', taxonomyCode: 'BSCH.12',
     });
   }
   return resolved;

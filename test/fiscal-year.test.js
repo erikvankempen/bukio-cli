@@ -39,7 +39,7 @@ function cli(dbPath, args) {
 function makeFiscalDb() {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-fiscal-'));
   const db = openDb(path.join(dir, 'test.db'));
-  db.prepare('INSERT INTO company (name, kvk, fiscal_year_end) VALUES (?, ?, ?)').run('Test Coaching', '12345678', '03-31');
+  db.prepare('INSERT INTO company (name, registration_id, fiscal_year_end) VALUES (?, ?, ?)').run('Test Coaching', '12345678', '03-31');
   seedDefaultChart(db);
   createEntry(db, { date: '2026-01-15', description: 'jan 2026 (prev FY)', postings: [{ code: '1100', amountCents: 10000 }, { code: '8000', amountCents: -10000 }] });
   createEntry(db, { date: '2026-11-15', description: 'nov 2026 (this FY)', postings: [{ code: '1100', amountCents: 20000 }, { code: '8000', amountCents: -20000 }] });
@@ -106,7 +106,7 @@ test('sales() uses the fiscal window for --year', () => {
   const dbPath = path.join(dir, 'test.db');
   try {
     const db = openDb(dbPath);
-    db.prepare('INSERT INTO company (name, kvk, fiscal_year_end, address, postal_code, city) VALUES (?, ?, ?, ?, ?, ?)').run('Test Coaching', '12345678', '03-31', 'Teststraat 1', '1000 AA', 'Amsterdam');
+    db.prepare('INSERT INTO company (name, registration_id, fiscal_year_end, address, postal_code, city) VALUES (?, ?, ?, ?, ?, ?)').run('Test Coaching', '12345678', '03-31', 'Teststraat 1', '1000 AA', 'Amsterdam');
     seedDefaultChart(db);
     const c = createContact(db, { name: 'Acme BV', address: 'Straat 1', postalCode: '1000 AA', city: 'Amsterdam' });
     // invoice dated 2026-01-20 (prev FY) and 2026-11-20 (this FY)

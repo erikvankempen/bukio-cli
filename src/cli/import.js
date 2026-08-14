@@ -143,7 +143,7 @@ export function make(program) {
           const result = importXaf(db, { xmlText, actor: ctx.actor, dryRun: ctx.dryRun });
           if (ctx.dryRun) {
             output(ctx, result, (d) => {
-              console.log(`plan: import XAF 4.0 — ${d.company.name ?? 'unknown company'} (${d.company.kvk ?? 'no kvk'}) ${d.company.fiscal_year ?? ''}`);
+              console.log(`plan: import XAF 4.0 — ${d.company.name ?? 'unknown company'} (${d.company.registration_id ?? 'no kvk'}) ${d.company.fiscal_year ?? ''}`);
               console.log(`  ${d.rekeningen} rekeningen / ${d.mutaties} mutaties`);
               if (d.accounts_to_create) console.log(`  ${d.accounts_to_create} accounts will be created`);
               if (d.accounts_to_rename?.length) {
@@ -166,7 +166,7 @@ export function make(program) {
               console.log(`renamed accounts: ${d.accounts_updated.map((a) => `${a.code} '${a.from}' -> '${a.to}'`).join(', ')}`);
             }
             if (d.accounts_rgs_backfilled?.length) {
-              console.log(`RGS backfilled: ${d.accounts_rgs_backfilled.map((a) => `${a.code} ${a.name} -> ${a.rgs_code}`).join(', ')}`);
+              console.log(`RGS backfilled: ${d.accounts_rgs_backfilled.map((a) => `${a.code} ${a.name} -> ${a.taxonomy_code}`).join(', ')}`);
             }
             for (const w of d.chart_warnings ?? []) console.log(`  warning: ${w}`);
             if (d.ignored_btw_codes.length) {

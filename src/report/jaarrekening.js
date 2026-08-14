@@ -62,20 +62,20 @@ function groupSections(sections, lines) {
   });
   const out = [];
   for (const line of lines) {
-    const hits = sections.filter((s) => s.rgs_code === line.rgs);
+    const hits = sections.filter((s) => s.taxonomy_code === line.rgs);
     if (!hits.length) continue;
     out.push({
       label: line.label,
-      rgs_code: line.rgs,
+      taxonomy_code: line.rgs,
       sections: hits.map(normalize),
       total_cents: hits.reduce((s, g) => s + g.total_cents, 0),
     });
   }
-  const leftover = sections.filter((s) => !known.has(s.rgs_code));
+  const leftover = sections.filter((s) => !known.has(s.taxonomy_code));
   if (leftover.length) {
     out.push({
       label: 'Overig',
-      rgs_code: null,
+      taxonomy_code: null,
       sections: leftover.map(normalize),
       total_cents: leftover.reduce((s, g) => s + g.total_cents, 0),
     });
@@ -102,19 +102,19 @@ export function jaarrekening(db, { year, model = 'klein' }) {
   const passivaSections = groupSections(b.liabilities_and_equity.sections, PASSIVA_LINES);
   // onverdeeld resultaat folds into Eigen vermogen (pre-close) as its own line
   if (b.liabilities_and_equity.result_cents !== 0) {
-    const ev = passivaSections.find((s) => s.rgs_code === 'BEIV.05');
+    const ev = passivaSections.find((s) => s.taxonomy_code === 'BEIV.05');
     if (ev) {
       ev.total_cents += b.liabilities_and_equity.result_cents;
       ev.sections.push({
-        rgs_code: null, label: 'Onverdeeld resultaat',
+        taxonomy_code: null, label: 'Onverdeeld resultaat',
         accounts: [{ code: '—', name: 'Resultaat boekjaar', amount_cents: b.liabilities_and_equity.result_cents }],
         total_cents: b.liabilities_and_equity.result_cents,
       });
     } else {
       passivaSections.push({
-        label: 'Eigen vermogen', rgs_code: 'BEIV.05',
+        label: 'Eigen vermogen', taxonomy_code: 'BEIV.05',
         sections: [{
-          rgs_code: null, label: 'Onverdeeld resultaat',
+          taxonomy_code: null, label: 'Onverdeeld resultaat',
           accounts: [{ code: '—', name: 'Resultaat boekjaar', amount_cents: b.liabilities_and_equity.result_cents }],
           total_cents: b.liabilities_and_equity.result_cents,
         }],
@@ -129,7 +129,7 @@ export function jaarrekening(db, { year, model = 'klein' }) {
     year,
     model,
     company: {
-      name: company.name, kvk: company.kvk, btw_id: company.btw_id,
+      name: company.name, kvk: company.registration_id, btw_id: company.tax_id,
       legal_form: company.legal_form, address: company.address,
       postal_code: company.postal_code, city: company.city,
     },
@@ -152,13 +152,13 @@ export function jaarrekening(db, { year, model = 'klein' }) {
     const [pnlFrom, pnlTo] = fiscalYearWindow(db, year);
     const p = pnl(db, { from: pnlFrom, to: pnlTo });
     const pnlLines = groupSections(p.sections, PNL_LINES);
-    const omzet = pnlLines.find((l) => l.rgs_code === 'WOMZ.80')?.total_cents ?? 0;
-    const overige = pnlLines.find((l) => l.rgs_code === 'WOVB.82')?.total_cents ?? 0;
-    const inkoop = pnlLines.find((l) => l.rgs_code === 'WKPR.70')?.total_cents ?? 0;
+    const omzet = pnlLines.find((l) => l.taxonomy_code === 'WOMZ.80')?.total_cents ?? 0;
+    const overige = pnlLines.find((l) => l.taxonomy_code === 'WOVB.82')?.total_cents ?? 0;
+    const inkoop = pnlLines.find((l) => l.taxonomy_code === 'WKPR.70')?.total_cents ?? 0;
     // pure operating costs: everything except omzet (80), inkoopwaarde (70)
     // and overige bedrijfsopbrengsten (82) — WKPR.70 must NOT be inside
     // kosten or resultaat would subtract it twice
-    const kosten = pnlLines.filter((l) => !['WOMZ.80', 'WKPR.70', 'WOVB.82'].includes(l.rgs_code))
+    const kosten = pnlLines.filter((l) => !['WOMZ.80', 'WKPR.70', 'WOVB.82'].includes(l.taxonomy_code))
       .reduce((s, l) => s + l.total_cents, 0);
     report.pnl = {
       lines: pnlLines,

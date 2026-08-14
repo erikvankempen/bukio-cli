@@ -47,7 +47,7 @@ function pnlLines(report) {
  */
 function microResultCents(report) {
   for (const s of report.balans?.passiva ?? []) {
-    if (s.rgs_code === null && s.label === 'Onverdeeld resultaat') return s.total_cents;
+    if (s.taxonomy_code === null && s.label === 'Onverdeeld resultaat') return s.total_cents;
   }
   return 0;
 }

@@ -39,10 +39,10 @@ test('balans: assets = liabilities + equity + result', () => {
   assert.equal(b.liabilities_and_equity.total_cents, 1096000);
   assert.equal(b.liabilities_and_equity.result_cents, 96000); // 121.000 - 25.000
 
-  const blim = b.assets.sections.find((s) => s.rgs_code === 'BLIM.10');
+  const blim = b.assets.sections.find((s) => s.taxonomy_code === 'BLIM.10');
   assert.equal(blim.label, 'Liquide middelen');
   assert.equal(blim.total_cents, 1096000);
-  const ev = b.liabilities_and_equity.sections.find((s) => s.rgs_code === 'BEIV.05');
+  const ev = b.liabilities_and_equity.sections.find((s) => s.taxonomy_code === 'BEIV.05');
   assert.equal(ev.total_cents, 1000000);
 });
 
@@ -81,9 +81,9 @@ test('pnl: revenue, costs and result', () => {
   assert.equal(p.revenue_cents, 121000);
   assert.equal(p.costs_cents, 25000);
   assert.equal(p.result_cents, 96000);
-  const omzet = p.sections.find((s) => s.rgs_code === 'WOMZ.80');
+  const omzet = p.sections.find((s) => s.taxonomy_code === 'WOMZ.80');
   assert.equal(omzet.total_cents, 121000);
-  const kosten = p.sections.find((s) => s.rgs_code === 'WBED.42');
+  const kosten = p.sections.find((s) => s.taxonomy_code === 'WBED.42');
   assert.equal(kosten.total_cents, 25000);
 });
 
@@ -95,14 +95,14 @@ test('pnl: empty period gives zero result and no sections', () => {
 
 test('pnl: legacy chart without RGS codes still splits revenue/costs by type', () => {
   // accounts created from an audit-file import carry NO rgs codes (pre-fix
-  // data); revenue/costs must be driven by account type, not rgs_code
+  // data); revenue/costs must be driven by account type, not taxonomy_code
   for (const [code, name, type] of [
     ['8200', 'Omzet diensten', 'income'],
     ['6531', 'Kosten IT', 'expense'],
     ['6710', 'Afschrijvingskosten', 'expense'],
     ['9100', 'Rentebaten', 'expense'], // contra-expense account
   ]) {
-    createAccount(db, { code, name, type, normalBalance: type === 'income' ? 'credit' : 'debit', rgsCode: null });
+    createAccount(db, { code, name, type, normalBalance: type === 'income' ? 'credit' : 'debit', taxonomyCode: null });
   }
   post('2026-03-01', 'Factuur', [{ code: '1100', amountCents: 29420 }, { code: '8200', amountCents: -29420 }]);
   post('2026-03-02', 'Hosting', [{ code: '6531', amountCents: 24036 }, { code: '1100', amountCents: -24036 }]);
@@ -115,7 +115,7 @@ test('pnl: legacy chart without RGS codes still splits revenue/costs by type', (
   assert.equal(p.result_cents, 29420 - (24036 + 29976 - 11716)); // -319.51-style
 });
 
-test('pnl: catch-all section for accounts with unknown rgs_code', () => {
+test('pnl: catch-all section for accounts with unknown taxonomy_code', () => {
   createAccount(db, { code: '5000', name: 'Testkosten', type: 'expense', normalBalance: 'debit' });
   post('2026-05-01', 'Testkosten', [{ code: '5000', amountCents: 1000 }, { code: '1100', amountCents: -1000 }]);
   const p = pnl(db, { from: '2026-01-01', to: '2026-12-31' });

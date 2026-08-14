@@ -8,7 +8,7 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import Database from 'better-sqlite3';
 import crypto from 'node:crypto';
-import { mkdtempSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, copyFileSync, readdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { openDb, migrate } from '../src/core/db.js';
@@ -59,6 +59,24 @@ test('args null is stored and read back as null', () => {
 
 const SIG_COLUMNS = ['digest_hash', 'sig_keyid', 'sig_nonce', 'sig_ts', 'sig', 'sig_status'];
 
+const MIGRATIONS_DIR = path.join(import.meta.dirname, '..', 'migrations');
+
+/** Scratch DB built by applying the REAL migrations 001..version (verbatim). */
+function buildDbThrough(version) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-audit-mig-'));
+  const file = path.join(dir, 'upgrade.db');
+  const db = new Database(file);
+  for (const f of readdirSync(MIGRATIONS_DIR)
+    .filter((x) => /^\d+_.*\.sql$/.test(x))
+    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))) {
+    const v = parseInt(f.split('_')[0], 10);
+    if (v > version) continue;
+    db.exec(readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8'));
+  }
+  db.pragma(`user_version = ${version}`);
+  return { db, file };
+}
+
 function auditColumns(db) {
   return db.prepare('PRAGMA table_info(audit_log)').all().map((c) => c.name);
 }
@@ -68,7 +86,7 @@ test('migration 018: fresh DB gains the six signature columns + actor_keys + set
   const keys = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
   assert.ok(keys.includes('actor_keys'));
   assert.ok(keys.includes('settings'));
-  assert.equal(db.pragma('user_version', { simple: true }), 20);
+  assert.equal(db.pragma('user_version', { simple: true }), 22);
 });
 
 test('migration 019: actor_keys gains a composite (actor, keyid) primary key', () => {
@@ -79,18 +97,9 @@ test('migration 019: actor_keys gains a composite (actor, keyid) primary key', (
 });
 
 test('migration 019: a v18 DB with single-row actor_keys upgrades without data loss', () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-audit-v18-'));
-  const v18 = path.join(dir, 'v18.db');
-  const raw = new Database(v18);
-  raw.pragma('user_version = 18');
-  raw.exec(`CREATE TABLE actor_keys (
-    actor TEXT PRIMARY KEY, keyid TEXT NOT NULL, public_key TEXT NOT NULL,
-    enrolled_at TEXT NOT NULL, revoked_at TEXT, revoked_reason TEXT
-  )`);
-  // a real v18 DB carries the 018 additions: settings (signing_enforce)
-  // + the audit signature columns; migration 020 reads settings, so the
-  // fixture must include it
-  raw.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)');
+  // a REAL v18 DB (migrations 001-018 applied verbatim) — this also exercises
+  // the 021/022 schema changes on the same upgrade chain
+  const { db: raw, file: v18 } = buildDbThrough(18);
   raw.prepare('INSERT INTO actor_keys (actor, keyid, public_key, enrolled_at, revoked_at, revoked_reason) VALUES (?, ?, ?, ?, ?, ?)')
     .run('agent:bartholomeus', 'ab'.repeat(16), 'PUBKEY-PEM', '2026-08-10T00:00:00.000Z', '2026-08-10T01:00:00.000Z', 'test');
   raw.close();
@@ -107,16 +116,9 @@ test('migration 019: a v18 DB with single-row actor_keys upgrades without data l
 });
 
 test('migration 018: existing DB keeps legacy rows with sig_status = unsigned', () => {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-audit-legacy-'));
-  const legacyPath = path.join(dir, 'legacy.db');
-  const raw = new Database(legacyPath);
-  raw.pragma('user_version = 17');
-  raw.exec(`CREATE TABLE audit_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-    actor TEXT NOT NULL, action TEXT NOT NULL, command TEXT,
-    args_json TEXT, outcome TEXT, entry_ids TEXT
-  )`);
+  // a REAL v17 DB (migrations 001-017 applied verbatim) — the audit_log at
+  // 017 is exactly the legacy shape below; 018 adds the signature columns
+  const { db: raw, file: legacyPath } = buildDbThrough(17);
   raw.prepare('INSERT INTO audit_log (actor, action, outcome) VALUES (?, ?, ?)')
     .run('human:erik', 'company.init', 'ok');
   raw.close();

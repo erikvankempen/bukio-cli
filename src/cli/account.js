@@ -15,7 +15,7 @@ import { record } from '../audit/index.js';
 
 function serializeAccount(a) {
   return {
-    code: a.code, name: a.name, type: a.type, rgs_code: a.rgs_code,
+    code: a.code, name: a.name, type: a.type, taxonomy_code: a.taxonomy_code,
     normal_balance: a.normal_balance, active: Boolean(a.active),
   };
 }
@@ -38,8 +38,8 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           if (ctx.dryRun) {
-            const plan = { code: opts.code, name: opts.name, type: opts.type, normal_balance: opts.normalBalance, rgs_code: opts.rgsCode ?? null };
-            validateAccount({ code: opts.code, name: opts.name, type: opts.type, normalBalance: opts.normalBalance, rgsCode: opts.rgsCode });
+            const plan = { code: opts.code, name: opts.name, type: opts.type, normal_balance: opts.normalBalance, taxonomy_code: opts.taxonomyCode ?? null };
+            validateAccount({ code: opts.code, name: opts.name, type: opts.type, normalBalance: opts.normalBalance, taxonomyCode: opts.taxonomyCode });
             const exists = getAccountByCode(db, opts.code);
             output(ctx, { action: 'add account', account: plan, exists: Boolean(exists), dryRun: true }, (d) => {
               console.log(`plan: add account ${d.account.code} ${d.account.name} (${d.account.type}/${d.account.normal_balance})`);
@@ -50,11 +50,11 @@ export function make(program) {
           }
           const accountRow = createAccount(db, {
             code: opts.code, name: opts.name, type: opts.type,
-            normalBalance: opts.normalBalance, rgsCode: opts.rgsCode ?? null,
+            normalBalance: opts.normalBalance, taxonomyCode: opts.taxonomyCode ?? null,
           });
           record(db, {
             actor: ctx.actor, action: 'account.add', command: 'account add',
-            args: { code: opts.code, name: opts.name, type: opts.type, normal_balance: opts.normalBalance, rgs_code: opts.rgsCode ?? null },
+            args: { code: opts.code, name: opts.name, type: opts.type, normal_balance: opts.normalBalance, taxonomy_code: opts.taxonomyCode ?? null },
             outcome: 'ok',
           });
           output(ctx, serializeAccount(accountRow), (a) => {
@@ -86,7 +86,7 @@ export function make(program) {
               { key: 'name', label: 'name' },
               { key: 'type', label: 'type' },
               { key: 'normal_balance', label: 'bal' },
-              { key: 'rgs_code', label: 'rgs' },
+              { key: 'taxonomy_code', label: 'rgs' },
               { key: 'active', label: 'active' },
             ]);
           });
@@ -111,7 +111,7 @@ export function make(program) {
           if (!a) throw Object.assign(new Error(`account ${opts.code} does not exist`), { code: 'ACCOUNT_NOT_FOUND' });
           output(ctx, serializeAccount(a), (row) => {
             console.log(`${row.code}  ${row.name}`);
-            console.log(`type: ${row.type}  normal balance: ${row.normal_balance}  rgs: ${row.rgs_code ?? '-'}  active: ${row.active}`);
+            console.log(`type: ${row.type}  normal balance: ${row.normal_balance}  rgs: ${row.taxonomy_code ?? '-'}  active: ${row.active}`);
           });
         } finally {
           db.close();
@@ -189,7 +189,7 @@ export function make(program) {
 
   account
     .command('import')
-    .description('import a chart from CSV: code,name,type,normal_balance[,rgs_code]')
+    .description('import a chart from CSV: code,name,type,normal_balance[,taxonomy_code]')
     .requiredOption('--file <path>', 'chart CSV file')
     .option('--dry-run', 'validate the file without importing')
     .action(async (opts, command) => {

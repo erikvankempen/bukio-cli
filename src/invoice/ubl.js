@@ -42,9 +42,9 @@ function addressBlock(partyName, p, taxId = null) {
   // Peppol BIS 3.0 BT-34: Seller electronic address (cbc:EndpointID, 1..1).
   // For Dutch companies this is the KVK number under scheme 9944 (the Peppol
   // registry code for the Dutch Chamber of Commerce). Emitted when present —
-  // the seller's kvk is always set (finalize requires it).
-  const endpoint = p.kvk
-    ? `\n        <cbc:EndpointID schemeID="9944">${esc(p.kvk)}</cbc:EndpointID>`
+  // the seller's registration id is always set (finalize requires it).
+  const endpoint = p.registration_id
+    ? `\n        <cbc:EndpointID schemeID="9944">${esc(p.registration_id)}</cbc:EndpointID>`
     : '';
   return `
         <cac:Party>${endpoint}
@@ -58,7 +58,7 @@ function addressBlock(partyName, p, taxId = null) {
           ${taxId ? `<cac:PartyTaxScheme><cbc:CompanyID schemeID="VAT">${esc(taxId)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
           <cac:PartyLegalEntity>
             <cbc:RegistrationName>${esc(partyName)}</cbc:RegistrationName>
-            ${p.kvk ? `<cbc:CompanyID>${esc(p.kvk)}</cbc:CompanyID>` : ''}
+            ${p.registration_id ? `<cbc:CompanyID>${esc(p.registration_id)}</cbc:CompanyID>` : ''}
           </cac:PartyLegalEntity>
         </cac:Party>`;
 }
@@ -224,7 +224,7 @@ export function invoiceToUbl(db, invoice) {
       <cbc:ID>${esc(creditBillingRef)}</cbc:ID>
     </cac:InvoiceDocumentReference>
   </cac:BillingReference>` : ''}
-  <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.btw_id)}</cac:AccountingSupplierParty>
+  <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.tax_id)}</cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
     <cac:Party>
       ${contact.kvk ? `<cbc:EndpointID schemeID="9944">${esc(contact.kvk)}</cbc:EndpointID>` : ''}

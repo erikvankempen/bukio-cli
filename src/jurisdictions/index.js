@@ -65,3 +65,23 @@ export function getProfile(country) {
   }
   return profile;
 }
+
+/**
+ * Resolve the profile for a company DB (reads company.country).
+ * - no company row yet (pre-init) or no country column (pre-migration-021)
+ *   → 'NL' default
+ * - company.country set → getProfile(country) (throws PROFILE_NOT_FOUND /
+ *   COUNTRY_NOT_SUPPORTED per decision §9.1.6 — never a silent fallback)
+ * Consumers must use THIS resolver — never read company.country directly.
+ */
+export function resolveProfile(db) {
+  let country = null;
+  try {
+    const row = db.prepare('SELECT country FROM company WHERE id = 1').get();
+    country = row ? row.country : null;
+  } catch {
+    // pre-021 schema: no country column — NL default
+    country = null;
+  }
+  return getProfile(country ?? 'NL');
+}

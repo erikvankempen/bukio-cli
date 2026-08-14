@@ -24,7 +24,7 @@ const IBAN = 'NL91ABNA0417164300'; // valid test IBAN (ABN AMRO)
 beforeEach(() => {
   db = openDb(':memory:');
   seedDefaultChart(db);
-  db.prepare("INSERT INTO company (name, kvk, legal_form, iban, vat_module) VALUES ('Demo BV', '12345678', 'bv', ?, 0)").run(IBAN);
+  db.prepare("INSERT INTO company (name, registration_id, legal_form, iban, vat_module) VALUES ('Demo BV', '12345678', 'bv', ?, 0)").run(IBAN);
 });
 
 const vendor = () => createContact(db, { name: 'Vimexx', iban: 'NL02ABNA0123456789', actor: 'agent:test' });

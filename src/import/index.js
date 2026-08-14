@@ -142,17 +142,17 @@ function ensureAccount(db, code, name, netCents, createdList, typeHint = null) {
   const existing = getAccountByCode(db, code);
   if (existing) {
     const inferred = inferRgs(existing.type, existing.name);
-    if (inferred && existing.rgs_code !== inferred) {
-      db.prepare('UPDATE accounts SET rgs_code = ? WHERE id = ?').run(inferred, existing.id);
+    if (inferred && existing.taxonomy_code !== inferred) {
+      db.prepare('UPDATE accounts SET taxonomy_code = ? WHERE id = ?').run(inferred, existing.id);
     }
     return existing;
   }
   const { type, normalBalance } = typeHint ?? inferAccountType(code, netCents);
   const account = createAccount(db, {
     code, name: name || `Rekening ${code}`, type, normalBalance,
-    rgsCode: inferRgs(type, name || `Rekening ${code}`),
+    taxonomyCode: inferRgs(type, name || `Rekening ${code}`),
   });
-  createdList.push({ code: account.code, name: account.name, type: account.type, normal_balance: account.normal_balance, rgs_code: account.rgs_code });
+  createdList.push({ code: account.code, name: account.name, type: account.type, normal_balance: account.normal_balance, taxonomy_code: account.taxonomy_code });
   return account;
 }
 
@@ -170,16 +170,16 @@ function syncAccountFromFile(db, code, name, typeHint, createdList, updatedList,
     const { type, normalBalance } = typeHint ?? inferAccountType(code, 0);
     const account = createAccount(db, {
       code, name: cleanName, type, normalBalance,
-      rgsCode: inferRgs(type, cleanName),
+      taxonomyCode: inferRgs(type, cleanName),
     });
-    createdList.push({ code: account.code, name: account.name, type: account.type, normal_balance: account.normal_balance, rgs_code: account.rgs_code });
+    createdList.push({ code: account.code, name: account.name, type: account.type, normal_balance: account.normal_balance, taxonomy_code: account.taxonomy_code });
     return;
   }
-  if (existing.rgs_code !== inferRgs(existing.type, existing.name)) {
+  if (existing.taxonomy_code !== inferRgs(existing.type, existing.name)) {
     const rgs = inferRgs(existing.type, existing.name);
     if (rgs) {
-      db.prepare('UPDATE accounts SET rgs_code = ? WHERE id = ?').run(rgs, existing.id);
-      rgsBackfilledList.push({ code: existing.code, name: existing.name, rgs_code: rgs });
+      db.prepare('UPDATE accounts SET taxonomy_code = ? WHERE id = ?').run(rgs, existing.id);
+      rgsBackfilledList.push({ code: existing.code, name: existing.name, taxonomy_code: rgs });
     }
   }
   const nameDiffers = String(existing.name).trim().toLowerCase() !== cleanName.toLowerCase();
@@ -194,9 +194,9 @@ function syncAccountFromFile(db, code, name, typeHint, createdList, updatedList,
   // a chart-authoritative rename also realigns the RGS code (the name/type
   // usually change together, e.g. 1100 Bank -> 1100 Gebouwen: BLIM.10 -> BMVA.02)
   const rgs = inferRgs(type, cleanName);
-  db.prepare('UPDATE accounts SET name = ?, type = ?, normal_balance = ?, rgs_code = ? WHERE id = ?')
-    .run(cleanName, type, normalBalance, rgs ?? existing.rgs_code, existing.id);
-  updatedList.push({ code, from: before, to: cleanName, type, normal_balance: normalBalance, rgs_code: rgs });
+  db.prepare('UPDATE accounts SET name = ?, type = ?, normal_balance = ?, taxonomy_code = ? WHERE id = ?')
+    .run(cleanName, type, normalBalance, rgs ?? existing.taxonomy_code, existing.id);
+  updatedList.push({ code, from: before, to: cleanName, type, normal_balance: normalBalance, taxonomy_code: rgs });
 }
 
 // --- opening balances -------------------------------------------------------
@@ -552,10 +552,10 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
   const fileName = header.CompanyName ? String(header.CompanyName).trim() : null;
   const companyMismatch = [];
   if (company) {
-    if (fileKvk && company.kvk && fileKvk !== company.kvk) {
-      throw importError('COMPANY_MISMATCH', `audit file is for ${fileKvk} (${fileName ?? 'unknown'}), database is for ${company.kvk} (${company.name})`);
+    if (fileKvk && company.registration_id && fileKvk !== company.registration_id) {
+      throw importError('COMPANY_MISMATCH', `audit file is for ${fileKvk} (${fileName ?? 'unknown'}), database is for ${company.registration_id} (${company.name})`);
     }
-    if (fileKvk && !company.kvk) {
+    if (fileKvk && !company.registration_id) {
       companyMismatch.push(`database has no KVK; file is for ${fileKvk}`);
     }
     if (fileName && company.name && fileName !== company.name) {
@@ -851,8 +851,8 @@ function importAuditFileLayout(db, { auditFile, actor, dryRun }) {
   const currency = String(header.CurrencyCode ?? 'EUR').trim();
   const companyMismatch = [];
   if (company) {
-    if (fileKvk && /^\d{8}$/.test(fileKvk) && company.kvk && fileKvk !== company.kvk) {
-      throw importError('COMPANY_MISMATCH', `audit file is for ${fileKvk} (${fileName ?? 'unknown'}), database is for ${company.kvk} (${company.name})`);
+    if (fileKvk && /^\d{8}$/.test(fileKvk) && company.registration_id && fileKvk !== company.registration_id) {
+      throw importError('COMPANY_MISMATCH', `audit file is for ${fileKvk} (${fileName ?? 'unknown'}), database is for ${company.registration_id} (${company.name})`);
     }
     if (fileName && company.name && fileName.toLowerCase() !== company.name.toLowerCase()) {
       companyMismatch.push(`company name differs: file '${fileName}' vs database '${company.name}'`);

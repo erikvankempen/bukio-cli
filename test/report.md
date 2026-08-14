@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-12 05:23:19 UTC — **✅ 773 passing · 0 failing (773 tests)**
+**Latest run:** 2026-08-14 15:22:17 UTC — **❌ 787 passing · 1 failing (788 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -693,6 +693,31 @@
     - ✅ validateCompliance: VAT company without btw-id still fails SUPPLIER_INCOMPLETE
     - ✅ createContact: dashed IBAN is stored in the canonical dash-free form (normalizer parity)
 
+### jurisdictions.test.js — 
+
+13 passing · 0 failing
+
+    - ✅ getProfile returns the NL profile for NL (any case)
+    - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
+    - ✅ getProfile throws COUNTRY_NOT_SUPPORTED for valid-but-planned countries
+    - ✅ getProfile throws PROFILE_NOT_FOUND for unknown valid codes
+    - ✅ profiles are deep-frozen (static data — no consumer may mutate)
+    - ✅ NL profile integrity — tax section matches the legacy VAT module
+    - ✅ NL profile integrity — reporting section matches the legacy chart
+    - ✅ NL profile integrity — identifiers, compliance, documents, closing
+    - ✅ normalizeCountry trims and uppercases
+    - ✅ resolveProfile returns the NL profile for a company with country NL
+    - ✅ resolveProfile defaults to NL on a pre-021 DB (no country column)
+    - ✅ resolveProfile defaults to NL when no company row exists yet
+    - ✅ resolveProfile throws for unsupported / unknown company countries (decision §9.1.6)
+
+### migration-021.test.js — 
+
+2 passing · 0 failing
+
+    - ✅ migrations 021+022 upgrade a 020 DB: new columns, CHECK removals, renames, backfill
+    - ✅ migration 021 keeps company data lossless across the rebuild
+
 ### money.test.js — integer-cents money helpers
 
 5 passing · 0 failing
@@ -790,7 +815,7 @@
 
 ### remote.test.js — 
 
-20 passing · 0 failing
+19 passing · 1 failing
 
     - ✅ server token: mints a single-use, actor-bound token (hashed at rest)
     - ✅ remote register: enrols a client-only key (private key never leaves the client)
@@ -807,7 +832,7 @@
     - ✅ enforcement: an unsigned envelope is refused under enforce (SIGNATURE_REQUIRED)
     - ✅ authz: a readonly actor is refused a mutation (AUTHZ_DENIED)
     - ✅ local-only commands refuse under --server (LOCAL_ONLY)
-    - ✅ health endpoint reports ok
+    - ❌ health endpoint reports ok
     - ✅ unknown route is 404
     - ✅ unreachable server: clean REMOTE_UNREACHABLE error
     - ✅ server token rejects a bad --ttl-hours value
@@ -842,7 +867,7 @@
     - ✅ pnl: revenue, costs and result
     - ✅ pnl: empty period gives zero result and no sections
     - ✅ pnl: legacy chart without RGS codes still splits revenue/costs by type
-    - ✅ pnl: catch-all section for accounts with unknown rgs_code
+    - ✅ pnl: catch-all section for accounts with unknown taxonomy_code
     - ✅ journal: one row per posting, ordered by date
 
 ### review-round3.test.js — 

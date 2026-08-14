@@ -139,7 +139,7 @@ export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
   if (dryRun) {
     return {
       ok: true, path: out, year, dryRun: true,
-      company: { name: company.name, kvk: company.kvk },
+      company: { name: company.name, registration_id: company.registration_id },
       rekeningen: accounts.length,
       mutaties: posted.filter((e) => (byEntry.get(e.id) ?? []).length > 0).length,
     };
@@ -151,7 +151,7 @@ export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
   parts.push('  <XafHeader>');
   parts.push('    <Version>4.0</Version>');
   parts.push(`    <CompanyName>${esc(company.name)}</CompanyName>`);
-  parts.push(`    <CompanyID>${esc(company.kvk || '')}</CompanyID>`);
+  parts.push(`    <CompanyID>${esc(company.registration_id || '')}</CompanyID>`);
   parts.push(`    <FiscalYear>${esc(year)}</FiscalYear>`);
   parts.push(`    <StartDate>${fyFrom}</StartDate>`);
   parts.push(`    <EndDate>${fyTo}</EndDate>`);
@@ -207,7 +207,7 @@ export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
     ok: true,
     path: out,
     year,
-    company: { name: company.name, kvk: company.kvk },
+    company: { name: company.name, registration_id: company.registration_id },
     rekeningen: accounts.length,
     mutaties: mutatieIds.length,
   };

@@ -85,8 +85,8 @@ function readLogo(file) {
 
 const COMPANY_FIELDS = [
   ['name', 'name', 'company name'],
-  ['kvk', 'kvk', 'KVK number'],
-  ['btwId', 'btw_id', 'BTW identification number'],
+  ['kvk', 'registration_id', 'KVK number'],
+  ['btwId', 'tax_id', 'BTW identification number'],
   ['iban', 'iban', 'bank account (IBAN)'],
   ['address', 'address', 'street address (for compliant invoices)'],
   ['postalCode', 'postal_code', 'postal code'],
@@ -95,8 +95,8 @@ const COMPANY_FIELDS = [
 
 function serializeCompany(row) {
   return {
-    id: row.id, name: row.name, kvk: row.kvk, legal_form: row.legal_form,
-    btw_id: row.btw_id, iban: row.iban, address: row.address,
+    id: row.id, name: row.name, kvk: row.registration_id, legal_form: row.legal_form,
+    btw_id: row.tax_id, iban: row.iban, address: row.address,
     postal_code: row.postal_code, city: row.city, vat_module: row.vat_module,
     kor_flag: row.kor_flag, fiscal_year_end: row.fiscal_year_end,
     logo_mime: row.logo_mime ?? null,
@@ -173,7 +173,7 @@ export function make(program) {
             throw Object.assign(new Error('nothing to update — pass at least one of --name/--kvk/--btw-id/--iban/--address/--postal-code/--city/--logo/--remove-logo'), { code: 'NOTHING_TO_UPDATE' });
           }
           for (const [opt, col, label] of COMPANY_FIELDS) {
-            if (changes[col] === '' && col !== 'btw_id') {
+            if (changes[col] === '' && col !== 'tax_id') {
               throw Object.assign(new Error(`${label} cannot be empty`), { code: 'INVALID_VALUE' });
             }
           }

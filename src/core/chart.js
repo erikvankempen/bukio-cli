@@ -8,7 +8,7 @@
 // VAT-agnostic by design: no BTW accounts here — the VAT module (Phase 2)
 // adds them when enabled.
 //
-// rgs_code values are RGS *hoofdgroep* (niveau 2) reference codes per the
+// taxonomy_code values are RGS *hoofdgroep* (niveau 2) reference codes per the
 // official Referentie Grootboekschema (source: RGS documentation, e.g.
 // referentiegrootboekschema.nl / RGS hoofdgroepen list). Full rekening-level
 // taxonomy sync is a later enhancement; the CSV import (`account import`)
@@ -53,39 +53,39 @@ export function inferRgs(type, name) {
 
 export const DEFAULT_CHART = [
   // Activa
-  { code: '1000', name: 'Kas', type: 'asset', normalBalance: 'debit', rgsCode: 'BLIM.10' },
-  { code: '1100', name: 'Bank', type: 'asset', normalBalance: 'debit', rgsCode: 'BLIM.10' },
-  { code: '1200', name: 'Debiteuren', type: 'asset', normalBalance: 'debit', rgsCode: 'BVOR.11' },
-  { code: '1400', name: 'Voorraad', type: 'asset', normalBalance: 'debit', rgsCode: 'BVRD.30' },
-  { code: '1600', name: 'Overige vorderingen', type: 'asset', normalBalance: 'debit', rgsCode: 'BVOR.11' },
-  { code: '1700', name: 'Vooruitbetaalde kosten', type: 'asset', normalBalance: 'debit', rgsCode: 'BVOR.11' },
-  { code: '1800', name: 'Materiële vaste activa', type: 'asset', normalBalance: 'debit', rgsCode: 'BMVA.02' },
-  { code: '1850', name: 'Vervoermiddelen', type: 'asset', normalBalance: 'debit', rgsCode: 'BMVA.02' },
+  { code: '1000', name: 'Kas', type: 'asset', normalBalance: 'debit', taxonomyCode: 'BLIM.10' },
+  { code: '1100', name: 'Bank', type: 'asset', normalBalance: 'debit', taxonomyCode: 'BLIM.10' },
+  { code: '1200', name: 'Debiteuren', type: 'asset', normalBalance: 'debit', taxonomyCode: 'BVOR.11' },
+  { code: '1400', name: 'Voorraad', type: 'asset', normalBalance: 'debit', taxonomyCode: 'BVRD.30' },
+  { code: '1600', name: 'Overige vorderingen', type: 'asset', normalBalance: 'debit', taxonomyCode: 'BVOR.11' },
+  { code: '1700', name: 'Vooruitbetaalde kosten', type: 'asset', normalBalance: 'debit', taxonomyCode: 'BVOR.11' },
+  { code: '1800', name: 'Materiële vaste activa', type: 'asset', normalBalance: 'debit', taxonomyCode: 'BMVA.02' },
+  { code: '1850', name: 'Vervoermiddelen', type: 'asset', normalBalance: 'debit', taxonomyCode: 'BMVA.02' },
   // Passiva
-  { code: '2000', name: 'Crediteuren', type: 'liability', normalBalance: 'credit', rgsCode: 'BSCH.12' },
-  { code: '2100', name: 'Overige schulden', type: 'liability', normalBalance: 'credit', rgsCode: 'BSCH.12' },
-  { code: '2300', name: 'Vooruitontvangen bedragen', type: 'liability', normalBalance: 'credit', rgsCode: 'BSCH.12' },
-  { code: '2400', name: 'Nog te betalen kosten', type: 'liability', normalBalance: 'credit', rgsCode: 'BSCH.12' },
-  { code: '2900', name: 'Rekening-courant', type: 'liability', normalBalance: 'credit', rgsCode: 'BSCH.12' },
+  { code: '2000', name: 'Crediteuren', type: 'liability', normalBalance: 'credit', taxonomyCode: 'BSCH.12' },
+  { code: '2100', name: 'Overige schulden', type: 'liability', normalBalance: 'credit', taxonomyCode: 'BSCH.12' },
+  { code: '2300', name: 'Vooruitontvangen bedragen', type: 'liability', normalBalance: 'credit', taxonomyCode: 'BSCH.12' },
+  { code: '2400', name: 'Nog te betalen kosten', type: 'liability', normalBalance: 'credit', taxonomyCode: 'BSCH.12' },
+  { code: '2900', name: 'Rekening-courant', type: 'liability', normalBalance: 'credit', taxonomyCode: 'BSCH.12' },
   // Eigen vermogen
-  { code: '3000', name: 'Eigen vermogen', type: 'equity', normalBalance: 'credit', rgsCode: 'BEIV.05' },
+  { code: '3000', name: 'Eigen vermogen', type: 'equity', normalBalance: 'credit', taxonomyCode: 'BEIV.05' },
   // Kosten
-  { code: '4000', name: 'Inkoopwaarde', type: 'expense', normalBalance: 'debit', rgsCode: 'WKPR.70' },
-  { code: '4100', name: 'Huisvestingskosten', type: 'expense', normalBalance: 'debit', rgsCode: 'WBED.42' },
-  { code: '4200', name: 'Autokosten', type: 'expense', normalBalance: 'debit', rgsCode: 'WBED.42' },
-  { code: '4300', name: 'Kantoor- en algemene kosten', type: 'expense', normalBalance: 'debit', rgsCode: 'WBED.42' },
-  { code: '4310', name: 'Accountants- en administratiekosten', type: 'expense', normalBalance: 'debit', rgsCode: 'WBED.42' },
-  { code: '4320', name: 'Verzekeringen', type: 'expense', normalBalance: 'debit', rgsCode: 'WBED.42' },
-  { code: '4330', name: 'Telecommunicatie', type: 'expense', normalBalance: 'debit', rgsCode: 'WBED.42' },
-  { code: '4340', name: 'Software en internetdiensten', type: 'expense', normalBalance: 'debit', rgsCode: 'WBED.42' },
-  { code: '4400', name: 'Personeelskosten', type: 'expense', normalBalance: 'debit', rgsCode: 'WPER.40' },
-  { code: '4500', name: 'Financiële baten en lasten', type: 'expense', normalBalance: 'debit', rgsCode: 'WFBE.84' },
-  { code: '4600', name: 'Afschrijvingen', type: 'expense', normalBalance: 'debit', rgsCode: 'WAFS.41' },
-  { code: '4700', name: 'Overige bedrijfskosten', type: 'expense', normalBalance: 'debit', rgsCode: 'WBED.42' },
-  { code: '4840', name: 'Koersverschillen', type: 'expense', normalBalance: 'debit', rgsCode: 'WFBE.84' },
+  { code: '4000', name: 'Inkoopwaarde', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WKPR.70' },
+  { code: '4100', name: 'Huisvestingskosten', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WBED.42' },
+  { code: '4200', name: 'Autokosten', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WBED.42' },
+  { code: '4300', name: 'Kantoor- en algemene kosten', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WBED.42' },
+  { code: '4310', name: 'Accountants- en administratiekosten', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WBED.42' },
+  { code: '4320', name: 'Verzekeringen', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WBED.42' },
+  { code: '4330', name: 'Telecommunicatie', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WBED.42' },
+  { code: '4340', name: 'Software en internetdiensten', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WBED.42' },
+  { code: '4400', name: 'Personeelskosten', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WPER.40' },
+  { code: '4500', name: 'Financiële baten en lasten', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WFBE.84' },
+  { code: '4600', name: 'Afschrijvingen', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WAFS.41' },
+  { code: '4700', name: 'Overige bedrijfskosten', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WBED.42' },
+  { code: '4840', name: 'Koersverschillen', type: 'expense', normalBalance: 'debit', taxonomyCode: 'WFBE.84' },
   // Opbrengsten
-  { code: '8000', name: 'Omzet', type: 'income', normalBalance: 'credit', rgsCode: 'WOMZ.80' },
-  { code: '8100', name: 'Overige opbrengsten', type: 'income', normalBalance: 'credit', rgsCode: 'WOVB.82' },
+  { code: '8000', name: 'Omzet', type: 'income', normalBalance: 'credit', taxonomyCode: 'WOMZ.80' },
+  { code: '8100', name: 'Overige opbrengsten', type: 'income', normalBalance: 'credit', taxonomyCode: 'WOVB.82' },
 ];
 
 /** RGS hoofdgroep labels (official RGS nomenclature, Dutch). */

@@ -116,7 +116,7 @@ function initAction(ctx, opts) {
   const db = ensureDb(ctx, { create: true });
   try {
     db.prepare(
-      `INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module, kor_flag, fiscal_year_end)
+      `INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module, kor_flag, fiscal_year_end)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(company.name, company.kvk, company.legal_form, company.btw_id, company.iban,
       company.address, company.postal_code, company.city,

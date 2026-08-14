@@ -10,7 +10,33 @@
 // legacy hardcoded constants exactly ("moved, not changed").
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getProfile, PLANNED, normalizeCountry } from '../src/jurisdictions/index.js';
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import Database from 'better-sqlite3';
+import { getProfile, PLANNED, normalizeCountry, resolveProfile } from '../src/jurisdictions/index.js';
+
+const MIGRATIONS_DIR = path.join(import.meta.dirname, '..', 'migrations');
+
+/** Scratch DB migrated to `version` (all migrations ≤ version, verbatim). */
+function scratchDbAt(version, seedCompany = null) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'bukio-jur-'));
+  const file = path.join(dir, 'test.db');
+  const db = new Database(file);
+  for (const f of readdirSync(MIGRATIONS_DIR)
+    .filter((x) => /^\d+_.*\.sql$/.test(x))
+    .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))) {
+    const v = parseInt(f.split('_')[0], 10);
+    if (v > version) continue;
+    db.exec(readFileSync(path.join(MIGRATIONS_DIR, f), 'utf8'));
+  }
+  db.pragma(`user_version = ${version}`);
+  if (seedCompany) {
+    // seedCompany = { sql, params } — caller provides the full INSERT
+    db.prepare(seedCompany.sql).run(...seedCompany.params);
+  }
+  return db;
+}
 
 test('getProfile returns the NL profile for NL (any case)', () => {
   for (const cc of ['NL', 'nl', ' Nl ']) {
@@ -116,4 +142,49 @@ test('normalizeCountry trims and uppercases', () => {
   assert.equal(normalizeCountry('GB'), 'GB');
   assert.equal(normalizeCountry(''), null);
   assert.equal(normalizeCountry(null), null);
+});
+
+test('resolveProfile returns the NL profile for a company with country NL', () => {
+  const db = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'NL'] });
+  try {
+    const p = resolveProfile(db);
+    assert.equal(p.meta.country, 'NL');
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveProfile defaults to NL on a pre-021 DB (no country column)', () => {
+  const db = scratchDbAt(20, { sql: 'INSERT INTO company (name) VALUES (?)', params: ['Test BV'] });
+  try {
+    const p = resolveProfile(db);
+    assert.equal(p.meta.country, 'NL');
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveProfile defaults to NL when no company row exists yet', () => {
+  const db = scratchDbAt(21);
+  try {
+    const p = resolveProfile(db);
+    assert.equal(p.meta.country, 'NL');
+  } finally {
+    db.close();
+  }
+});
+
+test('resolveProfile throws for unsupported / unknown company countries (decision §9.1.6)', () => {
+  const dbGB = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'GB'] });
+  try {
+    assert.throws(() => resolveProfile(dbGB), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
+  } finally {
+    dbGB.close();
+  }
+  const dbZZ = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'ZZ'] });
+  try {
+    assert.throws(() => resolveProfile(dbZZ), (e) => e.code === 'PROFILE_NOT_FOUND');
+  } finally {
+    dbZZ.close();
+  }
 });

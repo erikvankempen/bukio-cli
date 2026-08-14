@@ -146,10 +146,10 @@ export function make(program) {
           };
           const flatRows = (d) => [
             ...d.assets.sections.flatMap((s) => s.accounts.map((a) => ({
-              side: 'activa', rgs: s.rgs_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
+              side: 'activa', rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
             }))),
             ...d.liabilities_and_equity.sections.flatMap((s) => s.accounts.map((a) => ({
-              side: 'passiva', rgs: s.rgs_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
+              side: 'passiva', rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
             }))),
             { side: 'passiva', rgs: '', group: 'Nog te verdelen resultaat', code: '', name: '', amount: d.liabilities_and_equity.result },
           ];
@@ -171,14 +171,14 @@ export function make(program) {
               console.log(`BALANCE SHEET as of ${d.as_of}`);
               console.log('ACTIVA');
               for (const s of d.assets.sections) {
-                console.log(`  ${s.label} (${s.rgs_code})`);
+                console.log(`  ${s.label} (${s.taxonomy_code})`);
                 for (const a of s.accounts) console.log(`    ${a.code}  ${a.name.padEnd(30)} ${fmt(a.balance_cents)}`);
                 console.log(`    ${''.padEnd(32)} ${fmt(s.total_cents)}`);
               }
               console.log(`  totaal activa: ${d.assets.total}`);
               console.log('PASSIVA');
               for (const s of d.liabilities_and_equity.sections) {
-                console.log(`  ${s.label} (${s.rgs_code})`);
+                console.log(`  ${s.label} (${s.taxonomy_code})`);
                 for (const a of s.accounts) console.log(`    ${a.code}  ${a.name.padEnd(30)} ${fmt(a.balance_cents)}`);
                 console.log(`    ${''.padEnd(32)} ${fmt(s.total_cents)}`);
               }
@@ -223,7 +223,7 @@ export function make(program) {
           };
           const flatRows = (d) => [
             ...d.sections.flatMap((s) => s.accounts.map((a) => ({
-              rgs: s.rgs_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.amount_cents),
+              rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.amount_cents),
             }))),
             { rgs: '', group: 'Netto resultaat', code: '', name: '', amount: d.result },
           ];
@@ -244,7 +244,7 @@ export function make(program) {
             render: (d) => {
               console.log(`WINST- EN VERLIESREKENING ${d.from} .. ${d.to}`);
               for (const s of d.sections) {
-                console.log(`  ${s.label} (${s.rgs_code})`);
+                console.log(`  ${s.label} (${s.taxonomy_code})`);
                 for (const a of s.accounts) console.log(`    ${a.code}  ${a.name.padEnd(30)} ${fmt(a.amount_cents)}`);
                 console.log(`    ${''.padEnd(32)} ${fmt(s.total_cents)}`);
               }
