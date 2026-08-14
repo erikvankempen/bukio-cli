@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,6 +19,7 @@ import Database from 'better-sqlite3';
 import { openDb } from '../src/core/db.js';
 import { validateCompliance } from '../src/invoice/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
+import { exportXaf } from '../src/export/index.js';
 import { getProfile, PLANNED, normalizeCountry, resolveProfile } from '../src/jurisdictions/index.js';
 
 const MIGRATIONS_DIR = path.join(import.meta.dirname, '..', 'migrations');
@@ -374,5 +375,32 @@ test('M8: year-end close resolves the profile (unknown company country -> PROFIL
   db.prepare("UPDATE company SET country = 'ZZ' WHERE id = 1").run();
   db.close();
   const r = cli(dbPath, ['year-end', 'close', '--year', '2026'], { expectFail: true });
+  assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
+});
+
+// --- Phase A M9: export + bank import resolve the profile -------------------
+
+test('M9: exportXaf resolves the profile (unknown company country -> PROFILE_NOT_FOUND)', () => {
+  const db = scratchDbAt(22);
+  try {
+    db.prepare("INSERT INTO company (name, registration_id, tax_id, country) VALUES ('Test BV', '12345678', 'NL123456789B01', 'ZZ')").run();
+    assert.throws(
+      () => exportXaf(db, { year: 2026, out: '/tmp/xaf-test.xml' }),
+      (e) => e.code === 'PROFILE_NOT_FOUND',
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('M9: bank import resolves the profile (unknown company country -> PROFILE_NOT_FOUND)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--vat', 'on']);
+  const db = openDb(dbPath);
+  db.prepare("UPDATE company SET country = 'ZZ' WHERE id = 1").run();
+  db.close();
+  const csvPath = path.join(path.dirname(dbPath), 'tx.csv');
+  writeFileSync(csvPath, 'date,description,amount,iban\n2026-01-05,test,100.00,IBAN123\n');
+  const r = cli(dbPath, ['bank', 'import', '--file', csvPath, '--iban', 'NL00BANK0123456789', '--dry-run'], { expectFail: true });
   assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
 });
