@@ -91,7 +91,10 @@ export function make(program) {
           const outPath = opts.out ?? `financial-statements-${opts.year}-${opts.model}.pdf`;
           const result = await jaarrekeningToPdf(report, { outPath });
           output(ctx, { path: result.path, bytes: result.bytes, ...(warnings ? { warnings } : {}) },
-            (d) => console.log(`wrote ${d.path} (${d.bytes} bytes)`));
+            (d) => {
+              console.log(`wrote ${d.path} (${d.bytes} bytes)`);
+              for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
+            });
           return;
         }
         if (opts.format === 'xlsx') {
@@ -99,7 +102,10 @@ export function make(program) {
           const outPath = opts.out ?? `financial-statements-${opts.year}-${opts.model}.xlsx`;
           const result = await renderJaarrekeningXlsx(report, { outPath });
           output(ctx, { path: result.path, bytes: result.bytes, ...(warnings ? { warnings } : {}) },
-            (d) => console.log(`wrote ${d.path} (${d.bytes} bytes)`));
+            (d) => {
+              console.log(`wrote ${d.path} (${d.bytes} bytes)`);
+              for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
+            });
           return;
         }
         throw Object.assign(new Error(`unknown format '${opts.format}' (use json|pdf|xlsx)`), { code: 'INVALID_FORMAT' });

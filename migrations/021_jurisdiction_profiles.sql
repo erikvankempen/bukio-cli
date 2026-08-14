@@ -18,8 +18,11 @@
 --
 -- No triggers reference company / vat_returns / filings and nothing has an
 -- FK to them, so the rebuilds need no trigger/FK surgery beyond the swap.
-
-PRAGMA foreign_keys = OFF;
+-- Because nothing references these tables, foreign_keys stays ON and the
+-- whole migration runs INSIDE the runner's BEGIN/COMMIT transaction — a
+-- crash mid-rebuild rolls back atomically instead of leaving a half-swapped
+-- schema behind (the DROP TABLE IF EXISTS *_new guards below only matter
+-- for a stale table from a pre-transactional failed attempt).
 
 -- 1. company ---------------------------------------------------------------
 
@@ -28,9 +31,8 @@ ALTER TABLE company ADD COLUMN base_currency TEXT NOT NULL DEFAULT 'EUR';
 ALTER TABLE company ADD COLUMN locale TEXT NOT NULL DEFAULT 'nl';
 ALTER TABLE company ADD COLUMN profile_version INTEGER NOT NULL DEFAULT 1;
 
--- stale table from a previously failed attempt (the rebuild runs OUTSIDE a
--- transaction — a crash mid-migration could leave it behind; drop it so a
--- retry starts clean instead of failing on CREATE TABLE)
+-- stale table from a previously failed attempt (defensive; the migration
+-- now runs inside a transaction, so this should never trigger)
 DROP TABLE IF EXISTS company_new;
 CREATE TABLE company_new (
   id              INTEGER PRIMARY KEY CHECK (id = 1),
