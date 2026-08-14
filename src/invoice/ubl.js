@@ -12,6 +12,7 @@
 // Full Peppol validation (Schematron) is out of scope — verify via a
 // validation service before production use.
 import { computeInvoiceTotals, formatQty, lineDiscountCents } from './index.js';
+import { resolveProfile } from '../jurisdictions/index.js';
 
 function esc(s) {
   // XML 1.0 valid chars: strip control chars (0x00-0x08, 0x0B, 0x0C,
@@ -69,7 +70,19 @@ function addressBlock(partyName, p, taxId = null) {
  * the InvoiceLine) and on the total (AllowanceTotalAmount). VAT breakdown
  * bases are the discounted amounts, so the XML reconciles with the books.
  */
+// e-invoicing builders keyed by profile.documents.eInvoicing. NL is the
+// only format in Phase A ('peppol-bis-3.0'); future markets register theirs.
+const EINVOICING_BUILDERS = {
+  'peppol-bis-3.0': buildPeppolBis30,
+};
+
 export function invoiceToUbl(db, invoice) {
+  const { documents } = resolveProfile(db);
+  const builder = EINVOICING_BUILDERS[documents.eInvoicing] ?? EINVOICING_BUILDERS['peppol-bis-3.0'];
+  return builder(db, invoice);
+}
+
+function buildPeppolBis30(db, invoice) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   // BT-25 (preceding invoice): the credit note's BillingReference must carry
   // the ORIGINAL invoice number, not the buyer reference. Look it up via

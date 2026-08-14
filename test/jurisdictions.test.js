@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { openDb } from '../src/core/db.js';
 import { validateCompliance } from '../src/invoice/index.js';
+import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { getProfile, PLANNED, normalizeCountry, resolveProfile } from '../src/jurisdictions/index.js';
 
 const MIGRATIONS_DIR = path.join(import.meta.dirname, '..', 'migrations');
@@ -347,4 +348,19 @@ test('M6: compliance status resolves the profile (unknown company country -> PRO
   db.close();
   const r = cli(dbPath, ['compliance', 'status', '--year', '2026'], { expectFail: true });
   assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
+});
+
+// --- Phase A M7: e-invoicing resolves the profile ---------------------------
+
+test('M7: invoiceToUbl resolves the profile (unknown company country -> PROFILE_NOT_FOUND)', () => {
+  const db = scratchDbAt(22);
+  try {
+    db.prepare("INSERT INTO company (name, registration_id, tax_id, country) VALUES ('Test BV', '12345678', 'NL123456789B01', 'ZZ')").run();
+    assert.throws(
+      () => invoiceToUbl(db, { invoice_type: 'invoice', lines: [], contact: {} }),
+      (e) => e.code === 'PROFILE_NOT_FOUND',
+    );
+  } finally {
+    db.close();
+  }
 });
