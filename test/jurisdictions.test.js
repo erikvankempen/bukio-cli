@@ -364,3 +364,15 @@ test('M7: invoiceToUbl resolves the profile (unknown company country -> PROFILE_
     db.close();
   }
 });
+
+// --- Phase A M8: year-end close + payments resolve the profile --------------
+
+test('M8: year-end close resolves the profile (unknown company country -> PROFILE_NOT_FOUND)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--vat', 'on']);
+  const db = openDb(dbPath);
+  db.prepare("UPDATE company SET country = 'ZZ' WHERE id = 1").run();
+  db.close();
+  const r = cli(dbPath, ['year-end', 'close', '--year', '2026'], { expectFail: true });
+  assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
+});
