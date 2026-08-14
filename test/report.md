@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-14 15:47:07 UTC — **✅ 799 passing · 0 failing (799 tests)**
+**Latest run:** 2026-08-14 16:18:14 UTC — **❌ 801 passing · 1 failing (802 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-24 passing · 0 failing
+27 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -721,6 +721,9 @@
     - ✅ M3 company update: generic --registration-id/--tax-id work without warnings
     - ✅ M4: obReadout resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ M4: validateCompliance resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M5: jaarrekening resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M5: deprecated alias `jaarrekening report` still works and warns
+    - ✅ M6: compliance status resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
 
 ### migration-021.test.js — 
 
@@ -826,7 +829,7 @@
 
 ### remote.test.js — 
 
-20 passing · 0 failing
+19 passing · 1 failing
 
     - ✅ server token: mints a single-use, actor-bound token (hashed at rest)
     - ✅ remote register: enrols a client-only key (private key never leaves the client)
@@ -843,7 +846,7 @@
     - ✅ enforcement: an unsigned envelope is refused under enforce (SIGNATURE_REQUIRED)
     - ✅ authz: a readonly actor is refused a mutation (AUTHZ_DENIED)
     - ✅ local-only commands refuse under --server (LOCAL_ONLY)
-    - ✅ health endpoint reports ok
+    - ❌ health endpoint reports ok
     - ✅ unknown route is 404
     - ✅ unreachable server: clean REMOTE_UNREACHABLE error
     - ✅ server token rejects a bad --ttl-hours value

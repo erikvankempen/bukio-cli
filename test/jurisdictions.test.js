@@ -336,3 +336,15 @@ test('M5: deprecated alias `jaarrekening report` still works and warns', () => {
   assert.equal(r.out.data.financial_statements.year, '2026');
   assert.ok(r.out.data.warnings.some((w) => w.includes('jaarrekening is deprecated')));
 });
+
+// --- Phase A M6: compliance calendar resolves the profile -------------------
+
+test('M6: compliance status resolves the profile (unknown company country -> PROFILE_NOT_FOUND)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--vat', 'on']);
+  const db = openDb(dbPath);
+  db.prepare("UPDATE company SET country = 'ZZ' WHERE id = 1").run();
+  db.close();
+  const r = cli(dbPath, ['compliance', 'status', '--year', '2026'], { expectFail: true });
+  assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
+});
