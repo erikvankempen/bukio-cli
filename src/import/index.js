@@ -703,7 +703,7 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
     accounts_rgs_backfilled: rgsBackfilled,
     chart_warnings: syncWarnings,
     header: {
-      company_name: fileName, company_kvk: fileKvk, fiscal_year: header.FiscalYear ?? null,
+      company_name: fileName, company_registration_id: fileKvk, fiscal_year: header.FiscalYear ?? null,
       start_date: header.StartDate ?? null, end_date: header.EndDate ?? null,
       software: header.SoftwareName ? `${header.SoftwareName} ${header.SoftwareVersion ?? ''}`.trim() : null,
     },
@@ -1011,7 +1011,7 @@ function importAuditFileLayout(db, { auditFile, actor, dryRun }) {
     accounts_rgs_backfilled: rgsBackfilled,
     chart_warnings: syncWarnings,
     header: {
-      company_name: fileName, company_kvk: fileKvk, fiscal_year: header.FiscalYear ?? null,
+      company_name: fileName, company_registration_id: fileKvk, fiscal_year: header.FiscalYear ?? null,
       start_date: header.StartDate ?? null, end_date: header.EndDate ?? null,
       software: header.SoftwareDescription ? String(header.SoftwareDescription).trim() : null,
     },
