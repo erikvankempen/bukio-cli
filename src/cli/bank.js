@@ -28,8 +28,9 @@ function parseBankFile(filePath, format, iban, db) {
   if (db) {
     const { exchange } = resolveProfile(db);
     const formatIds = { camt: 'camt.053', csv: 'csv' };
-    if (!exchange.bankStatementFormats.includes(formatIds[fmt])) {
-      throw Object.assign(new Error(`bank statement format '${formatIds[fmt]}' is not supported by the jurisdiction profile (exchange.bankStatementFormats: ${exchange.bankStatementFormats.join(', ')})`), { code: 'INVALID_FORMAT' });
+    const formatId = formatIds[fmt] ?? fmt;
+    if (!exchange.bankStatementFormats.includes(formatId)) {
+      throw Object.assign(new Error(`bank statement format '${formatId}' is not supported by the jurisdiction profile (exchange.bankStatementFormats: ${exchange.bankStatementFormats.join(', ')})`), { code: 'INVALID_FORMAT' });
     }
   }
   if (fmt === 'camt') {

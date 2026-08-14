@@ -410,12 +410,20 @@ function resolveAfTeDragenAccount(db, account) {
  */
 export function vatFile(db, { account = null, period = null, desc = null, actor = 'human', dryRun = false }) {
   requireVat(db);
-  account = account ?? resolveProfile(db).tax.accounts.fileDefault;
-  const bal2500 = accountBalance(db, '2500');
-  const bal1500 = accountBalance(db, '1500');
-  const net = -(bal2500 + bal1500); // positive = owe
+  const { tax } = resolveProfile(db);
+  account = account ?? tax.accounts.fileDefault;
+  // clearing accounts come from the profile ledger (NL: 1500 te vorderen /
+  // 2500 te betalen) — identified by type, not by hardcoded codes
+  const inputAcc = tax.accounts.ledger.find((a) => a.type === 'asset');
+  const outputAcc = tax.accounts.ledger.find((a) => a.type === 'liability');
+  if (!inputAcc || !outputAcc) {
+    throw vatError('FORMAT_NOT_SUPPORTED', `the jurisdiction profile's VAT ledger must declare one asset and one liability clearing account (got: ${tax.accounts.ledger.map((a) => a.code).join(', ')})`);
+  }
+  const balInput = accountBalance(db, inputAcc.code);
+  const balOutput = accountBalance(db, outputAcc.code);
+  const net = -(balOutput + balInput); // positive = owe
   if (net === 0) {
-    throw vatError('VAT_NOTHING_TO_FILE', 'no outstanding VAT position to reclassify (2500/1500 net is zero)');
+    throw vatError('VAT_NOTHING_TO_FILE', `no outstanding VAT position to reclassify (${outputAcc.code}/${inputAcc.code} net is zero)`);
   }
   // Resolve the af-te-dragen account BEFORE building the plan: a requested
   // code that is taken by another account falls to the next free numeric
@@ -426,9 +434,9 @@ export function vatFile(db, { account = null, period = null, desc = null, actor 
   // legs, 1500 te vorderen the debit/input legs) and the NET lands there
   // (credit when you owe, debit when you get a refund).
   const postings = [
-    { code: '2500', amountCents: -bal2500 },
-    { code: '1500', amountCents: -bal1500 },
-    { code: account, amountCents: bal2500 + bal1500 },
+    { code: outputAcc.code, amountCents: -balOutput },
+    { code: inputAcc.code, amountCents: -balInput },
+    { code: account, amountCents: balOutput + balInput },
   ].filter((p) => p.amountCents !== 0);
   const owe = net > 0;
   const liability = Math.abs(net);

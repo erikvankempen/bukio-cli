@@ -23,8 +23,8 @@ export function createAccount(db, { code, name, type, normalBalance, taxonomyCod
   validateAccount({ code, name, type, normalBalance, taxonomyCode });
   try {
     const info = db.prepare(
-      'INSERT INTO accounts (code, name, type, taxonomy_code, normal_balance) VALUES (?, ?, ?, ?, ?)',
-    ).run(code, name.trim(), type, taxonomyCode, normalBalance);
+      'INSERT INTO accounts (code, name, type, taxonomy_code, normal_balance, taxonomy) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(code, name.trim(), type, taxonomyCode, normalBalance, 'rgs');
     return getAccount(db, info.lastInsertRowid);
   } catch (err) {
     if (String(err.message).includes('UNIQUE constraint failed: accounts.code')) {

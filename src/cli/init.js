@@ -77,13 +77,19 @@ function buildCompany(opts) {
   }
   // deprecated aliases: --kvk -> --registration-id, --btw-id -> --tax-id
   const warnings = [];
+  if (opts.registrationId != null && opts.kvk != null) {
+    warnings.push('--kvk ignored because --registration-id was also given');
+  }
+  if (opts.taxId != null && opts.btwId != null) {
+    warnings.push('--btw-id ignored because --tax-id was also given');
+  }
   const registrationId = opts.registrationId != null
     ? opts.registrationId
     : (opts.kvk != null ? (warnings.push('--kvk is deprecated — use --registration-id'), opts.kvk) : null);
   const taxId = opts.taxId != null
     ? opts.taxId
     : (opts.btwId != null ? (warnings.push('--btw-id is deprecated — use --tax-id'), opts.btwId) : null);
-  return {
+  const company = {
     name: opts.name,
     registration_id: registrationId,
     legal_form: opts.legalForm,
@@ -99,8 +105,8 @@ function buildCompany(opts) {
     base_currency: profile.meta.baseCurrency,
     locale: profile.meta.locale,
     profile_version: 1,
-    _warnings: warnings,
   };
+  return { company, warnings };
 }
 
 function renderInit(data) {
@@ -113,11 +119,12 @@ function renderInit(data) {
   console.log(`chart:    ${data.chart.accounts} accounts (default chart)`);
   if (data.chart.created != null) console.log(`seeded:   ${data.chart.created} new`);
   if (data.company.vat_module) console.log('vat:      module enabled (incl. 1500/2500)');
+  for (const w of data.warnings ?? []) console.error(`warning: ${w}`);
   console.log(data.dryRun ? '(dry run — nothing written)' : 'initialised.');
 }
 
 function initAction(ctx, opts) {
-  const company = buildCompany(opts);
+  const { company, warnings } = buildCompany(opts);
 
   if (ctx.dryRun) {
     output(ctx, {
@@ -126,7 +133,7 @@ function initAction(ctx, opts) {
       db: ctx.dbPath,
       db_exists: existsSync(ctx.dbPath),
       chart: { accounts: DEFAULT_CHART.length + (company.vat_module ? 2 : 0) },
-      ...(company._warnings.length ? { warnings: company._warnings } : {}),
+      ...(warnings.length ? { warnings } : {}),
       dryRun: true,
     }, renderInit);
     return;
@@ -154,15 +161,16 @@ function initAction(ctx, opts) {
       const vatResult = enableVatModule(db, { actor: ctx.actor });
       vatCreated = vatResult.accounts.length;
     }
+    const { _warnings, ...auditArgs } = company;
     record(db, {
       actor: ctx.actor, action: 'company.init', command: 'init',
-      args: company, outcome: 'ok',
+      args: auditArgs, outcome: 'ok',
     });
     output(ctx, {
       company,
       db: ctx.dbPath,
       chart: { accounts: listAccounts(db).length, created: created + vatCreated },
-      ...(company._warnings.length ? { warnings: company._warnings } : {}),
+      ...(warnings.length ? { warnings } : {}),
       dryRun: false,
     }, renderInit);
   } finally {

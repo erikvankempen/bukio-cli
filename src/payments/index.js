@@ -549,7 +549,8 @@ export function exportPaymentBatch(db, { id, schema = null, actor = 'human', dry
   // profile's exchange.paymentFormats (NL: sepa-pain.001 + sepa-pain.008)
   const { exchange } = resolveProfile(db);
   const formatId = isDD ? 'sepa-pain.008' : 'sepa-pain.001';
-  if (!exchange.paymentFormats.includes(formatId)) {
+  const declared = exchange.paymentFormats ?? [];
+  if (!declared.includes(formatId)) {
     throw paymentsError('PAYMENT_FORMAT_NOT_SUPPORTED', `the jurisdiction profile does not declare ${formatId} (exchange.paymentFormats: ${exchange.paymentFormats.join(', ')})`);
   }
   const lines = db.prepare('SELECT * FROM payment_batch_lines WHERE batch_id = ? ORDER BY id').all(id);

@@ -79,8 +79,10 @@ export function resolveProfile(db) {
   try {
     const row = db.prepare('SELECT country FROM company WHERE id = 1').get();
     country = row ? row.country : null;
-  } catch {
-    // pre-021 schema: no country column — NL default
+  } catch (err) {
+    // pre-021 schema: no country column — NL default. Anything else
+    // (locked DB, corruption) must propagate, not silently default to NL.
+    if (!String(err.message).includes('no such column: country')) throw err;
     country = null;
   }
   return getProfile(country ?? 'NL');

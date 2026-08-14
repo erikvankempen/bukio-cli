@@ -171,11 +171,15 @@ export function make(program) {
           if (!row) throw dbError('NO_COMPANY', 'no company — run bukio init first');
 
           // deprecated aliases: --kvk -> --registration-id, --btw-id -> --tax-id
-          if (opts.kvk !== undefined && opts.registrationId === undefined) {
+          if (opts.kvk !== undefined && opts.registrationId !== undefined) {
+            opts._warnings = [...(opts._warnings ?? []), '--kvk ignored because --registration-id was also given'];
+          } else if (opts.kvk !== undefined) {
             opts.registrationId = opts.kvk;
             opts._warnings = [...(opts._warnings ?? []), '--kvk is deprecated — use --registration-id'];
           }
-          if (opts.btwId !== undefined && opts.taxId === undefined) {
+          if (opts.btwId !== undefined && opts.taxId !== undefined) {
+            opts._warnings = [...(opts._warnings ?? []), '--btw-id ignored because --tax-id was also given'];
+          } else if (opts.btwId !== undefined) {
             opts.taxId = opts.btwId;
             opts._warnings = [...(opts._warnings ?? []), '--btw-id is deprecated — use --tax-id'];
           }
@@ -218,6 +222,7 @@ export function make(program) {
               console.log('plan: company update');
               for (const [k, v] of Object.entries(d.changes)) console.log(`  ${k}: '${row[k]}' -> '${v}'`);
               if (d.logo) console.log(`  logo: ${d.logo.mime} (${d.logo.bytes} bytes${d.logo.width ? `, ${d.logo.width}×${d.logo.height} px` : ''})${d.logo.bytes === 0 ? ' — removed' : ''}`);
+              for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
               console.log('(dry run — nothing written)');
             });
             return;
@@ -248,6 +253,7 @@ export function make(program) {
             for (const [k, v] of Object.entries(d.changes)) console.log(`  ${k}: '${row[k]}' -> '${v}'`);
             if (logo !== null && logo.mime) console.log(`  logo: ${logo.mime} (${logo.bytes.length} bytes)`);
             if (logo !== null && !logo.mime) console.log('  logo: removed');
+            for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
           });
         } finally {
           db.close();
