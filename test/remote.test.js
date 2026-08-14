@@ -347,7 +347,19 @@ test('local-only commands refuse under --server (LOCAL_ONLY)', () => {
 // --- health / misc -----------------------------------------------------------
 
 test('health endpoint reports ok', async () => {
-  const res = await fetch(`${serverUrl}/health`);
+  // retry: under parallel-suite load a single connection attempt can fail
+  // transiently while the daemon itself stays alive (the next test, unknown
+  // route is 404, fetches the same server and passes)
+  let res;
+  for (let i = 0; i < 3; i++) {
+    try {
+      res = await fetch(`${serverUrl}/health`);
+      break;
+    } catch (e) {
+      if (i === 2) throw e;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.ok, true);

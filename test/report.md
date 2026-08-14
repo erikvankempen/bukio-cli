@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-14 16:47:48 UTC — **❌ 805 passing · 1 failing (806 tests)**
+**Latest run:** 2026-08-14 17:17:17 UTC — **✅ 806 passing · 0 failing (806 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -833,7 +833,7 @@
 
 ### remote.test.js — 
 
-19 passing · 1 failing
+20 passing · 0 failing
 
     - ✅ server token: mints a single-use, actor-bound token (hashed at rest)
     - ✅ remote register: enrols a client-only key (private key never leaves the client)
@@ -850,7 +850,7 @@
     - ✅ enforcement: an unsigned envelope is refused under enforce (SIGNATURE_REQUIRED)
     - ✅ authz: a readonly actor is refused a mutation (AUTHZ_DENIED)
     - ✅ local-only commands refuse under --server (LOCAL_ONLY)
-    - ❌ health endpoint reports ok
+    - ✅ health endpoint reports ok
     - ✅ unknown route is 404
     - ✅ unreachable server: clean REMOTE_UNREACHABLE error
     - ✅ server token rejects a bad --ttl-hours value
