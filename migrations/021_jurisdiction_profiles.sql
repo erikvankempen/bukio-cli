@@ -3,9 +3,10 @@
 -- * company: add jurisdiction columns (country / base_currency / locale /
 --   profile_version) and DROP the NL-only legal_form CHECK — legal-form
 --   validation moves to the CLI layer via profile.meta.legalForms. SQLite
---   cannot ALTER a CHECK, so company is rebuilt (the standard procedure; the
---   runner detects `PRAGMA foreign_keys` and applies this file OUTSIDE the
---   transaction wrapper).
+--   cannot ALTER a CHECK, so company is rebuilt (the standard procedure).
+--   Nothing has an FK to the rebuilt tables, so foreign_keys stays ON and
+--   the runner applies this file INSIDE its BEGIN/COMMIT transaction —
+--   the whole migration is atomic and crash-retry-safe.
 -- * accounts: add the taxonomy discriminator column, backfilled 'rgs' where a
 --   legacy RGS code is present. (The rgs_code -> taxonomy_code rename is
 --   migration 022 — it is disruptive and must land atomically with the code
