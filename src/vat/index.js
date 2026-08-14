@@ -214,7 +214,10 @@ const OB_LAYOUTS = {
 export function obReadout(db, { period }) {
   requireVat(db);
   const { tax } = resolveProfile(db);
-  const builder = OB_LAYOUTS[tax.returnLayout] ?? OB_LAYOUTS['ob-1a-5d'];
+  const builder = OB_LAYOUTS[tax.returnLayout];
+  if (!builder) {
+    throw vatError('FORMAT_NOT_SUPPORTED', `return layout '${tax.returnLayout}' has no builder (registered: ${Object.keys(OB_LAYOUTS).join(', ')})`);
+  }
   return builder(db, { period });
 }
 

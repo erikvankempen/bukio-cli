@@ -98,7 +98,10 @@ const XAF_BUILDERS = {
 
 export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
   const { documents } = resolveProfile(db);
-  const builder = XAF_BUILDERS[documents.auditFile] ?? XAF_BUILDERS['xaf-auditfile-4.0'];
+  const builder = XAF_BUILDERS[documents.auditFile];
+  if (!builder) {
+    throw Object.assign(new Error(`audit file format '${documents.auditFile}' has no builder (registered: ${Object.keys(XAF_BUILDERS).join(', ')})`), { code: 'FORMAT_NOT_SUPPORTED' });
+  }
   return builder(db, { year, out, actor, dryRun });
 }
 

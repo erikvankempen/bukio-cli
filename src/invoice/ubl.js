@@ -78,7 +78,10 @@ const EINVOICING_BUILDERS = {
 
 export function invoiceToUbl(db, invoice) {
   const { documents } = resolveProfile(db);
-  const builder = EINVOICING_BUILDERS[documents.eInvoicing] ?? EINVOICING_BUILDERS['peppol-bis-3.0'];
+  const builder = EINVOICING_BUILDERS[documents.eInvoicing];
+  if (!builder) {
+    throw Object.assign(new Error(`e-invoicing format '${documents.eInvoicing}' has no builder (registered: ${Object.keys(EINVOICING_BUILDERS).join(', ')})`), { code: 'FORMAT_NOT_SUPPORTED' });
+  }
   return builder(db, invoice);
 }
 

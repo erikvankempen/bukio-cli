@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-14 17:17:17 UTC — **✅ 806 passing · 0 failing (806 tests)**
+**Latest run:** 2026-08-14 19:41:20 UTC — **✅ 807 passing · 0 failing (807 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-31 passing · 0 failing
+32 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -728,6 +728,7 @@
     - ✅ M8: year-end close resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ M9: exportXaf resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ M9: bank import resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ review-fix: account add --taxonomy-code works; --rgs-code alias maps and warns
 
 ### migration-021.test.js — 
 

@@ -404,3 +404,15 @@ test('M9: bank import resolves the profile (unknown company country -> PROFILE_N
   const r = cli(dbPath, ['bank', 'import', '--file', csvPath, '--iban', 'NL00BANK0123456789', '--dry-run'], { expectFail: true });
   assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
 });
+
+// --- review-fix: account taxonomy flag (regression + alias coverage) --------
+
+test('review-fix: account add --taxonomy-code works; --rgs-code alias maps and warns', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV']);
+  const primary = cli(dbPath, ['account', 'add', '--code', '1300', '--name', 'Testrekening', '--type', 'asset', '--normal-balance', 'debit', '--taxonomy-code', 'BMVA.02', '--dry-run']);
+  assert.equal(primary.out.data.account.taxonomy_code, 'BMVA.02');
+  const alias = cli(dbPath, ['account', 'add', '--code', '1300', '--name', 'Testrekening', '--type', 'asset', '--normal-balance', 'debit', '--rgs-code', 'BMVA.02', '--dry-run']);
+  assert.equal(alias.out.data.account.taxonomy_code, 'BMVA.02');
+  assert.ok(alias.out.data.warnings.some((w) => w.includes('--rgs-code is deprecated')));
+});

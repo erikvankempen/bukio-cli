@@ -63,7 +63,10 @@ function groupSections(sections, lines) {
 
 export function jaarrekening(db, { year, model = 'klein' }) {
   const { reporting } = resolveProfile(db);
-  const builder = JAARREKENING_FORMATS[reporting.format] ?? JAARREKENING_FORMATS.auto;
+  const builder = JAARREKENING_FORMATS[reporting.format];
+  if (!builder) {
+    throw jaarrekeningError('FORMAT_NOT_SUPPORTED', `financial statements format '${reporting.format}' has no builder (registered: ${Object.keys(JAARREKENING_FORMATS).join(', ')})`);
+  }
   return builder(db, { year, model, reporting });
 }
 

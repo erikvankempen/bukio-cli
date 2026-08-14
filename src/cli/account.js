@@ -30,18 +30,25 @@ export function make(program) {
     .requiredOption('--name <name>', 'account name')
     .requiredOption('--type <type>', 'asset|liability|equity|income|expense')
     .requiredOption('--normal-balance <debit|credit>', 'normal balance')
-    .option('--rgs-code <code>', 'RGS reference code (e.g. BMVA.02)')
+    .option('--taxonomy-code <code>', 'taxonomy reference code (RGS for NL, e.g. BMVA.02)')
+    .option('--rgs-code <code>', '[deprecated] alias for --taxonomy-code')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
+      const warnings = [];
       try {
         const db = ensureDb(ctx);
         try {
+          // deprecated alias: --rgs-code maps to the generic flag (warns)
+          if (opts.rgsCode != null && opts.taxonomyCode == null) {
+            opts.taxonomyCode = opts.rgsCode;
+            warnings.push('--rgs-code is deprecated — use --taxonomy-code');
+          }
           if (ctx.dryRun) {
             const plan = { code: opts.code, name: opts.name, type: opts.type, normal_balance: opts.normalBalance, taxonomy_code: opts.taxonomyCode ?? null };
             validateAccount({ code: opts.code, name: opts.name, type: opts.type, normalBalance: opts.normalBalance, taxonomyCode: opts.taxonomyCode });
             const exists = getAccountByCode(db, opts.code);
-            output(ctx, { action: 'add account', account: plan, exists: Boolean(exists), dryRun: true }, (d) => {
+            output(ctx, { action: 'add account', account: plan, exists: Boolean(exists), ...(warnings.length ? { warnings } : {}), dryRun: true }, (d) => {
               console.log(`plan: add account ${d.account.code} ${d.account.name} (${d.account.type}/${d.account.normal_balance})`);
               console.log(d.exists ? `(note: account ${d.account.code} already exists)` : '');
               console.log('(dry run — nothing written)');
@@ -57,8 +64,9 @@ export function make(program) {
             args: { code: opts.code, name: opts.name, type: opts.type, normal_balance: opts.normalBalance, taxonomy_code: opts.taxonomyCode ?? null },
             outcome: 'ok',
           });
-          output(ctx, serializeAccount(accountRow), (a) => {
+          output(ctx, { ...serializeAccount(accountRow), ...(warnings.length ? { warnings } : {}) }, (a) => {
             console.log(`added account ${a.code} ${a.name} (${a.type}/${a.normal_balance})`);
+            for (const w of a.warnings ?? []) console.error(`warning: ${w}`);
           });
         } finally {
           db.close();

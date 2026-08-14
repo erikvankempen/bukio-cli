@@ -122,7 +122,10 @@ export async function resolveRate(db, { currency, rate, date, actor = 'human', n
     throw fxError('FX_RATE_NOT_FOUND', `no FX rate for ${currency} on/before ${date} — set one with 'bukio fx set', pass --rate, or allow the ECB fetch`);
   }
   const { exchange } = resolveProfile(db);
-  const fetcher = FX_SOURCES[exchange.fxSource] ?? FX_SOURCES.ecb;
+  const fetcher = FX_SOURCES[exchange.fxSource];
+  if (!fetcher) {
+    throw fxError('FORMAT_NOT_SUPPORTED', `fx source '${exchange.fxSource}' has no fetcher (registered: ${Object.keys(FX_SOURCES).join(', ')})`);
+  }
   const fetched = await fetcher({ currency, date });
   if (!fetched) {
     throw fxError('ECB_RATE_NOT_AVAILABLE', `no ${exchange.fxSource} reference rate for ${currency} on/before ${date} (not in the rate set, or before 1999)`);
