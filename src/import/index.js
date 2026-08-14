@@ -639,7 +639,7 @@ export function importXaf(db, { xmlText, actor = 'human', dryRun = false }) {
   const syncWarnings = [];
   const plan = {
     action: 'import xaf',
-    company: { name: fileName, kvk: fileKvk, fiscal_year: header.FiscalYear ?? null, period: `${header.StartDate ?? ''}..${header.EndDate ?? ''}` },
+    company: { name: fileName, registration_id: fileKvk, fiscal_year: header.FiscalYear ?? null, period: `${header.StartDate ?? ''}..${header.EndDate ?? ''}` },
     software: header.SoftwareName ? `${header.SoftwareName} ${header.SoftwareVersion ?? ''}`.trim() : null,
     rekeningen: rekeningen.length,
     mutaties: parsedMutaties.length,
