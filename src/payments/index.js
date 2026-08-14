@@ -551,7 +551,7 @@ export function exportPaymentBatch(db, { id, schema = null, actor = 'human', dry
   const formatId = isDD ? 'sepa-pain.008' : 'sepa-pain.001';
   const declared = exchange.paymentFormats ?? [];
   if (!declared.includes(formatId)) {
-    throw paymentsError('PAYMENT_FORMAT_NOT_SUPPORTED', `the jurisdiction profile does not declare ${formatId} (exchange.paymentFormats: ${exchange.paymentFormats.join(', ')})`);
+    throw paymentsError('PAYMENT_FORMAT_NOT_SUPPORTED', `the jurisdiction profile does not declare ${formatId} (exchange.paymentFormats: ${declared.join(', ') || 'none declared'})`);
   }
   const lines = db.prepare('SELECT * FROM payment_batch_lines WHERE batch_id = ? ORDER BY id').all(id);
   // SEPA MsgId max 35 chars: BUKIO + 14-char timestamp + batch id (last 16

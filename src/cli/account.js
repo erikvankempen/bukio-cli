@@ -39,8 +39,11 @@ export function make(program) {
       try {
         const db = ensureDb(ctx);
         try {
-          // deprecated alias: --rgs-code maps to the generic flag (warns)
-          if (opts.rgsCode != null && opts.taxonomyCode == null) {
+          // deprecated alias: --rgs-code maps to the generic flag (warns);
+          // primary + alias together: alias ignored WITH a warning
+          if (opts.rgsCode != null && opts.taxonomyCode != null) {
+            warnings.push('--rgs-code ignored because --taxonomy-code was also given');
+          } else if (opts.rgsCode != null) {
             opts.taxonomyCode = opts.rgsCode;
             warnings.push('--rgs-code is deprecated — use --taxonomy-code');
           }
@@ -51,6 +54,7 @@ export function make(program) {
             output(ctx, { action: 'add account', account: plan, exists: Boolean(exists), ...(warnings.length ? { warnings } : {}), dryRun: true }, (d) => {
               console.log(`plan: add account ${d.account.code} ${d.account.name} (${d.account.type}/${d.account.normal_balance})`);
               console.log(d.exists ? `(note: account ${d.account.code} already exists)` : '');
+              for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
               console.log('(dry run — nothing written)');
             });
             return;

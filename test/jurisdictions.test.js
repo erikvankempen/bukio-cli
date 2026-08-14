@@ -415,4 +415,7 @@ test('review-fix: account add --taxonomy-code works; --rgs-code alias maps and w
   const alias = cli(dbPath, ['account', 'add', '--code', '1300', '--name', 'Testrekening', '--type', 'asset', '--normal-balance', 'debit', '--rgs-code', 'BMVA.02', '--dry-run']);
   assert.equal(alias.out.data.account.taxonomy_code, 'BMVA.02');
   assert.ok(alias.out.data.warnings.some((w) => w.includes('--rgs-code is deprecated')));
+  const conflict = cli(dbPath, ['account', 'add', '--code', '1300', '--name', 'Testrekening', '--type', 'asset', '--normal-balance', 'debit', '--taxonomy-code', 'BMVA.02', '--rgs-code', 'BFVA.03', '--dry-run']);
+  assert.equal(conflict.out.data.account.taxonomy_code, 'BMVA.02'); // primary wins
+  assert.ok(conflict.out.data.warnings.some((w) => w.includes('--rgs-code ignored')));
 });
