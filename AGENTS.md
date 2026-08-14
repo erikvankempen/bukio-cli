@@ -40,14 +40,14 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 
 | Command | Purpose |
 |---------|---------|
-| `bukio init --name X [--kvk ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + 28-account RGS-mapped chart. Fails `ALREADY_INITIALISED` if done. |
+| `bukio init --name X [--country NL] [--registration-id ..] [--tax-id ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + 29-account RGS-mapped chart; jurisdiction defaults from the country profile (NL: kvk 8 digits, btw-id NL...B01). Deprecated aliases: `--kvk` = `--registration-id`, `--btw-id` = `--tax-id`. Fails `ALREADY_INITIALISED` if done. |
 | `bukio entry add --date YYYY-MM-DD --desc ".." --postings "CODE:AMT,CODE:AMT" [--post] [--dry-run]` | Create (and optionally post) a balanced journal entry. |
 | `bukio entry post --id N [--dry-run]` | Post a draft entry. |
 | `bukio entry reverse --id N [--reason ".."] [--dry-run]` | Post a contra-entry that cancels entry N. |
 | `bukio entry list [--state draft\|posted] [--limit N]` | List entries (newest first). |
 | `bukio entry show --id N` | One entry + postings. |
 | `bukio account add/list/show/deactivate/reactivate` | Chart of accounts management. |
-| `bukio account import --file chart.csv [--dry-run]` | Import a chart: `code,name,type,normal_balance[,rgs_code]`. |
+| `bukio account import --file chart.csv [--dry-run]` | Import a chart: `code,name,type,normal_balance[,taxonomy_code]` (legacy header `rgs_code` still accepted). |
 | `bukio report trial-balance [--year YYYY]` | Per-account totals; `data.balanced` tells you the books reconcile. |
 | `bukio report balance-sheet [--as-of YYYY-MM-DD]` (alias: `balans`, deprecated) | Balance sheet; `data.balanced` must be true. |
 | `bukio report pnl [--year YYYY]` | P&L: revenue, costs, result. |
@@ -76,7 +76,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio item list [--all]` / `show --id` / `update --id [--price] [--unit] [--vat] [--gl] [--deactivate]` | Inspect/update the catalog; deactivation blocks new invoices, existing keep snapshots. |
 | `bukio contact add --name N [--address] [--vat-id]` / `list` | Invoice counterparties. |
 | `bukio invoice create --contact N --lines "..." \| --items "..." --date D [--discount-pct P \| --discount-amount A] [--language nl\|en]` | Draft invoice. Lines: `[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]` (fractional qty allowed, per-line discount `@-10%`/`@-25.00`). Items: `ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]` with per-invoice overrides. Total discount applies BEFORE VAT. |
-| `bukio company show` / `update --name --kvk --btw-id --iban --address --postal-code --city [--dry-run]` | Company record (audited); supplier gegevens must be complete before finalize (12-vereisten 1-3). |
+| `bukio company show` / `update --name --registration-id --tax-id --iban --address --postal-code --city [--country read-only] [--dry-run]` | Company record (audited; country immutable after init); supplier gegevens must be complete before finalize (12-vereisten 1-3). |
 | `bukio company update --logo FILE` / `--remove-logo` / `company logo --out FILE` | Store/extract the invoice logo (PNG/JPEG/SVG ≤ 1 MB, ≤ 2048×2048 px, stored as a BLOB in the DB — travels with backups). |
 | `bukio attach add --invoice N\|--entry N --file F [--store db\|file] [--note] [--dry-run]` / `attach list --invoice N\|--entry N` / `attach show --id N [--out F] [--force]` / `attach remove --id N [--dry-run]` | Store source documents against invoices/entries. Default `--store db` = BLOB in the DB (travels with backups); `--store file` = copy in `<db>-attachments/` with the path stored. Lists are metadata-only. `show --out` refuses to overwrite without `--force`. |
 | `bukio invoice create --contact N --lines "2x DESC @ PRICE @21" --date D` | Draft invoice (12-vereisten validated at finalize). |

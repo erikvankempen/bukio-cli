@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-14 16:18:14 UTC — **❌ 801 passing · 1 failing (802 tests)**
+**Latest run:** 2026-08-14 16:47:48 UTC — **❌ 805 passing · 1 failing (806 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-27 passing · 0 failing
+31 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -724,6 +724,10 @@
     - ✅ M5: jaarrekening resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ M5: deprecated alias `jaarrekening report` still works and warns
     - ✅ M6: compliance status resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M7: invoiceToUbl resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M8: year-end close resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M9: exportXaf resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M9: bank import resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
 
 ### migration-021.test.js — 
 
