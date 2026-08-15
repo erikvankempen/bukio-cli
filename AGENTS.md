@@ -31,6 +31,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | JSON output | `--json` (global flag — works before or after the subcommand) |
 | Signing key | `--sign-key <path>`, or the actor's session, or `BUKIO_SIGNING_PASSPHRASE` (human keys), or the actor's key file at `<config>/keys/<role>-<name>.key` — in that order |
 | Config dir | env `BUKIO_CONFIG_DIR` (default `~/.bukio`) — keys in `keys/`, sessions in `sessions/`, nonce cache `nonces.json` |
+| Output language | `--locale <code>` or env `BUKIO_LOCALE` (default: `en`) — human-facing output language, see §3.2 |
 
 > **Single company per database.** One company = one database file. To work on company B, point `--db` at its file. Never mix companies in one database.
 
@@ -40,7 +41,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 
 | Command | Purpose |
 |---------|---------|
-| `bukio init --name X [--country NL] [--registration-id ..] [--tax-id ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + 29-account RGS-mapped chart; jurisdiction defaults from the country profile (NL: kvk 8 digits, btw-id NL...B01). Deprecated aliases: `--kvk` = `--registration-id`, `--btw-id` = `--tax-id`. Fails `ALREADY_INITIALISED` if done. |
+| `bukio init --name X [--country NL] [--registration-id ..] [--tax-id ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + the country profile's default chart (NL: 29-account RGS-mapped; see §3.1 for all eleven profiles). Jurisdiction defaults come from the profile: chart, VAT codes/rates, identifiers, fiscal year end, compliance deadlines. Deprecated aliases: `--kvk` = `--registration-id`, `--btw-id` = `--tax-id`. Fails `ALREADY_INITIALISED` if done. |
 | `bukio entry add --date YYYY-MM-DD --desc ".." --postings "CODE:AMT,CODE:AMT" [--post] [--dry-run]` | Create (and optionally post) a balanced journal entry. |
 | `bukio entry post --id N [--dry-run]` | Post a draft entry. |
 | `bukio entry reverse --id N [--reason ".."] [--dry-run]` | Post a contra-entry that cancels entry N. |
@@ -54,9 +55,9 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio report journal [--year YYYY]` | Journal export (one row per posting). |
 | `bukio report aging [--as-of D] [--kind debtors\|creditors\|both]` | Open items per contact, bucketed by days past due (current/30/60/90+); creditors show `in_batch` separately. |
 | `bukio report sales [--year YYYY] [--by contact\|item]` | Sales revenue for a year: per contact (net/vat/gross via the totals engine) or per item (net after per-line discounts; invoice-level discounts not allocated per line). |
-| `bukio contact statement --id N [--as-of D]` | Opgave: invoices + payments + payables with a running balance (positive = contact owes you). |
+| `bukio contact statement --id N [--as-of D]` | Statement (alias: `opgave`): invoices + payments + payables with a running balance (positive = contact owes you). |
 | `bukio report <cmd> --format csv\|xlsx [--out PATH]` | Export any report; xlsx requires `--out`. |
-| `bukio bank add --iban IBAN [--name N] [--account-code CODE] [--dry-run]` | Register a bank account (default ledger code 1100). |
+| `bukio bank add --iban IBAN [--name N] [--account-code CODE] [--dry-run]` | Register a bank account (default: the country profile's bank account, NL 1100). |
 | `bukio bank import --file F --iban IBAN [--dry-run]` | Import CAMT.053 XML or bank CSV (idempotent by hash). |
 | `bukio bank match auto [--dry-run]` / `suggest` / `link --tx --entry` / `post --tx --account` | Reconcile: auto-match to entries, or post new entries from unmatched transactions. |
 | `bukio bank list` / `transactions [--state]` / `ignore --tx` / `unignore --tx` | Account balances, transaction states, ignore/unignore (own transfers). |
@@ -166,7 +167,60 @@ the booked amounts.
 
 ---
 
+### 3.1 Jurisdiction profiles (11 markets)
+
+`init --country <cc>` seeds the profile's default chart and applies its
+defaults (chart convention, VAT codes/rates, identifiers, fiscal year end,
+deadlines). PLANNED is empty — every ISO 3166-1 alpha-2 code is either a live
+profile or `PROFILE_NOT_FOUND`.
+
+| Country | Chart convention | Currency | VAT rates (2026) | Small-business scheme | Identifier / Peppol scheme | e-Invoicing | Locale |
+|---|---|---|---|---|---|---|---|
+| NL Netherlands | RGS-mapped | EUR | 21 / 9 / 0 | kor | kvk / 9944 | peppol-bis-3.0 | nl |
+| LU Luxembourg | PCN 2020 | EUR | 17 / 14 / 8 / 3 | franchise (€50K) | RCS / 0195 | peppol-bis-3.0 (+ FAIA audit file) | fr-lu |
+| GB United Kingdom | QuickBooks/Xero-style | GBP | 20 / 5 / 0 | flat-rate (≤ £150K) | CRN / — (2026 roadmap) | — | en |
+| FR France | PCG (plan comptable général) | EUR | 20 / 10 / 5.5 / 2.1 | franchise (€85K / €37.5K) | SIREN / 0002 | peppol-bis-3.0 | fr |
+| US United States | QuickBooks-style (no statutory chart) | USD | no federal VAT | — | EIN / — | — | en |
+| BE Belgium | PCN-BE minimum plan (AR 12-09-1983) | EUR | 21 / 12 / 6 / 0 | franchise (€25K, from 2025) | KBO / 0208 | peppol-bis-3.0 (B2B mandate since 1 Jan 2026) | nl-be |
+| DE Germany | DATEV SKR 03 | EUR | 19 / 7 / 0 | kleinunternehmer (€25k/€100k) | USt-IdNr / 9930 | peppol-bis-3.0 (EN 16931 accepted) | de |
+| DK Denmark | Standardkontoplan-aligned | DKK | 25 (no reduced band) | — | CVR / 0184 | peppol-bis-3.0 (B2B voluntary) | da |
+| FI Finland | Liikekirjuri model chart | EUR | 25.5 / 13.5 / 10 / 0 | franchise (€20K) | LY-tunnus / 0037 | peppol-bis-3.0 (B2B voluntary) | fi |
+| NO Norway | NS 4102 standard kontoplan | NOK | 25 / 15 / 12 / 0 | — (NOK 50K registration threshold) | org.nr / 0192 | peppol-bis-3.0 (EHF 3.0; B2G mandatory) | nb |
+| SE Sweden | BAS 2023 | SEK | 25 / 12 / 6 / 0 | franchise (SEK 120K) | org.nr / 0007 | peppol-bis-3.0 (B2G mandatory) | sv |
+
+Strict dispatch: a profile registers only formats with existing builders —
+`financial-statements`, `vat readout`, `export xaf`, invoice compliance, etc.
+fail with `FORMAT_NOT_SUPPORTED` for markets whose engine is a B-milestone
+(no silent fallback to the NL format). See §7 error codes.
+
+### 3.2 Localization (i18n)
+
+Human-facing output is **English by default**; localization is opt-in per
+invocation: `--locale <code>` (global flag) or `BUKIO_LOCALE` env. Locale
+resolution: `--locale` → `BUKIO_LOCALE` → `en`. Regional codes resolve to
+their base language first (`nl-be` → Belgian-Dutch table → Dutch → English;
+`fr-lu` → Luxembourg overrides → French → English; `en-GB`/`en-US` → English).
+Tables: `en`, `nl`, `nl-be`, `de`, `fr`, `fr-lu`, `da`, `fi`, `nb`, `sv`.
+
+What localizes: invoice PDF labels/units (when the invoice language allows),
+invoice + reminder emails, CLI table headers and renders, VAT file/settle
+descriptions, status/direction labels.
+
+What **never** localizes: `--json` output (keys, error messages, amounts),
+error codes, MCP tool names/descriptions, chart/account identifiers, and
+statutory artifacts (OB readout labels 1a–5d, statutory jaarrekening XLSX
+'Winst en verlies', statutory model labels, RGS group names, command aliases,
+bank/import CSV header aliases). Documents keep their own language field
+(`invoice create --language nl|en`): when omitted it follows the company
+profile (Dutch for NL/BE companies, English for every other market — no
+market is the de facto base); the per-locale `pdf.*` table keys are reserved
+for document-language expansion.
+
 ## 4. JSON contracts
+
+The `--json` contract is language-independent: keys, error codes, messages
+and amounts stay English regardless of `--locale`/`BUKIO_LOCALE`. Never
+parse localized (human) output — always `--json`.
 
 ### Success
 
@@ -239,7 +293,7 @@ the booked amounts.
 
 ---
 
-## 5. Account codes (default chart — 28 accounts, RGS-mapped)
+## 5. Account codes (default chart — 29 accounts, RGS-mapped)
 
 | Code | Name | Type | RGS |
 |------|------|------|-----|
@@ -269,6 +323,7 @@ the booked amounts.
 | 4500 | Financiële baten en lasten | expense | WFBE.84 |
 | 4600 | Afschrijvingen | expense | WAFS.41 |
 | 4700 | Overige bedrijfskosten | expense | WBED.42 |
+| 4840 | Koersverschillen | expense | WFBE.84 |
 | 8000 | Omzet | income | WOMZ.80 |
 | 8100 | Overige opbrengsten | income | WOVB.82 |
 
@@ -804,12 +859,12 @@ authz off.
 | `INVALID_ROLE` / `ROLE_NOT_GRANTED` / `LAST_OWNER` | Role registry: unknown role, revoking a role the actor does not hold, or revoking the LAST owner (a company needs at least one owner — to turn authz off and to mediate key revokes) | Use one of `owner\|bookkeeper\|payments\|tax\|assets\|readonly`; grant the role first; grant `owner` to another actor before stepping down |
 | `INVALID_DESCRIPTION` / `INVALID_POSTINGS` / `INVALID_AMOUNT_CENTS` | Description empty, posting spec malformed, or a posting amount is 0 | Fix the argument — every entry needs a description, ≥2 non-zero postings |
 | `INVALID_LEGAL_FORM` / `INVALID_VAT_CHOICE` / `INVALID_FISCAL_YEAR_END` | `init` got a bad legal form, `--vat` other than `on`/`off`, or an impossible `--fiscal-year-end` (e.g. `99-99`, `02-30`) | Use the values the flag help shows (calendar dates only) |
-| `INVALID_COUNTRY` / `COUNTRY_NOT_SUPPORTED` / `PROFILE_NOT_FOUND` / `COUNTRY_IMMUTABLE` | `init --country` / jurisdiction-profile resolution: not an ISO 3166-1 alpha-2 code, a valid country with no profile implemented yet (Phase A supports NL; GB/US/FR/LU planned), no profile for a valid code, or `company update --country` trying to change the country after init (one company = one country) | Use a 2-letter code; supported: NL; re-init a new DB for another country |
+| `INVALID_COUNTRY` / `COUNTRY_NOT_SUPPORTED` / `PROFILE_NOT_FOUND` / `COUNTRY_IMMUTABLE` | `init --country` / jurisdiction-profile resolution: not an ISO 3166-1 alpha-2 code, a valid country with no profile implemented yet (PLANNED is empty — all eleven profiles NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE are live, so a planned-but-unimplemented code currently raises `PROFILE_NOT_FOUND`), no profile for a valid code, or `company update --country` trying to change the country after init (one company = one country) | Use a 2-letter code; supported: NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE; re-init a new DB for another country |
 | `INVALID_IBAN` / `INVALID_NAME` / `INVALID_TYPE` / `NOTHING_TO_UPDATE` | Bad company/contact field on `init`/`company update`/`contact add` (IBAN mod-97 validated) | Fix the value; pass at least one change to `company update` |
 | `COMPANY_REQUIRED` / `COMPANY_INCOMPLETE` / `NOT_INITIALISED` | Company missing or incomplete (e.g. no valid company IBAN for SEPA) | Run `init`, then `company update` to complete the profile |
 | `FORMAT_NOT_SUPPORTED` | A jurisdiction profile declares a document/format with no registered builder (audit file, e-invoicing, OB return layout, financial-statements layout, FX source, invoice compliance rule) | Profile-format dispatch is strict: an unregistered key fails loudly instead of silently falling back to the NL format — register the builder or fix the profile |
-| `PAYMENT_FORMAT_NOT_SUPPORTED` | SEPA export (pain.001/pain.008) hit a format the jurisdiction profile does not declare in exchange.paymentFormats | The declared formats come from the profile; Phase A (NL) supports sepa-pain.001 + sepa-pain.008 |
-| `DEADLINE_RULE_NOT_FOUND` / `INVALID_PERIOD_SHAPE` | compliance calendar hit a filing type whose deadlineRule or periodShape has no implementation (Phase A: nl-quarterly, nl-13-months; YYYY-Qn, YYYY) | Filing types come from the jurisdiction profile; add the rule/shape or fix the profile |
+| `PAYMENT_FORMAT_NOT_SUPPORTED` | SEPA export (pain.001/pain.008) hit a format the jurisdiction profile does not declare in exchange.paymentFormats | The declared formats come from the profile; every market that declares payment formats does so as sepa-pain.001 + sepa-pain.008 (GB, a SEPA member, declares none yet) |
+| `DEADLINE_RULE_NOT_FOUND` / `INVALID_PERIOD_SHAPE` | compliance calendar hit a filing type whose deadlineRule or periodShape has no implementation (nl-*, lu-*, gb-*, us-*, be-*, de-*, dk-*, fi-*, no-*, se-* rules; shapes YYYY-Qn, YYYY-MM, YYYY-Pn, YYYY) | Filing types come from the jurisdiction profile; add the rule/shape or fix the profile |
 | `INVALID_CURRENCY` / `INVALID_RATE` / `INVALID_FX_AMOUNT` / `INVALID_FX_CURRENCY` / `FX_RATE_NOT_FOUND` | FX rate or foreign-currency posting is malformed, or no rate exists | `fx set` a rate, pass `--rate`, or allow the ECB fetch |
 | `ECB_FETCH_FAILED` / `ECB_RATE_NOT_AVAILABLE` | ECB unreachable, or the currency/date has no reference rate | Retry later or `fx set` a rate manually |
 | `INVALID_FREQUENCY` / `INVALID_RUNS` / `INVALID_RANGE` / `INVALID_REVERSE` | Recurring template arguments malformed (frequency, run count, date range, reverse flag) | Fix the template arguments |

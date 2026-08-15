@@ -43,12 +43,13 @@ export async function runCli(argv) {
   program
     .name('bukio')
     .description('Agent-first bookkeeping for Dutch SMEs — SQLite, VAT-optional')
-    .version('0.15.1')
+    .version('0.16.0')
     .option('--json', 'machine-readable JSON output')
     .option('--db <path>', 'database file', process.env.BUKIO_DB || path.join(os.homedir(), '.bukio', 'bukio.db'))
     .option('--actor <who>', "acting entity '<role>:<name>' — e.g. agent:bartholomeus, human:erik (or BUKIO_ACTOR env; required)", undefined)
     .option('--sign-key <path>', 'explicit private-key file to sign with (default: the actor\'s key in <config>/keys)', undefined)
     .option('--server <url>', 'remote bukio server — POST a signed command envelope instead of running locally (or BUKIO_SERVER env)', undefined)
+    .option('--locale <code>', 'output language for human-facing text (or BUKIO_LOCALE env; default: English — explicit opt-in; tables: en, nl, nl-be, de, fr, fr-lu, da, fi, nb, sv)', undefined)
     .showHelpAfterError();
 
   initCmd(program);

@@ -10,7 +10,7 @@
 import { createAccount, getAccountByCode } from '../core/accounts.js';
 import { createEntry, postEntry } from '../core/entries.js';
 import { record } from '../audit/index.js';
-import { getProfile, resolveProfile } from '../jurisdictions/index.js';
+import { resolveProfile, allTaxCodes } from '../jurisdictions/index.js';
 import { isValidIban, normalizeIban } from '../core/iban.js';
 import { isVatEnabled, listVatCodes } from '../vat/index.js';
 import { getItem } from '../items/index.js';
@@ -32,8 +32,12 @@ const DISC_RE = /^-(\d+(?:\.\d{1,2})?)(%?)$/;
 // 1-2 digit number like '9'/'21'); anything else — e.g. '100' or 'nope' — is
 // the price, so price-only lines ("DESC @ 100") parse correctly while
 // unknown codes ('@99') still fail validation with VAT_CODE_NOT_FOUND.
-// NL profile codes are the source of truth (identical set to the legacy const)
-const KNOWN_VAT_CODES = new Set(getProfile('NL').tax.codes.map((c) => c.code));
+// union of all registered profiles' codes (validation against the ACTIVE
+// profile's list still happens downstream — see VAT_CODE_NOT_FOUND).
+// NOTE: a price-only line ending in a bare dotted rate ('Dienst @ 5.5')
+// now tokenizes the rate as a VAT code and fails INVALID_LINE — write two
+// decimals ('Dienst @ 5.50') or pass the code explicitly ('@ 5.50 @5.5').
+const KNOWN_VAT_CODES = new Set(allTaxCodes());
 function isVatCodeToken(token) {
   const t = token.toUpperCase();
   if (KNOWN_VAT_CODES.has(t)) return true;
@@ -277,25 +281,30 @@ export function computeInvoiceTotals(lines, discountType = null, discountValue =
 // --- contacts -------------------------------------------------------------
 
 export function createContact(db, {
-  name, address = null, postalCode = null, city = null, country = 'NL',
+  name, address = null, postalCode = null, city = null, country = null,
   email = null, vatId = null, kvk = null, iban = null, actor = 'human', dryRun = false,
 }) {
   if (!name || typeof name !== 'string' || !name.trim()) throw invoiceError('INVALID_NAME', 'contact needs a name');
   if (iban != null && !isValidIban(iban)) throw invoiceError('INVALID_IBAN', `'${iban}' is not a valid IBAN`);
+  // a contact without an explicit country is assumed to be in the issuer's
+  // market (NL contacts stay 'NL'; a LU company's customers default to 'LU'
+  // — the old hardcoded 'NL' default put a wrong BT-40 country on
+  // e-invoices in every non-NL market)
+  const cc = country ?? resolveProfile(db).meta.country;
   // canonical storage form — same as updateContact and every consumer
   // (normalizeIban strips spaces AND dashes; a space-only strip kept dashes,
   // so create vs update stored the same IBAN in two different shapes)
   const cleanIban = iban != null ? normalizeIban(iban) : null;
   if (dryRun) {
     return {
-      action: 'contact.create', name, address, postalCode, city, country, email,
+      action: 'contact.create', name, address, postalCode, city, country: cc, email,
       vatId, kvk, iban: cleanIban, dryRun: true,
     };
   }
   const info = db.prepare(`
     INSERT INTO contacts (name, address, postal_code, city, country, email, vat_id, kvk, iban, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(name, address, postalCode, city, country, email, vatId, kvk, cleanIban, actor);
+  `).run(name, address, postalCode, city, cc, email, vatId, kvk, cleanIban, actor);
   record(db, { actor, action: 'contact.create', command: 'contact add', args: { name, iban: iban ? true : false }, outcome: 'ok' });
   return getContact(db, info.lastInsertRowid);
 }
@@ -417,14 +426,14 @@ export function contactStatement(db, { contactId, asOf = null }) {
     const isCredit = i.invoice_type === 'credit';
     rows.push({
       date: i.date, kind: isCredit ? 'credit' : 'invoice', ref: i.invoice_number ?? `#${i.id}`,
-      description: isCredit ? `Creditnota ${i.invoice_number ?? ''}`.trim() : (i.description ?? `Factuur ${i.invoice_number}`),
+      description: isCredit ? `Credit note ${i.invoice_number ?? ''}`.trim() : (i.description ?? `Invoice ${i.invoice_number}`),
       debit_cents: isCredit ? 0 : i.gross_cents, credit_cents: isCredit ? i.gross_cents : 0, balance_cents: 0,
     });
     for (const p of i.payments.filter((x) => x.date <= asOfDate)) {
       // payments on a credit note are refunds we paid — reversed polarity
       rows.push({
         date: p.date, kind: 'payment', ref: i.invoice_number,
-        description: isCredit ? `Restitutie ${i.invoice_number}` : `Betaling ${i.invoice_number}`,
+        description: isCredit ? `Refund ${i.invoice_number}` : `Payment ${i.invoice_number}`,
         debit_cents: isCredit ? p.amount_cents : 0, credit_cents: isCredit ? 0 : p.amount_cents, balance_cents: 0,
       });
     }
@@ -435,7 +444,7 @@ export function contactStatement(db, { contactId, asOf = null }) {
   for (const p of payables) {
     rows.push({
       date: p.date, kind: 'payable', ref: p.invoice_ref,
-      description: `Inkoopfactuur ${p.invoice_ref}`,
+      description: `Purchase invoice ${p.invoice_ref}`,
       debit_cents: 0, credit_cents: p.amount_cents, balance_cents: 0,
     });
   }
@@ -510,14 +519,22 @@ function normalizeLineObject(l) {
  * Lines come from `lines` (free-form line specs) OR `items` (catalog item
  * specs "ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]" — price/VAT overrides apply
  * to this invoice only). `discountType/discountValue` apply to the TOTAL,
- * before VAT. `language` is 'nl' (default) or 'en'.
+ * before VAT. `language` is 'nl' or 'en'; when omitted it follows the
+ * company profile (Dutch for NL/BE companies, English for every other
+ * market) — no market is the de facto base.
  */
 export function createInvoice(db, {
   contactId, lines = null, items = null, date, dueDays = 30, deliveryDate = null,
   description = null, reference = null, notes = null, discountType = null,
-  discountValue = null, language = 'nl', actor = 'human', dryRun = false,
+  discountValue = null, language = null, actor = 'human', dryRun = false,
 }) {
   const contact = getContact(db, contactId);
+  if (language == null) {
+    // Document language follows the company profile, not a hardcoded market:
+    // NL/BE (Dutch-speaking) default to 'nl', every other market to 'en'.
+    const comp = db.prepare('SELECT locale FROM company WHERE id = 1').get();
+    language = comp && comp.locale && comp.locale.startsWith('nl') ? 'nl' : 'en';
+  }
   if (!contact) throw invoiceError('CONTACT_NOT_FOUND', `contact ${contactId} does not exist`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw invoiceError('INVALID_DATE', `date '${date}' must be YYYY-MM-DD`);
   {
@@ -670,6 +687,9 @@ export function createInvoice(db, {
 // the only rule in Phase A ('nl-12-vereisten' — art. 35c/35d Wet OB + KVK).
 const INVOICE_COMPLIANCE_RULES = {
   'nl-12-vereisten': validateNl12Vereisten,
+  // Phase B6: Luxembourg invoice requirements (loi TVA + RCS). French error
+  // messages, same error-code contract as the NL rule set.
+  'lu-invoice-vereisten': validateLuVereisten,
 };
 
 export function validateCompliance(db, invoice) {
@@ -690,23 +710,65 @@ function validateNl12Vereisten(db, invoice) {
   // (art. 35a Wet OB) — a VAT-exempt business (vat module off, no btw-id)
   // must still be able to invoice.
   const supplierHasVat = company.vat_module === 1 || Boolean(company.tax_id);
-  if (!company.name) missingSupplier.push('bedrijfsnaam');
+  if (!company.name) missingSupplier.push('company name');
   if (supplierHasVat && !company.tax_id) missingSupplier.push('btw-id');
-  if (!company.registration_id) missingSupplier.push('kvk-nummer');
-  if (!company.address) missingSupplier.push('adres');
-  if (!company.postal_code) missingSupplier.push('postcode');
-  if (!company.city) missingSupplier.push('plaats');
+  if (!company.registration_id) missingSupplier.push('registration number');
+  if (!company.address) missingSupplier.push('address');
+  if (!company.postal_code) missingSupplier.push('postal code');
+  if (!company.city) missingSupplier.push('city');
   if (missingSupplier.length) {
-    throw invoiceError('SUPPLIER_INCOMPLETE', `supplier gegevens ontbreken (vereiste 1-3): ${missingSupplier.join(', ')} — set them with init/company update`);
+    throw invoiceError('SUPPLIER_INCOMPLETE', `supplier details missing (requirements 1-3): ${missingSupplier.join(', ')} — set them with init/company update`);
   }
 
   if (!contact.name || !contact.address || !contact.city) {
-    throw invoiceError('CUSTOMER_INCOMPLETE', 'klantgegevens ontbreken (vereiste 6): naam, adres en plaats zijn verplicht');
+    throw invoiceError('CUSTOMER_INCOMPLETE', 'customer details missing (requirement 6): name, address and city are required');
   }
 
   const hasReverse = invoice.lines.some((l) => l.vat_code === 'R' || l.vat_code === 'RE');
   if (hasReverse && !contact.vat_id) {
-    throw invoiceError('CUSTOMER_VAT_REQUIRED', 'btw verlegd op de factuur: het btw-id van de klant is verplicht (vereiste 7)');
+    throw invoiceError('CUSTOMER_VAT_REQUIRED', 'reverse-charge invoice: the customer VAT id is required (requirement 7)');
+  }
+
+  return { ok: true, vereisten: 12 };
+}
+
+/**
+ * Validate the Luxembourg invoice requirements (loi modifiée du 12 février
+ * 1979 art. 66; RCS) — the checks implemented here cover the PARTY fields:
+ * seller name/legal form/seat, "R.C.S. Luxembourg" + number, TVA number
+ * (when the supplier is registered), customer name/address/city, and the
+ * customer TVA id on reverse-charge lines. The content-level rules from the
+ * law (issue date, sequential number, supply date, qty/nature, price excl.
+ * VAT, exemption reason, auto-liquidation note) are enforced by the invoice
+ * builder itself, not re-checked here. The autorisation d'établissement has
+ * no schema field yet (documented, not validated).
+ */
+function validateLuVereisten(db, invoice) {
+  const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
+  const contact = invoice.contact;
+
+  const missingSupplier = [];
+  // the supplier TVA number is a requirement only when the supplier is
+  // registered (franchise en base: below €50K no TVA number exists)
+  const supplierHasVat = company.vat_module === 1 || Boolean(company.tax_id);
+  if (!company.name) missingSupplier.push('dénomination');
+  if (!company.legal_form) missingSupplier.push('forme juridique');
+  if (supplierHasVat && !company.tax_id) missingSupplier.push('numéro de TVA');
+  if (!company.registration_id) missingSupplier.push('numéro RCS');
+  if (!company.address) missingSupplier.push('adresse');
+  if (!company.postal_code) missingSupplier.push('code postal');
+  if (!company.city) missingSupplier.push('ville');
+  if (missingSupplier.length) {
+    throw invoiceError('SUPPLIER_INCOMPLETE', `données du fournisseur manquantes: ${missingSupplier.join(', ')} — définissez-les avec init/company update`);
+  }
+
+  if (!contact.name || !contact.address || !contact.city) {
+    throw invoiceError('CUSTOMER_INCOMPLETE', 'données du client manquantes: nom, adresse et ville sont obligatoires');
+  }
+
+  const hasReverse = invoice.lines.some((l) => l.vat_code === 'R' || l.vat_code === 'RE');
+  if (hasReverse && !contact.vat_id) {
+    throw invoiceError('CUSTOMER_VAT_REQUIRED', 'auto-liquidation sur la facture: le numéro de TVA du client est obligatoire');
   }
 
   return { ok: true, vereisten: 12 };
@@ -722,12 +784,41 @@ export function nextInvoiceNumber(db, year) {
 }
 
 /**
+ * Posting defaults derived from the RESOLVED profile (Phase B6): the default
+ * sales account (first income account of the default chart — NL 8000, LU
+ * 7021), the VAT liability clearing account (tax.accounts.ledger — NL 2500,
+ * LU 461411) and the debtors account (reporting.debtorsAccount — NL 1200,
+ * LU 4011). These were hardcoded NL chart codes; a profile without an income
+ * account or VAT liability fails loudly instead of posting to a nonexistent
+ * account.
+ */
+function postingDefaults(db) {
+  const profile = resolveProfile(db);
+  const sales = profile.reporting.defaultChart.find((a) => a.type === 'income');
+  if (!sales) {
+    throw invoiceError('FORMAT_NOT_SUPPORTED', `profile ${profile.meta.country} declares no income account in its default chart — invoice postings need one`);
+  }
+  // the VAT liability is only required when the VAT module is enabled — a
+  // no-VAT market (US: tax.system 'none') books plain sales vs debtors
+  let vatLiabilityCode = null;
+  if (isVatEnabled(db)) {
+    const vatLiability = profile.tax.accounts.ledger.find((a) => a.type === 'liability');
+    if (!vatLiability) {
+      throw invoiceError('FORMAT_NOT_SUPPORTED', `profile ${profile.meta.country} declares no VAT liability clearing account — VAT-enabled invoice postings need one`);
+    }
+    vatLiabilityCode = vatLiability.code;
+  }
+  return { salesCode: sales.code, vatLiabilityCode, debtorsCode: profile.reporting.debtorsAccount };
+}
+
+/**
  * Build the booking postings for an invoice: Debiteuren vs Omzet + Te betalen
  * btw (VAT module on) or Debiteuren vs Omzet (module off). Credit notes use
  * the reversed signs. The VAT groups carry the discount-allocated nets and
  * per-rate VAT, so the books match the invoice exactly.
  */
 export function buildInvoicePostings(db, invoice) {
+  const pd = postingDefaults(db);
   const vatOn = isVatEnabled(db);
   const isCredit = invoice.invoice_type === 'credit';
   const sign = isCredit ? 1 : -1; // sales: omzet is credit (-), credit note: debit (+)
@@ -738,7 +829,7 @@ export function buildInvoicePostings(db, invoice) {
     const { groups } = computeInvoiceTotals(invoice.lines, invoice.discount_type, invoice.discount_value);
     for (const g of groups) {
       if (g.discountedNet === 0) continue;
-      const gl = g.gl ?? '8000';
+      const gl = g.gl ?? pd.salesCode;
       if (g.code && g.vat > 0) {
         // btw-plichtige omzet: tagged posting so the OB readout picks it up
         postings.push({
@@ -759,7 +850,7 @@ export function buildInvoicePostings(db, invoice) {
       }
     }
     if (invoice.vat_cents > 0) {
-      postings.push({ code: '2500', amountCents: sign * invoice.vat_cents });
+      postings.push({ code: pd.vatLiabilityCode, amountCents: sign * invoice.vat_cents });
     }
   } else {
     // VAT module off: still honor per-line GL accounts (a line with
@@ -768,11 +859,11 @@ export function buildInvoicePostings(db, invoice) {
     const { groups } = computeInvoiceTotals(invoice.lines, invoice.discount_type, invoice.discount_value);
     for (const g of groups) {
       if (g.discountedNet === 0) continue;
-      postings.push({ code: g.gl ?? '8000', amountCents: sign * g.discountedNet });
+      postings.push({ code: g.gl ?? pd.salesCode, amountCents: sign * g.discountedNet });
     }
   }
   // debiteuren leg: sales -> debit (+gross), credit note -> credit (-gross)
-  postings.push({ code: '1200', amountCents: isCredit ? -gross : gross });
+  postings.push({ code: pd.debtorsCode, amountCents: isCredit ? -gross : gross });
   return postings;
 }
 
@@ -811,7 +902,7 @@ export function finalizeInvoice(db, { id, actor = 'human', dryRun = false }) {
         const number = nextInvoiceNumber(db, year);
         const entry = createEntry(db, {
           date: invoice.date,
-          description: `Factuur ${number}${invoice.contact ? ` - ${invoice.contact.name}` : ''}`,
+          description: `Invoice ${number}${invoice.contact ? ` - ${invoice.contact.name}` : ''}`,
           postings,
           source: 'invoice',
           sourceRef: `inv:${id}`,
@@ -846,7 +937,7 @@ export function creditInvoice(db, { id, date = null, reason = null, actor = 'hum
     return {
       action: 'invoice.credit', for_invoice: id, reason,
       date: date ?? new Date().toISOString().slice(0, 10),
-      description: reason ?? `Creditfactuur voor ${original.invoice_number}`,
+      description: reason ?? `Credit note for ${original.invoice_number}`,
       reference: original.reference ?? original.invoice_number, dryRun: true,
     };
   }
@@ -861,7 +952,7 @@ export function creditInvoice(db, { id, date = null, reason = null, actor = 'hum
     })),
     date: date ?? new Date().toISOString().slice(0, 10),
     dueDays: null,
-    description: reason ?? `Creditfactuur voor ${original.invoice_number}`,
+    description: reason ?? `Credit note for ${original.invoice_number}`,
     // carry the buyer reference (klantkenmerk) so BT-10 on the credit note
     // matches the original — the preceding-invoice number for BT-25 is
     // derived in the UBL builder via credit_for_invoice_id
@@ -1002,13 +1093,13 @@ export function paymentFromBank(db, { invoiceId, bankTxId, actor = 'human', fxTo
     const paid = markPaid(db, { id: invoiceId, date: txRow.date, amountCents: outstanding, method: 'bank', bankTxId, actor });
     const postings = [
       { code: bankAccount.account_code, amountCents: txRow.amount_cents },
-      { code: '1200', amountCents: -outstanding },
+      { code: postingDefaults(db).debtorsCode, amountCents: -outstanding },
     ];
-    let description = `Betaling ${invoice.invoice_number ?? invoiceId}${invoice.contact ? ` - ${invoice.contact.name}` : ''}`;
+    let description = `Payment ${invoice.invoice_number ?? invoiceId}${invoice.contact ? ` - ${invoice.contact.name}` : ''}`;
     if (fxCents !== 0) {
       const fxAccount = ensureFxDifferenceAccount(db, { actor });
       postings.push({ code: fxAccount.code, amountCents: -fxCents });
-      description += ` (koersverschil ${formatAmount(fxCents)})`;
+      description += ` (fx difference ${formatAmount(fxCents)})`;
     }
     const entry = createEntry(db, {
       date: txRow.date,

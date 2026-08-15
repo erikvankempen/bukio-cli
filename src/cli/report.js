@@ -17,6 +17,7 @@ import { sales } from '../report/sales.js';
 import { toCsv, writeXlsx } from '../report/export.js';
 import { fiscalYearWindow } from '../year-end/index.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { t, resolveLocale } from '../i18n/index.js';
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -128,6 +129,7 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const asOf = opts.asOf || todayIso();
           const b = balans(db, { asOf });
@@ -146,12 +148,12 @@ export function make(program) {
           };
           const flatRows = (d) => [
             ...d.assets.sections.flatMap((s) => s.accounts.map((a) => ({
-              side: 'activa', rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
+              side: 'assets', rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
             }))),
             ...d.liabilities_and_equity.sections.flatMap((s) => s.accounts.map((a) => ({
-              side: 'passiva', rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
+              side: 'liabilities', rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
             }))),
-            { side: 'passiva', rgs: '', group: 'Nog te verdelen resultaat', code: '', name: '', amount: d.liabilities_and_equity.result },
+            { side: 'liabilities', rgs: '', group: t('report.undistributedResult', {}, locale), code: '', name: '', amount: d.liabilities_and_equity.result },
           ];
           await emitReport(ctx, opts, data, {
             csvColumns: [
@@ -169,21 +171,21 @@ export function make(program) {
             }],
             render: (d) => {
               console.log(`BALANCE SHEET as of ${d.as_of}`);
-              console.log('ACTIVA');
+              console.log(t('report.assets', {}, locale));
               for (const s of d.assets.sections) {
                 console.log(`  ${s.label} (${s.taxonomy_code})`);
                 for (const a of s.accounts) console.log(`    ${a.code}  ${a.name.padEnd(30)} ${fmt(a.balance_cents)}`);
                 console.log(`    ${''.padEnd(32)} ${fmt(s.total_cents)}`);
               }
-              console.log(`  totaal activa: ${d.assets.total}`);
-              console.log('PASSIVA');
+              console.log(`  ${t('report.totalAssets', {}, locale)} ${d.assets.total}`);
+              console.log(t('report.liabilities', {}, locale));
               for (const s of d.liabilities_and_equity.sections) {
                 console.log(`  ${s.label} (${s.taxonomy_code})`);
                 for (const a of s.accounts) console.log(`    ${a.code}  ${a.name.padEnd(30)} ${fmt(a.balance_cents)}`);
                 console.log(`    ${''.padEnd(32)} ${fmt(s.total_cents)}`);
               }
-              console.log(`  Nog te verdelen resultaat  ${d.liabilities_and_equity.result}`);
-              console.log(`  totaal passiva: ${d.liabilities_and_equity.total}`);
+              console.log(`  ${t('report.undistributedResult', {}, locale)}  ${d.liabilities_and_equity.result}`);
+              console.log(`  ${t('report.totalLiabilities', {}, locale)}: ${d.liabilities_and_equity.total}`);
               console.log(d.balanced ? 'BALANCED' : 'UNBALANCED!');
             },
           });
@@ -197,7 +199,7 @@ export function make(program) {
 
   report
     .command('pnl')
-    .description('winst- en verliesrekening for a period')
+    .description('profit and loss statement for a period')
     .option('--year <yyyy>', 'fiscal year (overrides --from/--to)')
     .option('--from <yyyy-mm-dd>', 'period start (inclusive)')
     .option('--to <yyyy-mm-dd>', 'period end (inclusive)')
@@ -207,6 +209,7 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const year = opts.year || currentYear();
           const [fyFrom, fyTo] = fiscalYearWindow(db, year);
@@ -225,7 +228,7 @@ export function make(program) {
             ...d.sections.flatMap((s) => s.accounts.map((a) => ({
               rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.amount_cents),
             }))),
-            { rgs: '', group: 'Netto resultaat', code: '', name: '', amount: d.result },
+            { rgs: '', group: t('report.netResult', {}, locale), code: '', name: '', amount: d.result },
           ];
           await emitReport(ctx, opts, data, {
             csvColumns: [
@@ -234,7 +237,7 @@ export function make(program) {
             ],
             csvRows: flatRows,
             sheets: (d) => [{
-              name: 'Winst en verlies',
+              name: t('report.pnlSheet', {}, locale),
               columns: [
                 { header: 'rgs', key: 'rgs' }, { header: 'group', key: 'group' },
                 { header: 'code', key: 'code' }, { header: 'name', key: 'name' }, { header: 'amount', key: 'amount' },
@@ -242,15 +245,15 @@ export function make(program) {
               rows: flatRows(d),
             }],
             render: (d) => {
-              console.log(`WINST- EN VERLIESREKENING ${d.from} .. ${d.to}`);
+              console.log(`${t('report.profitAndLoss', {}, locale)} ${d.from} .. ${d.to}`);
               for (const s of d.sections) {
                 console.log(`  ${s.label} (${s.taxonomy_code})`);
                 for (const a of s.accounts) console.log(`    ${a.code}  ${a.name.padEnd(30)} ${fmt(a.amount_cents)}`);
                 console.log(`    ${''.padEnd(32)} ${fmt(s.total_cents)}`);
               }
-              console.log(`  opbrengsten: ${d.revenue}`);
-              console.log(`  kosten:      ${d.costs}`);
-              console.log(`  resultaat:   ${d.result}`);
+              console.log(`  ${t('report.revenue', {}, locale)}: ${d.revenue}`);
+              console.log(`  ${t('report.costs', {}, locale)}:      ${d.costs}`);
+              console.log(`  ${t('report.result', {}, locale)}:     ${d.result}`);
             },
           });
         } finally {
@@ -273,6 +276,7 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const year = opts.year || currentYear();
           const [fyFrom, fyTo] = fiscalYearWindow(db, year);
@@ -416,6 +420,7 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const year = opts.year || currentYear();
           const by = opts.by || 'contact';

@@ -5,7 +5,7 @@
  */
 
 // bukio assets — fixed assets: depreciation schemes, asset register with
-// mid-life adoption, monthly depreciation runs, disposal, activastaat.
+// mid-life adoption, monthly depreciation runs, disposal, asset register.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
@@ -20,13 +20,13 @@ import { record } from '../audit/index.js';
 
 const ASSET_COLUMNS = [
   { key: 'id', label: 'id' },
-  { key: 'name', label: 'naam' },
-  { key: 'category', label: 'categorie' },
+  { key: 'name', label: 'name' },
+  { key: 'category', label: 'category' },
   { key: 'status', label: 'status' },
-  { key: 'purchase_date', label: 'aanschaf' },
-  { key: 'purchase_price', label: 'aanschafwaarde' },
-  { key: 'total_cum_dep', label: 'cum. afschr.' },
-  { key: 'book_value', label: 'boekwaarde' },
+  { key: 'purchase_date', label: 'purchase' },
+  { key: 'purchase_price', label: 'purchase price' },
+  { key: 'total_cum_dep', label: 'cum. deprec.' },
+  { key: 'book_value', label: 'book value' },
 ];
 
 function fmtAssetRow(r) {
@@ -45,12 +45,12 @@ function sheets(data) {
   const columns = ASSET_COLUMNS.map((c) => ({ header: c.label, key: c.key }));
   const rows = data.assets.map(fmtAssetRow);
   rows.push({
-    id: 'TOTAAL', name: '', category: '', status: '', purchase_date: '',
+    id: 'TOTAL', name: '', category: '', status: '', purchase_date: '',
     purchase_price: formatAmount(data.totals.purchase_price_cents),
     total_cum_dep: formatAmount(data.totals.total_cum_dep_cents),
     book_value: formatAmount(data.totals.book_value_cents),
   });
-  return [{ name: 'Activastaat', columns, rows }];
+  return [{ name: 'Fixed asset register', columns, rows }];
 }
 
 export function make(program) {
@@ -72,7 +72,7 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const plan = {
-            name: opts.name || `Standaard ${opts.lifeMonths} maanden ${opts.method}`, method: opts.method,
+            name: opts.name || `Standard ${opts.lifeMonths} months ${opts.method}`, method: opts.method,
             lifeMonths: Number(opts.lifeMonths), residualBp: Number(opts.residualBp),
           };
           if (ctx.dryRun) {
@@ -100,9 +100,9 @@ export function make(program) {
           const schemes = listSchemes(db);
           output(ctx, { schemes }, (d) => {
             table(d.schemes.map((s) => ({ id: s.id, name: s.name, method: s.method, life_months: s.life_months, residual_bp: s.residual_bp })), [
-              { key: 'id', label: 'id' }, { key: 'name', label: 'naam' },
-              { key: 'method', label: 'methode' }, { key: 'life_months', label: 'maanden' },
-              { key: 'residual_bp', label: 'restwaarde bp' },
+              { key: 'id', label: 'id' }, { key: 'name', label: 'name' },
+              { key: 'method', label: 'method' }, { key: 'life_months', label: 'months' },
+              { key: 'residual_bp', label: 'residual value bp' },
             ]);
           });
         } finally {
@@ -197,10 +197,10 @@ export function make(program) {
           }));
           output(ctx, { assets: data }, (d) => {
             table(d.assets.map((a) => ({ ...a, purchase_price: formatAmount(a.purchase_price_cents) })), [
-              { key: 'id', label: 'id' }, { key: 'name', label: 'naam' },
-              { key: 'category', label: 'categorie' }, { key: 'status', label: 'status' },
-              { key: 'purchase_date', label: 'aanschaf' },
-              { key: 'purchase_price', label: 'waarde' }, { key: 'scheme', label: 'schema' },
+              { key: 'id', label: 'id' }, { key: 'name', label: 'name' },
+              { key: 'category', label: 'category' }, { key: 'status', label: 'status' },
+              { key: 'purchase_date', label: 'purchase' },
+              { key: 'purchase_price', label: 'value' }, { key: 'scheme', label: 'scheme' },
             ]);
           });
         } finally {
@@ -281,7 +281,7 @@ export function make(program) {
 
   assets
     .command('register')
-    .description('activastaat: cost, cumulative depreciation, book value per asset (as of a date)')
+    .description('fixed asset register: cost, cumulative depreciation, book value per asset (as of a date)')
     .option('--as-of <yyyy-mm-dd>', 'cut-off date (default: today)')
     .option('--format <json|csv|xlsx>', 'output format', 'json')
     .option('--out <path>', 'file to write (csv/xlsx)')
@@ -294,7 +294,7 @@ export function make(program) {
           const format = opts.format;
           if (format === 'csv') {
             const totaalRow = {
-              id: '', name: 'TOTAAL', category: '', status: '',
+              id: '', name: 'TOTAL', category: '', status: '',
               purchase_date: '', purchase_price: formatAmount(data.totals.purchase_price_cents),
               total_cum_dep: formatAmount(data.totals.total_cum_dep_cents),
               book_value: formatAmount(data.totals.book_value_cents),
@@ -321,7 +321,7 @@ export function make(program) {
             return;
           }
           output(ctx, data, (d) => {
-            console.log(`activastaat ${d.as_of}`);
+            console.log(`fixed asset register ${d.as_of}`);
             table(d.assets.map(fmtAssetRow), ASSET_COLUMNS);
             console.log(`total: ${formatAmount(d.totals.purchase_price_cents)} / ${formatAmount(d.totals.total_cum_dep_cents)} / ${formatAmount(d.totals.book_value_cents)}`);
           });
@@ -340,7 +340,7 @@ export function make(program) {
     .requiredOption('--date <yyyy-mm-dd>', 'disposal date')
     .option('--proceeds <amount>', 'sale proceeds (default 0 = scrapped)', '0')
     .option('--bank-account <code>', 'bank account for the proceeds (default 1100)')
-    .option('--result-account <code>', 'winst/verlies account (default 8100)')
+    .option('--result-account <code>', 'profit/loss account (default 8100)')
     .option('--note <text>', 'free-form note')
     .option('--dry-run', 'show the proposed entry without writing')
     .action((opts, command) => {

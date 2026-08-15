@@ -10,3 +10,4 @@ data/
 *.xlsx
 .env
 .DS_Store
+docs-research/faia-src/

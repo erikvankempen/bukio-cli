@@ -58,14 +58,18 @@ export function make(program) {
     .description('register a bank account')
     .requiredOption('--iban <iban>', 'IBAN')
     .option('--name <name>', 'account name')
-    .option('--account-code <code>', 'linked ledger account', '1100')
+    .option('--account-code <code>', 'linked ledger account (default: the country profile\'s bank account)')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        // the default ledger account used to be hardcoded to the NL bank
+        // account (1100), which does not exist in most other charts — resolve
+        // the country profile's bankAccountDefault instead (NL stays 1100)
+        const accountCode = opts.accountCode ?? resolveProfile(db).reporting.bankAccountDefault ?? '1100';
         try {
-          const account = getOrCreateBankAccount(db, { iban: opts.iban, name: opts.name ?? null, accountCode: opts.accountCode, dryRun: ctx.dryRun });
+          const account = getOrCreateBankAccount(db, { iban: opts.iban, name: opts.name ?? null, accountCode, dryRun: ctx.dryRun });
           if (account.dryRun) {
             output(ctx, { plan: account }, (d) => {
               console.log(`plan: register bank account ${d.plan.iban} (${d.plan.name ?? '-'}) -> ledger ${d.plan.account_code}${d.plan.would_create ? '' : ' (already registered)'}`);
@@ -122,7 +126,7 @@ export function make(program) {
     .requiredOption('--iban <iban>', 'IBAN of the bank account')
     .option('--format <format>', 'camt|csv|auto (auto detects XML vs CSV)', 'auto')
     .option('--name <name>', 'bank account name (if created)')
-    .option('--account-code <code>', 'linked ledger account', '1100')
+    .option('--account-code <code>', 'linked ledger account (default: the country profile\'s bank account)')
     .option('--dry-run', 'show what would be imported without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
@@ -145,7 +149,7 @@ export function make(program) {
           }
           const result = importTransactions(db, {
             iban: opts.iban, transactions, name: opts.name ?? null,
-            accountCode: opts.accountCode, actor: ctx.actor,
+            accountCode: opts.accountCode ?? resolveProfile(db).reporting.bankAccountDefault ?? '1100', actor: ctx.actor,
           });
           // rows the CSV parser could not read (bad amount/date) — never
           // silently dropped; the user must fix the file and re-import

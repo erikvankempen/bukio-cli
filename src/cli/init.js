@@ -35,7 +35,7 @@ export function make(program) {
     .option('--city <city>', 'city')
     .option('--vat <on|off>', 'enable the VAT module (Phase 2)', 'off')
     .option('--kor', 'small business scheme (KOR) — implies --vat off')
-    .option('--fiscal-year-end <mm-dd>', 'fiscal year end', '12-31')
+    .option('--fiscal-year-end <mm-dd>', "fiscal year end (default: the country profile's)")
     .option('--dry-run', 'show the plan without writing anything')
     .action((opts, command) => {
       const ctx = makeCtx(command);
@@ -52,6 +52,8 @@ function buildCompany(opts) {
   // COUNTRY_NOT_SUPPORTED) and drives legal forms, the KOR gate, and the
   // stored country/base_currency/locale/profile_version
   const profile = getProfile(opts.country ?? 'NL');
+  // fiscal year end defaults from the country profile (NL 12-31, GB 03-31)
+  if (opts.fiscalYearEnd === undefined) opts.fiscalYearEnd = profile.meta.defaultFiscalYearEnd;
   if (!profile.meta.legalForms.includes(opts.legalForm)) {
     throw dbError('INVALID_LEGAL_FORM', `legal form '${opts.legalForm}' must be one of ${profile.meta.legalForms.join(', ')}`);
   }

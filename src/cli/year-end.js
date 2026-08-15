@@ -11,6 +11,7 @@ import { jaarrekening } from '../report/jaarrekening.js';
 import { jaarrekeningToPdf } from '../report/jaarrekening-pdf.js';
 import { icpReadout } from '../icp/index.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { t, resolveLocale } from '../i18n/index.js';
 
 export function make(program) {
   const yearEnd = program.command('year-end').description('annual close (afsluiting boekjaar)');
@@ -23,11 +24,12 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const result = yearEndClose(db, { year: opts.year, actor: ctx.actor, dryRun: ctx.dryRun });
           if (result.dryRun) {
             output(ctx, result, (d) => {
-              console.log(`plan: close ${d.year} — resultaat ${formatAmount(d.result_cents)}${d.create_9900 ? ' (creates account 9900)' : ''}`);
+              console.log(t('yearend.plan', { year: d.year, amount: formatAmount(d.result_cents), extra: d.create_9900 ? ' (creates account 9900)' : '' }, locale));
               for (const e of d.entries) {
                 console.log(`  ${e.description}`);
                 for (const p of e.postings) console.log(`    ${p.code}  ${formatAmount(p.amountCents).padStart(12)}`);
@@ -38,7 +40,7 @@ export function make(program) {
           }
           output(ctx, result, (d) => {
             if (!d.closed) { console.log(d.message); return; }
-            console.log(`${d.year} closed — resultaat ${formatAmount(d.result_cents)} (entries #${d.entries.map((e) => e.id).join(', #')}, posted)`);
+            console.log(t('yearend.closed', { year: d.year, amount: formatAmount(d.result_cents), entries: d.entries.map((e) => e.id).join(', #') }, locale));
           });
         } finally {
           db.close();
@@ -55,11 +57,12 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const s = yearEndStatus(db, { year: opts.year });
           output(ctx, { status: s }, (d) => {
             const st = d.status;
-            console.log(`${st.year}: ${st.closed ? 'CLOSED' : 'open'} — resultaat ${formatAmount(st.result_cents)}`);
+            console.log(t('yearend.status', { year: st.year, state: st.closed ? 'CLOSED' : 'open', amount: formatAmount(st.result_cents) }, locale));
             for (const a of st.accounts) console.log(`  ${a.code}  ${a.name.padEnd(30)} ${formatAmount(a.net_cents)}`);
             for (const e of st.closing_entries) console.log(`  closing entry #${e.id} ${e.date} "${e.description}"`);
           });
@@ -88,7 +91,7 @@ export function make(program) {
           return;
         }
         if (opts.format === 'pdf') {
-          const outPath = opts.out ?? `financial-statements-${opts.year}-${opts.model}.pdf`;
+          const outPath = opts.out ?? `financial-statements-${opts.year}-${report.model}.pdf`;
           const result = await jaarrekeningToPdf(report, { outPath });
           output(ctx, { path: result.path, bytes: result.bytes, ...(warnings ? { warnings } : {}) },
             (d) => {
@@ -99,7 +102,7 @@ export function make(program) {
         }
         if (opts.format === 'xlsx') {
           const { renderJaarrekeningXlsx } = await import('../report/jaarrekening-xlsx.js');
-          const outPath = opts.out ?? `financial-statements-${opts.year}-${opts.model}.xlsx`;
+          const outPath = opts.out ?? `financial-statements-${opts.year}-${report.model}.xlsx`;
           const result = await renderJaarrekeningXlsx(report, { outPath });
           output(ctx, { path: result.path, bytes: result.bytes, ...(warnings ? { warnings } : {}) },
             (d) => {
@@ -122,7 +125,7 @@ export function make(program) {
     .command('report')
     .description('annual accounts in the jurisdiction statutory layout')
     .requiredOption('--year <yyyy>', 'fiscal year')
-    .option('--model <micro|klein>', 'statutory model', 'klein')
+    .option('--model <model>', 'statutory model (per the country profile: NL micro|klein, LU abrege)')
     .option('--format <json|pdf|xlsx>', 'output format', 'json')
     .option('--out <path>', 'output path (pdf/xlsx)')
     .action(reportAction(false));
@@ -133,29 +136,30 @@ export function make(program) {
     .command('report')
     .description('[deprecated] alias for financial-statements report')
     .requiredOption('--year <yyyy>', 'fiscal year')
-    .option('--model <micro|klein>', 'statutory model', 'klein')
+    .option('--model <model>', 'statutory model (per the country profile: NL micro|klein, LU abrege)')
     .option('--format <json|pdf|xlsx>', 'output format', 'json')
     .option('--out <path>', 'output path (pdf/xlsx)')
     .action(reportAction(true));
 
-  const icp = program.command('icp').description('ICP listing (intracommunautaire prestaties)');
+  const icp = program.command('icp').description('ICP listing (intra-community supplies)');
   icp
     .command('readout')
-    .description('EU btw-verlegde supplies per customer for the ICP listing (manual filing aid)')
+    .description('EU reverse-charge supplies per customer for the ICP listing (manual filing aid)')
     .requiredOption('--period <yyyy-qn>', 'quarter, e.g. 2026-Q3')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const r = icpReadout(db, { period: opts.period });
           output(ctx, r, (d) => {
             console.log(`ICP ${d.period}: ${d.customers.length} EU customer(s), total ${d.total}`);
             table(d.customers, [
-              { key: 'name', label: 'klant' },
-              { key: 'vat_id', label: 'btw-id' },
-              { key: 'country', label: 'land' },
-              { key: 'amount', label: 'bedrag' },
+              { key: 'name', label: 'customer' },
+              { key: 'vat_id', label: 'tax id' },
+              { key: 'country', label: 'country' },
+              { key: 'amount', label: 'amount' },
             ]);
             console.log(d.note);
           });

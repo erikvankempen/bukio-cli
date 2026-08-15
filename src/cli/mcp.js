@@ -185,13 +185,13 @@ tool({
   handler: (db) => ({ accounts: listAccounts(db) }),
 });
 tool({
-  name: 'vat_readout', description: 'OB-aangifte fields 1a-5d for manual filing (never auto-files)', schema: {
+  name: 'vat_readout', description: 'VAT return fields 1a-5d for manual filing (never auto-files)', schema: {
     type: 'object', properties: { period: { type: 'string', description: 'YYYY-Qn or YYYY-MM' } }, required: ['period'],
   },
   handler: (db, args) => obReadout(db, { period: args.period }),
 });
 tool({
-  name: 'icp_readout', description: 'ICP listing: EU btw-verlegde supplies per customer', schema: {
+  name: 'icp_readout', description: 'ICP listing: EU reverse-charge supplies per customer', schema: {
     type: 'object', properties: { period: { type: 'string', description: 'YYYY-Qn' } }, required: ['period'],
   },
   handler: (db, args) => icpReadout(db, { period: args.period }),
@@ -337,7 +337,7 @@ tool({
       date: { type: 'string' }, description: { type: 'string' },
       postings: { type: 'array', items: { type: 'string' }, description: 'CODE:AMOUNT[@VATCODE]' },
       currency: { type: 'string' }, rate: { type: 'string' },
-      source_ref: { type: 'string', description: 'boekstuk reference (source_ref on the entry)' },
+      source_ref: { type: 'string', description: 'journal reference (source_ref on the entry)' },
       post: { type: 'boolean' }, actor: { type: 'string' }, mode: { type: 'string' },
     }, required: ['date', 'description', 'postings'],
   },
@@ -417,7 +417,7 @@ tool({
       date: args.date ?? new Date().toISOString().slice(0, 10),
       dueDays: args.due_days ?? 30,
       discountType, discountValue,
-      language: args.language ?? 'nl',
+      language: args.language ?? null,
       actor: args.actor ?? ctx.actor,
     };
     if (modeOf(args) === 'dry-run') {
@@ -665,7 +665,7 @@ tool({
 });
 tool({
   name: 'payments_batch_create', mutating: true,
-  description: 'create a SEPA batch: type transfer (pain.001) from transfer payables, or direct_debit (pain.008, incasso) from direct-debit payables (each needs a contact mandate)',
+  description: 'create a SEPA batch: type transfer (pain.001) from transfer payables, or direct_debit (pain.008) from direct-debit payables (each needs a contact mandate)',
   schema: {
     type: 'object', properties: {
       payable_ids: { type: 'array', items: { type: 'number' } },
@@ -706,13 +706,13 @@ tool({
 });
 tool({
   name: 'invoice_finalize', mutating: true,
-  description: 'finalize a draft: sequential number + booking entry (validates the 12 factuurvereisten)',
+  description: 'finalize a draft: sequential number + booking entry (validates the statutory invoice requirements)',
   schema: { type: 'object', properties: { id: { type: 'number' }, actor: { type: 'string' }, mode: { type: 'string' } }, required: ['id'] },
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);
     if (modeOf(args) === 'dry-run') {
       // validate like the real path (finalizeInvoice dryRun: existence,
-      // status, the 12 factuurvereisten) — the old plan echoed ok for
+      // status, the 12 statutory invoice requirements) — the old plan echoed ok for
       // nonexistent/draft-incomplete invoices
       return finalizeInvoice(db, { id: args.id, actor: args.actor ?? ctx.actor, dryRun: true });
     }
@@ -806,7 +806,7 @@ tool({
 });
 tool({
   name: 'contact_add', mutating: true,
-  description: 'register an invoice counterparty (EU customers need a btw-id for verlegd/ICP)',
+  description: 'register an invoice counterparty (EU customers need a VAT id for reverse charge/ICP)',
   schema: {
     type: 'object', properties: {
       name: { type: 'string' }, address: { type: 'string' }, postal_code: { type: 'string' },
@@ -832,7 +832,7 @@ tool({
 // --- fixed assets ------------------------------------------------------------
 
 tool({
-  name: 'assets_register', description: 'activastaat: cost, cumulative depreciation, book value per asset',
+  name: 'assets_register', description: 'fixed asset register: cost, cumulative depreciation, book value per asset',
   schema: { type: 'object', properties: { as_of: { type: 'string' } } },
   handler: (db, args) => register(db, { asOf: args.as_of ?? null }),
 });
@@ -949,7 +949,7 @@ function dispatch(db, ctx, msg) {
       return Promise.resolve(rpcResponse(id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: 'bukio-cli', version: '0.15.1' },
+        serverInfo: { name: 'bukio-cli', version: '0.16.0' },
       }));
     case 'notifications/initialized':
     case 'initialized':

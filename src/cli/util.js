@@ -63,6 +63,7 @@ export function makeCtx(command) {
     actor: o.actor ?? process.env.BUKIO_ACTOR ?? null,
     dryRun: Boolean(o.dryRun),
     server: o.server ?? process.env.BUKIO_SERVER ?? null,
+    locale: o.locale ?? process.env.BUKIO_LOCALE ?? null,
   };
 }
 

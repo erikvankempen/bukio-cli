@@ -13,6 +13,7 @@ import {
 } from '../vat/index.js';
 import { getTransaction, linkTransaction } from '../bank/index.js';
 import { ensureDb, makeCtx, output, fail, table, dbError } from './util.js';
+import { t, resolveLocale } from '../i18n/index.js';
 import { validateDate } from '../core/entries.js';
 
 import { toEurPostings, resolveRate } from '../fx/index.js';
@@ -194,7 +195,7 @@ export function make(program) {
 
   vat
     .command('readout')
-    .description('OB-aangifte manual-filing readout (fields 1a-5d) for a period')
+    .description('VAT return manual-filing readout (fields 1a-5d) for a period')
     .requiredOption('--period <period>', 'YYYY-Qn (quarter) or YYYY-MM (month)')
     .option('--mark-filed', 'record that this period was filed manually')
     .action((opts, command) => {
@@ -221,6 +222,10 @@ export function make(program) {
             note: readout.note,
           };
           output(ctx, data, (d) => {
+            // Labels mirror the official Dutch OB form (fields 1a-5d, Dutch
+            // terms) on purpose: the readout is the NL-only transcription aid
+            // the user copies into the Belastingdienst portal — English labels
+            // would mismatch the official form.
             console.log(`OB-AANGIFTE ${d.period} (${d.from} .. ${d.to}) — manual filing aid`);
             console.log('  1a  omzet hoog           ', d.fields['1a'].amount);
             console.log('  1b  omzet laag           ', d.fields['1b'].amount);
@@ -233,9 +238,9 @@ export function make(program) {
             console.log('  4b  verlegd EU           ', d.fields['4b'].amount);
             console.log('  5a  verschuldigde btw    ', d.fields['5a'].amount);
             console.log('  5b  voorbelasting        ', d.fields['5b'].amount);
-            console.log('  5d  te betalen/ontvangen ', d.to_pay);
+            console.log('  5d  payable/receivable ', d.to_pay);
             console.log(`  -> enter these amounts in Mijn Belastingdienst Zakelijk`);
-            console.log(`  -> then: bukio vat file --period ${d.period}   (move the position to af te dragen btw)`);
+            console.log(`  -> then: bukio vat file --period ${d.period}   (move the position to VAT payable)`);
           });
         } finally {
           db.close();
@@ -247,28 +252,30 @@ export function make(program) {
 
   vat
     .command('file')
-    .description("reclassify the outstanding VAT position to 'Af te dragen omzetbelasting' at filing")
+    .description('reclassify the outstanding VAT position to the settlement account at filing')
     .option('--period <period>', 'YYYY-Qn or YYYY-MM — used in the entry/audit label')
-    .option('--account <code>', `af-te-dragen account (default ${VAT_FILE_ACCOUNT_DEFAULT}, auto-created when missing)`)
+    .option('--account <code>', `VAT payable account (default: the country profile's fileDefault, e.g. ${VAT_FILE_ACCOUNT_DEFAULT} for NL; auto-created when missing)`)
     .option('--desc <text>', 'entry description override')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const result = vatFile(db, {
-            account: opts.account ?? VAT_FILE_ACCOUNT_DEFAULT, period: opts.period ?? null,
+            account: opts.account ?? null, period: opts.period ?? null,
             desc: opts.desc ?? null, actor: ctx.actor, dryRun: ctx.dryRun,
+            locale: resolveLocale(ctx, db),
           });
           output(ctx, result, (d) => {
             if (d.dryRun) {
-              console.log(`plan: reclassify ${formatAmount(d.liability_cents)} ${d.owe ? 'te betalen' : 'te ontvangen'} to ${d.account}`);
+              console.log(`plan: reclassify ${formatAmount(d.liability_cents)} ${t('dir.' + (d.owe ? 'payable' : 'receivable'), {}, locale)} to ${d.account}`);
               for (const p of d.postings) console.log(`  ${p.code}  ${formatAmount(p.amount_cents)}`);
               console.log('(dry run — nothing written)');
               return;
             }
-            console.log(`entry #${d.entry_id}  reclassified ${formatAmount(d.liability_cents)} ${d.owe ? 'te betalen' : 'te ontvangen'} to ${d.account}`);
+            console.log(`entry #${d.entry_id}  reclassified ${formatAmount(d.liability_cents)} ${t('dir.' + (d.owe ? 'payable' : 'receivable'), {}, locale)} to ${d.account}`);
             for (const p of d.postings) console.log(`  ${p.code}  ${formatAmount(p.amount_cents)}`);
           });
         } finally {
@@ -281,17 +288,18 @@ export function make(program) {
 
   vat
     .command('settle')
-    .description('book the bank payment that cancels the af-te-dragen balance; the rounding difference goes to the P&L')
-    .requiredOption('--tx <id>', 'unmatched bank transaction of the OB payment (incoming for a refund)')
+    .description('book the bank payment that cancels the VAT payable balance; the rounding difference goes to the P&L')
+    .requiredOption('--tx <id>', 'unmatched bank transaction of the VAT return payment (incoming for a refund)')
     .option('--period <period>', 'YYYY-Qn or YYYY-MM — used in the entry/audit label')
-    .option('--account <code>', `af-te-dragen account to settle (default ${VAT_FILE_ACCOUNT_DEFAULT} — must match the account used at 'vat file', e.g. when it fell to the next free code)`)
-    .option('--difference-account <code>', `P&L account for the rounding difference (default ${VAT_DIFFERENCE_ACCOUNT_DEFAULT})`)
+    .option('--account <code>', `VAT payable account to settle (default: the country profile's fileDefault, e.g. ${VAT_FILE_ACCOUNT_DEFAULT} for NL — must match the account used at 'vat file', e.g. when it fell to the next free code)`)
+    .option('--difference-account <code>', `P&L account for the rounding difference (default: the country profile's differenceDefault, e.g. ${VAT_DIFFERENCE_ACCOUNT_DEFAULT} for NL)`)
     .option('--desc <text>', 'entry description override')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const txId = Number(opts.tx);
           const tx = getTransaction(db, txId);
@@ -302,12 +310,13 @@ export function make(program) {
           if (ctx.dryRun) {
             const result = vatSettle(db, {
               txAmountCents: tx.amount_cents, txDate: tx.date, bankAccountCode: tx.account_code,
-              account: opts.account ?? VAT_FILE_ACCOUNT_DEFAULT,
-              differenceAccount: opts.differenceAccount ?? VAT_DIFFERENCE_ACCOUNT_DEFAULT,
+              account: opts.account ?? null,
+              differenceAccount: opts.differenceAccount ?? null,
               period: opts.period ?? null, desc: opts.desc ?? null, actor: ctx.actor, dryRun: true,
+              locale: resolveLocale(ctx, db),
             });
             output(ctx, { ...result, tx_id: tx.id }, (d) => {
-              console.log(`plan: settle ${formatAmount(d.paid_cents)} against af te dragen ${formatAmount(d.liability_cents)} on ${d.account} (${d.owe ? 'te betalen' : 'te ontvangen'})`);
+              console.log(`plan: settle ${formatAmount(d.paid_cents)} against VAT payable ${formatAmount(d.liability_cents)} on ${d.account} (${t('dir.' + (d.owe ? 'payable' : 'receivable'), {}, locale)})`);
               for (const p of d.postings) console.log(`  ${p.code}  ${formatAmount(p.amount_cents)}`);
               console.log(`  rounding difference -> ${d.difference_account}: ${formatAmount(d.difference_cents)}`);
               console.log('(dry run — nothing written)');
@@ -320,16 +329,17 @@ export function make(program) {
           const settled = db.transaction(() => {
             const result = vatSettle(db, {
               txAmountCents: tx.amount_cents, txDate: tx.date, bankAccountCode: tx.account_code,
-              account: opts.account ?? VAT_FILE_ACCOUNT_DEFAULT,
-              differenceAccount: opts.differenceAccount ?? VAT_DIFFERENCE_ACCOUNT_DEFAULT,
+              account: opts.account ?? null,
+              differenceAccount: opts.differenceAccount ?? null,
               period: opts.period ?? null, desc: opts.desc ?? null, actor: ctx.actor, dryRun: false,
+              locale: resolveLocale(ctx, db),
             });
             linkTransaction(db, { txId, entryId: result.entry_id, method: 'manual', actor: ctx.actor });
             return result;
           })();
           const linked = getTransaction(db, txId);
           output(ctx, { ...settled, tx: { id: tx.id, date: tx.date, amount: formatAmount(tx.amount_cents), state: linked.state } }, (d) => {
-            console.log(`entry #${d.entry_id}  settled OB payment of ${formatAmount(d.paid_cents)} against ${d.account} (${d.owe ? 'te betalen' : 'te ontvangen'})`);
+            console.log(`entry #${d.entry_id}  settled VAT return payment of ${formatAmount(d.paid_cents)} against ${d.account} (${t('dir.' + (d.owe ? 'payable' : 'receivable'), {}, locale)})`);
             for (const p of d.postings) console.log(`  ${p.code}  ${formatAmount(p.amount_cents)}`);
             console.log(`  rounding difference -> ${d.difference_account}: ${formatAmount(d.difference_cents)}  (tx #${d.tx.id} matched)`);
           });

@@ -10,6 +10,7 @@
 // VAT ledger legs) and computes the OB-aangifte fields for manual filing.
 import { vatError } from './errors.js';
 import { createAccount, getAccountByCode } from '../core/accounts.js';
+import { t } from '../i18n/index.js';
 import { createEntry, parsePostingSpecs, postEntry } from '../core/entries.js';
 import { formatAmount } from '../core/money.js';
 import { getProfile, resolveProfile } from '../jurisdictions/index.js';
@@ -68,7 +69,7 @@ export function parseVatPostingSpecs(raw) {
     for (const token of String(item).split(',')) {
       const t = token.trim();
       if (!t) continue;
-      const m = t.match(/^(\d{1,6}):(.+?)(?:@([A-Z0-9]+))?$/);
+      const m = t.match(/^(\d{1,6}):(.+?)(?:@([A-Z0-9.]+))?$/);
       if (!m) throw vatError('INVALID_POSTING', `posting '${t}' must be CODE:AMOUNT[@VATCODE] (e.g. 8000:-100.00@21)`);
       out.push({ code: m[1], amountCents: parsePostingSpecs([`${m[1]}:${m[2]}`])[0].amountCents, vatCode: m[3] ?? null });
     }
@@ -90,6 +91,17 @@ export function expandVatPostings(db, specs) {
   const vatLegs = [];
   // reverse charge / privégebruik VAT is due at the standard rate — per profile
   const reverseRate = resolveProfile(db).tax.reverseChargeEffectiveRateBp;
+  // the auto VAT legs land on the PROFILE's clearing accounts (NL 1500/2500,
+  // BE 411/451, FR 44566/44571, GB 2110/2100, LU 421611/461411, ...) — the
+  // old hardcoded '2500'/'1500' posted to nonexistent accounts (ACCOUNT_
+  // NOT_FOUND) or silently misbooked onto foreign codes on every non-NL
+  // market (e.g. NO 1500 is Kundefordringer/debtors, 2500 Betalbar skatt)
+  const { tax } = resolveProfile(db);
+  const inputAcc = tax.accounts.ledger.find((a) => a.type === 'asset');
+  const outputAcc = tax.accounts.ledger.find((a) => a.type === 'liability');
+  if (!inputAcc || !outputAcc) {
+    throw vatError('FORMAT_NOT_SUPPORTED', `the jurisdiction profile's VAT ledger must declare one asset and one liability clearing account (got: ${tax.accounts.ledger.map((a) => a.code).join(', ')})`);
+  }
 
   for (const spec of specs) {
     const account = getAccountByCode(db, spec.code);
@@ -114,7 +126,7 @@ export function expandVatPostings(db, specs) {
         : Math.round(Math.abs(spec.amountCents * effectiveRateBp / 10000)) * Math.sign(spec.amountCents);
 
       const isOutput = account.type === 'income' || vat.type === 'private';
-      const vatAccountCode = (vat.type === 'reverse' || isOutput) ? '2500' : '1500';
+      const vatAccountCode = isOutput ? outputAcc.code : inputAcc.code;
       expanded.push({
         code: spec.code, amountCents: spec.amountCents,
         vatCode: vat.code, vatAmountCents: vatAmount,
@@ -355,23 +367,42 @@ export function vatNetPosition(db) {
 }
 
 /** Ensure the 'Af te dragen omzetbelasting' liability account exists (idempotent). */
-function ensureAfTeDragenAccount(db, account) {
-  const resolved = resolveAfTeDragenAccount(db, account);
+function ensureVatSettlementAccount(db, account) {
+  const resolved = resolveVatSettlementAccount(db, account);
   if (!getAccountByCode(db, resolved)) {
+    // taxonomy code only when the profile's chart is taxonomy-mapped (NL RGS:
+    // BSCH.12); stamping the NL code on PCN/SKR-03/PCG charts would pollute
+    // the taxonomy column with a foreign scheme
+    const { reporting } = resolveProfile(db);
+    const usesTaxonomy = reporting.defaultChart.some((a) => a.taxonomyCode);
     createAccount(db, {
-      code: resolved, name: afTeDragenName(db), type: 'liability',
-      normalBalance: 'credit', taxonomyCode: 'BSCH.12',
+      code: resolved, name: vatSettlementAccountName(db), type: 'liability',
+      normalBalance: 'credit', taxonomyCode: usesTaxonomy ? 'BSCH.12' : null,
     });
   }
   return resolved;
 }
 
-function afTeDragenName(db) {
-  return resolveProfile(db).tax.accounts.afTeDragenName;
+function vatSettlementAccountName(db) {
+  return resolveProfile(db).tax.accounts.settlementAccountName;
 }
 
-function isAfTeDragenAccount(db, a) {
-  return Boolean(a && a.name === afTeDragenName(db) && a.type === 'liability' && a.normal_balance === 'credit');
+function isVatSettlementAccount(db, a) {
+  if (!a) return false;
+  const { tax, reporting } = resolveProfile(db);
+  // the profile-declared settlement account is the canonical af-te-dragen
+  // position when it is the SEEDED chart account (bilingual charts: BE 451
+  // 'TVA à payer — Te betalen BTW', DE 1780, GB 2120 — labels differ from
+  // vatSettlementAccountName), so name-equality alone no longer silently falls to a
+  // numeric successor. A FOREIGN account parked on the fileDefault code
+  // (NL legacy-import collisions; 2510 is auto-created, never seeded)
+  // still falls through to the next free code.
+  const seeded = (reporting.defaultChart ?? []).find((c) => c.code === tax.accounts.fileDefault);
+  if (
+    seeded && a.code === tax.accounts.fileDefault
+    && a.name === seeded.name && a.type === 'liability' && a.normal_balance === 'credit'
+  ) return true;
+  return a.name === vatSettlementAccountName(db) && a.type === 'liability' && a.normal_balance === 'credit';
 }
 
 /**
@@ -383,17 +414,17 @@ function isAfTeDragenAccount(db, a) {
  *   -> ...), reusing an af-te-dragen account found along the way; a
  *   non-numeric code with no successor is an error (VAT_ACCOUNT_COLLISION).
  */
-function resolveAfTeDragenAccount(db, account) {
+function resolveVatSettlementAccount(db, account) {
   const existing = getAccountByCode(db, account);
   if (!existing) return account;
-  if (isAfTeDragenAccount(db, existing)) return account;
+  if (isVatSettlementAccount(db, existing)) return account;
   if (!/^\d+$/.test(account)) {
-    throw vatError('VAT_ACCOUNT_COLLISION', `account ${account} exists but is not '${afTeDragenName(db)}' and has no numeric successor — pick a free code with --account`);
+    throw vatError('VAT_ACCOUNT_COLLISION', `account ${account} exists but is not '${vatSettlementAccountName(db)}' and has no numeric successor — pick a free code with --account`);
   }
   let code = String(Number(account) + 1);
   let guard = 0;
   while (getAccountByCode(db, code)) {
-    if (isAfTeDragenAccount(db, getAccountByCode(db, code))) return code; // a previous filing already landed here
+    if (isVatSettlementAccount(db, getAccountByCode(db, code))) return code; // a previous filing already landed here
     code = String(Number(code) + 1);
     if (++guard > 999) {
       throw vatError('VAT_ACCOUNT_COLLISION', `no free numeric successor after ${account} — pick a free code with --account`);
@@ -408,7 +439,7 @@ function resolveAfTeDragenAccount(db, account) {
  * whole euros, and the cent-level difference is settled to the P&L later
  * (vatSettle), never by distorting the VAT clearing accounts.
  */
-export function vatFile(db, { account = null, period = null, desc = null, actor = 'human', dryRun = false }) {
+export function vatFile(db, { account = null, period = null, desc = null, actor = 'human', dryRun = false, locale = 'en' }) {
   requireVat(db);
   const { tax } = resolveProfile(db);
   account = account ?? tax.accounts.fileDefault;
@@ -428,7 +459,7 @@ export function vatFile(db, { account = null, period = null, desc = null, actor 
   // Resolve the af-te-dragen account BEFORE building the plan: a requested
   // code that is taken by another account falls to the next free numeric
   // code, and the caller sees exactly where the position will land.
-  account = resolveAfTeDragenAccount(db, account);
+  account = resolveVatSettlementAccount(db, account);
   // The FULL clearing position moves to the af-te-dragen account: both
   // clearing accounts are emptied (2500 te betalen holds the credit/output
   // legs, 1500 te vorderen the debit/input legs) and the NET lands there
@@ -440,7 +471,11 @@ export function vatFile(db, { account = null, period = null, desc = null, actor 
   ].filter((p) => p.amountCents !== 0);
   const owe = net > 0;
   const liability = Math.abs(net);
-  const description = desc ?? `OB-aangifte${period ? ` ${period}` : ''} verlegging naar ${account} (${owe ? 'te betalen' : 'te ontvangen'})`;
+  const description = desc ?? t('vat.file.description', {
+    period: period ? ` ${period}` : '',
+    account,
+    direction: owe ? t('dir.payable', {}, locale) : t('dir.receivable', {}, locale),
+  }, locale);
 
   if (dryRun) {
     return {
@@ -450,7 +485,7 @@ export function vatFile(db, { account = null, period = null, desc = null, actor 
   }
 
   const entry = db.transaction(() => {
-    ensureAfTeDragenAccount(db, account);
+    ensureVatSettlementAccount(db, account);
     const created = createEntry(db, {
       date: new Date().toISOString().slice(0, 10), description,
       postings, source: 'manual', actor,
@@ -478,7 +513,7 @@ export function vatFile(db, { account = null, period = null, desc = null, actor 
 export function vatSettle(db, {
   txAmountCents, txDate, bankAccountCode, account = null,
   differenceAccount = null,
-  period = null, desc = null, actor = 'human', dryRun = false,
+  period = null, desc = null, actor = 'human', dryRun = false, locale = 'en',
 }) {
   requireVat(db);
   const { tax } = resolveProfile(db);
@@ -487,19 +522,19 @@ export function vatSettle(db, {
   if (!Number.isInteger(txAmountCents)) throw vatError('INVALID_AMOUNT', 'tx amount must be an integer number of cents');
   const balance = accountBalance(db, account);
   if (balance === 0) {
-    throw vatError('VAT_SETTLE_NOTHING', `no outstanding balance on ${account} (af te dragen omzetbelasting) to settle`);
+    throw vatError('VAT_SETTLE_NOTHING', `no outstanding balance on ${account} (${vatSettlementAccountName(db)}) to settle`);
   }
   const owe = balance < 0; // af-te-dragen credit (negative) = te betalen
   const liability = Math.abs(balance);
   const paid = Math.abs(txAmountCents);
   if (owe && txAmountCents >= 0) {
-    throw vatError('VAT_SETTLE_DIRECTION', `paying ${account} (te betalen) requires an OUTGOING bank transaction, got +${paid} cents`);
+    throw vatError('VAT_SETTLE_DIRECTION', `paying ${account} (payable) requires an OUTGOING bank transaction, got +${paid} cents`);
   }
   if (!owe && txAmountCents <= 0) {
-    throw vatError('VAT_SETTLE_DIRECTION', `receiving a refund on ${account} (te ontvangen) requires an INCOMING bank transaction, got ${txAmountCents} cents`);
+    throw vatError('VAT_SETTLE_DIRECTION', `receiving a refund on ${account} (receivable) requires an INCOMING bank transaction, got ${txAmountCents} cents`);
   }
   if (!getAccountByCode(db, differenceAccount)) {
-    throw vatError('INVALID_DIFFERENCE_ACCOUNT', `difference account ${differenceAccount} does not exist (pick an expense account, e.g. ${VAT_DIFFERENCE_ACCOUNT_DEFAULT})`);
+    throw vatError('INVALID_DIFFERENCE_ACCOUNT', `difference account ${differenceAccount} does not exist (pick an expense account, e.g. ${tax.accounts.differenceDefault})`);
   }
 
   // rounding difference: +debit (loss, paid more than booked) / -credit (gain,
@@ -517,7 +552,11 @@ export function vatSettle(db, {
     { code: bankAccountCode, amountCents: txAmountCents },
   ];
   if (difference !== 0) postings.push({ code: differenceAccount, amountCents: difference });
-  const description = desc ?? `Betaling OB-aangifte${period ? ` ${period}` : ''} — af te dragen omzetbelasting (afrondingsverschil ${formatAmount(difference)})`;
+  const description = desc ?? t('vat.settle.description', {
+    period: period ? ` ${period}` : '',
+    account: vatSettlementAccountName(db),
+    amount: formatAmount(difference),
+  }, locale);
 
   if (dryRun) {
     return {

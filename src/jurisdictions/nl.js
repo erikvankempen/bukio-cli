@@ -56,7 +56,7 @@ export default {
       ],
       fileDefault: '2510',
       differenceDefault: '4700',
-      afTeDragenName: 'Af te dragen omzetbelasting',
+      settlementAccountName: 'Af te dragen omzetbelasting',
     },
     returnLayout: 'ob-1a-5d', // declarative layout id; NL mapper keyed by this id
     filingPeriodicity: 'quarterly',
@@ -118,6 +118,10 @@ export default {
       { code: '8000', name: 'Omzet', type: 'income', normalBalance: 'credit', taxonomyCode: 'WOMZ.80' },
       { code: '8100', name: 'Overige opbrengsten', type: 'income', normalBalance: 'credit', taxonomyCode: 'WOVB.82' },
     ],
+    // additive (Phase B6): debtors account for invoice postings — was
+    // hardcoded '1200' in buildInvoicePostings; value unchanged for NL
+    debtorsAccount: '1200',
+    bankAccountDefault: '1100',
     inferTaxonomy: null, // NL keyword inference stays in code keyed by taxonomy='rgs'
     // current jaarrekening line lists verbatim (src/report/jaarrekening.js)
     statutoryAccounts: {

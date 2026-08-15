@@ -31,7 +31,7 @@ export function make(program) {
           if (result.dryRun) {
             output(ctx, result, (d) => {
               console.log(`plan: export XAF 4.0 for ${d.company.name} (KVK ${d.company.registration_id || '-'}) — fiscal year ${d.year}`);
-              console.log(`  ${d.rekeningen} rekeningen, ${d.mutaties} mutaties -> ${d.path}`);
+              console.log(`  ${d.rekeningen} accounts, ${d.mutaties} mutations -> ${d.path}`);
               console.log('(dry run — nothing written)');
             });
             return;
@@ -39,7 +39,7 @@ export function make(program) {
           output(ctx, result, (d) => {
             console.log(`wrote ${d.path}`);
             console.log(`  ${d.company.name} (KVK ${d.company.registration_id || '-'}) — fiscal year ${d.year}`);
-            console.log(`  ${d.rekeningen} rekeningen, ${d.mutaties} mutaties`);
+            console.log(`  ${d.rekeningen} accounts, ${d.mutaties} mutations`);
           });
         } finally {
           db.close();

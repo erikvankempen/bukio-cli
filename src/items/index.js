@@ -54,7 +54,11 @@ function validateItem({ name, unit, unitPriceCents, vatCode }) {
   if (!Number.isInteger(unitPriceCents) || unitPriceCents <= 0) {
     throw itemError('INVALID_PRICE', 'unit price must be positive cents');
   }
-  if (vatCode != null && !/^[A-Z0-9]+$/.test(vatCode)) {
+  // format check only — semantic validation against the ACTIVE profile's
+  // code list happens downstream (VAT_CODE_NOT_FOUND). The regex accepts
+  // dotted rates (FR '5.5'/'2.1') since the line-spec parser recognises
+  // them; '21', 'V', 'R', 'RE' all still pass.
+  if (vatCode != null && !/^[A-Z0-9]+(\.[0-9]{1,2})?$/.test(vatCode)) {
     throw itemError('INVALID_VAT_CODE', `vat code '${vatCode}' is malformed`);
   }
 }

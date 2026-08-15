@@ -10,7 +10,7 @@ import { fetchEcbRate } from '../fx/ecb.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
 
 export function make(program) {
-  const fx = program.command('fx').description('foreign exchange rates (vreemde valuta)');
+  const fx = program.command('fx').description('foreign exchange rates');
   fx
     .command('fetch')
     .description('fetch the ECB reference rate (1 EUR = N) for a currency on/before a date and store it')
@@ -87,9 +87,9 @@ export function make(program) {
           output(ctx, { currency: opts.currency, rates }, (d) => {
             if (!d.rates.length) { console.log(`no rates stored for ${d.currency}`); return; }
             table(d.rates, [
-              { key: 'date', label: 'datum' },
+              { key: 'date', label: 'date' },
               { key: 'rate', label: '1 EUR =' },
-              { key: 'source', label: 'bron' },
+              { key: 'source', label: 'source' },
             ]);
           });
         } finally {
@@ -112,10 +112,10 @@ export function make(program) {
           output(ctx, { rates }, (d) => {
             if (!d.rates.length) { console.log('no rates stored'); return; }
             table(d.rates, [
-              { key: 'currency', label: 'valuta' },
-              { key: 'date', label: 'datum' },
+              { key: 'currency', label: 'currency' },
+              { key: 'date', label: 'date' },
               { key: 'rate', label: '1 EUR =' },
-              { key: 'source', label: 'bron' },
+              { key: 'source', label: 'source' },
             ]);
           });
         } finally {
