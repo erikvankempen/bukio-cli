@@ -5,7 +5,7 @@
  */
 
 // bukio assets — fixed assets: depreciation schemes, asset register with
-// mid-life adoption, monthly depreciation runs, disposal, activastaat.
+// mid-life adoption, monthly depreciation runs, disposal, asset register.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {

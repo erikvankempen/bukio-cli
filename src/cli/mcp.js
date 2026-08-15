@@ -417,7 +417,7 @@ tool({
       date: args.date ?? new Date().toISOString().slice(0, 10),
       dueDays: args.due_days ?? 30,
       discountType, discountValue,
-      language: args.language ?? 'nl',
+      language: args.language ?? null,
       actor: args.actor ?? ctx.actor,
     };
     if (modeOf(args) === 'dry-run') {
