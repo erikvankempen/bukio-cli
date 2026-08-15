@@ -829,8 +829,10 @@ test('B5: LU compliance calendar — TVA on the 15th + annual accounts in 7 mont
     // annual accounts: deposit within ~7 months of the FY end (LSC 2002 law)
     const ac = obs.find((o) => o.type === 'COMPTES_ANNUELS' && o.period === '2026');
     assert.equal(ac.deadline, '2027-07-31');
-    // Q3 2026 is still open (deadline after today)
-    assert.equal(obs.find((o) => o.type === 'TVA' && o.period === '2026-Q3').status, 'open');
+    // Q3 2026 deadline 2026-10-15: open until then, overdue after (date-aware,
+    // so the suite does not flap when run after mid-October 2026)
+    const q3 = obs.find((o) => o.type === 'TVA' && o.period === '2026-Q3');
+    assert.equal(q3.status, new Date('2026-10-15') < new Date() ? 'overdue' : 'open');
     // no NL types leak into the LU calendar
     assert.ok(!obs.some((o) => ['OB', 'ICP', 'JAARREKENING'].includes(o.type)), 'no NL filing types in the LU calendar');
   } finally {

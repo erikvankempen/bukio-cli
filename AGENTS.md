@@ -265,7 +265,7 @@ fail with `FORMAT_NOT_SUPPORTED` for markets whose engine is a B-milestone
 
 ---
 
-## 5. Account codes (default chart — 28 accounts, RGS-mapped)
+## 5. Account codes (default chart — 29 accounts, RGS-mapped)
 
 | Code | Name | Type | RGS |
 |------|------|------|-----|
@@ -295,6 +295,7 @@ fail with `FORMAT_NOT_SUPPORTED` for markets whose engine is a B-milestone
 | 4500 | Financiële baten en lasten | expense | WFBE.84 |
 | 4600 | Afschrijvingen | expense | WAFS.41 |
 | 4700 | Overige bedrijfskosten | expense | WBED.42 |
+| 4840 | Koersverschillen | expense | WFBE.84 |
 | 8000 | Omzet | income | WOMZ.80 |
 | 8100 | Overige opbrengsten | income | WOVB.82 |
 
@@ -834,7 +835,7 @@ authz off.
 | `INVALID_IBAN` / `INVALID_NAME` / `INVALID_TYPE` / `NOTHING_TO_UPDATE` | Bad company/contact field on `init`/`company update`/`contact add` (IBAN mod-97 validated) | Fix the value; pass at least one change to `company update` |
 | `COMPANY_REQUIRED` / `COMPANY_INCOMPLETE` / `NOT_INITIALISED` | Company missing or incomplete (e.g. no valid company IBAN for SEPA) | Run `init`, then `company update` to complete the profile |
 | `FORMAT_NOT_SUPPORTED` | A jurisdiction profile declares a document/format with no registered builder (audit file, e-invoicing, OB return layout, financial-statements layout, FX source, invoice compliance rule) | Profile-format dispatch is strict: an unregistered key fails loudly instead of silently falling back to the NL format — register the builder or fix the profile |
-| `PAYMENT_FORMAT_NOT_SUPPORTED` | SEPA export (pain.001/pain.008) hit a format the jurisdiction profile does not declare in exchange.paymentFormats | The declared formats come from the profile; every SEPA market declares sepa-pain.001 + sepa-pain.008 |
+| `PAYMENT_FORMAT_NOT_SUPPORTED` | SEPA export (pain.001/pain.008) hit a format the jurisdiction profile does not declare in exchange.paymentFormats | The declared formats come from the profile; every market that declares payment formats does so as sepa-pain.001 + sepa-pain.008 (GB, a SEPA member, declares none yet) |
 | `DEADLINE_RULE_NOT_FOUND` / `INVALID_PERIOD_SHAPE` | compliance calendar hit a filing type whose deadlineRule or periodShape has no implementation (nl-*, lu-*, gb-*, us-*, be-*, de-*, dk-*, fi-*, no-*, se-* rules; shapes YYYY-Qn, YYYY-MM, YYYY-Pn, YYYY) | Filing types come from the jurisdiction profile; add the rule/shape or fix the profile |
 | `INVALID_CURRENCY` / `INVALID_RATE` / `INVALID_FX_AMOUNT` / `INVALID_FX_CURRENCY` / `FX_RATE_NOT_FOUND` | FX rate or foreign-currency posting is malformed, or no rate exists | `fx set` a rate, pass `--rate`, or allow the ECB fetch |
 | `ECB_FETCH_FAILED` / `ECB_RATE_NOT_AVAILABLE` | ECB unreachable, or the currency/date has no reference rate | Retry later or `fx set` a rate manually |

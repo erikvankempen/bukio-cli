@@ -751,7 +751,9 @@ resolves as `--rate` → stored rate (exact, else latest on/before) → **ECB
 reference rate** (fetched live, stored as source `ECB` for reuse). `--rate`
 always wins; `BUKIO_FX_NO_FETCH=1` keeps bukio fully offline. The description
 should note the currency and the original invoice number. Outgoing invoices
-stay EUR-only (the 12-vereisten and UBL are EUR-based).
+stay EUR-only in the shipped markets — the NL/LU invoice-compliance and UBL
+paths are EUR-based, and the non-EUR markets (GB/US/…) cannot finalize
+invoices yet.
 
 ### `bukio backup` / `bukio restore` / `bukio attach`
 
