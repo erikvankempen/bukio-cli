@@ -1328,10 +1328,10 @@ across 138 files (19,139 in `src/`, 14,928 in `test/`, 156 in `bin/` +
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 93–235
+**Comparison:** a conventional team building this would estimate **≈ 98–250
 person-months (≈ €882K–€2,247K)**; the AI-assisted build consumed **$19.56 in
 API costs plus ≈ €1,490 of my review-and-direction time (contributed, unpaid
-— see above)** over 32 working sessions in eleven days — still a tiny fraction of
+— see above)** over 24 working sessions in eleven days — still a tiny fraction of
 the conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.
