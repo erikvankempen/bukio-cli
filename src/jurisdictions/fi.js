@@ -117,7 +117,7 @@ export default {
       { code: '1763', name: 'Arvonlisäverosaamiset', type: 'asset', normalBalance: 'debit' },
       { code: '1800', name: 'Siirtosaamiset', type: 'asset', normalBalance: 'debit' },
       { code: '1900', name: 'Kassa', type: 'asset', normalBalance: 'debit' },
-      { code: '1910', name: 'Pankkitili', type: 'asset', normalBalance: 'debit' },
+      { code: '1910', name: 'Pankkitili (Nordea)', type: 'asset', normalBalance: 'debit' },
       { code: '1970', name: 'Pankkitili', type: 'asset', normalBalance: 'debit' },
       { code: '1990', name: 'Pankkitilien väliset siirrot', type: 'asset', normalBalance: 'debit' },
       { code: '2001', name: 'Osakepääoma', type: 'equity', normalBalance: 'credit' },

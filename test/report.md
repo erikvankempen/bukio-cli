@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 09:23:17 UTC — **✅ 872 passing · 0 failing (872 tests)**
+**Latest run:** 2026-08-15 09:44:13 UTC — **✅ 873 passing · 0 failing (873 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-97 passing · 0 failing
+98 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -758,6 +758,7 @@
     - ✅ FR: getProfile returns the FR profile (EUR, fr, PCG data)
     - ✅ FR: PLANNED is empty (all ten markets landed)
     - ✅ FR: init --country FR creates a French company with the PCG chart
+    - ✅ FR: dotted VAT codes (5.5/2.1) parse in the invoice line spec (review fix)
     - ✅ FR: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ US: getProfile returns the US profile (USD, en-US, no federal VAT)
     - ✅ US: PLANNED is empty (all ten markets landed)

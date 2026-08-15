@@ -10,7 +10,7 @@
 import { createAccount, getAccountByCode } from '../core/accounts.js';
 import { createEntry, postEntry } from '../core/entries.js';
 import { record } from '../audit/index.js';
-import { getProfile, resolveProfile } from '../jurisdictions/index.js';
+import { getProfile, resolveProfile , allTaxCodes } from '../jurisdictions/index.js';
 import { isValidIban, normalizeIban } from '../core/iban.js';
 import { isVatEnabled, listVatCodes } from '../vat/index.js';
 import { getItem } from '../items/index.js';
@@ -32,8 +32,9 @@ const DISC_RE = /^-(\d+(?:\.\d{1,2})?)(%?)$/;
 // 1-2 digit number like '9'/'21'); anything else — e.g. '100' or 'nope' — is
 // the price, so price-only lines ("DESC @ 100") parse correctly while
 // unknown codes ('@99') still fail validation with VAT_CODE_NOT_FOUND.
-// NL profile codes are the source of truth (identical set to the legacy const)
-const KNOWN_VAT_CODES = new Set(getProfile('NL').tax.codes.map((c) => c.code));
+// union of all registered profiles' codes (validation against the ACTIVE
+// profile's list still happens downstream — see VAT_CODE_NOT_FOUND)
+const KNOWN_VAT_CODES = new Set(allTaxCodes());
 function isVatCodeToken(token) {
   const t = token.toUpperCase();
   if (KNOWN_VAT_CODES.has(t)) return true;

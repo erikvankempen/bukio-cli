@@ -39,6 +39,16 @@ import us from './us.js';
 /** ISO 3166-1 alpha-2 country codes that are valid but not implemented yet. */
 export const PLANNED = [];
 
+// every code across ALL registered profiles — the invoice line-spec parser
+// uses this union to RECOGNISE a VAT-code token (validation still happens
+// against the ACTIVE profile's codes, so a foreign code fails loudly with
+// VAT_CODE_NOT_FOUND). Before the multi-jurisdiction expansion the parser
+// only knew the NL codes: FR's dotted rates '5.5'/'2.1' were not
+// recognised and silently mis-parsed as the line price.
+export function allTaxCodes() {
+  return [...new Set(Object.values(PROFILES).flatMap((p) => p.tax.codes.map((c) => c.code)))];
+}
+
 const PROFILES = {
   NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr), US: deepFreeze(us), BE: deepFreeze(be), DE: deepFreeze(de), DK: deepFreeze(dk), FI: deepFreeze(fi), NO: deepFreeze(no), SE: deepFreeze(se),
 };

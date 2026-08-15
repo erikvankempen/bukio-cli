@@ -1108,6 +1108,26 @@ test('FR: init --country FR creates a French company with the PCG chart', () => 
   assert.equal(kor.out.error.code, 'INVALID_VAT_CHOICE');
 });
 
+test('FR: dotted VAT codes (5.5/2.1) parse in the invoice line spec (review fix)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'SARL Test', '--country', 'FR', '--legal-form', 'sarl', '--vat', 'on']);
+  const db = openDb(dbPath);
+  try {
+    const contact = createContact(db, { name: 'Client', address: 'Rue 1', postalCode: '75001', city: 'Paris', vatId: 'FR99999999999', actor: 'agent:test' });
+    // '@5.5' must be recognised as the reduced VAT code, not mis-parsed as
+    // a €5.50 price (the old parser only knew the NL codes + \d{1,2})
+    const inv = createInvoice(db, { contactId: contact.id, date: '2026-07-10', lines: ['Prestation @ 1 @ 100.00 @5.5'] });
+    assert.equal(inv.lines[0].vat_code, '5.5');
+    assert.equal(inv.lines[0].vat_rate_bp, 550);
+    assert.equal(inv.lines[0].amount_cents, 10000);
+    // note: validateCompliance for FR fails FORMAT_NOT_SUPPORTED by design
+    // (no FR compliance engine yet — strict dispatch) — the parse is what
+    // this regression covers
+  } finally {
+    db.close();
+  }
+});
+
 test('FR: strict dispatch — unregistered formats fail loudly (no fallback)', () => {
   const dbPath = tmpDb();
   cli(dbPath, ['init', '--name', 'SAS Test', '--country', 'FR', '--legal-form', 'sas', '--vat', 'on']);
@@ -1580,7 +1600,7 @@ test('FI: getProfile returns the FI profile (EUR, fi-FI, 25.5% VAT)', () => {
   assert.equal(p.closing.equityAccount, '2251');
   assert.equal(p.reporting.taxonomy, null);
   // chart: Liikekirjuri codes incl. the 2350 Yksityistili contra-equity
-  assert.ok(p.reporting.defaultChart.some((a) => a.code === '1910' && a.name === 'Pankkitili'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '1910' && a.name === 'Pankkitili (Nordea)'));
   assert.ok(p.reporting.defaultChart.some((a) => a.code === '3000' && a.name === 'Myynti ALV 25,5%'));
   assert.ok(p.reporting.defaultChart.some((a) => a.code === '2350' && a.normalBalance === 'debit'));
   assert.ok(p.reporting.defaultChart.length >= 50);
@@ -1610,7 +1630,7 @@ test('FI: init --country FI creates a Finnish company with the model chart', () 
   const db = openDb(dbPath);
   try {
     const accounts = db.prepare('SELECT code, name, taxonomy FROM accounts WHERE active = 1').all();
-    assert.ok(accounts.some((a) => a.code === '1910' && a.name === 'Pankkitili'));
+    assert.ok(accounts.some((a) => a.code === '1910' && a.name === 'Pankkitili (Nordea)'));
     assert.ok(accounts.some((a) => a.code === '3000' && a.name === 'Myynti ALV 25,5%'));
     assert.ok(accounts.some((a) => a.code === '2350')); // contra-equity accepted (024)
     for (const a of accounts) assert.equal(a.taxonomy, null);

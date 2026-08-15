@@ -88,6 +88,10 @@ export default {
       // (brief, flagged unverified); 648 is seeded in the chart so
       // `vat settle` posts to a real account
       differenceDefault: '648',
+      // 451 is BOTH the output clearing account (ledger) and the settlement
+      // position (fileDefault): settle a filed balance before new output VAT
+      // accrues on the same account — the NL design keeps these separate
+      // (output clearing 2500 vs settlement 2510)
       settlementAccountName: 'TVA à payer',
     },
     // returnLayout omitted — the Intervat return engine is a B-milestone
