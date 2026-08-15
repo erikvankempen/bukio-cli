@@ -5,8 +5,9 @@
  */
 
 // bukio company — show the company record, update company details.
+import { t, resolveLocale } from '../i18n/index.js';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { ensureDb, makeCtx, output, fail, table, dbError } from './util.js';
+import {ensureDb, makeCtx, output, fail, table, dbError} from './util.js';
 import { isValidIban } from '../core/iban.js';
 import { record } from '../audit/index.js';
 
@@ -120,22 +121,23 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const row = getCompany(db);
           if (!row) throw dbError('NO_COMPANY', 'no company — run bukio init first');
           output(ctx, { company: serializeCompany(row) }, (d) => {
             table([d.company], [
-              { key: 'name', label: 'naam' },
-              { key: 'country', label: 'land' },
-              { key: 'legal_form', label: 'rechtsvorm' },
-              { key: 'registration_id', label: 'reg-id (kvk)' },
-              { key: 'tax_id', label: 'btw-id' },
-              { key: 'iban', label: 'iban' },
-              { key: 'address', label: 'adres' },
-              { key: 'postal_code', label: 'postcode' },
-              { key: 'city', label: 'plaats' },
-              { key: 'base_currency', label: 'valuta' },
-              { key: 'locale', label: 'taal' },
+              { key: 'name', label: t('company.name', {}, locale) },
+              { key: 'country', label: t('company.country', {}, locale) },
+              { key: 'legal_form', label: t('company.legalForm', {}, locale) },
+              { key: 'registration_id', label: t('company.regId', {}, locale) },
+              { key: 'tax_id', label: t('company.taxId', {}, locale) },
+              { key: 'iban', label: t('company.iban', {}, locale) },
+              { key: 'address', label: t('company.address', {}, locale) },
+              { key: 'postal_code', label: t('company.postalCode', {}, locale) },
+              { key: 'city', label: t('company.city', {}, locale) },
+              { key: 'base_currency', label: t('company.currency', {}, locale) },
+              { key: 'locale', label: t('company.language', {}, locale) },
             ]);
           });
         } finally {

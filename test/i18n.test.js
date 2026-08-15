@@ -88,6 +88,16 @@ function bookSale() {
 }
 const entryDesc = (id) => db.prepare('SELECT description FROM journal_entries WHERE id = ?').get(id).description;
 
+test('company show + balance-sheet labels localize (round-10 review keys)', () => {
+  assert.equal(t('company.name', {}, 'nl'), 'naam');
+  assert.equal(t('company.language', {}, 'nl'), 'taal');
+  assert.equal(t('company.regId', {}, 'de'), 'Reg.-Nr.');
+  assert.equal(t('report.totalAssets', {}, 'en'), 'total assets:');
+  assert.equal(t('report.totalAssets', {}, 'nl'), 'totaal activa:');
+  assert.equal(t('report.assets', {}, 'de'), 'AKTIVA');
+  assert.equal(t('report.liabilities', {}, 'fr'), 'PASSIF');
+});
+
 test('reminders table labels localize fully (nl)', () => {
   assert.equal(t('invlist.dueDate', {}, 'nl'), 'vervaldatum');
   assert.equal(t('invlist.outstanding', {}, 'nl'), 'openstaand');

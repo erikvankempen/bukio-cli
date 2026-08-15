@@ -34,7 +34,7 @@ export default {
   meta: {
     country: 'LU',
     baseCurrency: 'EUR',
-    locale: 'fr',
+    locale: 'fr-lu',
     // legal forms per the LU research brief (memo §7.5); slugs follow the NL
     // lowercase convention. Sàrl-S = simplified SARL.
     legalForms: ['entreprise-individuelle', 'sarl', 'sarl-s', 'sa', 'sas', 'scs'],

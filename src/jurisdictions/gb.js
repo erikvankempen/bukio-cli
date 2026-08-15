@@ -36,7 +36,7 @@ export default {
   meta: {
     country: 'GB',
     baseCurrency: 'GBP',
-    locale: 'en-GB',
+    locale: 'en',
     // legal forms per the GB research brief §4 (GOV.UK business structures)
     legalForms: ['sole-trader', 'private-limited-company', 'partnership', 'llp', 'cic', 'charity'],
     // 31 March is tax-year aligned (HMRC treats 31 Mar-5 Apr as aligned

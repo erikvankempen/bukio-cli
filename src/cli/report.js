@@ -171,14 +171,14 @@ export function make(program) {
             }],
             render: (d) => {
               console.log(`BALANCE SHEET as of ${d.as_of}`);
-              console.log('ACTIVA');
+              console.log(t('report.assets', {}, locale));
               for (const s of d.assets.sections) {
                 console.log(`  ${s.label} (${s.taxonomy_code})`);
                 for (const a of s.accounts) console.log(`    ${a.code}  ${a.name.padEnd(30)} ${fmt(a.balance_cents)}`);
                 console.log(`    ${''.padEnd(32)} ${fmt(s.total_cents)}`);
               }
-              console.log(`  totaal activa: ${d.assets.total}`);
-              console.log('PASSIVA');
+              console.log(`  ${t('report.totalAssets', {}, locale)} ${d.assets.total}`);
+              console.log(t('report.liabilities', {}, locale));
               for (const s of d.liabilities_and_equity.sections) {
                 console.log(`  ${s.label} (${s.taxonomy_code})`);
                 for (const a of s.accounts) console.log(`    ${a.code}  ${a.name.padEnd(30)} ${fmt(a.balance_cents)}`);

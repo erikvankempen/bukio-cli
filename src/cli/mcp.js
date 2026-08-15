@@ -706,7 +706,7 @@ tool({
 });
 tool({
   name: 'invoice_finalize', mutating: true,
-  description: 'finalize a draft: sequential number + booking entry (validates the 12 factuurvereisten)',
+  description: 'finalize a draft: sequential number + booking entry (validates the statutory invoice requirements)',
   schema: { type: 'object', properties: { id: { type: 'number' }, actor: { type: 'string' }, mode: { type: 'string' } }, required: ['id'] },
   handler: (db, args, ctx) => {
     guardExecute(ctx, args);

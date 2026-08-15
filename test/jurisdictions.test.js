@@ -429,7 +429,7 @@ test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
   const p = getProfile('LU');
   assert.equal(p.meta.country, 'LU');
   assert.equal(p.meta.baseCurrency, 'EUR');
-  assert.equal(p.meta.locale, 'fr');
+  assert.equal(p.meta.locale, 'fr-lu');
   assert.ok(p.meta.legalForms.includes('sarl'));
   assert.ok(!p.meta.legalForms.includes('bv')); // NL legal form rejected for LU
   assert.equal(p.identifiers.peppolSchemeId, '0195'); // RCS registry code (BT-34/BT-49)
@@ -493,11 +493,11 @@ test('B1: init --country LU creates a French LU company with the PCN chart', () 
   const r = cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'LU');
   assert.equal(r.out.data.company.base_currency, 'EUR');
-  assert.equal(r.out.data.company.locale, 'fr');
+  assert.equal(r.out.data.company.locale, 'fr-lu');
   const db = openDb(dbPath);
   try {
     const c = db.prepare('SELECT country, base_currency, locale, profile_version FROM company WHERE id = 1').get();
-    assert.deepEqual(c, { country: 'LU', base_currency: 'EUR', locale: 'fr', profile_version: 1 });
+    assert.deepEqual(c, { country: 'LU', base_currency: 'EUR', locale: 'fr-lu', profile_version: 1 });
     const accounts = db.prepare('SELECT code, name, taxonomy FROM accounts WHERE active = 1').all();
     assert.ok(accounts.some((a) => a.code === '516' && a.name === 'Caisse'));
     assert.ok(accounts.some((a) => a.code === '421611' && a.name === 'TVA en amont'));
@@ -1033,7 +1033,7 @@ test('GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)', () =>
   const p = getProfile('GB');
   assert.equal(p.meta.country, 'GB');
   assert.equal(p.meta.baseCurrency, 'GBP');
-  assert.equal(p.meta.locale, 'en-GB');
+  assert.equal(p.meta.locale, 'en');
   assert.equal(p.meta.defaultFiscalYearEnd, '03-31'); // tax-year aligned
   assert.ok(p.meta.legalForms.includes('private-limited-company'));
   assert.ok(!p.meta.legalForms.includes('bv')); // NL form rejected
@@ -1075,7 +1075,7 @@ test('GB: init --country GB creates a GBP company with the UK chart', () => {
   const r = cli(dbPath, ['init', '--name', 'Test Ltd', '--country', 'GB', '--legal-form', 'private-limited-company', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'GB');
   assert.equal(r.out.data.company.base_currency, 'GBP');
-  assert.equal(r.out.data.company.locale, 'en-GB');
+  assert.equal(r.out.data.company.locale, 'en');
   const db = openDb(dbPath);
   try {
     const accounts = db.prepare('SELECT code, name, taxonomy FROM accounts WHERE active = 1').all();
@@ -1249,7 +1249,7 @@ test('US: getProfile returns the US profile (USD, en-US, no federal VAT)', () =>
   const p = getProfile('US');
   assert.equal(p.meta.country, 'US');
   assert.equal(p.meta.baseCurrency, 'USD');
-  assert.equal(p.meta.locale, 'en-US');
+  assert.equal(p.meta.locale, 'en');
   assert.ok(p.meta.legalForms.includes('llc'));
   assert.ok(!p.meta.legalForms.includes('bv')); // NL form rejected
   // no federal VAT: system 'none', no codes, no ledger
@@ -1289,7 +1289,7 @@ test('US: init --country US creates a USD company with the US chart', () => {
   const r = cli(dbPath, ['init', '--name', 'Acme LLC', '--country', 'US', '--legal-form', 'llc']);
   assert.equal(r.out.data.company.country, 'US');
   assert.equal(r.out.data.company.base_currency, 'USD');
-  assert.equal(r.out.data.company.locale, 'en-US');
+  assert.equal(r.out.data.company.locale, 'en');
   const db = openDb(dbPath);
   try {
     const accounts = db.prepare('SELECT code, name, taxonomy FROM accounts WHERE active = 1').all();

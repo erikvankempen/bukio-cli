@@ -37,7 +37,7 @@ export default {
   meta: {
     country: 'US',
     baseCurrency: 'USD',
-    locale: 'en-US',
+    locale: 'en',
     // SBA business structures (research §4)
     legalForms: ['sole-proprietorship', 'partnership', 'llc', 's-corp', 'c-corp', 'non-profit'],
     // calendar year is the norm for SMEs; any tax year is allowed
