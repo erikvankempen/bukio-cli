@@ -183,7 +183,7 @@ export function make(program) {
                 console.log(`    ${''.padEnd(32)} ${fmt(s.total_cents)}`);
               }
               console.log(`  undistributed result  ${d.liabilities_and_equity.result}`);
-              console.log(`  totaal passiva: ${d.liabilities_and_equity.total}`);
+              console.log(`  total liabilities: ${d.liabilities_and_equity.total}`);
               console.log(d.balanced ? 'BALANCED' : 'UNBALANCED!');
             },
           });
@@ -197,7 +197,7 @@ export function make(program) {
 
   report
     .command('pnl')
-    .description('winst- en verliesrekening for a period')
+    .description('profit and loss statement for a period')
     .option('--year <yyyy>', 'fiscal year (overrides --from/--to)')
     .option('--from <yyyy-mm-dd>', 'period start (inclusive)')
     .option('--to <yyyy-mm-dd>', 'period end (inclusive)')

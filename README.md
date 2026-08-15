@@ -1094,7 +1094,7 @@ The version history is recorded in [CHANGELOG.md](CHANGELOG.md); the agent manua
 | `ALREADY_COMPLETED` | A completed recurring template cannot be re-activated |
 | `RECURRING_ERROR` | A template failed during `recurring run` (reported per-template, others continue) |
 | `SUPPLIER_INCOMPLETE` / `CUSTOMER_INCOMPLETE` | Invoice missing supplier/customer vereisten — set them at `init` / `contact add` |
-| `CUSTOMER_VAT_REQUIRED` | btw verlegd line needs the customer's btw-id |
+| `CUSTOMER_VAT_REQUIRED` | reverse-charge line needs the customer's VAT id |
 | `INVALID_LINE` / `NO_LINES` / `CONTACT_NOT_FOUND` | Invoice line/contact validation |
 | `ALREADY_FINALIZED` / `NOT_FINALIZED` | Invoice lifecycle violations |
 | `OVERPAYMENT` / `NOT_PAYABLE` / `CREDIT_NOT_PAYABLE` | Payment validation |

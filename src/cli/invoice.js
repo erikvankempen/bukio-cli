@@ -288,7 +288,7 @@ export function make(program) {
 
   invoice
     .command('finalize')
-    .description('assign the sequential number and book the entry (Debiteuren/Omzet/btw)')
+    .description('assign the sequential number and book the entry (debtors/revenue/VAT)')
     .requiredOption('--id <id>', 'invoice id')
     .option('--dry-run', 'show the number + postings without writing')
     .action((opts, command) => {
@@ -363,8 +363,8 @@ export function make(program) {
             const i = d.invoice;
             console.log(`${i.invoice_number ?? 'concept'} [${i.status}] ${i.date} — ${i.contact_name}`);
             for (const l of i.lines) console.log(`  ${l.line_no}. ${l.description}  ${l.quantity}x ${l.unit_price}${l.vat_code ? ` @${l.vat_code}` : ''} = ${l.amount}`);
-            console.log(`  net ${i.net} / btw ${i.vat} / totaal ${i.gross}`);
-            for (const p of i.payments) console.log(`  betaald ${p.date}: ${p.amount} (${p.method})`);
+            console.log(`  net ${i.net} / vat ${i.vat} / total ${i.gross}`);
+            for (const p of i.payments) console.log(`  paid ${p.date}: ${p.amount} (${p.method})`);
             if (i.outstanding_cents > 0) console.log(`  outstanding: ${formatAmount(i.outstanding_cents)}`);
           });
         } finally {
@@ -600,16 +600,16 @@ export function make(program) {
           output(ctx, result, (d) => {
             if (!d.count) { console.log(`no reminders as of ${d.as_of}`); return; }
             table(d.reminders, [
-              { key: 'invoice_number', label: 'factuur' },
-              { key: 'contact_name', label: 'klant' },
+              { key: 'invoice_number', label: 'invoice' },
+              { key: 'contact_name', label: 'customer' },
               { key: 'due_date', label: 'due_date' },
-              { key: 'days_overdue', label: 'dagen' },
+              { key: 'days_overdue', label: 'days' },
               { key: 'outstanding', label: 'outstanding' },
-              { key: 'remind', label: 'herinnering' },
+              { key: 'remind', label: 'reminder' },
             ]);
             if (opts.draftEmails) {
               for (const r of d.reminders) {
-                console.log(`\n--- ${r.invoice_number} -> ${r.draft_email.to ?? 'GEEN E-MAILADRES'} ---`);
+                console.log(`\n--- ${r.invoice_number} -> ${r.draft_email.to ?? 'NO EMAIL ADDRESS'} ---`);
                 console.log(`subject: ${r.draft_email.subject}`);
                 console.log(r.draft_email.body);
               }

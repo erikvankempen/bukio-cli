@@ -138,7 +138,7 @@ export function make(program) {
     .option('--out <path>', 'output path (pdf/xlsx)')
     .action(reportAction(true));
 
-  const icp = program.command('icp').description('ICP listing (intracommunautaire prestaties)');
+  const icp = program.command('icp').description('ICP listing (intra-community supplies)');
   icp
     .command('readout')
     .description('EU reverse-charge supplies per customer for the ICP listing (manual filing aid)')
