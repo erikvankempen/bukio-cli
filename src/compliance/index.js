@@ -103,6 +103,19 @@ const DEADLINE_RULES = {
   // FYE; CT600 corporation tax return 12 months after the period end
   'gb-9-months': (company, year) => monthsAfterFyEnd(company, year, 9),
   'gb-ct600': (company, year) => monthsAfterFyEnd(company, year, 12),
+  // US: Form 1120/1120-S due the 15th day of the 4th month after the tax
+  // year end (April 15 for calendar-year); Form 941 quarterly, due the
+  // last day of the month after the quarter
+  'us-1120': (company, year) => {
+    const fy = company.fiscal_year_end || '12-31';
+    const parts = String(fy).split('-');
+    const mm = Number(parts[parts.length - 2]);
+    const total = mm + 4;
+    const y = Number(year) + Math.floor((total - 1) / 12);
+    const m = ((total - 1) % 12) + 1;
+    return `${y}-${String(m).padStart(2, '0')}-15`;
+  },
+  'us-941': (period) => quarterDeadline(period).deadline, // same month-end shape as NL
 };
 
 export function isFiled(db, type, period) {

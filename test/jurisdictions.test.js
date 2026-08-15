@@ -66,11 +66,8 @@ test('getProfile throws COUNTRY_NOT_SUPPORTED for valid-but-planned countries', 
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
   }
-  assert.ok(PLANNED.includes('US'));
-  // LU, GB and FR (Phase B) are implemented — not in PLANNED
-  assert.ok(!PLANNED.includes('LU'));
-  assert.ok(!PLANNED.includes('GB'));
-  assert.ok(!PLANNED.includes('FR'));
+  // all Phase B markets are implemented — PLANNED is empty
+  assert.deepEqual([...PLANNED].sort(), []);
 });
 
 test('getProfile throws PROFILE_NOT_FOUND for unknown valid codes', () => {
@@ -185,11 +182,11 @@ test('resolveProfile defaults to NL when no company row exists yet', () => {
 });
 
 test('resolveProfile throws for unsupported / unknown company countries (decision §9.1.6)', () => {
-  const dbUS = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'US'] });
+  const dbDE = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'DE'] });
   try {
-    assert.throws(() => resolveProfile(dbUS), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
+    assert.throws(() => resolveProfile(dbDE), (e) => e.code === 'PROFILE_NOT_FOUND');
   } finally {
-    dbUS.close();
+    dbDE.close();
   }
   const dbZZ = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'ZZ'] });
   try {
@@ -220,11 +217,11 @@ function tmpDb() {
   return path.join(dir, 'test.db');
 }
 
-test('M3 init: --country US (still planned) is rejected with COUNTRY_NOT_SUPPORTED', () => {
+test('M3 init: --country DE (valid code, no profile) is rejected with PROFILE_NOT_FOUND', () => {
   const dbPath = tmpDb();
-  const r = cli(dbPath, ['init', '--name', 'Test BV', '--country', 'US'], { expectFail: true });
+  const r = cli(dbPath, ['init', '--name', 'Test BV', '--country', 'DE'], { expectFail: true });
   assert.equal(r.code, 1);
-  assert.equal(r.out.error.code, 'COUNTRY_NOT_SUPPORTED');
+  assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
 });
 
 test('M3 init: --country ZZ (valid code, no profile) is rejected with PROFILE_NOT_FOUND', () => {
@@ -471,9 +468,9 @@ test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('B1: LU is implemented — PLANNED is now US only', () => {
+test('B1: LU is implemented — PLANNED is empty (all Phase B markets landed)', () => {
   assert.ok(!PLANNED.includes('LU'));
-  assert.deepEqual([...PLANNED].sort(), ['US']);
+  assert.deepEqual([...PLANNED].sort(), []);
   assert.equal(getProfile('LU').meta.country, 'LU');
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
@@ -883,9 +880,9 @@ test('GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)', () =>
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['gb-9-months', 'gb-ct600']);
 });
 
-test('GB: PLANNED is now US only', () => {
+test('GB: PLANNED is empty (all Phase B markets landed)', () => {
   assert.ok(!PLANNED.includes('GB'));
-  assert.deepEqual([...PLANNED].sort(), ['US']);
+  assert.deepEqual([...PLANNED].sort(), []);
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
   }
@@ -995,10 +992,9 @@ test('FR: getProfile returns the FR profile (EUR, fr, PCG data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('FR: PLANNED is now US only', () => {
+test('FR: PLANNED is empty (all Phase B markets landed)', () => {
   assert.ok(!PLANNED.includes('FR'));
-  assert.deepEqual([...PLANNED].sort(), ['US']);
-  assert.throws(() => getProfile('US'), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
+  assert.deepEqual([...PLANNED].sort(), []);
 });
 
 test('FR: init --country FR creates a French company with the PCG chart', () => {
@@ -1040,6 +1036,108 @@ test('FR: strict dispatch — unregistered formats fail loudly (no fallback)', (
       () => validateCompliance(db, { invoice_type: 'invoice', lines: [] }),
       (e) => e.code === 'FORMAT_NOT_SUPPORTED',
     );
+  } finally {
+    db.close();
+  }
+});
+
+// --- Phase B: US profile (no VAT, state-level sales tax) ---------------------
+
+test('US: getProfile returns the US profile (USD, en-US, no federal VAT)', () => {
+  const p = getProfile('US');
+  assert.equal(p.meta.country, 'US');
+  assert.equal(p.meta.baseCurrency, 'USD');
+  assert.equal(p.meta.locale, 'en-US');
+  assert.ok(p.meta.legalForms.includes('llc'));
+  assert.ok(!p.meta.legalForms.includes('bv')); // NL form rejected
+  // no federal VAT: system 'none', no codes, no ledger
+  assert.equal(p.tax.system, 'none');
+  assert.deepEqual(p.tax.codes, []);
+  assert.deepEqual(p.tax.accounts.ledger, []);
+  assert.ok(p.identifiers.vatIdFormat.test('12-3456789')); // EIN
+  assert.ok(!p.identifiers.vatIdFormat.test('123456789'));
+  assert.equal(p.reporting.debtorsAccount, '1100');
+  assert.equal(p.closing.resultAccount, '3300');
+  assert.equal(p.closing.equityAccount, '3200');
+  assert.equal(p.reporting.taxonomy, null);
+  // QuickBooks-convention chart incl. the 1410 contra-asset (migration 023)
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '1000' && a.name === 'Checking account'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '4000' && a.name === 'Sales — goods'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '1410' && a.normalBalance === 'credit'));
+  assert.ok(p.reporting.defaultChart.length >= 38);
+  // B-milestones stay unregistered (strict dispatch fails loudly)
+  assert.equal(p.tax.returnLayout, undefined);
+  assert.equal(p.reporting.format, undefined);
+  assert.equal(p.documents.invoiceCompliance, undefined);
+  assert.equal(p.documents.eInvoicing, undefined);
+  assert.equal(p.documents.auditFile, undefined);
+  assert.deepEqual(p.exchange.bankStatementFormats, ['csv']); // CAMT.053 unverified
+  assert.deepEqual(p.exchange.paymentFormats, []); // no SEPA; ACH is a B-milestone
+  // US deadlines: 1120 (15th of 4th month after FYE) + 941 (quarterly)
+  assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['us-1120', 'us-941']);
+});
+
+test('US: PLANNED is empty — every market in the memo is implemented', () => {
+  assert.deepEqual([...PLANNED].sort(), []);
+  assert.equal(getProfile('US').meta.country, 'US');
+});
+
+test('US: init --country US creates a USD company with the US chart', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Acme LLC', '--country', 'US', '--legal-form', 'llc']);
+  assert.equal(r.out.data.company.country, 'US');
+  assert.equal(r.out.data.company.base_currency, 'USD');
+  assert.equal(r.out.data.company.locale, 'en-US');
+  const db = openDb(dbPath);
+  try {
+    const accounts = db.prepare('SELECT code, name, taxonomy FROM accounts WHERE active = 1').all();
+    assert.ok(accounts.some((a) => a.code === '1000' && a.name === 'Checking account'));
+    assert.ok(accounts.some((a) => a.code === '4000' && a.name === 'Sales — goods'));
+    assert.ok(accounts.some((a) => a.code === '1410')); // contra-asset accepted (023)
+    for (const a of accounts) assert.equal(a.taxonomy, null);
+  } finally {
+    db.close();
+  }
+  // NL legal form rejected for US
+  const bad = cli(tmpDb(), ['init', '--name', 'X', '--country', 'US', '--legal-form', 'bv'], { expectFail: true });
+  assert.equal(bad.out.error.code, 'INVALID_LEGAL_FORM');
+  // KOR is an NL-only scheme
+  const kor = cli(tmpDb(), ['init', '--name', 'X', '--country', 'US', '--legal-form', 'llc', '--kor'], { expectFail: true });
+  assert.equal(kor.out.error.code, 'INVALID_VAT_CHOICE');
+});
+
+test('US: strict dispatch — unregistered formats fail loudly (no fallback)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Acme LLC', '--country', 'US', '--legal-form', 'llc']);
+  let r = cli(dbPath, ['financial-statements', 'report', '--year', '2026'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
+  r = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', '/tmp/xaf-us.xml'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
+  const db = openDb(dbPath);
+  try {
+    assert.throws(
+      () => validateCompliance(db, { invoice_type: 'invoice', lines: [] }),
+      (e) => e.code === 'FORMAT_NOT_SUPPORTED',
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('US: compliance calendar — 1120 on 15 Apr + 941 quarterly (month-end)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Acme LLC', '--country', 'US', '--legal-form', 'llc']);
+  const db = openDb(dbPath);
+  try {
+    const r = complianceStatus(db, { year: 2026 });
+    const obs = r.obligations;
+    // FY 12-31: 1120 due 15 Apr next year
+    assert.equal(obs.find((o) => o.type === 'FEDERAL_INCOME_TAX' && o.period === '2026').deadline, '2027-04-15');
+    // 941 quarterly, last day of the month after the quarter
+    assert.equal(obs.find((o) => o.type === 'PAYROLL_941' && o.period === '2026-Q3').deadline, '2026-10-31');
+    assert.equal(obs.find((o) => o.type === 'PAYROLL_941' && o.period === '2026-Q4').deadline, '2027-01-31');
+    // no NL/LU/GB/FR types leak into the US calendar
+    assert.ok(!obs.some((o) => ['OB', 'ICP', 'JAARREKENING', 'TVA', 'COMPTES_ANNUELS', 'ANNUAL_ACCOUNTS', 'CT600'].includes(o.type)));
   } finally {
     db.close();
   }

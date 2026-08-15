@@ -779,11 +779,17 @@ function postingDefaults(db) {
   if (!sales) {
     throw invoiceError('FORMAT_NOT_SUPPORTED', `profile ${profile.meta.country} declares no income account in its default chart — invoice postings need one`);
   }
-  const vatLiability = profile.tax.accounts.ledger.find((a) => a.type === 'liability');
-  if (!vatLiability) {
-    throw invoiceError('FORMAT_NOT_SUPPORTED', `profile ${profile.meta.country} declares no VAT liability clearing account — invoice postings need one`);
+  // the VAT liability is only required when the VAT module is enabled — a
+  // no-VAT market (US: tax.system 'none') books plain sales vs debtors
+  let vatLiabilityCode = null;
+  if (isVatEnabled(db)) {
+    const vatLiability = profile.tax.accounts.ledger.find((a) => a.type === 'liability');
+    if (!vatLiability) {
+      throw invoiceError('FORMAT_NOT_SUPPORTED', `profile ${profile.meta.country} declares no VAT liability clearing account — VAT-enabled invoice postings need one`);
+    }
+    vatLiabilityCode = vatLiability.code;
   }
-  return { salesCode: sales.code, vatLiabilityCode: vatLiability.code, debtorsCode: profile.reporting.debtorsAccount };
+  return { salesCode: sales.code, vatLiabilityCode, debtorsCode: profile.reporting.debtorsAccount };
 }
 
 /**

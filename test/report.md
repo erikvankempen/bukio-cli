@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 06:33:43 UTC — **✅ 833 passing · 0 failing (833 tests)**
+**Latest run:** 2026-08-15 06:43:51 UTC — **✅ 838 passing · 0 failing (838 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-58 passing · 0 failing
+63 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -710,7 +710,7 @@
     - ✅ resolveProfile defaults to NL on a pre-021 DB (no country column)
     - ✅ resolveProfile defaults to NL when no company row exists yet
     - ✅ resolveProfile throws for unsupported / unknown company countries (decision §9.1.6)
-    - ✅ M3 init: --country US (still planned) is rejected with COUNTRY_NOT_SUPPORTED
+    - ✅ M3 init: --country DE (valid code, no profile) is rejected with PROFILE_NOT_FOUND
     - ✅ M3 init: --country ZZ (valid code, no profile) is rejected with PROFILE_NOT_FOUND
     - ✅ M3 init: --country nl (lowercase) normalizes to NL and stores profile fields
     - ✅ M3 init: generic --registration-id/--tax-id are stored; no deprecation warning
@@ -730,7 +730,7 @@
     - ✅ M9: bank import resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ review-fix: account add --taxonomy-code works; --rgs-code alias maps and warns
     - ✅ B1: getProfile returns the LU profile (French, PCN 2020 data)
-    - ✅ B1: LU is implemented — PLANNED is now US only
+    - ✅ B1: LU is implemented — PLANNED is empty (all Phase B markets landed)
     - ✅ B1: the LU profile is deep-frozen
     - ✅ B1: init --country LU creates a French LU company with the PCN chart
     - ✅ B1: LU strict dispatch — unregistered formats fail loudly (no NL fallback)
@@ -747,14 +747,19 @@
     - ✅ B3: LU export xaf produces the FAIA 2.01 reduced-B audit file
     - ✅ B3: NL XAF export is unchanged (byte-identical, xaf-auditfile-4.0)
     - ✅ GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)
-    - ✅ GB: PLANNED is now US only
+    - ✅ GB: PLANNED is empty (all Phase B markets landed)
     - ✅ GB: init --country GB creates a GBP company with the UK chart
     - ✅ GB: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ GB: compliance calendar — annual accounts in 9 months, CT600 in 12
     - ✅ FR: getProfile returns the FR profile (EUR, fr, PCG data)
-    - ✅ FR: PLANNED is now US only
+    - ✅ FR: PLANNED is empty (all Phase B markets landed)
     - ✅ FR: init --country FR creates a French company with the PCG chart
     - ✅ FR: strict dispatch — unregistered formats fail loudly (no fallback)
+    - ✅ US: getProfile returns the US profile (USD, en-US, no federal VAT)
+    - ✅ US: PLANNED is empty — every market in the memo is implemented
+    - ✅ US: init --country US creates a USD company with the US chart
+    - ✅ US: strict dispatch — unregistered formats fail loudly (no fallback)
+    - ✅ US: compliance calendar — 1120 on 15 Apr + 941 quarterly (month-end)
 
 ### migration-021.test.js — 
 
