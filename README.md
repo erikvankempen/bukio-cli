@@ -1324,6 +1324,26 @@ context. If your agent is unable to help, shoot me a message at
 
 ---
 
+## Supported jurisdictions
+
+Ten jurisdiction profiles (see AGENTS.md §3.1 for the full table). `bukio init --country <cc>` seeds the country's chart convention (RGS, PCN 2020, PCG, SKR 03, BAS 2023, NS 4102, …), VAT codes/rates, identifiers and compliance calendar. Format dispatch is strict: markets whose engines are B-milestones fail loudly (`FORMAT_NOT_SUPPORTED`) — no market ever silently gets another market's output.
+
+| Country | Currency | VAT (2026) | Chart convention | Peppol scheme |
+|---|---|---|---|---|
+| NL Netherlands | EUR | 21 / 9 / 0 | RGS-mapped | 9944 (kvk) |
+| LU Luxembourg | EUR | 17 / 14 / 8 / 3 | PCN 2020 | 0195 (RCS) |
+| GB United Kingdom | GBP | 20 / 5 / 0 | QuickBooks/Xero-style | — (2026 roadmap) |
+| FR France | EUR | 20 / 10 / 5.5 / 2.1 | PCG (plan comptable général) | 0002 (SIREN) |
+| US United States | USD | no federal VAT | QuickBooks-style | — |
+| BE Belgium | EUR | 21 / 12 / 6 / 0 | PCN-BE minimum plan (AR 12-09-1983) | 0208 (KBO) |
+| DE Germany | EUR | 19 / 7 / 0 | DATEV SKR 03 | 9930 (USt-IdNr) |
+| DK Denmark | DKK | 25 (no reduced band) | Standardkontoplan-aligned | 0184 (CVR) |
+| FI Finland | EUR | 25.5 / 13.5 / 10 / 0 | Liikekirjuri model chart | 0037 (Y-tunnus) |
+| NO Norway | NOK | 25 / 15 / 12 / 0 | NS 4102 standard kontoplan | 0192 (org.nr) |
+| SE Sweden | SEK | 25 / 12 / 6 / 0 | BAS 2023 | 0007 (org.nr) |
+
+---
+
 ## Roadmap
 
 | Phase | Scope | Status |
@@ -1342,6 +1362,7 @@ context. If your agent is unable to help, shoot me a message at
 | 11 | Items catalog + discounts + invoice languages: `item` CRUD, `invoice create --items/--discount-*/--language`, fractional quantities, per-line + total discounts with per-rate VAT allocation, VAT breakdown per rate on PDF/UBL, company logo on the PDF | Invoice from a reusable catalog with discounts, in Dutch or English, with the company logo — **✅ done (v0.13.0, 433 tests green)** | planned |
 | 12 | Inbound e-invoicing + delivery + cash management: attachments in-DB (`attach`), encrypted/rotated backups, aging/statement/sales reports, `import invoice` (EN 16931/Peppol UBL → payables), `invoice email` (SMTP), SEPA direct debit (`mandate` + pain.008) | The 2027 e-invoice mandate both ways: receive UBL invoices, email the PDF, collect by incasso — **✅ done (v0.14.1, 603 tests green)** | planned |
 | 13 | Actor security layers: **Tier 0** signed actor commands (per-company key registry, enforcement, `audit verify`) + **Tier 0.5 per-actor authorizations** — capability families + roles (`actor authz`, `actor roles`, `actor can`, `actor who-can`), deny-by-default segregation-of-duties gate in the sign gate (CLI + MCP), owner-mediated key revoke | Every command signed and attributable; agents act only within their role — the actor who books is not the one who files or pays — **✅ done (dev branch, 746 tests green)** | done |
+| 14 | Multi-jurisdiction profiles: ten markets (NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE) — country chart conventions, VAT codes + rates, identifiers + Peppol schemes, compliance calendars; strict format dispatch (unbuilt formats fail loudly, no silent fallbacks) | One research-verified profile per market (docs-research/*.md); PLANNED empty — **✅ done (dev branch, 868 tests green)** | done |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 
