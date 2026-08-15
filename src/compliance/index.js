@@ -147,6 +147,16 @@ const DEADLINE_RULES = {
   },
   'de-annual-vat': (company, year) => `${Number(year) + 1}-07-31`,
   'de-12-months': (company, year) => monthsAfterFyEnd(company, year, 12),
+  // DK (research §10, SKAT): quarterly VAT due the 1st day of the 3rd
+  // following month (Q2 -> 1 Sep); annual report (class B) within 5 months
+  // of FYE
+  'dk-quarterly': (period) => {
+    const q = Number(String(period).split('-')[1].replace('Q', ''));
+    const m = q * 3 + 3;
+    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
+    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-01`;
+  },
+  'dk-5-months': (company, year) => monthsAfterFyEnd(company, year, 5),
 };
 
 export function isFiled(db, type, period) {
