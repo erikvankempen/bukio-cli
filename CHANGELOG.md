@@ -51,6 +51,10 @@ merged to `main` and released.
   `--registration-id/--tax-id`.
 
 ### Changed
+- **Positioning** — repository, README and CLI description now state the
+  eleven-jurisdiction scope (the "Dutch SMEs" tagline is gone); the invoice
+  document-language default is documented as profile-derived (Dutch for NL/BE
+  companies, English otherwise).
 
 - Migrations 021–024: company gains `country`, `base_currency`, `locale`,
   `profile_version`; `legal_form` CHECK removed; `taxonomy` backfill for RGS;

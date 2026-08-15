@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -42,7 +42,7 @@ export async function runCli(argv) {
   const program = new Command();
   program
     .name('bukio')
-    .description('Agent-first bookkeeping for Dutch SMEs — SQLite, VAT-optional')
+    .description('Agent-first bookkeeping for SMEs across eleven jurisdictions — SQLite, VAT-optional')
     .version('0.16.0')
     .option('--json', 'machine-readable JSON output')
     .option('--db <path>', 'database file', process.env.BUKIO_DB || path.join(os.homedir(), '.bukio', 'bukio.db'))

@@ -1,6 +1,6 @@
 ---
 name: bukio-cli
-description: Drive bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs. Book invoices, archive the originals, keep the books balanced.
+description: Drive bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions. Book invoices, archive the originals, keep the books balanced.
 ---
 
 # bukio-cli — agent workflow

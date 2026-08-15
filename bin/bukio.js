@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
