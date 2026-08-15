@@ -171,8 +171,14 @@ the booked amounts.
 
 `init --country <cc>` seeds the profile's default chart and applies its
 defaults (chart convention, VAT codes/rates, identifiers, fiscal year end,
-deadlines). PLANNED is empty — every ISO 3166-1 alpha-2 code is either a live
-profile or `PROFILE_NOT_FOUND`.
+deadlines). PLANNED (not yet implemented): **Phase C** — AT Austria (EKR chart,
+USt 20/10/13, Kleinunternehmer ≤ €35K, UID/FN, UVA, Peppol member), IE Ireland
+(UK-style chart, VAT 23/13.5/9/0, CRO + IE-format VAT number, VAT3 bi-monthly,
+Peppol member); **Phase D** — IT Italy (Piano dei conti, IVA 22/10/4, Partita
+IVA, liquidazione IVA + F24, SdI/FatturaPA domestic e-invoicing), ES Spain
+(PGC, IVA 21/10/4, NIF, Modelo 303/390, Verifactu), PT Portugal (SNC, IVA
+23/13/6, NIPC, ATCUD). **Parked** — CH Switzerland (CHF base currency, QR-bill,
+not a Peppol country). Unimplemented codes raise `PROFILE_NOT_FOUND`.
 
 | Country | Chart convention | Currency | VAT rates (2026) | Small-business scheme | Identifier / Peppol scheme | e-Invoicing | Locale |
 |---|---|---|---|---|---|---|---|
@@ -187,6 +193,11 @@ profile or `PROFILE_NOT_FOUND`.
 | FI Finland | Liikekirjuri model chart | EUR | 25.5 / 13.5 / 10 / 0 | franchise (€20K) | LY-tunnus / 0037 | peppol-bis-3.0 (B2B voluntary) | fi |
 | NO Norway | NS 4102 standard kontoplan | NOK | 25 / 15 / 12 / 0 | — (NOK 50K registration threshold) | org.nr / 0192 | peppol-bis-3.0 (EHF 3.0; B2G mandatory) | nb |
 | SE Sweden | BAS 2023 | SEK | 25 / 12 / 6 / 0 | franchise (SEK 120K) | org.nr / 0007 | peppol-bis-3.0 (B2G mandatory) | sv |
+| AT Austria *(planned — Phase C)* | Einheitskontenrahmen (EKR) | EUR | 20 / 10 / 13 | kleinunternehmer (≤ €35K) | UID (ATU…, FN) / Peppol | peppol-bis-3.0 | de |
+| IE Ireland *(planned — Phase C)* | UK-style (no statutory chart) | EUR | 23 / 13.5 / 9 / 0 | registration threshold (€37.5K services / €75K goods) | CRO / Peppol | peppol-bis-3.0 | en |
+| IT Italy *(planned — Phase D)* | Piano dei conti | EUR | 22 / 10 / 4 | forfettario (≤ €85K) | Partita IVA / Peppol | **SdI (FatturaPA)** domestic, peppol-bis-3.0 cross-border | it |
+| ES Spain *(planned — Phase D)* | PGC (plan general contable) | EUR | 21 / 10 / 4 | régimen simplificado | NIF / Peppol | peppol-bis-3.0 (+ Verifactu) | es |
+| PT Portugal *(planned — Phase D)* | SNC (sistema de normalização contabilística) | EUR | 23 / 13 / 6 | regime simplificado | NIPC / Peppol | peppol-bis-3.0 (+ ATCUD) | pt |
 
 Strict dispatch: a profile registers only formats with existing builders —
 `financial-statements`, `vat readout`, `export xaf`, invoice compliance, etc.
