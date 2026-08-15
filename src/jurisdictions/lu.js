@@ -19,7 +19,7 @@
 //                                  are a B-milestone)
 // Registered since B2: reporting.format 'lu-lsc' + statutoryAccounts
 // (LSC abridged layout).
-//   - documents.auditFile         omitted → XAF export fails (FAIA is B3)
+// Registered since B3: documents.auditFile 'faia-2.01-reduced-b'.
 // Registered since B6: documents.invoiceCompliance 'lu-invoice-vereisten'
 // (loi TVA art. 66 + RCS rule set).
 //   - compliance.filingTypes      [] → calendar shows nothing (turnover-band
@@ -203,7 +203,8 @@ export default {
     // (autorisation d'établissement has no schema field — documented only)
     eInvoicing: 'peppol-bis-3.0', // B2G mandatory since 18 Mar 2023; the UBL
     // builder is EU-generic and reads identifiers.peppolSchemeId (0195 = RCS)
-    // auditFile omitted — FAIA (AED audit file) is B3
+    auditFile: 'faia-2.01-reduced-b', // B3: FAIA 2.01 reduced version B
+    // (AED electronic audit file; the PCN-levied audit-file standard)
     languages: ['fr', 'en', 'de'],
     defaultLanguage: 'fr',
   },

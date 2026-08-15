@@ -452,7 +452,8 @@ test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
   // B1 scope: formats without an engine are deliberately unregistered
   // (strict dispatch fails loudly instead of producing Dutch output)
   assert.equal(p.tax.returnLayout, undefined);
-  assert.equal(p.documents.auditFile, undefined);
+  // B3: the FAIA audit-file format is registered
+  assert.equal(p.documents.auditFile, 'faia-2.01-reduced-b');
   // B5: the LU compliance calendar is registered (quarterly TVA default band
   // + annual accounts within ~7 months of the FY end)
   assert.deepEqual(p.compliance.filingTypes, [
@@ -528,11 +529,8 @@ test('B1: init --country LU creates a French LU company with the PCN chart', () 
 test('B1: LU strict dispatch — unregistered formats fail loudly (no NL fallback)', () => {
   const dbPath = tmpDb();
   cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);
-  // XAF export: FAIA is B3 — never the Dutch audit file
-  let r = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', '/tmp/xaf-lu.xml'], { expectFail: true });
-  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
   // VAT readout: the LU eCDF return layout is a B-milestone
-  r = cli(dbPath, ['vat', 'readout', '--period', '2026-Q1'], { expectFail: true });
+  let r = cli(dbPath, ['vat', 'readout', '--period', '2026-Q1'], { expectFail: true });
   assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
   // invoice compliance is registered since B6 (tested in the B6 section)
 });
@@ -770,4 +768,82 @@ test('B5: LU TVA filings mark through the registry and flip the status', () => {
   } finally {
     db.close();
   }
+});
+
+// --- Phase B B3: FAIA audit-file export -------------------------------------
+
+test('B3: LU export xaf produces the FAIA 2.01 reduced-B audit file', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--registration-id', 'B123456', '--tax-id', 'LU12345678', '--vat', 'on']);
+  cli(dbPath, ['company', 'update', '--address', '1 rue du Test', '--postal-code', 'L-1234', '--city', 'Luxembourg']);
+  const db = openDb(dbPath);
+  try {
+    createContact(db, {
+      name: 'Client SARL', address: '1 rue du Test', postalCode: 'L-1234', city: 'Luxembourg',
+      vatId: 'LU99999999', actor: 'agent:test',
+    });
+    const inv = createInvoice(db, {
+      contactId: 1, date: '2026-08-15', lines: ['1x Prestation @ 100.00 @17'], actor: 'agent:test',
+    });
+    finalizeInvoice(db, { id: inv.id, actor: 'agent:test' }); // 4011 +117.00 / 7021 -100.00 / 461411 -17.00
+  } finally {
+    db.close();
+  }
+  const outPath = path.join(tmpdir(), `faia-${Date.now()}.xml`);
+  const r = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', outPath]);
+  assert.equal(r.out.data.mutaties, 1);
+  const xml = readFileSync(outPath, 'utf8');
+  // FAIA 2.01 reduced B: no namespace, AuditFile root, English elements
+  assert.ok(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>'));
+  assert.match(xml, /<AuditFile>/);
+  assert.ok(!xml.includes('xmlns='), 'reduced B has no targetNamespace');
+  assert.match(xml, /<AuditFileVersion>2\.01<\/AuditFileVersion>/);
+  assert.match(xml, /<AuditFileCountry>LU<\/AuditFileCountry>/);
+  assert.match(xml, /<RegistrationNumber>B123456<\/RegistrationNumber>/);
+  assert.match(xml, /<TaxRegistrationNumber>LU12345678<\/TaxRegistrationNumber>/);
+  assert.match(xml, /<TaxNumber>LU12345678<\/TaxNumber>/);
+  // civil-year selection (FAIA requires complete civil years)
+  assert.match(xml, /<SelectionStartDate>2026-01-01<\/SelectionStartDate>/);
+  assert.match(xml, /<SelectionEndDate>2026-12-31<\/SelectionEndDate>/);
+  // chart of accounts with French AccountType values + required balances
+  assert.match(xml, /<AccountID>4011<\/AccountID>\s*<AccountDescription>Clients<\/AccountDescription>\s*<AccountType>Actif<\/AccountType>/);
+  assert.match(xml, /<AccountID>7021<\/AccountID>\s*<AccountDescription>Ventes de produits finis<\/AccountDescription>\s*<AccountType>Produit<\/AccountType>/);
+  assert.match(xml, /<AccountID>461411<\/AccountID>[\s\S]*?<AccountType>Passif<\/AccountType>/);
+  assert.match(xml, /<ClosingDebitBalance>117\.00<\/ClosingDebitBalance>/);
+  assert.match(xml, /<ClosingCreditBalance>100\.00<\/ClosingCreditBalance>/);
+  // entries: one transaction, debit/credit pairs, balanced totals
+  assert.match(xml, /<NumberOfEntries>1<\/NumberOfEntries>/);
+  assert.match(xml, /<TotalDebit>117\.00<\/TotalDebit>/);
+  assert.match(xml, /<TotalCredit>117\.00<\/TotalCredit>/);
+  assert.match(xml, /<TransactionID>\d+<\/TransactionID>\s*<Period>8<\/Period>\s*<PeriodYear>2026<\/PeriodYear>/);
+  assert.match(xml, /<DebitAmount><Amount>117\.00<\/Amount><\/DebitAmount>/);
+  assert.match(xml, /<CreditAmount><Amount>100\.00<\/Amount><\/CreditAmount>/);
+  // never the Dutch XAF root/namespace
+  assert.ok(!xml.includes('<Xaf '), 'never the Dutch XAF root');
+});
+
+test('B3: NL XAF export is unchanged (byte-identical, xaf-auditfile-4.0)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678', '--tax-id', 'NL123456789B01', '--vat', 'on']);
+  cli(dbPath, ['company', 'update', '--address', 'Industrieweg 12', '--postal-code', '2712 CD', '--city', 'Zoetermeer']);
+  const db = openDb(dbPath);
+  try {
+    createContact(db, {
+      name: 'ACME B.V.', address: 'Straat 1', postalCode: '1000 AA', city: 'Amsterdam',
+      vatId: 'NL999999999B01', actor: 'agent:test',
+    });
+    const inv = createInvoice(db, {
+      contactId: 1, date: '2026-08-15', lines: ['2x Consultancy @ 150.00 @21'], actor: 'agent:test',
+    });
+    finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+  } finally {
+    db.close();
+  }
+  const outPath = path.join(tmpdir(), `xaf-${Date.now()}.xml`);
+  const r = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', outPath]);
+  assert.equal(r.out.data.mutaties, 1);
+  const xml = readFileSync(outPath, 'utf8');
+  assert.match(xml, /<Xaf xmlns="http:\/\/www\.auditfiles\.nl\/XAF\/4\.0">/);
+  assert.match(xml, /<RekeningCode>1200<\/RekeningCode>/);
+  assert.ok(!xml.includes('<AuditFile>'), 'NL still emits the Dutch XAF, never FAIA');
 });

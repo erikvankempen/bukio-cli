@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 05:56:30 UTC — **✅ 822 passing · 0 failing (822 tests)**
+**Latest run:** 2026-08-15 06:08:57 UTC — **✅ 824 passing · 0 failing (824 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-47 passing · 0 failing
+49 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -744,6 +744,8 @@
     - ✅ B2: NL financial statements keep the klein default (byte-identical)
     - ✅ B5: LU compliance calendar — TVA on the 15th + annual accounts in 7 months
     - ✅ B5: LU TVA filings mark through the registry and flip the status
+    - ✅ B3: LU export xaf produces the FAIA 2.01 reduced-B audit file
+    - ✅ B3: NL XAF export is unchanged (byte-identical, xaf-auditfile-4.0)
 
 ### migration-021.test.js — 
 
