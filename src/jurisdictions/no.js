@@ -87,7 +87,7 @@ export default {
       ],
       fileDefault: '2740',
       differenceDefault: '2740',
-      afTeDragenName: 'Oppgjørskonto MVA',
+      settlementAccountName: 'Oppgjørskonto MVA',
     },
     // returnLayout omitted — the Altinn mva-meldingen engine is a
     // B-milestone

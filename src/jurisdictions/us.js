@@ -63,7 +63,7 @@ export default {
       // no VAT ledger — the US books no input/output VAT. postingDefaults
       // only requires a VAT liability when the VAT module is enabled.
       ledger: [],
-      // fileDefault/differenceDefault/afTeDragenName omitted — there is no
+      // fileDefault/differenceDefault/settlementAccountName omitted — there is no
       // federal VAT return or settlement in the US
     },
     // returnLayout omitted — no federal VAT return engine

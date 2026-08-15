@@ -82,7 +82,7 @@ export default {
       // confidence): default to the umbrella 461418 TVA – Autres dettes; the
       // choice is a per-firm convention, documented not mandated
       differenceDefault: '461418',
-      afTeDragenName: 'TVA à payer',
+      settlementAccountName: 'TVA à payer',
     },
     // returnLayout omitted — LU eCDF (CA3-style) return layout is a
     // B-milestone; OB readout fails loudly for LU until then

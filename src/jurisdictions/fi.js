@@ -85,7 +85,7 @@ export default {
       ],
       fileDefault: '2939',
       differenceDefault: '2939',
-      afTeDragenName: 'AV Verovelka',
+      settlementAccountName: 'AV Verovelka',
     },
     // returnLayout omitted — the OmaVero kausiveroilmoitus engine is a
     // B-milestone

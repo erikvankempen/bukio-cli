@@ -355,28 +355,28 @@ export function vatNetPosition(db) {
 }
 
 /** Ensure the 'Af te dragen omzetbelasting' liability account exists (idempotent). */
-function ensureAfTeDragenAccount(db, account) {
-  const resolved = resolveAfTeDragenAccount(db, account);
+function ensureVatSettlementAccount(db, account) {
+  const resolved = resolveVatSettlementAccount(db, account);
   if (!getAccountByCode(db, resolved)) {
     createAccount(db, {
-      code: resolved, name: afTeDragenName(db), type: 'liability',
+      code: resolved, name: vatSettlementAccountName(db), type: 'liability',
       normalBalance: 'credit', taxonomyCode: 'BSCH.12',
     });
   }
   return resolved;
 }
 
-function afTeDragenName(db) {
-  return resolveProfile(db).tax.accounts.afTeDragenName;
+function vatSettlementAccountName(db) {
+  return resolveProfile(db).tax.accounts.settlementAccountName;
 }
 
-function isAfTeDragenAccount(db, a) {
+function isVatSettlementAccount(db, a) {
   if (!a) return false;
   const { tax, reporting } = resolveProfile(db);
   // the profile-declared settlement account is the canonical af-te-dragen
   // position when it is the SEEDED chart account (bilingual charts: BE 451
   // 'TVA à payer — Te betalen BTW', DE 1780, GB 2120 — labels differ from
-  // afTeDragenName), so name-equality alone no longer silently falls to a
+  // vatSettlementAccountName), so name-equality alone no longer silently falls to a
   // numeric successor. A FOREIGN account parked on the fileDefault code
   // (NL legacy-import collisions; 2510 is auto-created, never seeded)
   // still falls through to the next free code.
@@ -385,7 +385,7 @@ function isAfTeDragenAccount(db, a) {
     seeded && a.code === tax.accounts.fileDefault
     && a.name === seeded.name && a.type === 'liability' && a.normal_balance === 'credit'
   ) return true;
-  return a.name === afTeDragenName(db) && a.type === 'liability' && a.normal_balance === 'credit';
+  return a.name === vatSettlementAccountName(db) && a.type === 'liability' && a.normal_balance === 'credit';
 }
 
 /**
@@ -397,17 +397,17 @@ function isAfTeDragenAccount(db, a) {
  *   -> ...), reusing an af-te-dragen account found along the way; a
  *   non-numeric code with no successor is an error (VAT_ACCOUNT_COLLISION).
  */
-function resolveAfTeDragenAccount(db, account) {
+function resolveVatSettlementAccount(db, account) {
   const existing = getAccountByCode(db, account);
   if (!existing) return account;
-  if (isAfTeDragenAccount(db, existing)) return account;
+  if (isVatSettlementAccount(db, existing)) return account;
   if (!/^\d+$/.test(account)) {
-    throw vatError('VAT_ACCOUNT_COLLISION', `account ${account} exists but is not '${afTeDragenName(db)}' and has no numeric successor — pick a free code with --account`);
+    throw vatError('VAT_ACCOUNT_COLLISION', `account ${account} exists but is not '${vatSettlementAccountName(db)}' and has no numeric successor — pick a free code with --account`);
   }
   let code = String(Number(account) + 1);
   let guard = 0;
   while (getAccountByCode(db, code)) {
-    if (isAfTeDragenAccount(db, getAccountByCode(db, code))) return code; // a previous filing already landed here
+    if (isVatSettlementAccount(db, getAccountByCode(db, code))) return code; // a previous filing already landed here
     code = String(Number(code) + 1);
     if (++guard > 999) {
       throw vatError('VAT_ACCOUNT_COLLISION', `no free numeric successor after ${account} — pick a free code with --account`);
@@ -442,7 +442,7 @@ export function vatFile(db, { account = null, period = null, desc = null, actor 
   // Resolve the af-te-dragen account BEFORE building the plan: a requested
   // code that is taken by another account falls to the next free numeric
   // code, and the caller sees exactly where the position will land.
-  account = resolveAfTeDragenAccount(db, account);
+  account = resolveVatSettlementAccount(db, account);
   // The FULL clearing position moves to the af-te-dragen account: both
   // clearing accounts are emptied (2500 te betalen holds the credit/output
   // legs, 1500 te vorderen the debit/input legs) and the NET lands there
@@ -464,7 +464,7 @@ export function vatFile(db, { account = null, period = null, desc = null, actor 
   }
 
   const entry = db.transaction(() => {
-    ensureAfTeDragenAccount(db, account);
+    ensureVatSettlementAccount(db, account);
     const created = createEntry(db, {
       date: new Date().toISOString().slice(0, 10), description,
       postings, source: 'manual', actor,

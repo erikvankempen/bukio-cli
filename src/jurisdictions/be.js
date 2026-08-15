@@ -88,7 +88,7 @@ export default {
       // (brief, flagged unverified); 648 is seeded in the chart so
       // `vat settle` posts to a real account
       differenceDefault: '648',
-      afTeDragenName: 'TVA à payer',
+      settlementAccountName: 'TVA à payer',
     },
     // returnLayout omitted — the Intervat return engine is a B-milestone
     filingPeriodicity: 'monthly', // default; quarterly option for turnover ≤ €2.5M

@@ -83,7 +83,7 @@ export default {
       ],
       fileDefault: '2730',
       differenceDefault: '2730',
-      afTeDragenName: 'Afregning af moms',
+      settlementAccountName: 'Afregning af moms',
     },
     // returnLayout omitted — the TastSelv momsangivelse engine is a
     // B-milestone

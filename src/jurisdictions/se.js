@@ -88,7 +88,7 @@ export default {
       ],
       fileDefault: '2650',
       differenceDefault: '2650',
-      afTeDragenName: 'Redovisningskonto för moms',
+      settlementAccountName: 'Redovisningskonto för moms',
     },
     // returnLayout omitted — the Skatteverket momsredovisning engine is a
     // B-milestone

@@ -81,7 +81,7 @@ export default {
       ],
       fileDefault: '44551',
       differenceDefault: '44551',
-      afTeDragenName: 'TVA à décaisser',
+      settlementAccountName: 'TVA à décaisser',
     },
     // returnLayout omitted — CA3 monthly / RSI semi-annual return engine
     // is a B-milestone

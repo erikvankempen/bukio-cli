@@ -104,7 +104,7 @@ test('NL profile integrity — tax section matches the legacy VAT module', () =>
   assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['1500', '2500']);
   assert.equal(p.tax.accounts.fileDefault, '2510');
   assert.equal(p.tax.accounts.differenceDefault, '4700');
-  assert.equal(p.tax.accounts.afTeDragenName, 'Af te dragen omzetbelasting');
+  assert.equal(p.tax.accounts.settlementAccountName, 'Af te dragen omzetbelasting');
 });
 
 test('NL profile integrity — reporting section matches the legacy chart', () => {

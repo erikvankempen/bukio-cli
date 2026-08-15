@@ -79,7 +79,7 @@ export default {
       ],
       fileDefault: '2120',
       differenceDefault: '2120', // return balance/rounding lands on the settlement account
-      afTeDragenName: 'VAT payable to HMRC',
+      settlementAccountName: 'VAT payable to HMRC',
     },
     // returnLayout omitted — the UK 9-box VAT return is a B-milestone
     filingPeriodicity: 'quarterly', // default; annual/cash accounting schemes exist

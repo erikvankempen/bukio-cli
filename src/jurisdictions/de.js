@@ -84,7 +84,7 @@ export default {
       // the 1789/1790 flow is a B-milestone); the rounding difference lands
       // on the Zahllast settlement account
       differenceDefault: '1780',
-      afTeDragenName: 'Umsatzsteuer-Vorauszahlungen',
+      settlementAccountName: 'Umsatzsteuer-Vorauszahlungen',
     },
     // returnLayout omitted — the ELSTER UStVA engine is a B-milestone
     filingPeriodicity: 'quarterly', // monthly when prior-year VAT > €9,000 (§ 18(2) UStG)
