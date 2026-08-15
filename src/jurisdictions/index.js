@@ -12,16 +12,19 @@
 // labels, compliance filing types, identifiers, e-invoicing profile, closing
 // accounts. The NL profile (./nl.js) is the reference implementation — cut
 // verbatim from the previously hardcoded module constants, so NL behavior is
-// byte-identical.
+// byte-identical. LU (./lu.js) is the first Phase B market profile (PCN 2020
+// chart, French labels); it registers only formats with existing builders —
+// everything else fails loudly via the strict dispatch.
 //
 // Consumers must resolve profiles ONLY through this registry — never read
 // company.country directly (see the profile-sprawl rule in the Phase A plan).
+import lu from './lu.js';
 import nl from './nl.js';
 
 /** ISO 3166-1 alpha-2 country codes that are valid but not implemented yet. */
-export const PLANNED = ['GB', 'US', 'FR', 'LU'];
+export const PLANNED = ['GB', 'US', 'FR'];
 
-const PROFILES = { NL: deepFreeze(nl) };
+const PROFILES = { NL: deepFreeze(nl), LU: deepFreeze(lu) };
 
 export function jurisdictionError(code, message) {
   const e = new Error(message);

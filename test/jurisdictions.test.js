@@ -17,7 +17,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import { openDb } from '../src/core/db.js';
-import { validateCompliance } from '../src/invoice/index.js';
+import {
+  createContact, createInvoice, finalizeInvoice, getInvoice, validateCompliance,
+} from '../src/invoice/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { exportXaf } from '../src/export/index.js';
 import { getProfile, PLANNED, normalizeCountry, resolveProfile } from '../src/jurisdictions/index.js';
@@ -66,7 +68,8 @@ test('getProfile throws COUNTRY_NOT_SUPPORTED for valid-but-planned countries', 
   assert.ok(PLANNED.includes('GB'));
   assert.ok(PLANNED.includes('US'));
   assert.ok(PLANNED.includes('FR'));
-  assert.ok(PLANNED.includes('LU'));
+  // LU is implemented (Phase B1) — it must NOT be in PLANNED
+  assert.ok(!PLANNED.includes('LU'));
 });
 
 test('getProfile throws PROFILE_NOT_FOUND for unknown valid codes', () => {
@@ -418,4 +421,147 @@ test('review-fix: account add --taxonomy-code works; --rgs-code alias maps and w
   const conflict = cli(dbPath, ['account', 'add', '--code', '1300', '--name', 'Testrekening', '--type', 'asset', '--normal-balance', 'debit', '--taxonomy-code', 'BMVA.02', '--rgs-code', 'BFVA.03', '--dry-run']);
   assert.equal(conflict.out.data.account.taxonomy_code, 'BMVA.02'); // primary wins
   assert.ok(conflict.out.data.warnings.some((w) => w.includes('--rgs-code ignored')));
+});
+
+// --- Phase B B1: Luxembourg profile (PCN 2020, French labels) ---------------
+
+test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
+  const p = getProfile('LU');
+  assert.equal(p.meta.country, 'LU');
+  assert.equal(p.meta.baseCurrency, 'EUR');
+  assert.equal(p.meta.locale, 'fr');
+  assert.ok(p.meta.legalForms.includes('sarl'));
+  assert.ok(!p.meta.legalForms.includes('bv')); // NL legal form rejected for LU
+  assert.equal(p.identifiers.peppolSchemeId, '0195'); // RCS registry code (BT-34/BT-49)
+  assert.ok(p.identifiers.vatIdFormat.test('LU12345678'));
+  assert.equal(p.tax.standardRateBp, 1700);
+  assert.equal(p.tax.smallBusinessScheme, 'franchise'); // €50K franchise en base
+  assert.deepEqual(p.tax.codes.map((c) => c.code), ['17', '14', '8', '3', '0', 'V', 'R', 'RE', 'M', 'P']);
+  // PCN VAT ledger (official RGD annex): 421611 TVA en amont / 461411 TVA en aval
+  assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['421611', '461411']);
+  assert.equal(p.tax.accounts.fileDefault, '461412');
+  // PCN has NO class 8: the annual result is 142, appropriation to 1411
+  assert.equal(p.closing.resultAccount, '142');
+  assert.equal(p.closing.equityAccount, '1411');
+  assert.equal(p.reporting.taxonomy, 'pcn');
+  // chart codes verbatim from the official annex (hierarchical 2-6 digits)
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '516' && a.name === 'Caisse'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '421611' && a.name === 'TVA en amont'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '7021' && a.name === 'Ventes de produits finis'));
+  // B1 scope: formats without an engine are deliberately unregistered
+  // (strict dispatch fails loudly instead of producing Dutch output)
+  assert.equal(p.tax.returnLayout, undefined);
+  assert.equal(p.reporting.format, undefined);
+  assert.equal(p.documents.invoiceCompliance, undefined);
+  assert.equal(p.documents.auditFile, undefined);
+  assert.deepEqual(p.compliance.filingTypes, []);
+  // e-invoicing IS registered: B2G mandatory in LU since 18 Mar 2023
+  assert.equal(p.documents.eInvoicing, 'peppol-bis-3.0');
+  assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
+});
+
+test('B1: LU is implemented — PLANNED is now GB/US/FR only', () => {
+  assert.ok(!PLANNED.includes('LU'));
+  assert.deepEqual([...PLANNED].sort(), ['FR', 'GB', 'US']);
+  assert.equal(getProfile('LU').meta.country, 'LU');
+  for (const cc of PLANNED) {
+    assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
+  }
+});
+
+test('B1: the LU profile is deep-frozen', () => {
+  const p = getProfile('LU');
+  assert.ok(Object.isFrozen(p));
+  assert.ok(Object.isFrozen(p.tax));
+  assert.ok(Object.isFrozen(p.tax.codes));
+  assert.ok(Object.isFrozen(p.reporting.defaultChart));
+  assert.throws(() => { p.tax.standardRateBp = 9999; }, TypeError);
+});
+
+test('B1: init --country LU creates a French LU company with the PCN chart', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);
+  assert.equal(r.out.data.company.country, 'LU');
+  assert.equal(r.out.data.company.base_currency, 'EUR');
+  assert.equal(r.out.data.company.locale, 'fr');
+  const db = openDb(dbPath);
+  try {
+    const c = db.prepare('SELECT country, base_currency, locale, profile_version FROM company WHERE id = 1').get();
+    assert.deepEqual(c, { country: 'LU', base_currency: 'EUR', locale: 'fr', profile_version: 1 });
+    const accounts = db.prepare('SELECT code, name, taxonomy FROM accounts WHERE active = 1').all();
+    assert.ok(accounts.some((a) => a.code === '516' && a.name === 'Caisse'));
+    assert.ok(accounts.some((a) => a.code === '421611' && a.name === 'TVA en amont'));
+    assert.ok(accounts.some((a) => a.code === '7021'));
+    assert.ok(accounts.length >= 40);
+    // LU accounts carry the pcn taxonomy discriminator (createAccount fix)
+    for (const a of accounts) assert.equal(a.taxonomy, 'pcn');
+  } finally {
+    db.close();
+  }
+  // NL legal forms are rejected for an LU company
+  const bad = cli(tmpDb(), ['init', '--name', 'X', '--country', 'LU', '--legal-form', 'bv'], { expectFail: true });
+  assert.equal(bad.out.error.code, 'INVALID_LEGAL_FORM');
+  // KOR is an NL-only scheme — rejected for LU (franchise en base instead)
+  const kor = cli(tmpDb(), ['init', '--name', 'X', '--country', 'LU', '--legal-form', 'sarl', '--kor'], { expectFail: true });
+  assert.equal(kor.out.error.code, 'INVALID_VAT_CHOICE');
+  // NL companies are unchanged: seeded accounts keep the 'rgs' discriminator
+  const nlPath = tmpDb();
+  cli(nlPath, ['init', '--name', 'Test BV', '--vat', 'on']);
+  const nlDb = openDb(nlPath);
+  try {
+    assert.equal(nlDb.prepare("SELECT taxonomy FROM accounts WHERE code = '1000'").get().taxonomy, 'rgs');
+  } finally {
+    nlDb.close();
+  }
+});
+
+test('B1: LU strict dispatch — unregistered formats fail loudly (no NL fallback)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);
+  // financial statements: the LU LSC layout is B2 — never a Dutch one
+  let r = cli(dbPath, ['financial-statements', 'report', '--year', '2026'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
+  // XAF export: FAIA is B3 — never the Dutch audit file
+  r = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', '/tmp/xaf-lu.xml'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
+  // VAT readout: the LU eCDF return layout is a B-milestone
+  r = cli(dbPath, ['vat', 'readout', '--period', '2026-Q1'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
+  // invoice compliance: the LU rule set is B6
+  const db = openDb(dbPath);
+  try {
+    assert.throws(
+      () => validateCompliance(db, { invoice_type: 'invoice', lines: [] }),
+      (e) => e.code === 'FORMAT_NOT_SUPPORTED',
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('B1: LU UBL invoice emits the RCS scheme 0195 and country LU (never 9944)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--registration-id', 'B123456', '--vat', 'on']);
+  const db = openDb(dbPath);
+  try {
+    createContact(db, {
+      name: 'Client SARL', address: '1 rue du Test', postalCode: 'L-1234', city: 'Luxembourg',
+      vatId: 'LU99999999', kvk: 'B654321', actor: 'agent:test',
+    });
+    // NOTE: LU invoices cannot be finalized in B1 (finalizeInvoice runs the
+    // compliance rule set, which is deliberately unregistered until B6) —
+    // UBL generation is tested on the created invoice, which is all the
+    // builder needs (it reads company + invoice fields, not posting state)
+    const inv = createInvoice(db, {
+      contactId: 1, date: '2026-08-15', lines: ['1x Prestation @ 100.00 @17'], actor: 'agent:test',
+    });
+    const xml = invoiceToUbl(db, getInvoice(db, inv.id));
+    // BT-34/BT-49: RCS scheme 0195, never the Dutch KVK scheme 9944
+    assert.ok(xml.includes('schemeID="0195"'), 'endpoints use the RCS scheme 0195');
+    assert.ok(!xml.includes('schemeID="9944"'), 'never the Dutch KVK scheme');
+    assert.match(xml, /<cbc:IdentificationCode>LU<\/cbc:IdentificationCode>/);
+    assert.ok(xml.includes('LU99999999'), 'buyer carries the LU TVA id');
+  } finally {
+    db.close();
+  }
 });

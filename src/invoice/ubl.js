@@ -36,7 +36,7 @@ const UNIT_CODE_MAP = {
   session: 'C62', km: 'KMT', kg: 'KGM', project: 'C62',
 };
 
-function addressBlock(partyName, p, taxId = null) {
+function addressBlock(partyName, p, taxId = null, schemeId = '9944', country = 'NL') {
   // the supplier row is snake_case (postal_code); contacts are camelCase —
   // read both so the postal code is never silently dropped
   const postal = p.postalCode ?? p.postal_code ?? '';
@@ -45,7 +45,7 @@ function addressBlock(partyName, p, taxId = null) {
   // registry code for the Dutch Chamber of Commerce). Emitted when present —
   // the seller's registration id is always set (finalize requires it).
   const endpoint = p.registration_id
-    ? `\n        <cbc:EndpointID schemeID="9944">${esc(p.registration_id)}</cbc:EndpointID>`
+    ? `\n        <cbc:EndpointID schemeID="${schemeId}">${esc(p.registration_id)}</cbc:EndpointID>`
     : '';
   return `
         <cac:Party>${endpoint}
@@ -54,7 +54,7 @@ function addressBlock(partyName, p, taxId = null) {
             <cbc:StreetName>${esc(p.address ?? '')}</cbc:StreetName>
             <cbc:CityName>${esc(p.city ?? '')}</cbc:CityName>
             <cbc:PostalZone>${esc(postal)}</cbc:PostalZone>
-            <cac:Country><cbc:IdentificationCode>${esc(p.country ?? 'NL')}</cbc:IdentificationCode></cac:Country>
+            <cac:Country><cbc:IdentificationCode>${esc(p.country ?? country)}</cbc:IdentificationCode></cac:Country>
           </cac:PostalAddress>
           ${taxId ? `<cac:PartyTaxScheme><cbc:CompanyID schemeID="VAT">${esc(taxId)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
           <cac:PartyLegalEntity>
@@ -77,15 +77,16 @@ const EINVOICING_BUILDERS = {
 };
 
 export function invoiceToUbl(db, invoice) {
-  const { documents } = resolveProfile(db);
+  const profile = resolveProfile(db);
+  const { documents } = profile;
   const builder = EINVOICING_BUILDERS[documents.eInvoicing];
   if (!builder) {
     throw Object.assign(new Error(`e-invoicing format '${documents.eInvoicing}' has no builder (registered: ${Object.keys(EINVOICING_BUILDERS).join(', ')})`), { code: 'FORMAT_NOT_SUPPORTED' });
   }
-  return builder(db, invoice);
+  return builder(db, invoice, profile);
 }
 
-function buildPeppolBis30(db, invoice) {
+function buildPeppolBis30(db, invoice, profile) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   // BT-25 (preceding invoice): the credit note's BillingReference must carry
   // the ORIGINAL invoice number, not the buyer reference. Look it up via
@@ -129,7 +130,7 @@ function buildPeppolBis30(db, invoice) {
     // AE (reverse charge): emit the code's configured rate when one exists
     // (e.g. 9% verlegd constructiewerk); the default R/RE codes carry 0%
     // (reverse charge has no VAT) and fall back to the NL standard rate 21.00
-    const percent = s.cat === 'AE' ? (s.rateBp > 0 ? (s.rateBp / 100).toFixed(2) : '21.00') : (s.rateBp / 100).toFixed(2);
+    const percent = s.cat === 'AE' ? (s.rateBp > 0 ? (s.rateBp / 100).toFixed(2) : (profile.tax.standardRateBp / 100).toFixed(2)) : (s.rateBp / 100).toFixed(2);
     return `
       <cac:TaxSubtotal>
         <cbc:TaxableAmount currencyID="${currency}">${moneyAmount(s.baseCents)}</cbc:TaxableAmount>
@@ -240,10 +241,10 @@ function buildPeppolBis30(db, invoice) {
       <cbc:ID>${esc(creditBillingRef)}</cbc:ID>
     </cac:InvoiceDocumentReference>
   </cac:BillingReference>` : ''}
-  <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.tax_id)}</cac:AccountingSupplierParty>
+  <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.tax_id, profile.identifiers.peppolSchemeId, profile.meta.country)}</cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
     <cac:Party>
-      ${contact.kvk ? `<cbc:EndpointID schemeID="9944">${esc(contact.kvk)}</cbc:EndpointID>` : ''}
+      ${contact.kvk ? `<cbc:EndpointID schemeID="${profile.identifiers.peppolSchemeId}">${esc(contact.kvk)}</cbc:EndpointID>` : ''}
       <cac:PartyName><cbc:Name>${esc(contact.name)}</cbc:Name></cac:PartyName>
       <cac:PostalAddress>
         <cbc:StreetName>${esc(contact.address ?? '')}</cbc:StreetName>

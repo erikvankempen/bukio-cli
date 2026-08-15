@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-14 21:54:37 UTC — **✅ 807 passing · 0 failing (807 tests)**
+**Latest run:** 2026-08-15 05:18:34 UTC — **✅ 813 passing · 0 failing (813 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-32 passing · 0 failing
+38 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -729,6 +729,12 @@
     - ✅ M9: exportXaf resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ M9: bank import resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ review-fix: account add --taxonomy-code works; --rgs-code alias maps and warns
+    - ✅ B1: getProfile returns the LU profile (French, PCN 2020 data)
+    - ✅ B1: LU is implemented — PLANNED is now GB/US/FR only
+    - ✅ B1: the LU profile is deep-frozen
+    - ✅ B1: init --country LU creates a French LU company with the PCN chart
+    - ✅ B1: LU strict dispatch — unregistered formats fail loudly (no NL fallback)
+    - ✅ B1: LU UBL invoice emits the RCS scheme 0195 and country LU (never 9944)
 
 ### migration-021.test.js — 
 
