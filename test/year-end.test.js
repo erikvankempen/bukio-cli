@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,7 +25,7 @@ function setup({ vat = true, complete = true } = {}) {
   db = openDb(':memory:');
   seedDefaultChart(db);
   db.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300', ?, '2712 CD', 'Zoetermeer', ?)
   `).run(complete ? 'Industrieweg 12' : null, vat ? 1 : 0);
   if (vat) enableVatModule(db);
@@ -148,7 +148,7 @@ test('jaarrekening: klein model — statutory balans + W&V, balanced', () => {
   const labels = r.balans.activa.map((g) => g.label);
   assert.ok(labels.includes('Liquide middelen')); // 1100
   // eigen vermogen includes the onverdeeld resultaat (pre-close)
-  const ev = r.balans.passiva.find((s) => s.rgs_code === 'BEIV.05');
+  const ev = r.balans.passiva.find((s) => s.taxonomy_code === 'BEIV.05');
   assert.ok(ev);
   assert.equal(ev.total_cents, 7000);
   // W&V klein
@@ -181,7 +181,7 @@ test('jaarrekening: after closing, result sits in equity (no onverdeeld)', () =>
   entry('2026-03-01', 'Omzet', [{ code: '1100', amountCents: 12100 }, { code: '8000', amountCents: -10000 }, { code: '2500', amountCents: -2100 }]);
   yearEndClose(db, { year: 2026 });
   const r = jaarrekening(db, { year: 2026, model: 'micro' });
-  const ev = r.balans.passiva.find((s) => s.rgs_code === 'BEIV.05');
+  const ev = r.balans.passiva.find((s) => s.taxonomy_code === 'BEIV.05');
   assert.equal(ev.total_cents, 10000); // result closed into equity
   assert.ok(!ev.sections.some((s) => s.label === 'Onverdeeld resultaat'));
   assert.equal(r.pnl, undefined); // micro has no W&V
@@ -266,7 +266,7 @@ test('jaarrekening: PDF html renders account detail without NaN', () => {
 test('jaarrekening: pnl includes the Afschrijvingen line for WAFS.41', () => {
   entry('2026-03-01', 'Afschr', [{ code: '1800', amountCents: -10000 }, { code: '4600', amountCents: 10000 }]);
   const r = jaarrekening(db, { year: 2026, model: 'klein' });
-  const line = r.pnl.lines.find((l) => l.rgs_code === 'WAFS.41');
+  const line = r.pnl.lines.find((l) => l.taxonomy_code === 'WAFS.41');
   assert.ok(line, 'WAFS.41 must map to an Afschrijvingen line');
   assert.equal(line.label, 'Afschrijvingen');
   assert.equal(line.total_cents, 10000);

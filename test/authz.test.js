@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -65,7 +65,7 @@ const CLI_PATHS = [
   'report trial-balance', 'report balance-sheet', 'report pnl', 'report journal',
   'report aging', 'report sales',
   'update', 'vat enable', 'vat codes', 'vat book', 'vat readout', 'vat file', 'vat settle',
-  'year-end close', 'year-end status', 'year-end report', 'jaarrekening report', 'mcp',
+  'year-end close', 'year-end status', 'year-end report', 'financial-statements report', 'mcp',
   'server start', 'server token',
 ];
 

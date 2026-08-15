@@ -1,12 +1,13 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
 
 // Accounts — chart of accounts CRUD, CSV import, default chart seeding.
 import { readFileSync } from 'node:fs';
-import { DEFAULT_CHART, inferRgs } from './chart.js';
+import { inferRgs } from './chart.js';
+import { resolveProfile } from '../jurisdictions/index.js';
 
 const VALID_TYPES = ['asset', 'liability', 'equity', 'income', 'expense'];
 const VALID_NORMAL = ['debit', 'credit'];
@@ -18,12 +19,12 @@ export function accountError(code, message) {
   return e;
 }
 
-export function createAccount(db, { code, name, type, normalBalance, rgsCode = null }) {
-  validateAccount({ code, name, type, normalBalance, rgsCode });
+export function createAccount(db, { code, name, type, normalBalance, taxonomyCode = null }) {
+  validateAccount({ code, name, type, normalBalance, taxonomyCode });
   try {
     const info = db.prepare(
-      'INSERT INTO accounts (code, name, type, rgs_code, normal_balance) VALUES (?, ?, ?, ?, ?)',
-    ).run(code, name.trim(), type, rgsCode, normalBalance);
+      'INSERT INTO accounts (code, name, type, taxonomy_code, normal_balance, taxonomy) VALUES (?, ?, ?, ?, ?, ?)',
+    ).run(code, name.trim(), type, taxonomyCode, normalBalance, resolveProfile(db).reporting.taxonomy);
     return getAccount(db, info.lastInsertRowid);
   } catch (err) {
     if (String(err.message).includes('UNIQUE constraint failed: accounts.code')) {
@@ -62,7 +63,7 @@ export function listAccounts(db, { type = null, includeInactive = false } = {}) 
 /** Seed the default chart; skips codes that already exist. Returns count of new accounts. */
 export function seedDefaultChart(db) {
   let created = 0;
-  for (const a of DEFAULT_CHART) {
+  for (const a of resolveProfile(db).reporting.defaultChart) {
     if (getAccountByCode(db, a.code)) continue;
     createAccount(db, a);
     created += 1;
@@ -90,7 +91,7 @@ export function reactivateAccount(db, code, { dryRun = false } = {}) {
 }
 
 /** Validate one account row object (shared by createAccount and CSV import). */
-export function validateAccount({ code, name, type, normalBalance, rgsCode = null }) {
+export function validateAccount({ code, name, type, normalBalance, taxonomyCode = null }) {
   if (!code || typeof code !== 'string' || !/^\d{1,6}$/.test(code)) {
     throw accountError('INVALID_CODE', `account code '${code}' must be 1-6 digits`);
   }
@@ -101,14 +102,14 @@ export function validateAccount({ code, name, type, normalBalance, rgsCode = nul
   if (!VALID_NORMAL.includes(normalBalance)) {
     throw accountError('INVALID_NORMAL_BALANCE', `normal_balance '${normalBalance}' must be debit or credit`);
   }
-  if (rgsCode != null && rgsCode !== '' && !RGS_RE.test(rgsCode)) {
-    throw accountError('INVALID_RGS_CODE', `rgs_code '${rgsCode}' does not look like an RGS code (e.g. BMVA.02)`);
+  if (taxonomyCode != null && taxonomyCode !== '' && !RGS_RE.test(taxonomyCode)) {
+    throw accountError('INVALID_RGS_CODE', `taxonomy_code '${taxonomyCode}' does not look like an RGS code (e.g. BMVA.02)`);
   }
 }
 
 /**
  * Import a chart from CSV. Columns (header row required):
- *   code,name,type,normal_balance[,rgs_code]
+ *   code,name,type,normal_balance[,taxonomy_code]
  * Valid rows are created; invalid rows are skipped with a reported error.
  * Returns { created, skipped, total, errors: [{line, error}] }.
  */
@@ -125,6 +126,9 @@ export function importChartCsv(db, csvText) {
     }
   }
   const idx = Object.fromEntries(header.map((h, i) => [h, i]));
+  // legacy header alias: charts written before the taxonomy rename used
+  // 'rgs_code' — accept both (migration 022 renamed the column, not the CSV)
+  if (idx.taxonomy_code == null && idx.rgs_code != null) idx.taxonomy_code = idx.rgs_code;
 
   const created = [];
   const errors = [];
@@ -137,10 +141,10 @@ export function importChartCsv(db, csvText) {
         name: row[idx.name],
         type: row[idx.type],
         normalBalance: row[idx.normal_balance],
-        rgsCode: idx.rgs_code != null ? (row[idx.rgs_code] || null) : null,
+        taxonomyCode: idx.taxonomy_code != null ? (row[idx.taxonomy_code] || null) : null,
         // enforce RGS on import: charts without an rgs column get inferred
-        ...(idx.rgs_code == null || !(row[idx.rgs_code] || '').trim()
-          ? { rgsCode: inferRgs(row[idx.type], row[idx.name]) }
+        ...(idx.taxonomy_code == null || !(row[idx.taxonomy_code] || '').trim()
+          ? { taxonomyCode: inferRgs(row[idx.type], row[idx.name]) }
           : {}),
       };
       validateAccount(account);

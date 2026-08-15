@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -35,7 +35,7 @@ test('createAccount: rejects duplicates and invalid input', () => {
     { code: 'INVALID_TYPE' });
   assert.throws(() => createAccount(db, { code: '5001', name: 'x', type: 'expense', normalBalance: 'credit' }),
     { code: 'INVALID_COMBINATION' });
-  assert.throws(() => createAccount(db, { code: '5001', name: 'x', type: 'expense', normalBalance: 'debit', rgsCode: 'BMVA' }),
+  assert.throws(() => createAccount(db, { code: '5001', name: 'x', type: 'expense', normalBalance: 'debit', taxonomyCode: 'BMVA' }),
     { code: 'INVALID_RGS_CODE' });
 });
 
@@ -64,7 +64,7 @@ test('deactivate/reactivate lifecycle blocks new postings', () => {
 
 test('importChartCsv: imports valid rows, skips duplicates and invalid rows', () => {
   const csv = [
-    'code,name,type,normal_balance,rgs_code',
+    'code,name,type,normal_balance,taxonomy_code',
     '5000,Testkosten,expense,debit,WBED.42',
     '5100,Andere kosten,expense,debit,WBED.42',
     '5200,Verkeerd type,weird,debit,',
@@ -88,7 +88,7 @@ test('importChartCsv: header validation', () => {
 
 test('importChartCsv: quoted values with commas parse', () => {
   const csv = [
-    'code,name,type,normal_balance,rgs_code',
+    'code,name,type,normal_balance,taxonomy_code',
     '"5000","Kosten, algemeen",expense,debit,WBED.42',
   ].join('\n');
   const result = importChartCsv(db, csv);

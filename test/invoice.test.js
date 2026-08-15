@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -26,7 +26,7 @@ function setupCompany({ vat = true, complete = true } = {}) {
   db = openDb(':memory:');
   seedDefaultChart(db);
   db.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300', ?, '2712 CD', 'Zoetermeer', ?)
   `).run(complete ? 'Industrieweg 12' : null, vat ? 1 : 0);
   if (vat) enableVatModule(db);
@@ -546,14 +546,14 @@ test('invoiceReminders: credit notes are not reminder candidates', () => {
 // --- VAT-exempt suppliers (no btw-id) ---------------------------------------
 
 test('validateCompliance: VAT-exempt company without btw-id can still invoice', () => {
-  db.prepare('UPDATE company SET vat_module = 0, btw_id = NULL WHERE id = 1').run();
+  db.prepare('UPDATE company SET vat_module = 0, tax_id = NULL WHERE id = 1').run();
   addContact();
   const finalized = finalizeInvoice(db, { id: mkInvoice({ lines: ['1x Coaching @ 150.00'] }).id, actor: 'agent:test' });
   assert.equal(finalized.invoice.status, 'sent');
 });
 
 test('validateCompliance: VAT company without btw-id still fails SUPPLIER_INCOMPLETE', () => {
-  db.prepare('UPDATE company SET btw_id = NULL WHERE id = 1').run(); // vat_module stays on
+  db.prepare('UPDATE company SET tax_id = NULL WHERE id = 1').run(); // vat_module stays on
   addContact();
   assert.throws(() => finalizeInvoice(db, { id: mkInvoice().id, actor: 'agent:test' }), { code: 'SUPPLIER_INCOMPLETE' });
 });

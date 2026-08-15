@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -47,7 +47,7 @@ function setup({ vat = true } = {}) {
   db = openDb(':memory:');
   seedDefaultChart(db);
   db.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
             'Industrieweg 12', '2712 CD', 'Zoetermeer', ?)
   `).run(vat ? 1 : 0);
@@ -396,7 +396,7 @@ test('MCP: initialize + tools/list + read-only calls work end-to-end', async () 
   const fileDb = openDb(dbPath);
   seedDefaultChart(fileDb);
   fileDb.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
             'Industrieweg 12', '2712 CD', 'Zoetermeer', 1)
   `).run();
@@ -455,7 +455,7 @@ test('MCP: params:null on a call answers cleanly (no -32603 internal error)', as
   const fileDb = openDb(dbPath);
   seedDefaultChart(fileDb);
   fileDb.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
             'Industrieweg 12', '2712 CD', 'Zoetermeer', 1)
   `).run();
@@ -485,7 +485,7 @@ test('MCP: invoices tool derives the overdue status (regression)', async () => {
   const fileDb = openDb(dbPath);
   seedDefaultChart(fileDb);
   fileDb.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
             'Industrieweg 12', '2712 CD', 'Zoetermeer', 1)
   `).run();
@@ -526,7 +526,7 @@ test('MCP: non-object JSON-RPC messages get Invalid Request, server survives', a
   const fileDb = openDb(dbPath);
   seedDefaultChart(fileDb);
   fileDb.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
             'Industrieweg 12', '2712 CD', 'Zoetermeer', 1)
   `).run();
@@ -561,7 +561,7 @@ test('MCP: mutations are plan-only by default; execute books with the actor', as
   const fileDb = openDb(dbPath);
   seedDefaultChart(fileDb);
   fileDb.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
             'Industrieweg 12', '2712 CD', 'Zoetermeer', 1)
   `).run();
@@ -610,7 +610,7 @@ test('MCP: assets_run books DEPRECIATION, not recurring entries (import-collisio
   const fileDb = openDb(dbPath);
   seedDefaultChart(fileDb);
   fileDb.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
             'Industrieweg 12', '2712 CD', 'Zoetermeer', 0)
   `).run();
@@ -654,7 +654,7 @@ test('MCP: contact_add preserves postal_code and vat_id (regression)', async () 
   const fileDb = openDb(dbPath);
   seedDefaultChart(fileDb);
   fileDb.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
             'Industrieweg 12', '2712 CD', 'Zoetermeer', 0)
   `).run();
@@ -696,7 +696,7 @@ test('MCP: BUKIO_MCP_READONLY blocks execution', async () => {
   const fileDb = openDb(dbPath);
   seedDefaultChart(fileDb);
   fileDb.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
             'Industrieweg 12', '2712 CD', 'Zoetermeer', 1)
   `).run();

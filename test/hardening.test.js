@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -98,7 +98,7 @@ function setup({ vat = true } = {}) {
   db = openDb(':memory:');
   seedDefaultChart(db);
   db.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
             'Industrieweg 12', '2712 CD', 'Zoetermeer', ?)
   `).run(vat ? 1 : 0);
@@ -637,7 +637,7 @@ test('CSV and XLSX exports neuter formula injection', async () => {
 test('jaarrekening XLSX guards formula injection in account and company names', async () => {
   // hostile company name + hostile account name must be stored as TEXT cells
   db.prepare("UPDATE company SET name = '=HYPERLINK(\"https://evil\",\"x\")' WHERE id = 1").run();
-  db.prepare("INSERT INTO accounts (code, name, type, normal_balance, rgs_code) VALUES ('9999', '=SUM(A1:A2)', 'expense', 'debit', 'WBED.42')").run();
+  db.prepare("INSERT INTO accounts (code, name, type, normal_balance, taxonomy_code) VALUES ('9999', '=SUM(A1:A2)', 'expense', 'debit', 'WBED.42')").run();
   const e = createEntry(db, {
     date: '2026-06-01', description: 'kost',
     postings: [{ code: '1100', amountCents: 1000 }, { code: '9999', amountCents: -1000 }],
@@ -652,6 +652,7 @@ test('jaarrekening XLSX guards formula injection in account and company names', 
   const nameCell = wb.getWorksheet('Balans').getCell('A3');
   assert.ok(String(nameCell.value).startsWith("'=HYPERLINK"), `company name must be guarded, got: ${nameCell.value}`);
   // hostile account name in the W&V sheet must be guarded too
+  // the statutory jaarrekening XLSX keeps its Dutch sheet names (statutory document)
   const wv = wb.getWorksheet('Winst en verlies');
   let guarded = false;
   wv.eachRow((row) => {
@@ -684,7 +685,7 @@ test('MCP: vat_book execute leaves a draft unless post=true; invoice_pay default
   const db0 = openDb(dbPath);
   seedDefaultChart(db0);
   db0.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300', 'Industrieweg 12', '2712 CD', 'Zoetermeer', 1)
   `).run();
   enableVatModule(db0);
@@ -831,9 +832,9 @@ test('CLI: assets register --format csv has a header row and totals', () => {
   cli(dbPath, ['assets', 'add', '--name', 'Laptop', '--purchase-date', '2026-01-01', '--purchase-price', '1200.00', '--depreciation-start', '2026-01-01', '--recognition-date', '2026-01-01']);
   const csv = runRaw(dbPath, ['assets', 'register', '--format', 'csv']).raw;
   const lines = csv.trim().split('\n');
-  assert.ok(lines[0].startsWith('id,naam,categorie'), `header row expected, got: ${lines[0]}`);
+  assert.ok(lines[0].startsWith('id,name,category'), `header row expected, got: ${lines[0]}`);
   assert.ok(csv.includes('Laptop'), 'asset row must be present');
-  assert.ok(csv.includes('TOTAAL'), 'totals row must be present');
+  assert.ok(csv.includes('TOTAL'), 'totals row must be present');
 });
 
 test('CLI: assets register --format json emits JSON without the global --json flag (round 11)', () => {
@@ -981,7 +982,7 @@ test('4840 Koersverschillen is created on demand for pre-2026-08-07 databases', 
   paymentFromBank(db, { invoiceId: inv.id, bankTxId: tx.id, actor: 'agent:test' });
   const fx = getAccountByCode(db, '4840');
   assert.ok(fx, '4840 must be created on demand');
-  assert.equal(fx.rgs_code, 'WFBE.84');
+  assert.equal(fx.taxonomy_code, 'WFBE.84');
   assert.equal(trialBalance(db, {}).balanced, true);
 });
 
@@ -1147,7 +1148,7 @@ test('importTransactions rejects garbage or impossible transaction dates', () =>
 test('createPaymentBatch rejects a garbage batch date (it would land in pain.001)', () => {
   const company = db.prepare('SELECT * FROM company').get();
   if (!company) {
-    db.prepare("INSERT INTO company (name, kvk, legal_form) VALUES ('Test BV', '12345678', 'bv')").run();
+    db.prepare("INSERT INTO company (name, registration_id, legal_form) VALUES ('Test BV', '12345678', 'bv')").run();
   }
   db.prepare("UPDATE company SET iban = 'NL91ABNA0417164300' WHERE id = 1").run();
   assert.throws(
@@ -1187,7 +1188,7 @@ test('invoice reminders --within-days 0 stays 0 and garbage is rejected (no sile
   const dbPath = tmpDb();
   const db0 = openDb(dbPath);
   seedDefaultChart(db0);
-  db0.prepare("INSERT INTO company (name, kvk, legal_form) VALUES ('Test BV', '12345678', 'bv')").run();
+  db0.prepare("INSERT INTO company (name, registration_id, legal_form) VALUES ('Test BV', '12345678', 'bv')").run();
   db0.close();
 
   // 0 must stay 0 — the old `Number(x) || 7` masked it to 7
@@ -1223,7 +1224,7 @@ test('CLI --limit 0 returns 0 rows; garbage --limit errors (no parseInt || defau
   const dbPath = tmpDb();
   const db0 = openDb(dbPath);
   seedDefaultChart(db0);
-  db0.prepare("INSERT INTO company (name, kvk, legal_form) VALUES ('Test BV', '12345678', 'bv')").run();
+  db0.prepare("INSERT INTO company (name, registration_id, legal_form) VALUES ('Test BV', '12345678', 'bv')").run();
   for (let i = 0; i < 2; i += 1) {
     const e = createEntry(db0, {
       date: '2026-01-01', description: `e${i}`,
@@ -1267,7 +1268,7 @@ test('MCP: journal honors limit with a truncation flag; year and limit are valid
   const dbPath = tmpDb();
   const db0 = openDb(dbPath);
   seedDefaultChart(db0);
-  db0.prepare("INSERT INTO company (name, kvk, legal_form) VALUES ('Test BV', '12345678', 'bv')").run();
+  db0.prepare("INSERT INTO company (name, registration_id, legal_form) VALUES ('Test BV', '12345678', 'bv')").run();
   for (let i = 0; i < 3; i += 1) {
     const e = createEntry(db0, {
       date: '2026-01-01', description: `e${i}`,
@@ -1865,7 +1866,7 @@ test('account add/deactivate/reactivate/import are audited (they mutated silentl
   cli(dbPath, ['account', 'reactivate', '--code', '9999']);
   const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-chart-'));
   const csvPath = path.join(dir, 'chart.csv');
-  writeFileSync(csvPath, 'code,name,type,normal_balance,rgs_code\n8888,Nieuwe rekening,expense,debit,WKPR.70\n');
+  writeFileSync(csvPath, 'code,name,type,normal_balance,taxonomy_code\n8888,Nieuwe rekening,expense,debit,WKPR.70\n');
   cli(dbPath, ['account', 'import', '--file', csvPath]);
   const audit = cli(dbPath, ['audit']);
   const actions = audit.out.data.entries.map((e) => e.action);

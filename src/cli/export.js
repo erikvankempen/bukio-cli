@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -30,16 +30,16 @@ export function make(program) {
           });
           if (result.dryRun) {
             output(ctx, result, (d) => {
-              console.log(`plan: export XAF 4.0 for ${d.company.name} (KVK ${d.company.kvk || '-'}) — fiscal year ${d.year}`);
-              console.log(`  ${d.rekeningen} rekeningen, ${d.mutaties} mutaties -> ${d.path}`);
+              console.log(`plan: export XAF 4.0 for ${d.company.name} (KVK ${d.company.registration_id || '-'}) — fiscal year ${d.year}`);
+              console.log(`  ${d.rekeningen} accounts, ${d.mutaties} mutations -> ${d.path}`);
               console.log('(dry run — nothing written)');
             });
             return;
           }
           output(ctx, result, (d) => {
             console.log(`wrote ${d.path}`);
-            console.log(`  ${d.company.name} (KVK ${d.company.kvk || '-'}) — fiscal year ${d.year}`);
-            console.log(`  ${d.rekeningen} rekeningen, ${d.mutaties} mutaties`);
+            console.log(`  ${d.company.name} (KVK ${d.company.registration_id || '-'}) — fiscal year ${d.year}`);
+            console.log(`  ${d.rekeningen} accounts, ${d.mutaties} mutations`);
           });
         } finally {
           db.close();

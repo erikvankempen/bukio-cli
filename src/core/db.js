@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -43,6 +43,10 @@ export function migrate(db) {
         db.exec(sql);
         db.pragma(`user_version = ${version}`);
       } catch (err) {
+        // a failed rebuild may have left a transaction open (the runner
+        // cannot roll back inside a BEGIN..COMMIT it does not own) — close
+        // it so the next migration starts clean
+        try { db.exec('ROLLBACK'); } catch { /* no active transaction */ }
         const e = new Error(`migration ${file} failed: ${err.message}`);
         e.code = 'MIGRATION_FAILED';
         throw e;

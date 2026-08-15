@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,7 +16,7 @@ const PASSIVA_GROUPS = ['BEIV.05', 'BVRZ.07', 'BLAS.08', 'BSCH.12'];
 function netPerAccount(db, { asOf, types }) {
   const placeholders = types.map(() => '?').join(',');
   return db.prepare(`
-    SELECT a.id, a.code, a.name, a.type, a.rgs_code,
+    SELECT a.id, a.code, a.name, a.type, a.taxonomy_code,
       COALESCE(SUM(p.amount_cents), 0) AS net_cents
     FROM accounts a
     LEFT JOIN (
@@ -72,7 +72,7 @@ export function balans(db, { asOf }) {
     const sideRows = rows.filter((r) => types.includes(r.type));
     const sections = groups.map((code) => {
       const accounts = sideRows
-        .filter((r) => (r.rgs_code || 'overig') === code)
+        .filter((r) => (r.taxonomy_code || 'overig') === code)
         .map((r) => ({
           code: r.code,
           name: r.name,
@@ -81,16 +81,16 @@ export function balans(db, { asOf }) {
         }))
         .filter((a) => a.balance_cents !== 0);
       return {
-        rgs_code: code,
+        taxonomy_code: code,
         label: rgsLabel(code),
         accounts,
         total_cents: accounts.reduce((s, a) => s + a.balance_cents, 0),
       };
     }).filter((s) => s.accounts.length > 0);
 
-    // catch-all: side accounts whose rgs_code is not in the known group list
+    // catch-all: side accounts whose taxonomy_code is not in the known group list
     const leftover = sideRows
-      .filter((r) => !known.has(r.rgs_code || 'overig'))
+      .filter((r) => !known.has(r.taxonomy_code || 'overig'))
       .map((r) => ({
         code: r.code,
         name: r.name,
@@ -100,7 +100,7 @@ export function balans(db, { asOf }) {
       .filter((a) => a.balance_cents !== 0);
     if (leftover.length) {
       sections.push({
-        rgs_code: null,
+        taxonomy_code: null,
         label: 'Overig',
         accounts: leftover,
         total_cents: leftover.reduce((s, a) => s + a.balance_cents, 0),

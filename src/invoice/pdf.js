@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -11,6 +11,7 @@
 import { formatAmount } from '../core/money.js';
 import { computeInvoiceTotals, formatQty, lineDiscountCents } from './index.js';
 import { label, unitLabel } from './i18n.js';
+import { t } from '../i18n/index.js';
 
 export function pdfError(code, message) {
   const e = new Error(message);
@@ -39,7 +40,7 @@ export function invoiceHtml(db, invoice) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   const contact = invoice.contact;
   const isCredit = invoice.invoice_type === 'credit';
-  const lang = invoice.language ?? 'nl';
+  const lang = invoice.language ?? 'en';
   const L = (k) => label(k, lang);
 
   const totals = computeInvoiceTotals(invoice.lines, invoice.discount_type, invoice.discount_value);
@@ -109,12 +110,12 @@ export function invoiceHtml(db, invoice) {
         <h1>${esc(company.name)}</h1>
         <p>${esc(company.address)}</p>
         <p>${esc(company.postal_code)} ${esc(company.city)}</p>
-        <p>${L('kvk')} ${esc(company.kvk)} · ${L('btw')} ${esc(company.btw_id)}</p>
+        <p>${L('kvk')} ${esc(company.registration_id)} · ${L('btw')} ${esc(company.tax_id)}</p>
       </div>
     </div>
     <div class="title">
       <h2>${isCredit ? L('credit') : L('invoice')}</h2>
-      <p><strong>${esc(invoice.invoice_number ?? 'concept')}</strong></p>
+      <p><strong>${esc(invoice.invoice_number ?? t('status.draft', {}, lang))}</strong></p>
       <p>${L('date')}: ${invoice.date}</p>
       ${invoice.due_date ? `<p>${L('dueDate')}: ${invoice.due_date}</p>` : ''}
       ${invoice.reference ? `<p>${L('reference')}: ${esc(invoice.reference)}</p>` : ''}

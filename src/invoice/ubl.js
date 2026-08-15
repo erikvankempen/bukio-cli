@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -12,6 +12,7 @@
 // Full Peppol validation (Schematron) is out of scope — verify via a
 // validation service before production use.
 import { computeInvoiceTotals, formatQty, lineDiscountCents } from './index.js';
+import { getProfile, resolveProfile } from '../jurisdictions/index.js';
 
 function esc(s) {
   // XML 1.0 valid chars: strip control chars (0x00-0x08, 0x0B, 0x0C,
@@ -35,16 +36,16 @@ const UNIT_CODE_MAP = {
   session: 'C62', km: 'KMT', kg: 'KGM', project: 'C62',
 };
 
-function addressBlock(partyName, p, taxId = null) {
+function addressBlock(partyName, p, taxId = null, schemeId = '9944', country = 'NL') {
   // the supplier row is snake_case (postal_code); contacts are camelCase —
   // read both so the postal code is never silently dropped
   const postal = p.postalCode ?? p.postal_code ?? '';
   // Peppol BIS 3.0 BT-34: Seller electronic address (cbc:EndpointID, 1..1).
   // For Dutch companies this is the KVK number under scheme 9944 (the Peppol
   // registry code for the Dutch Chamber of Commerce). Emitted when present —
-  // the seller's kvk is always set (finalize requires it).
-  const endpoint = p.kvk
-    ? `\n        <cbc:EndpointID schemeID="9944">${esc(p.kvk)}</cbc:EndpointID>`
+  // the seller's registration id is always set (finalize requires it).
+  const endpoint = p.registration_id
+    ? `\n        <cbc:EndpointID schemeID="${schemeId}">${esc(p.registration_id)}</cbc:EndpointID>`
     : '';
   return `
         <cac:Party>${endpoint}
@@ -53,12 +54,12 @@ function addressBlock(partyName, p, taxId = null) {
             <cbc:StreetName>${esc(p.address ?? '')}</cbc:StreetName>
             <cbc:CityName>${esc(p.city ?? '')}</cbc:CityName>
             <cbc:PostalZone>${esc(postal)}</cbc:PostalZone>
-            <cac:Country><cbc:IdentificationCode>${esc(p.country ?? 'NL')}</cbc:IdentificationCode></cac:Country>
+            <cac:Country><cbc:IdentificationCode>${esc(p.country ?? country)}</cbc:IdentificationCode></cac:Country>
           </cac:PostalAddress>
           ${taxId ? `<cac:PartyTaxScheme><cbc:CompanyID schemeID="VAT">${esc(taxId)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
           <cac:PartyLegalEntity>
             <cbc:RegistrationName>${esc(partyName)}</cbc:RegistrationName>
-            ${p.kvk ? `<cbc:CompanyID>${esc(p.kvk)}</cbc:CompanyID>` : ''}
+            ${p.registration_id ? `<cbc:CompanyID>${esc(p.registration_id)}</cbc:CompanyID>` : ''}
           </cac:PartyLegalEntity>
         </cac:Party>`;
 }
@@ -69,7 +70,39 @@ function addressBlock(partyName, p, taxId = null) {
  * the InvoiceLine) and on the total (AllowanceTotalAmount). VAT breakdown
  * bases are the discounted amounts, so the XML reconciles with the books.
  */
+// e-invoicing builders keyed by profile.documents.eInvoicing. NL is the
+// only format in Phase A ('peppol-bis-3.0'); future markets register theirs.
+const EINVOICING_BUILDERS = {
+  'peppol-bis-3.0': buildPeppolBis30,
+};
+
 export function invoiceToUbl(db, invoice) {
+  const profile = resolveProfile(db);
+  const { documents } = profile;
+  const builder = EINVOICING_BUILDERS[documents.eInvoicing];
+  if (!builder) {
+    throw Object.assign(new Error(`e-invoicing format '${documents.eInvoicing}' has no builder (registered: ${Object.keys(EINVOICING_BUILDERS).join(', ')})`), { code: 'FORMAT_NOT_SUPPORTED' });
+  }
+  return builder(db, invoice, profile);
+}
+
+// The buyer's EndpointID scheme must identify the registry that ISSUED the
+// buyer's number (e.g. NL KVK -> 9944, LU RCS -> 0195). Same-market buyers
+// (contact.country unset or equal) use the seller's scheme; a cross-border
+// buyer in one of the registered markets resolves their own country's
+// scheme; buyers in unregistered markets keep the seller's scheme (the
+// number is then best-effort, same as the pre-existing behaviour).
+function buyerSchemeId(profile, contact) {
+  const buyerCountry = (contact.country ?? profile.meta.country).toUpperCase();
+  if (buyerCountry === profile.meta.country.toUpperCase()) return profile.identifiers.peppolSchemeId;
+  try {
+    return getProfile(buyerCountry).identifiers?.peppolSchemeId ?? profile.identifiers.peppolSchemeId;
+  } catch {
+    return profile.identifiers.peppolSchemeId;
+  }
+}
+
+function buildPeppolBis30(db, invoice, profile) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   // BT-25 (preceding invoice): the credit note's BillingReference must carry
   // the ORIGINAL invoice number, not the buyer reference. Look it up via
@@ -112,8 +145,8 @@ export function invoiceToUbl(db, invoice) {
   const taxSubtotals = [...subtotalMap.values()].map((s) => {
     // AE (reverse charge): emit the code's configured rate when one exists
     // (e.g. 9% verlegd constructiewerk); the default R/RE codes carry 0%
-    // (reverse charge has no VAT) and fall back to the NL standard rate 21.00
-    const percent = s.cat === 'AE' ? (s.rateBp > 0 ? (s.rateBp / 100).toFixed(2) : '21.00') : (s.rateBp / 100).toFixed(2);
+    // (reverse charge has no VAT) and fall back to the PROFILE standard rate
+    const percent = s.cat === 'AE' ? (s.rateBp > 0 ? (s.rateBp / 100).toFixed(2) : (profile.tax.standardRateBp / 100).toFixed(2)) : (s.rateBp / 100).toFixed(2);
     return `
       <cac:TaxSubtotal>
         <cbc:TaxableAmount currencyID="${currency}">${moneyAmount(s.baseCents)}</cbc:TaxableAmount>
@@ -168,7 +201,10 @@ export function invoiceToUbl(db, invoice) {
       : l.vat_code === '0' ? 'Z'
         : (l.vat_code === 'V' || l.vat_code === 'M') ? 'E'
           : (l.vat_code ? 'S' : 'E');
-    const percent = (l.vat_code === 'R' || l.vat_code === 'RE') ? (l.vat_rate_bp > 0 ? (l.vat_rate_bp / 100).toFixed(2) : '21.00') : (l.vat_rate_bp / 100).toFixed(2);
+    // line-level percent must match the TaxSubtotal: AE falls back to the
+    // PROFILE standard rate (a hardcoded 21.00 broke reverse-charge lines in
+    // every non-NL market — EN 16931 BR-S-09-type inconsistency)
+    const percent = (l.vat_code === 'R' || l.vat_code === 'RE') ? (l.vat_rate_bp > 0 ? (l.vat_rate_bp / 100).toFixed(2) : (profile.tax.standardRateBp / 100).toFixed(2)) : (l.vat_rate_bp / 100).toFixed(2);
     const unitCode = UNIT_CODE_MAP[l.unit] ?? 'C62';
     // Peppol BIS 3.0: credit notes use cac:CreditNoteLine +
     // cbc:CreditNoteLineQuantity, invoices use cac:InvoiceLine +
@@ -224,16 +260,16 @@ export function invoiceToUbl(db, invoice) {
       <cbc:ID>${esc(creditBillingRef)}</cbc:ID>
     </cac:InvoiceDocumentReference>
   </cac:BillingReference>` : ''}
-  <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.btw_id)}</cac:AccountingSupplierParty>
+  <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.tax_id, profile.identifiers.peppolSchemeId, profile.meta.country)}</cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
     <cac:Party>
-      ${contact.kvk ? `<cbc:EndpointID schemeID="9944">${esc(contact.kvk)}</cbc:EndpointID>` : ''}
+      ${contact.kvk ? `<cbc:EndpointID schemeID="${buyerSchemeId(profile, contact)}">${esc(contact.kvk)}</cbc:EndpointID>` : ''}
       <cac:PartyName><cbc:Name>${esc(contact.name)}</cbc:Name></cac:PartyName>
       <cac:PostalAddress>
         <cbc:StreetName>${esc(contact.address ?? '')}</cbc:StreetName>
         <cbc:CityName>${esc(contact.city ?? '')}</cbc:CityName>
         <cbc:PostalZone>${esc(contact.postal_code ?? '')}</cbc:PostalZone>
-        <cac:Country><cbc:IdentificationCode>${esc(contact.country ?? 'NL')}</cbc:IdentificationCode></cac:Country>
+        <cac:Country><cbc:IdentificationCode>${esc(contact.country ?? profile.meta.country)}</cbc:IdentificationCode></cac:Country>
       </cac:PostalAddress>${buyerTax}
       <cac:PartyLegalEntity>
         <cbc:RegistrationName>${esc(contact.name)}</cbc:RegistrationName>

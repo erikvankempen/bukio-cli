@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -13,6 +13,7 @@ import { formatAmount } from '../core/money.js';
 import { sendMail, smtpConfig, smtpValidate } from '../core/smtp.js';
 import { invoiceToPdf } from './pdf.js';
 import { getInvoice } from './index.js';
+import { t } from '../i18n/index.js';
 import { record } from '../audit/index.js';
 
 export function emailError(code, message) {
@@ -22,16 +23,11 @@ export function emailError(code, message) {
 }
 
 function defaultSubject(lang, invoiceNumber, companyName) {
-  return lang === 'en'
-    ? `Invoice ${invoiceNumber} — ${companyName}`
-    : `Factuur ${invoiceNumber} — ${companyName}`;
+  return t('email.invoiceSubject', { number: invoiceNumber, company: companyName }, lang);
 }
 
 function defaultBody(lang, invoiceNumber, gross, companyName) {
-  if (lang === 'en') {
-    return `Dear client,\n\nPlease find attached invoice ${invoiceNumber} for a total of ${gross} (incl. VAT).\n\nKind regards,\n${companyName}`;
-  }
-  return `Geachte,\n\nHierbij ontvangt u factuur ${invoiceNumber} voor een totaalbedrag van ${gross} (incl. btw).\n\nMet vriendelijke groet,\n${companyName}`;
+  return t('email.invoiceBody', { number: invoiceNumber, gross, company: companyName }, lang);
 }
 
 /**

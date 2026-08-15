@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -16,6 +16,7 @@
 // The ledger is untouched: money moves when the bank processes; the bank
 // statement import (CAMT.053) books it.
 import { createHash } from 'node:crypto';
+import { resolveProfile } from '../jurisdictions/index.js';
 import { isValidIban, normalizeIban } from '../core/iban.js';
 import { parseImportAmount } from '../import/index.js';
 import { getContact, listContacts } from '../invoice/index.js';
@@ -214,7 +215,7 @@ export function createPaymentBatch(db, {
   date = null, debitIban = null, lines = [], payableIds = [], kind = 'transfer', actor = 'human', dryRun = false,
 }) {
   if (!['transfer', 'direct_debit'].includes(kind)) {
-    throw paymentsError('INVALID_KIND', "batch kind must be 'transfer' (SEPA credit) or 'direct_debit' (incasso)");
+    throw paymentsError('INVALID_KIND', "batch kind must be 'transfer' (SEPA credit) or 'direct_debit'");
   }
   const company = getCompany(db);
   if (!company) throw paymentsError('COMPANY_REQUIRED', 'company is not initialised');
@@ -278,9 +279,9 @@ export function createPaymentBatch(db, {
     if (!p) { fail(lineNo, 'PAYABLE_NOT_FOUND', `payable ${id} does not exist`); continue; }
     if (p.status !== 'unpaid') { fail(lineNo, 'PAYABLE_NOT_UNPAID', `payable ${id} is ${p.status}`); continue; }
     if (kind === 'transfer') {
-      if (p.payment_method !== 'transfer') { fail(lineNo, 'PAYABLE_DIRECT_DEBIT', `payable ${id} is paid by direct debit (incasso) — excluded from transfer batches`); continue; }
+      if (p.payment_method !== 'transfer') { fail(lineNo, 'PAYABLE_DIRECT_DEBIT', `payable ${id} is paid by direct debit — excluded from transfer batches`); continue; }
     } else if (p.payment_method !== 'direct_debit') {
-      fail(lineNo, 'PAYABLE_NOT_DIRECT_DEBIT', `payable ${id} is a transfer (betaalbaar) — not an incasso; use a transfer batch`); continue;
+      fail(lineNo, 'PAYABLE_NOT_DIRECT_DEBIT', `payable ${id} is a transfer — not a direct debit; use a transfer batch`); continue;
     }
     const c = getContact(db, p.contact_id);
     const iban = normalizeIban(c?.iban ?? '');
@@ -294,7 +295,7 @@ export function createPaymentBatch(db, {
       }
       items.push({
         payable_id: p.id, contact_id: p.contact_id, name: c.name, iban, amount_cents: p.amount_cents,
-        reference: `Factuur ${p.invoice_ref}`,
+        reference: `Invoice ${p.invoice_ref}`,
         mandate_id: mandate.id, mandate_ref: mandate.mandate_ref, mandate_date: mandate.mandate_date,
         mandate_seq: mandateSeqFor(db, mandate.id), scheme: mandate.scheme,
       });
@@ -305,7 +306,7 @@ export function createPaymentBatch(db, {
       continue;
     }
     if (c.name.length > 70) { fail(lineNo, 'SEPA_NAME_TOO_LONG', `contact ${c.name.slice(0, 40)}… name max 70 characters (SEPA Max70Text)`); continue; }
-    items.push({ payable_id: p.id, contact_id: p.contact_id, name: c.name, iban, amount_cents: p.amount_cents, reference: `Factuur ${p.invoice_ref}` });
+    items.push({ payable_id: p.id, contact_id: p.contact_id, name: c.name, iban, amount_cents: p.amount_cents, reference: `Invoice ${p.invoice_ref}` });
   }
 
   if (items.length === 0 && errors.length === 0) throw paymentsError('EMPTY_BATCH', 'no payments to batch — pass --lines, --csv or --from-invoices');
@@ -543,6 +544,14 @@ export function exportPaymentBatch(db, { id, schema = null, actor = 'human', dry
     if (!['008.02'].includes(effSchema)) throw paymentsError('INVALID_SCHEMA', 'direct-debit batches export pain.008.001.02 only');
   } else if (!['001.03', '001.09'].includes(effSchema)) {
     throw paymentsError('INVALID_SCHEMA', "schema must be '001.03' or '001.09'");
+  }
+  // capability gate: the SEPA format must be declared in the jurisdiction
+  // profile's exchange.paymentFormats (NL: sepa-pain.001 + sepa-pain.008)
+  const { exchange } = resolveProfile(db);
+  const formatId = isDD ? 'sepa-pain.008' : 'sepa-pain.001';
+  const declared = exchange.paymentFormats ?? [];
+  if (!declared.includes(formatId)) {
+    throw paymentsError('PAYMENT_FORMAT_NOT_SUPPORTED', `the jurisdiction profile does not declare ${formatId} (exchange.paymentFormats: ${declared.join(', ') || 'none declared'})`);
   }
   const lines = db.prepare('SELECT * FROM payment_batch_lines WHERE batch_id = ? ORDER BY id').all(id);
   // SEPA MsgId max 35 chars: BUKIO + 14-char timestamp + batch id (last 16

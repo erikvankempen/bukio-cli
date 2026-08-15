@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -38,7 +38,7 @@ function setup({ vat = true } = {}) {
   db = openDb(':memory:');
   seedDefaultChart(db);
   db.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300',
             'Industrieweg 12', '2712 CD', 'Zoetermeer', ?)
   `).run(vat ? 1 : 0);
@@ -407,7 +407,7 @@ test('year-end: fiscal year end 06-30 drives the jaarrekening as-of date', () =>
 
 test('jaarrekening: custom account lands in Overig, totals still balance', async () => {
   const { createAccount } = await import('../src/core/accounts.js');
-  createAccount(db, { code: '1999', name: 'Crypto', type: 'asset', normalBalance: 'debit', rgsCode: null });
+  createAccount(db, { code: '1999', name: 'Crypto', type: 'asset', normalBalance: 'debit', taxonomyCode: null });
   entry('2026-03-01', 'Omzet', [{ code: '1999', amountCents: 10000 }, { code: '8000', amountCents: -10000 }]);
   const r = jaarrekening(db, { year: 2026, model: 'klein' });
   const overig = r.balans.activa.find((g) => g.label === 'Overig');

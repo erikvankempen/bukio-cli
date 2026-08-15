@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -95,7 +95,7 @@ test('company show: returns the company record', () => {
   cli(t.file, ['company', 'update', '--city', 'Amsterdam']);
   const r = cli(t.file, ['company', 'show']);
   assert.equal(r.out.data.company.name, 'Test Coaching');
-  assert.equal(r.out.data.company.kvk, '12345678');
+  assert.equal(r.out.data.company.registration_id, '12345678');
   assert.equal(r.out.data.company.city, 'Amsterdam');
 });
 

@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -209,6 +209,7 @@ const CLI_CAPABILITIES = {
   'year-end status': 'close.year',
   'year-end close': 'close.year',
   'year-end report': 'close.year',
+  'financial-statements report': 'close.year',
   'jaarrekening report': 'close.year',
   // export / fx
   'export xaf': 'export.manage',

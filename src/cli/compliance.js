@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -49,7 +49,7 @@ export function make(program) {
   comp
     .command('mark')
     .description('record a manual filing (OB uses "vat readout --mark-filed")')
-    .requiredOption('--type <OB|ICP|JAARREKENING>', 'obligation type')
+    .requiredOption('--type <type>', 'obligation type (from the country profile\'s filingTypes, e.g. OB/ICP/JAARREKENING for NL)')
     .requiredOption('--period <p>', '2026-Q3 (OB/ICP) or 2026 (JAARREKENING)')
     .option('--date <yyyy-mm-dd>', 'filing date (default: today)')
     .option('--dry-run', 'show the plan without writing')

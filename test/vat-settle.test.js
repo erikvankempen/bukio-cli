@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -39,7 +39,7 @@ function setup() {
   db = openDb(':memory:');
   seedDefaultChart(db);
   db.prepare(
-    "INSERT INTO company (name, kvk, legal_form, btw_id, iban, vat_module) VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', ?, 1)",
+    "INSERT INTO company (name, registration_id, legal_form, tax_id, iban, vat_module) VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', ?, 1)",
   ).run(IBAN);
   enableVatModule(db);
 }

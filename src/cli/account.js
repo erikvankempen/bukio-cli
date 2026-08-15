@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -15,7 +15,7 @@ import { record } from '../audit/index.js';
 
 function serializeAccount(a) {
   return {
-    code: a.code, name: a.name, type: a.type, rgs_code: a.rgs_code,
+    code: a.code, name: a.name, type: a.type, taxonomy_code: a.taxonomy_code,
     normal_balance: a.normal_balance, active: Boolean(a.active),
   };
 }
@@ -30,35 +30,47 @@ export function make(program) {
     .requiredOption('--name <name>', 'account name')
     .requiredOption('--type <type>', 'asset|liability|equity|income|expense')
     .requiredOption('--normal-balance <debit|credit>', 'normal balance')
-    .option('--rgs-code <code>', 'RGS reference code (e.g. BMVA.02)')
+    .option('--taxonomy-code <code>', 'taxonomy reference code (RGS for NL, e.g. BMVA.02)')
+    .option('--rgs-code <code>', '[deprecated] alias for --taxonomy-code')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
+      const warnings = [];
       try {
         const db = ensureDb(ctx);
         try {
+          // deprecated alias: --rgs-code maps to the generic flag (warns);
+          // primary + alias together: alias ignored WITH a warning
+          if (opts.rgsCode != null && opts.taxonomyCode != null) {
+            warnings.push('--rgs-code ignored because --taxonomy-code was also given');
+          } else if (opts.rgsCode != null) {
+            opts.taxonomyCode = opts.rgsCode;
+            warnings.push('--rgs-code is deprecated — use --taxonomy-code');
+          }
           if (ctx.dryRun) {
-            const plan = { code: opts.code, name: opts.name, type: opts.type, normal_balance: opts.normalBalance, rgs_code: opts.rgsCode ?? null };
-            validateAccount({ code: opts.code, name: opts.name, type: opts.type, normalBalance: opts.normalBalance, rgsCode: opts.rgsCode });
+            const plan = { code: opts.code, name: opts.name, type: opts.type, normal_balance: opts.normalBalance, taxonomy_code: opts.taxonomyCode ?? null };
+            validateAccount({ code: opts.code, name: opts.name, type: opts.type, normalBalance: opts.normalBalance, taxonomyCode: opts.taxonomyCode });
             const exists = getAccountByCode(db, opts.code);
-            output(ctx, { action: 'add account', account: plan, exists: Boolean(exists), dryRun: true }, (d) => {
+            output(ctx, { action: 'add account', account: plan, exists: Boolean(exists), ...(warnings.length ? { warnings } : {}), dryRun: true }, (d) => {
               console.log(`plan: add account ${d.account.code} ${d.account.name} (${d.account.type}/${d.account.normal_balance})`);
               console.log(d.exists ? `(note: account ${d.account.code} already exists)` : '');
+              for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
               console.log('(dry run — nothing written)');
             });
             return;
           }
           const accountRow = createAccount(db, {
             code: opts.code, name: opts.name, type: opts.type,
-            normalBalance: opts.normalBalance, rgsCode: opts.rgsCode ?? null,
+            normalBalance: opts.normalBalance, taxonomyCode: opts.taxonomyCode ?? null,
           });
           record(db, {
             actor: ctx.actor, action: 'account.add', command: 'account add',
-            args: { code: opts.code, name: opts.name, type: opts.type, normal_balance: opts.normalBalance, rgs_code: opts.rgsCode ?? null },
+            args: { code: opts.code, name: opts.name, type: opts.type, normal_balance: opts.normalBalance, taxonomy_code: opts.taxonomyCode ?? null },
             outcome: 'ok',
           });
-          output(ctx, serializeAccount(accountRow), (a) => {
+          output(ctx, { ...serializeAccount(accountRow), ...(warnings.length ? { warnings } : {}) }, (a) => {
             console.log(`added account ${a.code} ${a.name} (${a.type}/${a.normal_balance})`);
+            for (const w of a.warnings ?? []) console.error(`warning: ${w}`);
           });
         } finally {
           db.close();
@@ -86,7 +98,7 @@ export function make(program) {
               { key: 'name', label: 'name' },
               { key: 'type', label: 'type' },
               { key: 'normal_balance', label: 'bal' },
-              { key: 'rgs_code', label: 'rgs' },
+              { key: 'taxonomy_code', label: 'rgs' },
               { key: 'active', label: 'active' },
             ]);
           });
@@ -111,7 +123,7 @@ export function make(program) {
           if (!a) throw Object.assign(new Error(`account ${opts.code} does not exist`), { code: 'ACCOUNT_NOT_FOUND' });
           output(ctx, serializeAccount(a), (row) => {
             console.log(`${row.code}  ${row.name}`);
-            console.log(`type: ${row.type}  normal balance: ${row.normal_balance}  rgs: ${row.rgs_code ?? '-'}  active: ${row.active}`);
+            console.log(`type: ${row.type}  normal balance: ${row.normal_balance}  rgs: ${row.taxonomy_code ?? '-'}  active: ${row.active}`);
           });
         } finally {
           db.close();
@@ -189,7 +201,7 @@ export function make(program) {
 
   account
     .command('import')
-    .description('import a chart from CSV: code,name,type,normal_balance[,rgs_code]')
+    .description('import a chart from CSV: code,name,type,normal_balance[,taxonomy_code]')
     .requiredOption('--file <path>', 'chart CSV file')
     .option('--dry-run', 'validate the file without importing')
     .action(async (opts, command) => {

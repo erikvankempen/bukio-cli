@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -43,7 +43,7 @@ function post(date, description, postings, extra = {}) {
 
 function seedCompany() {
   db.prepare(
-    'INSERT INTO company (id, name, kvk, legal_form, vat_module, kor_flag, fiscal_year_end) VALUES (1, ?, ?, ?, 0, 0, ?)',
+    'INSERT INTO company (id, name, registration_id, legal_form, vat_module, kor_flag, fiscal_year_end) VALUES (1, ?, ?, ?, 0, 0, ?)',
   ).run('Test Coaching', '12345678', 'eenmanszaak', '12-31');
 }
 

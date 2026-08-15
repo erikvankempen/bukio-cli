@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -195,7 +195,7 @@ test('account add/list/show/deactivate flow', () => {
 
   const added = run(dbPath, ['account', 'add', '--code', '5000', '--name', 'Testkosten', '--type', 'expense', '--normal-balance', 'debit', '--json']).out.data;
   assert.equal(added.code, '5000');
-  assert.equal(added.rgs_code, null);
+  assert.equal(added.taxonomy_code, null);
 
   const dup = run(dbPath, ['account', 'add', '--code', '5000', '--name', 'x', '--type', 'expense', '--normal-balance', 'debit', '--json'], { expectFail: true });
   assert.equal(dup.out.error.code, 'ACCOUNT_EXISTS');
@@ -216,7 +216,7 @@ test('account import: dry-run validates, real import creates', () => {
   run(dbPath, ['init', '--name', 'A', '--json']);
   const csvPath = path.join(path.dirname(dbPath), 'chart.csv');
   writeFileSync(csvPath, [
-    'code,name,type,normal_balance,rgs_code',
+    'code,name,type,normal_balance,taxonomy_code',
     '5000,Testkosten,expense,debit,WBED.42',
     '5100,Verkeerd,weird,debit,',
   ].join('\n'));

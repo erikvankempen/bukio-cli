@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -32,7 +32,7 @@ function setupCompany({ vat = true } = {}) {
   db = openDb(':memory:');
   seedDefaultChart(db);
   db.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300', 'Industrieweg 12', '2712 CD', 'Zoetermeer', ?)
   `).run(vat ? 1 : 0);
   if (vat) enableVatModule(db);
@@ -147,6 +147,11 @@ test('item guards: name/unit/price/vat/account', () => {
   assert.throws(() => createItem(db, { name: 'X', unit: 'weeks', unitPriceCents: 100, actor: 'agent:test' }), { code: 'INVALID_UNIT' });
   assert.throws(() => createItem(db, { name: 'X', unit: 'h', unitPriceCents: 0, actor: 'agent:test' }), { code: 'INVALID_PRICE' });
   assert.throws(() => createItem(db, { name: 'X', unit: 'h', unitPriceCents: 100, vatCode: '999', actor: 'agent:test' }), { code: 'VAT_CODE_NOT_FOUND' });
+  // dotted rates (FR 5.5/2.1) are FORMAT-valid after the parser fix — the
+  // NL fixture still rejects them semantically (VAT_CODE_NOT_FOUND), while
+  // malformed codes stay INVALID_VAT_CODE
+  assert.throws(() => createItem(db, { name: 'X', unit: 'h', unitPriceCents: 100, vatCode: '5.5', actor: 'agent:test' }), { code: 'VAT_CODE_NOT_FOUND' });
+  assert.throws(() => createItem(db, { name: 'X', unit: 'h', unitPriceCents: 100, vatCode: '5..5', actor: 'agent:test' }), { code: 'INVALID_VAT_CODE' });
   assert.throws(() => createItem(db, { name: 'X', unit: 'h', unitPriceCents: 100, glAccount: '9999', actor: 'agent:test' }), { code: 'ACCOUNT_NOT_FOUND' });
   assert.throws(() => updateItem(db, { id: 999, actor: 'agent:test' }), { code: 'ITEM_NOT_FOUND' });
   // dry-run writes nothing

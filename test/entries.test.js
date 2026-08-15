@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -25,9 +25,9 @@ test('default chart is seeded with 29 accounts (incl. 4840 Koersverschillen)', (
   assert.equal(accounts.length, 29);
   assert.equal(accounts.some((a) => a.code === '1100' && a.type === 'asset'), true);
   // 4840 Koersverschillen (FX differences on invoice payments, 2026-08-07)
-  assert.equal(accounts.some((a) => a.code === '4840' && a.rgs_code === 'WFBE.84'), true);
+  assert.equal(accounts.some((a) => a.code === '4840' && a.taxonomy_code === 'WFBE.84'), true);
   assert.equal(accounts.some((a) => a.code === '8000' && a.type === 'income'), true);
-  assert.equal(accounts.every((a) => a.rgs_code), true); // all RGS-mapped
+  assert.equal(accounts.every((a) => a.taxonomy_code), true); // all RGS-mapped
   // VAT-agnostic: no btw accounts in the core chart
   assert.equal(accounts.some((a) => /btw|omzetbelasting/i.test(a.name)), false);
 });

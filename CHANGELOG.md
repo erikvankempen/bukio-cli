@@ -6,6 +6,86 @@ match `package.json` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
+## [0.16.0] — 2026-08-15
+
+### Added
+
+- **Eleven jurisdictions** — `bukio init --country <cc>` now seeds the country
+  profile's chart convention, VAT codes/rates (2026), identifiers, Peppol
+  scheme and compliance calendar for NL, LU, GB, FR, US, BE, DE, DK, FI, NO
+  and SE (Phase B; profiles at `src/jurisdictions/`, roadmap rows 14–15):
+  - NL: 29-account RGS-mapped chart (unchanged baseline, byte-identical),
+    KvK/btw-id, Peppol 9944.
+  - LU: PCN 2020 chart, RCS, Peppol 0195; LU e-invoicing rules.
+  - GB: QuickBooks/Xero-style chart, Companies House number, Peppol 0208,
+    MTD-compatible stance, 03-31 fiscal year.
+  - FR: PCG chart, SIREN, Peppol 0002, franchise small-business scheme.
+  - US: no-federal-VAT tracking model (track + export).
+  - BE: PCN-BE AR 12-09-1983 chart, KBO, Peppol 0208, BTW readout.
+  - DE/DK/FI/NO/SE: SKR 03 / standard charts, USt-IdNr. / CVR / Y-tunnus /
+    Org.nr., Peppol 9930 / 0184 / 0037 / 0192 / 0007, per-market VAT bands
+    (incl. DK 25 % only, NO no-reduced band, DE 0 % solar, FI 25.5 %).
+  - Strict dispatch: unregistered formats fail loudly (`PROFILE_NOT_FOUND`),
+    never a silent NL fallback — NL is one of eleven equal citizens.
+- **Localization (i18n)** — optional, opt-in `--locale <code>` (global flag)
+  or `BUKIO_LOCALE` env switches human-facing output; **English stays the
+  default** and the JSON contract, error codes and MCP tool names never
+  localize:
+  - Locale tables for en, nl, nl-be, de, fr, fr-lu, da, fi, nb, sv
+    (8 full tables × 88 keys, parity-guarded by tests; nl-be/fr-lu as
+    regional overrides).
+  - Wired: invoice PDF labels/units, invoice + reminder emails, CLI tables
+    and renders (invoice list/reminders, balance sheet, P&L, month-end,
+    year-end, company show), VAT file/settle descriptions. `--desc` still
+    wins over localized defaults.
+  - Invoice document language follows the company profile (Dutch for NL/BE
+    companies, English for every other market; `--language nl|en` overrides)
+    — no market is the de facto base.
+- **English-first terminology sweep** — generic all-market runtime strings
+  (labels, plans, help, MCP descriptions) are English by default; statutory
+  artifacts keep their legal language per market (OB readout labels,
+  'Winst en verlies' statutory XLSX sheet, RGS group names, command aliases,
+  import CSV header aliases).
+- **`financial-statements` command** (year-end close) with the deprecated
+  `jaarrekening` alias; `init --kvk/--btw-id` deprecated in favour of
+  `--registration-id/--tax-id`.
+
+### Changed
+- **Positioning** — repository, README and CLI description now state the
+  eleven-jurisdiction scope (the "Dutch SMEs" tagline is gone); the invoice
+  document-language default is documented as profile-derived (Dutch for NL/BE
+  companies, English otherwise). The README presents the Netherlands as one of
+  eleven equal citizens: `init`/`company`/`account`/`contact` options use the
+  profile-neutral names (`--country`, `--registration-id`, `--tax-id`,
+  `--taxonomy-code`), chart and report examples are marked as the NL profile's,
+  and the OB readout is framed as the NL statutory VAT-return shape. The
+  command reference was re-verified against the live CLI (init/company/
+  account/contact option names, invoice create + bank import + fx set options,
+  per-profile VAT codes and statutory models).
+
+- Migrations 021–024: company gains `country`, `base_currency`, `locale`,
+  `profile_version`; `legal_form` CHECK removed; `taxonomy` backfill for RGS;
+  `vat_returns`/`filings` type CHECK widened — lossless, verified.
+- Code comments remain Dutch where they explain statutory/fiscal mechanics;
+  the public surface is English.
+
+### Fixed
+
+- `invoice show` no longer throws `ReferenceError` on invoices with payments
+  or outstanding amounts in human mode (locale was undeclared in the render
+  path; JSON mode had masked it).
+- i18n table parity repair (the 14 balance-sheet/company keys now exist in
+  all 8 full tables; a parity-guard test prevents silent regressions).
+- Residual Dutch literals on generic paths (assets list/schemes, fx, item
+  list, ICP readout, import/export summaries, MCP tool descriptions).
+
+### Verified
+
+- **891/891 tests green** (was 876 at Phase B start; +15 market/i18n
+  coverage). Two consecutive clean full-review passes (rounds 8+9) plus the
+  round-10 fresh pass and the i18n 3-review chain — all fail-closed,
+  static-only subagent reviews with file:line verdicts.
+
 ## [0.15.1] — 2026-08-11
 
 ### Added

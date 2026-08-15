@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -37,7 +37,7 @@ export function make(program) {
     .requiredOption('--date <date>', 'invoice date YYYY-MM-DD')
     .option('--due <date>', 'due date YYYY-MM-DD')
     .requiredOption('--amount <amount>', 'amount (e.g. 123.45 or 123,45)')
-    .option('--method <method>', "payment term: 'transfer' (SEPA batch) or 'direct-debit' (incasso, excluded from batches)", 'transfer')
+    .option('--method <method>', "payment term: 'transfer' (SEPA batch) or 'direct-debit' (excluded from batches)", 'transfer')
     .option('--entry-id <id>', 'optional: linked expense booking (entry id)')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
@@ -101,7 +101,7 @@ export function make(program) {
       } catch (err) { fail(ctx, err); }
     });
 
-  const mandate = payments.command('mandate').description('SEPA direct-debit mandates (incassovolmacht)');
+  const mandate = payments.command('mandate').description('SEPA direct-debit mandates');
   mandate
     .command('add')
     .description('register a signed mandate for a contact')
@@ -175,7 +175,7 @@ export function make(program) {
     .option('--payable <ids>', 'only these payable ids (comma-separated)')
     .option('--date <date>', 'requested execution date YYYY-MM-DD (default today)')
     .option('--from-iban <iban>', 'debit account IBAN (default: company IBAN)')
-    .option('--type <type>', "batch kind: 'transfer' (SEPA credit, pain.001) or 'direct-debit' (incasso, pain.008)", 'transfer')
+    .option('--type <type>', "batch kind: 'transfer' (SEPA credit, pain.001) or 'direct-debit' (pain.008)", 'transfer')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);

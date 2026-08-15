@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for Dutch SMEs.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -11,6 +11,7 @@ import {
   createContact, updateContact, createInvoice, creditInvoice, finalizeInvoice, getInvoice,
   formatQty, invoiceReminders, listContacts, listInvoices, markPaid, contactStatement,
 } from '../invoice/index.js';
+import { t, resolveLocale } from '../i18n/index.js';
 import { invoiceToPdf } from '../invoice/pdf.js';
 import { invoiceToUbl } from '../invoice/ubl.js';
 import { sendPeppolInvoice } from '../invoice/peppol.js';
@@ -65,7 +66,7 @@ export function make(program) {
     .option('--city <city>', 'city')
     .option('--country <code>', 'country code', 'NL')
     .option('--email <email>', 'email')
-    .option('--vat-id <id>', 'customer btw-id (required for btw verlegd)')
+    .option('--vat-id <id>', 'customer VAT id (required for reverse charge)')
     .option('--kvk <kvk>', 'customer KVK number')
     .option('--iban <iban>', 'bank account (IBAN) — needed to include the contact in payment batches')
     .option('--dry-run', 'validate without writing')
@@ -105,7 +106,7 @@ export function make(program) {
     .option('--city <city>', 'city')
     .option('--country <code>', 'country code')
     .option('--email <email>', 'email')
-    .option('--vat-id <id>', 'customer btw-id')
+    .option('--vat-id <id>', 'customer tax id')
     .option('--kvk <kvk>', 'customer KVK number')
     .option('--iban <iban>', 'bank account (IBAN)')
     .option('--dry-run', 'show the plan without writing')
@@ -152,7 +153,7 @@ export function make(program) {
           output(ctx, { contacts }, (d) => {
             table(d.contacts, [
               { key: 'id', label: '#' }, { key: 'name', label: 'name' },
-              { key: 'city', label: 'city' }, { key: 'vat_id', label: 'btw-id' },
+              { key: 'city', label: 'city' }, { key: 'vat_id', label: 'tax id' },
             ]);
           });
         } finally {
@@ -165,7 +166,7 @@ export function make(program) {
 
   contact
     .command('statement')
-    .description('opgave: invoices + payments + payables with a running balance')
+    .description('statement: invoices + payments + payables with a running balance')
     .requiredOption('--id <id>', 'contact id')
     .option('--as-of <yyyy-mm-dd>', 'statement date (default: today)')
     .option('--format <format>', 'json|csv|xlsx|human')
@@ -234,7 +235,7 @@ export function make(program) {
     .option('--notes <text>', 'free-text note (printed on the invoice)')
     .option('--discount-pct <pct>', 'discount on the total, percentage (e.g. 5)')
     .option('--discount-amount <amount>', 'discount on the total, fixed amount (e.g. 50.00)')
-    .option('--language <lang>', "invoice language: 'nl' (default) or 'en'", 'nl')
+    .option('--language <lang>', "invoice language: 'nl' or 'en' (default: follows the company profile)")
     .option('--dry-run', 'validate without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);
@@ -261,7 +262,7 @@ export function make(program) {
               language: opts.language, actor: ctx.actor, dryRun: true,
             });
             output(ctx, plan, (d) => {
-              console.log(`plan: draft invoice for contact #${d.contact_id} on ${d.date} — net ${formatAmount(d.net_cents)}${d.vat_cents ? ` + ${formatAmount(d.vat_cents)} btw` : ''} = ${formatAmount(d.gross_cents)}${d.discount_cents ? ` (korting ${formatAmount(d.discount_cents)})` : ''} [${d.language}]`);
+              console.log(`plan: draft invoice for contact #${d.contact_id} on ${d.date} — net ${formatAmount(d.net_cents)}${d.vat_cents ? ` + ${formatAmount(d.vat_cents)} VAT` : ''} = ${formatAmount(d.gross_cents)}${d.discount_cents ? ` (discount ${formatAmount(d.discount_cents)})` : ''} [${d.language}]`);
               for (const l of d.lines) console.log(`  ${l.qty}x ${l.description} @ ${formatAmount(l.priceCents)}${l.vatCode ? ` @${l.vatCode}` : ''}${l.discountType ? ` @-${l.discountType === 'pct' ? `${l.discountValue / 100}%` : formatAmount(l.discountValue)}` : ''}`);
               console.log('(dry run — nothing written)');
             });
@@ -276,7 +277,7 @@ export function make(program) {
             language: opts.language, actor: ctx.actor,
           });
           output(ctx, { invoice: fmtInvoice(inv), dryRun: false }, (d) => {
-            console.log(`invoice #${d.invoice.id} [draft] ${d.invoice.date} — ${d.invoice.contact_name}: ${d.invoice.gross} (btw ${d.invoice.vat})${d.invoice.discount_cents ? ` (korting ${formatAmount(d.invoice.discount_cents)})` : ''} [${d.invoice.language}]`);
+            console.log(`invoice #${d.invoice.id} [draft] ${d.invoice.date} — ${d.invoice.contact_name}: ${d.invoice.gross} (VAT ${d.invoice.vat})${d.invoice.discount_cents ? ` (discount ${formatAmount(d.invoice.discount_cents)})` : ''} [${d.invoice.language}]`);
           });
         } finally {
           db.close();
@@ -288,7 +289,7 @@ export function make(program) {
 
   invoice
     .command('finalize')
-    .description('assign the sequential number and book the entry (Debiteuren/Omzet/btw)')
+    .description('assign the sequential number and book the entry (debtors/revenue/VAT)')
     .requiredOption('--id <id>', 'invoice id')
     .option('--dry-run', 'show the number + postings without writing')
     .action((opts, command) => {
@@ -299,7 +300,7 @@ export function make(program) {
           const result = finalizeInvoice(db, { id: opts.id, actor: ctx.actor, dryRun: ctx.dryRun });
           if (ctx.dryRun) {
             output(ctx, { ...result, dryRun: true }, (d) => {
-              console.log(`plan: finalize as ${d.invoice_number} — net ${formatAmount(d.net)} / btw ${formatAmount(d.vat)} / totaal ${formatAmount(d.gross)}`);
+              console.log(`plan: finalize as ${d.invoice_number} — net ${formatAmount(d.net)} / VAT ${formatAmount(d.vat)} / total ${formatAmount(d.gross)}`);
               for (const p of d.postings) console.log(`  ${p.code}  ${formatAmount(p.amountCents).padStart(12)}${p.vatCode ? ` @${p.vatCode}` : ''}`);
               console.log('(dry run — nothing written)');
             });
@@ -327,17 +328,18 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const invoices = listInvoices(db, { status: opts.status ?? null, type: opts.type ?? null }).map(fmtInvoice);
           output(ctx, { invoices }, (d) => {
             table(d.invoices, [
               { key: 'id', label: '#' },
-              { key: 'invoice_number', label: 'nummer' },
-              { key: 'invoice_type', label: 'type' },
-              { key: 'date', label: 'datum' },
-              { key: 'contact_name', label: 'klant' },
-              { key: 'gross', label: 'totaal' },
-              { key: 'status', label: 'status' },
+              { key: 'invoice_number', label: t('invlist.number', {}, locale) },
+              { key: 'invoice_type', label: t('invlist.type', {}, locale) },
+              { key: 'date', label: t('invlist.date', {}, locale) },
+              { key: 'contact_name', label: t('invlist.customer', {}, locale) },
+              { key: 'gross', label: t('invlist.total', {}, locale) },
+              { key: 'status', label: t('invlist.status', {}, locale) },
             ]);
           });
         } finally {
@@ -356,16 +358,17 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const inv = getInvoice(db, opts.id);
           if (!inv) throw Object.assign(new Error(`invoice ${opts.id} does not exist`), { code: 'NOT_FOUND' });
           output(ctx, { invoice: fmtInvoice(inv) }, (d) => {
             const i = d.invoice;
-            console.log(`${i.invoice_number ?? 'concept'} [${i.status}] ${i.date} — ${i.contact_name}`);
+            console.log(`${i.invoice_number ?? t('status.draft', {}, locale)} [${i.status}] ${i.date} — ${i.contact_name}`);
             for (const l of i.lines) console.log(`  ${l.line_no}. ${l.description}  ${l.quantity}x ${l.unit_price}${l.vat_code ? ` @${l.vat_code}` : ''} = ${l.amount}`);
-            console.log(`  net ${i.net} / btw ${i.vat} / totaal ${i.gross}`);
-            for (const p of i.payments) console.log(`  betaald ${p.date}: ${p.amount} (${p.method})`);
-            if (i.outstanding_cents > 0) console.log(`  openstaand: ${formatAmount(i.outstanding_cents)}`);
+            console.log(`  net ${i.net} / vat ${i.vat} / total ${i.gross}`);
+            for (const p of i.payments) console.log(`  ${t('entry.paid', { date: p.date, amount: p.amount, method: p.method }, locale)}`);
+            if (i.outstanding_cents > 0) console.log(`  ${t('entry.outstanding', { amount: formatAmount(i.outstanding_cents) }, locale)}`);
           });
         } finally {
           db.close();
@@ -387,7 +390,7 @@ export function make(program) {
         try {
           const inv = getInvoice(db, opts.id);
           if (!inv) throw Object.assign(new Error(`invoice ${opts.id} does not exist`), { code: 'NOT_FOUND' });
-          if (!inv.invoice_number) throw Object.assign(new Error('finalize the invoice first — a concept has no number yet'), { code: 'NOT_FINALIZED' });
+          if (!inv.invoice_number) throw Object.assign(new Error('finalize the invoice first — a draft has no number yet'), { code: 'NOT_FINALIZED' });
           const outPath = opts.out ?? `${inv.invoice_number}.pdf`;
           const result = await invoiceToPdf(db, inv, { outPath });
           output(ctx, { path: result.path, bytes: result.bytes }, (d) => console.log(`wrote ${d.path} (${d.bytes} bytes)`));
@@ -537,7 +540,7 @@ export function make(program) {
     .description('email a finalized invoice (PDF attached) — SMTP config via BUKIO_SMTP_* env')
     .requiredOption('--id <id>', 'invoice id')
     .option('--to <email>', 'recipient (default: the contact email)')
-    .option('--subject <text>', 'subject (default: "Factuur <nr> — <company>")')
+    .option('--subject <text>', 'subject (default: "Invoice <nr> — <company>")')
     .option('--body <text>', 'plain-text body (default: a short Dutch/English intro)')
     .option('--no-pdf', "don't attach the PDF")
     .option('--dry-run', 'render and validate without sending')
@@ -580,36 +583,35 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const result = invoiceReminders(db, { withinDays: Number(opts.withinDays) });
+          const locale = resolveLocale(ctx, db);
           if (opts.draftEmails) {
             const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
             result.reminders = result.reminders.map((r) => {
               const to = r.contact_email;
-              const subject = `Betalingsherinnering factuur ${r.invoice_number}`;
-              const lines = [
-                `Beste ${r.contact_name},`,
-                '',
-                `Voor factuur ${r.invoice_number} staat nog ${r.outstanding} open (vervaldatum ${r.due_date}).`,
-                company?.iban ? `Wilt u dit bedrag overmaken naar IBAN ${company.iban} o.v.v. ${r.invoice_number}?` : `Wilt u het openstaande bedrag overmaken o.v.v. ${r.invoice_number}?`,
-                '',
-                'Met vriendelijke groet,',
-                company?.name ?? ' ',
-              ];
+              const subject = t('email.reminderSubject', { number: r.invoice_number }, locale);
+              const transfer = company?.iban
+                ? t('email.reminderTransferIban', { iban: company.iban, number: r.invoice_number }, locale)
+                : t('email.reminderTransferPlain', { number: r.invoice_number }, locale);
+              const lines = t('email.reminderBody', {
+                name: r.contact_name, number: r.invoice_number,
+                outstanding: r.outstanding, dueDate: r.due_date, transfer, company: company?.name ?? ' ',
+              }, locale).split('\n');
               return { ...r, draft_email: { to, subject, body: lines.join('\n') } };
             });
           }
           output(ctx, result, (d) => {
-            if (!d.count) { console.log(`no reminders as of ${d.as_of}`); return; }
+            if (!d.count) { console.log(t('reminder.none', { date: d.as_of }, locale)); return; }
             table(d.reminders, [
-              { key: 'invoice_number', label: 'factuur' },
-              { key: 'contact_name', label: 'klant' },
-              { key: 'due_date', label: 'vervaldatum' },
-              { key: 'days_overdue', label: 'dagen' },
-              { key: 'outstanding', label: 'openstaand' },
-              { key: 'remind', label: 'herinnering' },
+              { key: 'invoice_number', label: t('invlist.number', {}, locale) },
+              { key: 'contact_name', label: t('invlist.customer', {}, locale) },
+              { key: 'due_date', label: t('invlist.dueDate', {}, locale) },
+              { key: 'days_overdue', label: t('invlist.days', {}, locale) },
+              { key: 'outstanding', label: t('invlist.outstanding', {}, locale) },
+              { key: 'remind', label: t('invlist.reminder', {}, locale) },
             ]);
             if (opts.draftEmails) {
               for (const r of d.reminders) {
-                console.log(`\n--- ${r.invoice_number} -> ${r.draft_email.to ?? 'GEEN E-MAILADRES'} ---`);
+                console.log(`\n--- ${r.invoice_number} -> ${r.draft_email.to ?? 'NO EMAIL ADDRESS'} ---`);
                 console.log(`subject: ${r.draft_email.subject}`);
                 console.log(r.draft_email.body);
               }
