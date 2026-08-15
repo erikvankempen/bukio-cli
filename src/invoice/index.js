@@ -426,14 +426,14 @@ export function contactStatement(db, { contactId, asOf = null }) {
     const isCredit = i.invoice_type === 'credit';
     rows.push({
       date: i.date, kind: isCredit ? 'credit' : 'invoice', ref: i.invoice_number ?? `#${i.id}`,
-      description: isCredit ? `Creditnota ${i.invoice_number ?? ''}`.trim() : (i.description ?? `Factuur ${i.invoice_number}`),
+      description: isCredit ? `Credit note ${i.invoice_number ?? ''}`.trim() : (i.description ?? `Invoice ${i.invoice_number}`),
       debit_cents: isCredit ? 0 : i.gross_cents, credit_cents: isCredit ? i.gross_cents : 0, balance_cents: 0,
     });
     for (const p of i.payments.filter((x) => x.date <= asOfDate)) {
       // payments on a credit note are refunds we paid — reversed polarity
       rows.push({
         date: p.date, kind: 'payment', ref: i.invoice_number,
-        description: isCredit ? `Restitutie ${i.invoice_number}` : `Betaling ${i.invoice_number}`,
+        description: isCredit ? `Refund ${i.invoice_number}` : `Payment ${i.invoice_number}`,
         debit_cents: isCredit ? p.amount_cents : 0, credit_cents: isCredit ? 0 : p.amount_cents, balance_cents: 0,
       });
     }
@@ -444,7 +444,7 @@ export function contactStatement(db, { contactId, asOf = null }) {
   for (const p of payables) {
     rows.push({
       date: p.date, kind: 'payable', ref: p.invoice_ref,
-      description: `Inkoopfactuur ${p.invoice_ref}`,
+      description: `Purchase invoice ${p.invoice_ref}`,
       debit_cents: 0, credit_cents: p.amount_cents, balance_cents: 0,
     });
   }
@@ -710,18 +710,18 @@ function validateNl12Vereisten(db, invoice) {
   // (art. 35a Wet OB) — a VAT-exempt business (vat module off, no btw-id)
   // must still be able to invoice.
   const supplierHasVat = company.vat_module === 1 || Boolean(company.tax_id);
-  if (!company.name) missingSupplier.push('bedrijfsnaam');
+  if (!company.name) missingSupplier.push('company name');
   if (supplierHasVat && !company.tax_id) missingSupplier.push('btw-id');
-  if (!company.registration_id) missingSupplier.push('kvk-nummer');
-  if (!company.address) missingSupplier.push('adres');
-  if (!company.postal_code) missingSupplier.push('postcode');
-  if (!company.city) missingSupplier.push('plaats');
+  if (!company.registration_id) missingSupplier.push('registration number');
+  if (!company.address) missingSupplier.push('address');
+  if (!company.postal_code) missingSupplier.push('postal code');
+  if (!company.city) missingSupplier.push('city');
   if (missingSupplier.length) {
-    throw invoiceError('SUPPLIER_INCOMPLETE', `supplier gegevens ontbreken (vereiste 1-3): ${missingSupplier.join(', ')} — set them with init/company update`);
+    throw invoiceError('SUPPLIER_INCOMPLETE', `supplier details missing (requirements 1-3): ${missingSupplier.join(', ')} — set them with init/company update`);
   }
 
   if (!contact.name || !contact.address || !contact.city) {
-    throw invoiceError('CUSTOMER_INCOMPLETE', 'klantgegevens ontbreken (vereiste 6): naam, adres en plaats zijn verplicht');
+    throw invoiceError('CUSTOMER_INCOMPLETE', 'customer details missing (requirement 6): name, address and city are required');
   }
 
   const hasReverse = invoice.lines.some((l) => l.vat_code === 'R' || l.vat_code === 'RE');
@@ -902,7 +902,7 @@ export function finalizeInvoice(db, { id, actor = 'human', dryRun = false }) {
         const number = nextInvoiceNumber(db, year);
         const entry = createEntry(db, {
           date: invoice.date,
-          description: `Factuur ${number}${invoice.contact ? ` - ${invoice.contact.name}` : ''}`,
+          description: `Invoice ${number}${invoice.contact ? ` - ${invoice.contact.name}` : ''}`,
           postings,
           source: 'invoice',
           sourceRef: `inv:${id}`,
@@ -937,7 +937,7 @@ export function creditInvoice(db, { id, date = null, reason = null, actor = 'hum
     return {
       action: 'invoice.credit', for_invoice: id, reason,
       date: date ?? new Date().toISOString().slice(0, 10),
-      description: reason ?? `Creditfactuur voor ${original.invoice_number}`,
+      description: reason ?? `Credit note for ${original.invoice_number}`,
       reference: original.reference ?? original.invoice_number, dryRun: true,
     };
   }
@@ -952,7 +952,7 @@ export function creditInvoice(db, { id, date = null, reason = null, actor = 'hum
     })),
     date: date ?? new Date().toISOString().slice(0, 10),
     dueDays: null,
-    description: reason ?? `Creditfactuur voor ${original.invoice_number}`,
+    description: reason ?? `Credit note for ${original.invoice_number}`,
     // carry the buyer reference (klantkenmerk) so BT-10 on the credit note
     // matches the original — the preceding-invoice number for BT-25 is
     // derived in the UBL builder via credit_for_invoice_id
@@ -1095,11 +1095,11 @@ export function paymentFromBank(db, { invoiceId, bankTxId, actor = 'human', fxTo
       { code: bankAccount.account_code, amountCents: txRow.amount_cents },
       { code: postingDefaults(db).debtorsCode, amountCents: -outstanding },
     ];
-    let description = `Betaling ${invoice.invoice_number ?? invoiceId}${invoice.contact ? ` - ${invoice.contact.name}` : ''}`;
+    let description = `Payment ${invoice.invoice_number ?? invoiceId}${invoice.contact ? ` - ${invoice.contact.name}` : ''}`;
     if (fxCents !== 0) {
       const fxAccount = ensureFxDifferenceAccount(db, { actor });
       postings.push({ code: fxAccount.code, amountCents: -fxCents });
-      description += ` (koersverschil ${formatAmount(fxCents)})`;
+      description += ` (fx difference ${formatAmount(fxCents)})`;
     }
     const entry = createEntry(db, {
       date: txRow.date,

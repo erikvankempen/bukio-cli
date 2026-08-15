@@ -295,7 +295,7 @@ export function createPaymentBatch(db, {
       }
       items.push({
         payable_id: p.id, contact_id: p.contact_id, name: c.name, iban, amount_cents: p.amount_cents,
-        reference: `Factuur ${p.invoice_ref}`,
+        reference: `Invoice ${p.invoice_ref}`,
         mandate_id: mandate.id, mandate_ref: mandate.mandate_ref, mandate_date: mandate.mandate_date,
         mandate_seq: mandateSeqFor(db, mandate.id), scheme: mandate.scheme,
       });
@@ -306,7 +306,7 @@ export function createPaymentBatch(db, {
       continue;
     }
     if (c.name.length > 70) { fail(lineNo, 'SEPA_NAME_TOO_LONG', `contact ${c.name.slice(0, 40)}… name max 70 characters (SEPA Max70Text)`); continue; }
-    items.push({ payable_id: p.id, contact_id: p.contact_id, name: c.name, iban, amount_cents: p.amount_cents, reference: `Factuur ${p.invoice_ref}` });
+    items.push({ payable_id: p.id, contact_id: p.contact_id, name: c.name, iban, amount_cents: p.amount_cents, reference: `Invoice ${p.invoice_ref}` });
   }
 
   if (items.length === 0 && errors.length === 0) throw paymentsError('EMPTY_BATCH', 'no payments to batch — pass --lines, --csv or --from-invoices');
