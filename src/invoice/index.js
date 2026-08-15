@@ -10,6 +10,7 @@
 import { createAccount, getAccountByCode } from '../core/accounts.js';
 import { createEntry, postEntry } from '../core/entries.js';
 import { record } from '../audit/index.js';
+import { getProfile, resolveProfile } from '../jurisdictions/index.js';
 import { isValidIban, normalizeIban } from '../core/iban.js';
 import { isVatEnabled, listVatCodes } from '../vat/index.js';
 import { getItem } from '../items/index.js';
@@ -31,7 +32,8 @@ const DISC_RE = /^-(\d+(?:\.\d{1,2})?)(%?)$/;
 // 1-2 digit number like '9'/'21'); anything else — e.g. '100' or 'nope' — is
 // the price, so price-only lines ("DESC @ 100") parse correctly while
 // unknown codes ('@99') still fail validation with VAT_CODE_NOT_FOUND.
-const KNOWN_VAT_CODES = new Set(['21', '9', '0', 'V', 'R', 'RE', 'M', 'P']);
+// NL profile codes are the source of truth (identical set to the legacy const)
+const KNOWN_VAT_CODES = new Set(getProfile('NL').tax.codes.map((c) => c.code));
 function isVatCodeToken(token) {
   const t = token.toUpperCase();
   if (KNOWN_VAT_CODES.has(t)) return true;
@@ -664,7 +666,22 @@ export function createInvoice(db, {
  * Returns the list of missing vereisten; throws SUPPLIER_INCOMPLETE /
  * CUSTOMER_INCOMPLETE / CUSTOMER_VAT_REQUIRED when they matter.
  */
+// Compliance rule-sets keyed by profile.documents.invoiceCompliance. NL is
+// the only rule in Phase A ('nl-12-vereisten' — art. 35c/35d Wet OB + KVK).
+const INVOICE_COMPLIANCE_RULES = {
+  'nl-12-vereisten': validateNl12Vereisten,
+};
+
 export function validateCompliance(db, invoice) {
+  const profile = resolveProfile(db);
+  const rule = INVOICE_COMPLIANCE_RULES[profile.documents.invoiceCompliance];
+  if (!rule) {
+    throw invoiceError('FORMAT_NOT_SUPPORTED', `invoice compliance rule '${profile.documents.invoiceCompliance}' has no implementation (registered: ${Object.keys(INVOICE_COMPLIANCE_RULES).join(', ')})`);
+  }
+  return rule(db, invoice);
+}
+
+function validateNl12Vereisten(db, invoice) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   const contact = invoice.contact;
 
@@ -672,10 +689,10 @@ export function validateCompliance(db, invoice) {
   // The supplier btw-id is a factuurvereiste only when the supplier HAS one
   // (art. 35a Wet OB) — a VAT-exempt business (vat module off, no btw-id)
   // must still be able to invoice.
-  const supplierHasVat = company.vat_module === 1 || Boolean(company.btw_id);
+  const supplierHasVat = company.vat_module === 1 || Boolean(company.tax_id);
   if (!company.name) missingSupplier.push('bedrijfsnaam');
-  if (supplierHasVat && !company.btw_id) missingSupplier.push('btw-id');
-  if (!company.kvk) missingSupplier.push('kvk-nummer');
+  if (supplierHasVat && !company.tax_id) missingSupplier.push('btw-id');
+  if (!company.registration_id) missingSupplier.push('kvk-nummer');
   if (!company.address) missingSupplier.push('adres');
   if (!company.postal_code) missingSupplier.push('postcode');
   if (!company.city) missingSupplier.push('plaats');
@@ -918,7 +935,7 @@ export function ensureFxDifferenceAccount(db, { actor = 'human' } = {}) {
   if (!account) {
     account = createAccount(db, {
       code: '4840', name: 'Koersverschillen', type: 'expense',
-      normalBalance: 'debit', rgsCode: 'WFBE.84',
+      normalBalance: 'debit', taxonomyCode: 'WFBE.84',
     });
     record(db, {
       actor, action: 'account.create', command: 'bank match',

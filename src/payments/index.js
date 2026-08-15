@@ -16,6 +16,7 @@
 // The ledger is untouched: money moves when the bank processes; the bank
 // statement import (CAMT.053) books it.
 import { createHash } from 'node:crypto';
+import { resolveProfile } from '../jurisdictions/index.js';
 import { isValidIban, normalizeIban } from '../core/iban.js';
 import { parseImportAmount } from '../import/index.js';
 import { getContact, listContacts } from '../invoice/index.js';
@@ -543,6 +544,14 @@ export function exportPaymentBatch(db, { id, schema = null, actor = 'human', dry
     if (!['008.02'].includes(effSchema)) throw paymentsError('INVALID_SCHEMA', 'direct-debit batches export pain.008.001.02 only');
   } else if (!['001.03', '001.09'].includes(effSchema)) {
     throw paymentsError('INVALID_SCHEMA', "schema must be '001.03' or '001.09'");
+  }
+  // capability gate: the SEPA format must be declared in the jurisdiction
+  // profile's exchange.paymentFormats (NL: sepa-pain.001 + sepa-pain.008)
+  const { exchange } = resolveProfile(db);
+  const formatId = isDD ? 'sepa-pain.008' : 'sepa-pain.001';
+  const declared = exchange.paymentFormats ?? [];
+  if (!declared.includes(formatId)) {
+    throw paymentsError('PAYMENT_FORMAT_NOT_SUPPORTED', `the jurisdiction profile does not declare ${formatId} (exchange.paymentFormats: ${declared.join(', ') || 'none declared'})`);
   }
   const lines = db.prepare('SELECT * FROM payment_batch_lines WHERE batch_id = ? ORDER BY id').all(id);
   // SEPA MsgId max 35 chars: BUKIO + 14-char timestamp + batch id (last 16

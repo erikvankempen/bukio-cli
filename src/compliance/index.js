@@ -10,6 +10,7 @@
 //   the fiscal year end (art. 2:394 BW). Statuses come from vat_returns (OB)
 //   and the filings registry (ICP, JAARREKENING).
 import { record } from '../audit/index.js';
+import { resolveProfile } from '../jurisdictions/index.js';
 
 export function complianceError(code, message) {
   const e = new Error(message);
@@ -46,6 +47,13 @@ export function jaarrekeningDeadline(company, year) {
   return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 }
 
+// Deadline rules keyed by profile.compliance.filingTypes[].deadlineRule.
+// Both rules return a 'YYYY-MM-DD' deadline string.
+const DEADLINE_RULES = {
+  'nl-quarterly': (period) => quarterDeadline(period).deadline,
+  'nl-13-months': (company, year) => jaarrekeningDeadline(company, year),
+};
+
 export function isFiled(db, type, period) {
   if (type === 'OB') {
     return Boolean(db.prepare("SELECT 1 FROM vat_returns WHERE type = 'OB' AND period = ? AND status = 'filed'").get(period));
@@ -54,8 +62,10 @@ export function isFiled(db, type, period) {
 }
 
 export function markFiled(db, { type, period, date = null, actor = 'human', dryRun = false }) {
-  if (!['OB', 'ICP', 'JAARREKENING'].includes(type)) {
-    throw complianceError('INVALID_TYPE', "type must be OB, ICP or JAARREKENING (OB uses 'vat readout --mark-filed')");
+  const { compliance } = resolveProfile(db);
+  const knownTypes = compliance.filingTypes.map((ft) => ft.type);
+  if (!knownTypes.includes(type)) {
+    throw complianceError('INVALID_TYPE', `type must be one of ${knownTypes.join(', ')} (OB uses 'vat readout --mark-filed')`);
   }
   if (type === 'OB') {
     throw complianceError('INVALID_TYPE', "OB filings are recorded with 'bukio vat readout --period ... --mark-filed'");
@@ -93,27 +103,34 @@ export function complianceStatus(db, { year }) {
     });
   };
 
-  // OB + ICP per quarter with a deadline in or after the calendar year
-  for (const qn of ['1', '2', '3', '4']) {
-    const period = `${year}-Q${qn}`;
-    const { deadline } = quarterDeadline(period);
-    if (deadline < `${year}-01-01`) continue;
-    push('OB', period, deadline);
-    push('ICP', period, deadline);
-  }
-  // the Q4 obligation of the previous year falls in this calendar year
-  const prevQ4 = quarterDeadline(`${Number(year) - 1}-Q4`);
-  if (prevQ4.deadline >= `${year}-01-01`) {
-    push('OB', `${Number(year) - 1}-Q4`, prevQ4.deadline);
-    push('ICP', `${Number(year) - 1}-Q4`, prevQ4.deadline);
-  }
-
-  // jaarrekening: FY `year` deposit (13 months after FY end) + prior FY if still open
-  const deadline = jaarrekeningDeadline(company, year);
-  push('JAARREKENING', String(year), deadline, { books_closed: isBooksClosed(db, year) });
-  const prevDeadline = jaarrekeningDeadline(company, Number(year) - 1);
-  if (!isFiled(db, 'JAARREKENING', String(Number(year) - 1)) && prevDeadline < deadline) {
-    push('JAARREKENING', String(Number(year) - 1), prevDeadline, { books_closed: isBooksClosed(db, Number(year) - 1) });
+  // obligations from the profile's filing types (NL: OB + ICP quarterly,
+  // JAARREKENING yearly) — deadlines via the per-rule registry
+  const { compliance } = resolveProfile(db);
+  for (const ft of compliance.filingTypes) {
+    const rule = DEADLINE_RULES[ft.deadlineRule];
+    if (!rule) {
+      throw complianceError('DEADLINE_RULE_NOT_FOUND', `deadline rule '${ft.deadlineRule}' is not implemented (Phase A: nl-quarterly, nl-13-months)`);
+    }
+    if (ft.periodShape === 'YYYY-Qn') {
+      for (const qn of ['1', '2', '3', '4']) {
+        const period = `${year}-Q${qn}`;
+        const deadline = rule(period);
+        if (deadline < `${year}-01-01`) continue;
+        push(ft.type, period, deadline);
+      }
+      // the Q4 obligation of the previous year falls in this calendar year
+      const prevQ4 = rule(`${Number(year) - 1}-Q4`);
+      if (prevQ4 >= `${year}-01-01`) push(ft.type, `${Number(year) - 1}-Q4`, prevQ4);
+    } else if (ft.periodShape === 'YYYY') {
+      const deadline = rule(company, year);
+      push(ft.type, String(year), deadline, { books_closed: isBooksClosed(db, year) });
+      const prevDeadline = rule(company, Number(year) - 1);
+      if (!isFiled(db, ft.type, String(Number(year) - 1)) && prevDeadline < deadline) {
+        push(ft.type, String(Number(year) - 1), prevDeadline, { books_closed: isBooksClosed(db, Number(year) - 1) });
+      }
+    } else {
+      throw complianceError('INVALID_PERIOD_SHAPE', `period shape '${ft.periodShape}' is not supported (Phase A: YYYY-Qn, YYYY)`);
+    }
   }
 
   return {

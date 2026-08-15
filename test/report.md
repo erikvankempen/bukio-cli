@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-12 05:23:19 UTC — **✅ 773 passing · 0 failing (773 tests)**
+**Latest run:** 2026-08-14 21:54:37 UTC — **✅ 807 passing · 0 failing (807 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -693,6 +693,50 @@
     - ✅ validateCompliance: VAT company without btw-id still fails SUPPLIER_INCOMPLETE
     - ✅ createContact: dashed IBAN is stored in the canonical dash-free form (normalizer parity)
 
+### jurisdictions.test.js — 
+
+32 passing · 0 failing
+
+    - ✅ getProfile returns the NL profile for NL (any case)
+    - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
+    - ✅ getProfile throws COUNTRY_NOT_SUPPORTED for valid-but-planned countries
+    - ✅ getProfile throws PROFILE_NOT_FOUND for unknown valid codes
+    - ✅ profiles are deep-frozen (static data — no consumer may mutate)
+    - ✅ NL profile integrity — tax section matches the legacy VAT module
+    - ✅ NL profile integrity — reporting section matches the legacy chart
+    - ✅ NL profile integrity — identifiers, compliance, documents, closing
+    - ✅ normalizeCountry trims and uppercases
+    - ✅ resolveProfile returns the NL profile for a company with country NL
+    - ✅ resolveProfile defaults to NL on a pre-021 DB (no country column)
+    - ✅ resolveProfile defaults to NL when no company row exists yet
+    - ✅ resolveProfile throws for unsupported / unknown company countries (decision §9.1.6)
+    - ✅ M3 init: --country GB is rejected with COUNTRY_NOT_SUPPORTED
+    - ✅ M3 init: --country ZZ (valid code, no profile) is rejected with PROFILE_NOT_FOUND
+    - ✅ M3 init: --country nl (lowercase) normalizes to NL and stores profile fields
+    - ✅ M3 init: generic --registration-id/--tax-id are stored; no deprecation warning
+    - ✅ M3 init: legacy --kvk/--btw-id aliases map to the generic fields and warn
+    - ✅ M3 company update: changing country is rejected with COUNTRY_IMMUTABLE
+    - ✅ M3 company update: --country with the SAME value passes the immutability gate
+    - ✅ M3 company update: --kvk alias warns and updates registration_id
+    - ✅ M3 company update: generic --registration-id/--tax-id work without warnings
+    - ✅ M4: obReadout resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M4: validateCompliance resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M5: jaarrekening resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M5: deprecated alias `jaarrekening report` still works and warns
+    - ✅ M6: compliance status resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M7: invoiceToUbl resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M8: year-end close resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M9: exportXaf resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ M9: bank import resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
+    - ✅ review-fix: account add --taxonomy-code works; --rgs-code alias maps and warns
+
+### migration-021.test.js — 
+
+2 passing · 0 failing
+
+    - ✅ migrations 021+022 upgrade a 020 DB: new columns, CHECK removals, renames, backfill
+    - ✅ migration 021 keeps company data lossless across the rebuild
+
 ### money.test.js — integer-cents money helpers
 
 5 passing · 0 failing
@@ -842,7 +886,7 @@
     - ✅ pnl: revenue, costs and result
     - ✅ pnl: empty period gives zero result and no sections
     - ✅ pnl: legacy chart without RGS codes still splits revenue/costs by type
-    - ✅ pnl: catch-all section for accounts with unknown rgs_code
+    - ✅ pnl: catch-all section for accounts with unknown taxonomy_code
     - ✅ journal: one row per posting, ordered by date
 
 ### review-round3.test.js — 

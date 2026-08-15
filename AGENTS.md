@@ -40,14 +40,14 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 
 | Command | Purpose |
 |---------|---------|
-| `bukio init --name X [--kvk ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + 28-account RGS-mapped chart. Fails `ALREADY_INITIALISED` if done. |
+| `bukio init --name X [--country NL] [--registration-id ..] [--tax-id ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + 29-account RGS-mapped chart; jurisdiction defaults from the country profile (NL: kvk 8 digits, btw-id NL...B01). Deprecated aliases: `--kvk` = `--registration-id`, `--btw-id` = `--tax-id`. Fails `ALREADY_INITIALISED` if done. |
 | `bukio entry add --date YYYY-MM-DD --desc ".." --postings "CODE:AMT,CODE:AMT" [--post] [--dry-run]` | Create (and optionally post) a balanced journal entry. |
 | `bukio entry post --id N [--dry-run]` | Post a draft entry. |
 | `bukio entry reverse --id N [--reason ".."] [--dry-run]` | Post a contra-entry that cancels entry N. |
 | `bukio entry list [--state draft\|posted] [--limit N]` | List entries (newest first). |
 | `bukio entry show --id N` | One entry + postings. |
 | `bukio account add/list/show/deactivate/reactivate` | Chart of accounts management. |
-| `bukio account import --file chart.csv [--dry-run]` | Import a chart: `code,name,type,normal_balance[,rgs_code]`. |
+| `bukio account import --file chart.csv [--dry-run]` | Import a chart: `code,name,type,normal_balance[,taxonomy_code]` (legacy header `rgs_code` still accepted). |
 | `bukio report trial-balance [--year YYYY]` | Per-account totals; `data.balanced` tells you the books reconcile. |
 | `bukio report balance-sheet [--as-of YYYY-MM-DD]` (alias: `balans`, deprecated) | Balance sheet; `data.balanced` must be true. |
 | `bukio report pnl [--year YYYY]` | P&L: revenue, costs, result. |
@@ -76,7 +76,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio item list [--all]` / `show --id` / `update --id [--price] [--unit] [--vat] [--gl] [--deactivate]` | Inspect/update the catalog; deactivation blocks new invoices, existing keep snapshots. |
 | `bukio contact add --name N [--address] [--vat-id]` / `list` | Invoice counterparties. |
 | `bukio invoice create --contact N --lines "..." \| --items "..." --date D [--discount-pct P \| --discount-amount A] [--language nl\|en]` | Draft invoice. Lines: `[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]` (fractional qty allowed, per-line discount `@-10%`/`@-25.00`). Items: `ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]` with per-invoice overrides. Total discount applies BEFORE VAT. |
-| `bukio company show` / `update --name --kvk --btw-id --iban --address --postal-code --city [--dry-run]` | Company record (audited); supplier gegevens must be complete before finalize (12-vereisten 1-3). |
+| `bukio company show` / `update --name --registration-id --tax-id --iban --address --postal-code --city [--country read-only] [--dry-run]` | Company record (audited; country immutable after init); supplier gegevens must be complete before finalize (12-vereisten 1-3). |
 | `bukio company update --logo FILE` / `--remove-logo` / `company logo --out FILE` | Store/extract the invoice logo (PNG/JPEG/SVG ≤ 1 MB, ≤ 2048×2048 px, stored as a BLOB in the DB — travels with backups). |
 | `bukio attach add --invoice N\|--entry N --file F [--store db\|file] [--note] [--dry-run]` / `attach list --invoice N\|--entry N` / `attach show --id N [--out F] [--force]` / `attach remove --id N [--dry-run]` | Store source documents against invoices/entries. Default `--store db` = BLOB in the DB (travels with backups); `--store file` = copy in `<db>-attachments/` with the path stored. Lists are metadata-only. `show --out` refuses to overwrite without `--force`. |
 | `bukio invoice create --contact N --lines "2x DESC @ PRICE @21" --date D` | Draft invoice (12-vereisten validated at finalize). |
@@ -86,7 +86,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio invoice email --id N [--to X] [--subject] [--body] [--no-pdf] [--dry-run]` | Email the finalized invoice PDF via SMTP (`BUKIO_SMTP_*` env — host/port/user/pass/from). Delivery is audited; status is `sent` from finalize onward. |
 | `bukio invoice peppol-send --id N [--endpoint URL] [--dry-run]` | POST the UBL to a Peppol access-point provider (env `BUKIO_PEPPOL_ENDPOINT` + `BUKIO_PEPPOL_TOKEN`). |
 | `bukio year-end status --year YYYY` / `close --year YYYY [--dry-run]` | Annual close: result -> 9900 -> 3000 (source 'closing'; P&L stays visible). |
-| `bukio jaarrekening report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx]` | Statutory annual accounts (KVK deposit package as PDF). |
+| `bukio financial-statements report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx]` | Statutory annual accounts (NL: KVK deposit package as PDF; deprecated alias `jaarrekening report`). |
 | `bukio icp readout --period 2026-Q3` | ICP listing: EU btw-verlegde supplies per customer (manual filing aid). |
 | `bukio fx set --currency USD --date D --rate 1.0875` | FX rate store (upsert, audited). |
 | `bukio fx fetch --currency USD [--date D]` | ECB reference rate (free, no key) on/before a date, stored as source=ECB. |
@@ -440,7 +440,7 @@ bukio year-end status --year 2026
 bukio year-end close --year 2026 --dry-run     # plan: result + postings
 bukio year-end close --year 2026               # result -> 9900 -> 3000
 # 2. statutory accounts + KVK deposit package
-bukio jaarrekening report --year 2026 --model klein --format pdf   # jaarrekening-2026-klein.pdf
+bukio financial-statements report --year 2026 --model klein --format pdf   # financial-statements-2026-klein.pdf
 # 3. quarterly EU listing (verlegde EU leveringen)
 bukio icp readout --period 2026-Q3
 # 4. the OB readout now also reports 2a (EU) and 3b (EU inkopen)
@@ -804,8 +804,12 @@ authz off.
 | `INVALID_ROLE` / `ROLE_NOT_GRANTED` / `LAST_OWNER` | Role registry: unknown role, revoking a role the actor does not hold, or revoking the LAST owner (a company needs at least one owner — to turn authz off and to mediate key revokes) | Use one of `owner\|bookkeeper\|payments\|tax\|assets\|readonly`; grant the role first; grant `owner` to another actor before stepping down |
 | `INVALID_DESCRIPTION` / `INVALID_POSTINGS` / `INVALID_AMOUNT_CENTS` | Description empty, posting spec malformed, or a posting amount is 0 | Fix the argument — every entry needs a description, ≥2 non-zero postings |
 | `INVALID_LEGAL_FORM` / `INVALID_VAT_CHOICE` / `INVALID_FISCAL_YEAR_END` | `init` got a bad legal form, `--vat` other than `on`/`off`, or an impossible `--fiscal-year-end` (e.g. `99-99`, `02-30`) | Use the values the flag help shows (calendar dates only) |
+| `INVALID_COUNTRY` / `COUNTRY_NOT_SUPPORTED` / `PROFILE_NOT_FOUND` / `COUNTRY_IMMUTABLE` | `init --country` / jurisdiction-profile resolution: not an ISO 3166-1 alpha-2 code, a valid country with no profile implemented yet (Phase A supports NL; GB/US/FR/LU planned), no profile for a valid code, or `company update --country` trying to change the country after init (one company = one country) | Use a 2-letter code; supported: NL; re-init a new DB for another country |
 | `INVALID_IBAN` / `INVALID_NAME` / `INVALID_TYPE` / `NOTHING_TO_UPDATE` | Bad company/contact field on `init`/`company update`/`contact add` (IBAN mod-97 validated) | Fix the value; pass at least one change to `company update` |
 | `COMPANY_REQUIRED` / `COMPANY_INCOMPLETE` / `NOT_INITIALISED` | Company missing or incomplete (e.g. no valid company IBAN for SEPA) | Run `init`, then `company update` to complete the profile |
+| `FORMAT_NOT_SUPPORTED` | A jurisdiction profile declares a document/format with no registered builder (audit file, e-invoicing, OB return layout, financial-statements layout, FX source, invoice compliance rule) | Profile-format dispatch is strict: an unregistered key fails loudly instead of silently falling back to the NL format — register the builder or fix the profile |
+| `PAYMENT_FORMAT_NOT_SUPPORTED` | SEPA export (pain.001/pain.008) hit a format the jurisdiction profile does not declare in exchange.paymentFormats | The declared formats come from the profile; Phase A (NL) supports sepa-pain.001 + sepa-pain.008 |
+| `DEADLINE_RULE_NOT_FOUND` / `INVALID_PERIOD_SHAPE` | compliance calendar hit a filing type whose deadlineRule or periodShape has no implementation (Phase A: nl-quarterly, nl-13-months; YYYY-Qn, YYYY) | Filing types come from the jurisdiction profile; add the rule/shape or fix the profile |
 | `INVALID_CURRENCY` / `INVALID_RATE` / `INVALID_FX_AMOUNT` / `INVALID_FX_CURRENCY` / `FX_RATE_NOT_FOUND` | FX rate or foreign-currency posting is malformed, or no rate exists | `fx set` a rate, pass `--rate`, or allow the ECB fetch |
 | `ECB_FETCH_FAILED` / `ECB_RATE_NOT_AVAILABLE` | ECB unreachable, or the currency/date has no reference rate | Retry later or `fx set` a rate manually |
 | `INVALID_FREQUENCY` / `INVALID_RUNS` / `INVALID_RANGE` / `INVALID_REVERSE` | Recurring template arguments malformed (frequency, run count, date range, reverse flag) | Fix the template arguments |

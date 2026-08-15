@@ -12,23 +12,14 @@ import { vatError } from './errors.js';
 import { createAccount, getAccountByCode } from '../core/accounts.js';
 import { createEntry, parsePostingSpecs, postEntry } from '../core/entries.js';
 import { formatAmount } from '../core/money.js';
+import { getProfile, resolveProfile } from '../jurisdictions/index.js';
 import { record } from '../audit/index.js';
 
-export const VAT_ACCOUNTS = [
-  { code: '1500', name: 'Te vorderen omzetbelasting', type: 'asset', normalBalance: 'debit', rgsCode: 'BVOR.11' },
-  { code: '2500', name: 'Te betalen omzetbelasting', type: 'liability', normalBalance: 'credit', rgsCode: 'BSCH.12' },
-];
-
-export const VAT_CODES = [
-  { code: '21', rateBp: 2100, type: 'standard', euReverse: 0, description: '21% hoog tarief' },
-  { code: '9', rateBp: 900, type: 'standard', euReverse: 0, description: '9% laag tarief' },
-  { code: '0', rateBp: 0, type: 'standard', euReverse: 0, description: '0% nultarief' },
-  { code: 'V', rateBp: 0, type: 'exempt', euReverse: 0, description: 'Vrijgesteld' },
-  { code: 'R', rateBp: 0, type: 'reverse', euReverse: 0, description: 'Verlegd (binnenland)' },
-  { code: 'RE', rateBp: 0, type: 'reverse', euReverse: 1, description: 'Verlegd (EU)' },
-  { code: 'M', rateBp: 0, type: 'margin', euReverse: 0, description: 'Marge' },
-  { code: 'P', rateBp: 0, type: 'private', euReverse: 0, description: 'Privégebruik' },
-];
+// NL profile data is the single source of truth (Phase A M4); these exports
+// stay as NL conveniences for the CLI/tests — contents identical to the
+// legacy hardcoded arrays
+export const VAT_ACCOUNTS = getProfile('NL').tax.accounts.ledger;
+export const VAT_CODES = getProfile('NL').tax.codes;
 
 export function isVatEnabled(db) {
   const company = db.prepare('SELECT vat_module, kor_flag FROM company').get();
@@ -47,19 +38,20 @@ export function enableVatModule(db, { actor = 'human' } = {}) {
   if (company.kor_flag) {
     throw vatError('KOR_ACTIVE', 'this company uses the KOR (kleineondernemersregeling) — the VAT module cannot be enabled');
   }
+  const { tax } = resolveProfile(db);
   const tx = db.transaction(() => {
     db.prepare('UPDATE company SET vat_module = 1 WHERE id = 1').run();
-    for (const a of VAT_ACCOUNTS) {
+    for (const a of tax.accounts.ledger) {
       if (!getAccountByCode(db, a.code)) createAccount(db, a);
     }
     const insertCode = db.prepare(
       'INSERT OR IGNORE INTO vat_codes (code, rate_bp, type, eu_reverse, description) VALUES (?, ?, ?, ?, ?)',
     );
-    for (const c of VAT_CODES) insertCode.run(c.code, c.rateBp, c.type, c.euReverse, c.description);
+    for (const c of tax.codes) insertCode.run(c.code, c.rateBp, c.type, c.euReverse, c.description);
     record(db, { actor, action: 'vat.enable', command: 'vat enable', args: {}, outcome: 'ok' });
   });
   tx();
-  return { vat_module: 1, accounts: VAT_ACCOUNTS.map((a) => a.code), codes: VAT_CODES.map((c) => c.code) };
+  return { vat_module: 1, accounts: tax.accounts.ledger.map((a) => a.code), codes: tax.codes.map((c) => c.code) };
 }
 
 export function listVatCodes(db) {
@@ -96,6 +88,8 @@ export function expandVatPostings(db, specs) {
   requireVat(db);
   const expanded = [];
   const vatLegs = [];
+  // reverse charge / privégebruik VAT is due at the standard rate — per profile
+  const reverseRate = resolveProfile(db).tax.reverseChargeEffectiveRateBp;
 
   for (const spec of specs) {
     const account = getAccountByCode(db, spec.code);
@@ -108,8 +102,8 @@ export function expandVatPostings(db, specs) {
         throw vatError('VAT_MARGIN_NOT_SUPPORTED', 'margeregeling cannot be split automatically — book it manually');
       }
       // Reverse charge / privégebruik: 0% codes, but the VAT due on the
-      // verlegde levering / private use is computed at the standard rate (21%).
-      const effectiveRateBp = (vat.type === 'reverse' || vat.type === 'private') ? 2100 : vat.rate_bp;
+      // verlegde levering / private use is computed at the standard rate.
+      const effectiveRateBp = (vat.type === 'reverse' || vat.type === 'private') ? reverseRate : vat.rate_bp;
       // private use (@P) is ALWAYS a deemed supply — the VAT is owed (credit
       // 2500), regardless of the posting's sign. Following the posting's sign
       // here would turn a debit-signed private-use booking (e.g. an expense
@@ -211,9 +205,26 @@ export function parsePeriod(period) {
  * This is an aid for MANUAL filing in Mijn Belastingdienst — bukio never
  * submits anything.
  */
+// OB readout builders keyed by profile.tax.returnLayout. NL is the only
+// layout in Phase A ('ob-1a-5d'); future markets register their own mapper.
+const OB_LAYOUTS = {
+  'ob-1a-5d': buildObReadoutNl,
+};
+
 export function obReadout(db, { period }) {
   requireVat(db);
+  const { tax } = resolveProfile(db);
+  const builder = OB_LAYOUTS[tax.returnLayout];
+  if (!builder) {
+    throw vatError('FORMAT_NOT_SUPPORTED', `return layout '${tax.returnLayout}' has no builder (registered: ${Object.keys(OB_LAYOUTS).join(', ')})`);
+  }
+  return builder(db, { period });
+}
+
+function buildObReadoutNl(db, { period }) {
   const { from, to, label } = parsePeriod(period);
+  const { tax } = resolveProfile(db);
+  const clearing = tax.accounts.ledger.map((a) => a.code);
 
   const rows = db.prepare(`
     SELECT p.amount_cents, p.vat_amount_cents, vc.code AS vat_code, vc.rate_bp, vc.type, vc.eu_reverse,
@@ -224,7 +235,7 @@ export function obReadout(db, { period }) {
     JOIN accounts a ON a.id = p.account_id
     WHERE e.date >= ? AND e.date <= ?
       AND p.vat_code_id IS NOT NULL
-      AND a.code NOT IN ('1500','2500')
+      AND a.code NOT IN (${clearing.map((c) => `'${c}'`).join(',')})
     ORDER BY e.id, p.id
   `).all(from, to);
 
@@ -338,7 +349,9 @@ function accountBalance(db, code) {
 /** Net VAT position: positive = you owe (2500 te betalen), negative = refund (1500 te vorderen). */
 export function vatNetPosition(db) {
   requireVat(db);
-  return -(accountBalance(db, '2500') + accountBalance(db, '1500'));
+  const ledger = resolveProfile(db).tax.accounts.ledger.map((a) => a.code);
+  const total = ledger.reduce((sum, code) => sum + accountBalance(db, code), 0);
+  return -total;
 }
 
 /** Ensure the 'Af te dragen omzetbelasting' liability account exists (idempotent). */
@@ -346,17 +359,19 @@ function ensureAfTeDragenAccount(db, account) {
   const resolved = resolveAfTeDragenAccount(db, account);
   if (!getAccountByCode(db, resolved)) {
     createAccount(db, {
-      code: resolved, name: AF_TE_DRAGEN_NAME, type: 'liability',
-      normalBalance: 'credit', rgsCode: 'BSCH.12',
+      code: resolved, name: afTeDragenName(db), type: 'liability',
+      normalBalance: 'credit', taxonomyCode: 'BSCH.12',
     });
   }
   return resolved;
 }
 
-const AF_TE_DRAGEN_NAME = 'Af te dragen omzetbelasting';
+function afTeDragenName(db) {
+  return resolveProfile(db).tax.accounts.afTeDragenName;
+}
 
-function isAfTeDragenAccount(a) {
-  return Boolean(a && a.name === AF_TE_DRAGEN_NAME && a.type === 'liability' && a.normal_balance === 'credit');
+function isAfTeDragenAccount(db, a) {
+  return Boolean(a && a.name === afTeDragenName(db) && a.type === 'liability' && a.normal_balance === 'credit');
 }
 
 /**
@@ -371,14 +386,14 @@ function isAfTeDragenAccount(a) {
 function resolveAfTeDragenAccount(db, account) {
   const existing = getAccountByCode(db, account);
   if (!existing) return account;
-  if (isAfTeDragenAccount(existing)) return account;
+  if (isAfTeDragenAccount(db, existing)) return account;
   if (!/^\d+$/.test(account)) {
-    throw vatError('VAT_ACCOUNT_COLLISION', `account ${account} exists but is not '${AF_TE_DRAGEN_NAME}' and has no numeric successor — pick a free code with --account`);
+    throw vatError('VAT_ACCOUNT_COLLISION', `account ${account} exists but is not '${afTeDragenName(db)}' and has no numeric successor — pick a free code with --account`);
   }
   let code = String(Number(account) + 1);
   let guard = 0;
   while (getAccountByCode(db, code)) {
-    if (isAfTeDragenAccount(getAccountByCode(db, code))) return code; // a previous filing already landed here
+    if (isAfTeDragenAccount(db, getAccountByCode(db, code))) return code; // a previous filing already landed here
     code = String(Number(code) + 1);
     if (++guard > 999) {
       throw vatError('VAT_ACCOUNT_COLLISION', `no free numeric successor after ${account} — pick a free code with --account`);
@@ -393,13 +408,22 @@ function resolveAfTeDragenAccount(db, account) {
  * whole euros, and the cent-level difference is settled to the P&L later
  * (vatSettle), never by distorting the VAT clearing accounts.
  */
-export function vatFile(db, { account = VAT_FILE_ACCOUNT_DEFAULT, period = null, desc = null, actor = 'human', dryRun = false }) {
+export function vatFile(db, { account = null, period = null, desc = null, actor = 'human', dryRun = false }) {
   requireVat(db);
-  const bal2500 = accountBalance(db, '2500');
-  const bal1500 = accountBalance(db, '1500');
-  const net = -(bal2500 + bal1500); // positive = owe
+  const { tax } = resolveProfile(db);
+  account = account ?? tax.accounts.fileDefault;
+  // clearing accounts come from the profile ledger (NL: 1500 te vorderen /
+  // 2500 te betalen) — identified by type, not by hardcoded codes
+  const inputAcc = tax.accounts.ledger.find((a) => a.type === 'asset');
+  const outputAcc = tax.accounts.ledger.find((a) => a.type === 'liability');
+  if (!inputAcc || !outputAcc) {
+    throw vatError('FORMAT_NOT_SUPPORTED', `the jurisdiction profile's VAT ledger must declare one asset and one liability clearing account (got: ${tax.accounts.ledger.map((a) => a.code).join(', ')})`);
+  }
+  const balInput = accountBalance(db, inputAcc.code);
+  const balOutput = accountBalance(db, outputAcc.code);
+  const net = -(balOutput + balInput); // positive = owe
   if (net === 0) {
-    throw vatError('VAT_NOTHING_TO_FILE', 'no outstanding VAT position to reclassify (2500/1500 net is zero)');
+    throw vatError('VAT_NOTHING_TO_FILE', `no outstanding VAT position to reclassify (${outputAcc.code}/${inputAcc.code} net is zero)`);
   }
   // Resolve the af-te-dragen account BEFORE building the plan: a requested
   // code that is taken by another account falls to the next free numeric
@@ -410,9 +434,9 @@ export function vatFile(db, { account = VAT_FILE_ACCOUNT_DEFAULT, period = null,
   // legs, 1500 te vorderen the debit/input legs) and the NET lands there
   // (credit when you owe, debit when you get a refund).
   const postings = [
-    { code: '2500', amountCents: -bal2500 },
-    { code: '1500', amountCents: -bal1500 },
-    { code: account, amountCents: bal2500 + bal1500 },
+    { code: outputAcc.code, amountCents: -balOutput },
+    { code: inputAcc.code, amountCents: -balInput },
+    { code: account, amountCents: balOutput + balInput },
   ].filter((p) => p.amountCents !== 0);
   const owe = net > 0;
   const liability = Math.abs(net);
@@ -452,11 +476,14 @@ export function vatFile(db, { account = VAT_FILE_ACCOUNT_DEFAULT, period = null,
  * transaction and links it to the booked entry.
  */
 export function vatSettle(db, {
-  txAmountCents, txDate, bankAccountCode, account = VAT_FILE_ACCOUNT_DEFAULT,
-  differenceAccount = VAT_DIFFERENCE_ACCOUNT_DEFAULT,
+  txAmountCents, txDate, bankAccountCode, account = null,
+  differenceAccount = null,
   period = null, desc = null, actor = 'human', dryRun = false,
 }) {
   requireVat(db);
+  const { tax } = resolveProfile(db);
+  account = account ?? tax.accounts.fileDefault;
+  differenceAccount = differenceAccount ?? tax.accounts.differenceDefault;
   if (!Number.isInteger(txAmountCents)) throw vatError('INVALID_AMOUNT', 'tx amount must be an integer number of cents');
   const balance = accountBalance(db, account);
   if (balance === 0) {

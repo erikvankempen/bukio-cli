@@ -11,6 +11,7 @@
 import { balans } from './balans.js';
 import { pnl } from './pnl.js';
 import { formatAmount } from '../core/money.js';
+import { resolveProfile } from '../jurisdictions/index.js';
 import { fiscalYearWindow } from '../year-end/index.js';
 
 export function jaarrekeningError(code, message) {
@@ -19,34 +20,11 @@ export function jaarrekeningError(code, message) {
   return e;
 }
 
-const MODELS = ['micro', 'klein'];
-
-// statutory line labels per RGS hoofdgroep
-const ACTIVA_LINES = [
-  { rgs: 'BMVA.02', label: 'Materiële vaste activa' },
-  { rgs: 'BIVA.04', label: 'Immateriële vaste activa' },
-  { rgs: 'BFVA.03', label: 'Financiële vaste activa' },
-  { rgs: 'BVRD.30', label: 'Voorraden' },
-  { rgs: 'BVOR.11', label: 'Vorderingen' },
-  { rgs: 'BLIM.10', label: 'Liquide middelen' },
-];
-const PASSIVA_LINES = [
-  { rgs: 'BEIV.05', label: 'Eigen vermogen' },
-  { rgs: 'BVRZ.07', label: 'Voorzieningen' },
-  { rgs: 'BLAS.08', label: 'Langlopende schulden' },
-  { rgs: 'BSCH.12', label: 'Kortlopende schulden' },
-];
-const PNL_LINES = [
-  { rgs: 'WOMZ.80', label: 'Netto-omzet' },
-  { rgs: 'WOVB.82', label: 'Overige bedrijfsopbrengsten' },
-  { rgs: 'WKPR.70', label: 'Inkoopwaarde van de omzet' },
-  { rgs: 'WBED.42', label: 'Overige bedrijfskosten' },
-  { rgs: 'WAFS.41', label: 'Afschrijvingen' },
-  // the chart system tags financiële baten en lasten as WFBE.84 (rgsLabel);
-  // WBEL.60 is kept for imported charts that use the official code
-  { rgs: 'WFBE.84', label: 'Financiële baten en lasten' },
-  { rgs: 'WBEL.60', label: 'Belastingen' },
-];
+// Jaarrekening builders keyed by profile.reporting.format. NL is the only
+// format in Phase A ('auto'); future markets register their own layout.
+const JAARREKENING_FORMATS = {
+  auto: buildJaarrekeningAuto,
+};
 
 function groupSections(sections, lines) {
   const known = new Set(lines.map((l) => l.rgs));
@@ -62,20 +40,20 @@ function groupSections(sections, lines) {
   });
   const out = [];
   for (const line of lines) {
-    const hits = sections.filter((s) => s.rgs_code === line.rgs);
+    const hits = sections.filter((s) => s.taxonomy_code === line.rgs);
     if (!hits.length) continue;
     out.push({
       label: line.label,
-      rgs_code: line.rgs,
+      taxonomy_code: line.rgs,
       sections: hits.map(normalize),
       total_cents: hits.reduce((s, g) => s + g.total_cents, 0),
     });
   }
-  const leftover = sections.filter((s) => !known.has(s.rgs_code));
+  const leftover = sections.filter((s) => !known.has(s.taxonomy_code));
   if (leftover.length) {
     out.push({
       label: 'Overig',
-      rgs_code: null,
+      taxonomy_code: null,
       sections: leftover.map(normalize),
       total_cents: leftover.reduce((s, g) => s + g.total_cents, 0),
     });
@@ -84,6 +62,17 @@ function groupSections(sections, lines) {
 }
 
 export function jaarrekening(db, { year, model = 'klein' }) {
+  const { reporting } = resolveProfile(db);
+  const builder = JAARREKENING_FORMATS[reporting.format];
+  if (!builder) {
+    throw jaarrekeningError('FORMAT_NOT_SUPPORTED', `financial statements format '${reporting.format}' has no builder (registered: ${Object.keys(JAARREKENING_FORMATS).join(', ')})`);
+  }
+  return builder(db, { year, model, reporting });
+}
+
+function buildJaarrekeningAuto(db, { year, model, reporting }) {
+  const MODELS = reporting.statutoryAccounts.models;
+  const LINES = reporting.statutoryAccounts.lines;
   if (!MODELS.includes(model)) throw jaarrekeningError('INVALID_MODEL', `model must be one of ${MODELS.join(', ')}`);
   if (!/^\d{4}$/.test(String(year))) throw jaarrekeningError('INVALID_YEAR', `year '${year}' must be YYYY`);
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
@@ -98,23 +87,23 @@ export function jaarrekening(db, { year, model = 'klein' }) {
   const asOf = `${year}-${String(fyeMonth).padStart(2, '0')}-${String(fyeDay).padStart(2, '0')}`;
   const b = balans(db, { asOf });
 
-  const activa = groupSections(b.assets.sections, ACTIVA_LINES);
-  const passivaSections = groupSections(b.liabilities_and_equity.sections, PASSIVA_LINES);
+  const activa = groupSections(b.assets.sections, LINES.activa);
+  const passivaSections = groupSections(b.liabilities_and_equity.sections, LINES.passiva);
   // onverdeeld resultaat folds into Eigen vermogen (pre-close) as its own line
   if (b.liabilities_and_equity.result_cents !== 0) {
-    const ev = passivaSections.find((s) => s.rgs_code === 'BEIV.05');
+    const ev = passivaSections.find((s) => s.taxonomy_code === 'BEIV.05');
     if (ev) {
       ev.total_cents += b.liabilities_and_equity.result_cents;
       ev.sections.push({
-        rgs_code: null, label: 'Onverdeeld resultaat',
+        taxonomy_code: null, label: 'Onverdeeld resultaat',
         accounts: [{ code: '—', name: 'Resultaat boekjaar', amount_cents: b.liabilities_and_equity.result_cents }],
         total_cents: b.liabilities_and_equity.result_cents,
       });
     } else {
       passivaSections.push({
-        label: 'Eigen vermogen', rgs_code: 'BEIV.05',
+        label: 'Eigen vermogen', taxonomy_code: 'BEIV.05',
         sections: [{
-          rgs_code: null, label: 'Onverdeeld resultaat',
+          taxonomy_code: null, label: 'Onverdeeld resultaat',
           accounts: [{ code: '—', name: 'Resultaat boekjaar', amount_cents: b.liabilities_and_equity.result_cents }],
           total_cents: b.liabilities_and_equity.result_cents,
         }],
@@ -129,7 +118,7 @@ export function jaarrekening(db, { year, model = 'klein' }) {
     year,
     model,
     company: {
-      name: company.name, kvk: company.kvk, btw_id: company.btw_id,
+      name: company.name, kvk: company.registration_id, btw_id: company.tax_id,
       legal_form: company.legal_form, address: company.address,
       postal_code: company.postal_code, city: company.city,
     },
@@ -151,14 +140,14 @@ export function jaarrekening(db, { year, model = 'klein' }) {
     // showed 9 wrong months and missed 3 months of the FY.
     const [pnlFrom, pnlTo] = fiscalYearWindow(db, year);
     const p = pnl(db, { from: pnlFrom, to: pnlTo });
-    const pnlLines = groupSections(p.sections, PNL_LINES);
-    const omzet = pnlLines.find((l) => l.rgs_code === 'WOMZ.80')?.total_cents ?? 0;
-    const overige = pnlLines.find((l) => l.rgs_code === 'WOVB.82')?.total_cents ?? 0;
-    const inkoop = pnlLines.find((l) => l.rgs_code === 'WKPR.70')?.total_cents ?? 0;
+    const pnlLines = groupSections(p.sections, LINES.pnl);
+    const omzet = pnlLines.find((l) => l.taxonomy_code === 'WOMZ.80')?.total_cents ?? 0;
+    const overige = pnlLines.find((l) => l.taxonomy_code === 'WOVB.82')?.total_cents ?? 0;
+    const inkoop = pnlLines.find((l) => l.taxonomy_code === 'WKPR.70')?.total_cents ?? 0;
     // pure operating costs: everything except omzet (80), inkoopwaarde (70)
     // and overige bedrijfsopbrengsten (82) — WKPR.70 must NOT be inside
     // kosten or resultaat would subtract it twice
-    const kosten = pnlLines.filter((l) => !['WOMZ.80', 'WKPR.70', 'WOVB.82'].includes(l.rgs_code))
+    const kosten = pnlLines.filter((l) => !['WOMZ.80', 'WKPR.70', 'WOVB.82'].includes(l.taxonomy_code))
       .reduce((s, l) => s + l.total_cents, 0);
     report.pnl = {
       lines: pnlLines,

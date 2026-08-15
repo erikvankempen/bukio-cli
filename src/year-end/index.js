@@ -13,6 +13,7 @@
 // after closing; the balance sheet (which includes the entries) then shows
 // equity including the result. Deterministic, dry-run first, fully audited.
 import { createAccount, getAccountByCode } from '../core/accounts.js';
+import { resolveProfile } from '../jurisdictions/index.js';
 import { createEntry, postEntry } from '../core/entries.js';
 import { record } from '../audit/index.js';
 
@@ -103,6 +104,11 @@ export function yearEndClose(db, { year, actor = 'human', dryRun = false }) {
   if (!/^\d{4}$/.test(String(year))) throw yearEndError('INVALID_YEAR', `year '${year}' must be YYYY`);
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   if (!company) throw yearEndError('NOT_INITIALISED', 'company database not initialised');
+  // closing accounts come from the jurisdiction profile (NL: 9900 resultaat /
+  // 3000 eigen vermogen)
+  const { closing } = resolveProfile(db);
+  const RESULT_ACCOUNT = closing.resultAccount;
+  const EQUITY_ACCOUNT = closing.equityAccount;
 
   const [fyFrom, fyTo] = fiscalYearWindow(db, year);
   const drafts = db.prepare(
@@ -127,20 +133,20 @@ export function yearEndClose(db, { year, actor = 'human', dryRun = false }) {
   // (createEntry rejects zero postings; a zero-result year closes cleanly).
   const closingPostings = accounts.map((a) => ({ code: a.code, amountCents: -a.net_cents }));
   if (resultCents !== 0) {
-    closingPostings.push({ code: '9900', amountCents: -resultCents });
+    closingPostings.push({ code: RESULT_ACCOUNT, amountCents: -resultCents });
   }
   // entry 2: appropriation to equity (only when there is a result)
   const appropriationPostings = resultCents !== 0
     ? [
-      { code: '9900', amountCents: resultCents },
-      { code: '3000', amountCents: -resultCents },
+      { code: RESULT_ACCOUNT, amountCents: resultCents },
+      { code: EQUITY_ACCOUNT, amountCents: -resultCents },
     ]
     : [];
 
   if (dryRun) {
     return {
       closed: false, year, dryRun: true, result_cents: resultCents,
-      create_9900: resultCents !== 0 && !getAccountByCode(db, '9900'),
+      create_9900: resultCents !== 0 && !getAccountByCode(db, RESULT_ACCOUNT),
       entries: [
         { description: `Afsluiting boekjaar ${year}`, postings: closingPostings },
         ...(appropriationPostings.length ? [{ description: `Resultaatbestemming ${year}`, postings: appropriationPostings }] : []),
@@ -152,8 +158,8 @@ export function yearEndClose(db, { year, actor = 'human', dryRun = false }) {
   // company's fiscal_year_end) — not hardcoded to 12-31
   const closeDate = fyTo;
   const tx = db.transaction(() => {
-    if (resultCents !== 0 && !getAccountByCode(db, '9900')) {
-      createAccount(db, { code: '9900', name: 'Resultaat boekjaar', type: 'equity', normalBalance: 'credit', rgsCode: 'BEIV.05' });
+    if (resultCents !== 0 && !getAccountByCode(db, RESULT_ACCOUNT)) {
+      createAccount(db, { code: RESULT_ACCOUNT, name: 'Resultaat boekjaar', type: 'equity', normalBalance: 'credit', taxonomyCode: 'BEIV.05' });
     }
     const e1 = createEntry(db, {
       date: closeDate, description: `Afsluiting boekjaar ${year}`,

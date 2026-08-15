@@ -85,8 +85,8 @@ function readLogo(file) {
 
 const COMPANY_FIELDS = [
   ['name', 'name', 'company name'],
-  ['kvk', 'kvk', 'KVK number'],
-  ['btwId', 'btw_id', 'BTW identification number'],
+  ['registrationId', 'registration_id', 'registration id (KVK for NL)'],
+  ['taxId', 'tax_id', 'tax id (btw-id for NL)'],
   ['iban', 'iban', 'bank account (IBAN)'],
   ['address', 'address', 'street address (for compliant invoices)'],
   ['postalCode', 'postal_code', 'postal code'],
@@ -95,10 +95,12 @@ const COMPANY_FIELDS = [
 
 function serializeCompany(row) {
   return {
-    id: row.id, name: row.name, kvk: row.kvk, legal_form: row.legal_form,
-    btw_id: row.btw_id, iban: row.iban, address: row.address,
+    id: row.id, name: row.name, registration_id: row.registration_id, legal_form: row.legal_form,
+    tax_id: row.tax_id, iban: row.iban, address: row.address,
     postal_code: row.postal_code, city: row.city, vat_module: row.vat_module,
     kor_flag: row.kor_flag, fiscal_year_end: row.fiscal_year_end,
+    country: row.country, base_currency: row.base_currency, locale: row.locale,
+    profile_version: row.profile_version,
     logo_mime: row.logo_mime ?? null,
     logo_bytes: row.logo ? row.logo.length : null,
   };
@@ -124,13 +126,16 @@ export function make(program) {
           output(ctx, { company: serializeCompany(row) }, (d) => {
             table([d.company], [
               { key: 'name', label: 'naam' },
-              { key: 'kvk', label: 'kvk' },
+              { key: 'country', label: 'land' },
               { key: 'legal_form', label: 'rechtsvorm' },
-              { key: 'btw_id', label: 'btw-id' },
+              { key: 'registration_id', label: 'reg-id (kvk)' },
+              { key: 'tax_id', label: 'btw-id' },
               { key: 'iban', label: 'iban' },
               { key: 'address', label: 'adres' },
               { key: 'postal_code', label: 'postcode' },
               { key: 'city', label: 'plaats' },
+              { key: 'base_currency', label: 'valuta' },
+              { key: 'locale', label: 'taal' },
             ]);
           });
         } finally {
@@ -145,8 +150,11 @@ export function make(program) {
     .command('update')
     .description('update company details (address, IBAN, btw-id, name, kvk, logo)')
     .option('--name <name>', 'company name')
-    .option('--kvk <kvk>', 'KVK number')
-    .option('--btw-id <id>', 'BTW identification number')
+    .option('--registration-id <id>', 'company registration number (KVK for NL)')
+    .option('--tax-id <id>', 'tax identification number (btw-id for NL)')
+    .option('--kvk <kvk>', '[deprecated] alias for --registration-id')
+    .option('--btw-id <id>', '[deprecated] alias for --tax-id')
+    .option('--country <CC>', 'country — immutable after init (rejected)')
     .option('--iban <iban>', 'bank account (IBAN)')
     .option('--address <address>', 'street address (for compliant invoices)')
     .option('--postal-code <code>', 'postal code')
@@ -162,6 +170,26 @@ export function make(program) {
           const row = getCompany(db);
           if (!row) throw dbError('NO_COMPANY', 'no company — run bukio init first');
 
+          // deprecated aliases: --kvk -> --registration-id, --btw-id -> --tax-id
+          if (opts.kvk !== undefined && opts.registrationId !== undefined) {
+            opts._warnings = [...(opts._warnings ?? []), '--kvk ignored because --registration-id was also given'];
+          } else if (opts.kvk !== undefined) {
+            opts.registrationId = opts.kvk;
+            opts._warnings = [...(opts._warnings ?? []), '--kvk is deprecated — use --registration-id'];
+          }
+          if (opts.btwId !== undefined && opts.taxId !== undefined) {
+            opts._warnings = [...(opts._warnings ?? []), '--btw-id ignored because --tax-id was also given'];
+          } else if (opts.btwId !== undefined) {
+            opts.taxId = opts.btwId;
+            opts._warnings = [...(opts._warnings ?? []), '--btw-id is deprecated — use --tax-id'];
+          }
+          // country is immutable after init (decision §9.1.5)
+          if (opts.country !== undefined) {
+            const want = String(opts.country).trim().toUpperCase();
+            if (want !== (row.country ?? 'NL')) {
+              throw Object.assign(new Error(`country is immutable after init — company stays ${row.country ?? 'NL'} (re-init a new DB for another country)`), { code: 'COUNTRY_IMMUTABLE' });
+            }
+          }
           const changes = {};
           for (const [opt, col, label] of COMPANY_FIELDS) {
             if (opts[opt] !== undefined) changes[col] = String(opts[opt]).trim();
@@ -170,10 +198,10 @@ export function make(program) {
           if (opts.logo !== undefined) logo = readLogo(opts.logo);
           if (opts.removeLogo) logo = { mime: null, bytes: null };
           if (Object.keys(changes).length === 0 && logo === null) {
-            throw Object.assign(new Error('nothing to update — pass at least one of --name/--kvk/--btw-id/--iban/--address/--postal-code/--city/--logo/--remove-logo'), { code: 'NOTHING_TO_UPDATE' });
+            throw Object.assign(new Error('nothing to update — pass at least one of --name/--registration-id/--tax-id/--iban/--address/--postal-code/--city/--logo/--remove-logo'), { code: 'NOTHING_TO_UPDATE' });
           }
           for (const [opt, col, label] of COMPANY_FIELDS) {
-            if (changes[col] === '' && col !== 'btw_id') {
+            if (changes[col] === '' && col !== 'tax_id') {
               throw Object.assign(new Error(`${label} cannot be empty`), { code: 'INVALID_VALUE' });
             }
           }
@@ -186,6 +214,7 @@ export function make(program) {
             changes,
             logo: logo === null ? null
               : { mime: logo.mime, bytes: logo.bytes ? logo.bytes.length : 0, width: logo.width, height: logo.height },
+            ...(opts._warnings?.length ? { warnings: opts._warnings } : {}),
             dryRun: true,
           };
           if (ctx.dryRun) {
@@ -193,6 +222,7 @@ export function make(program) {
               console.log('plan: company update');
               for (const [k, v] of Object.entries(d.changes)) console.log(`  ${k}: '${row[k]}' -> '${v}'`);
               if (d.logo) console.log(`  logo: ${d.logo.mime} (${d.logo.bytes} bytes${d.logo.width ? `, ${d.logo.width}×${d.logo.height} px` : ''})${d.logo.bytes === 0 ? ' — removed' : ''}`);
+              for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
               console.log('(dry run — nothing written)');
             });
             return;
@@ -215,11 +245,15 @@ export function make(program) {
             },
             outcome: 'ok',
           });
-          output(ctx, { company: serializeCompany(updated), changes }, (d) => {
+          output(ctx, {
+            company: serializeCompany(updated), changes,
+            ...(opts._warnings?.length ? { warnings: opts._warnings } : {}),
+          }, (d) => {
             console.log('company updated:');
             for (const [k, v] of Object.entries(d.changes)) console.log(`  ${k}: '${row[k]}' -> '${v}'`);
             if (logo !== null && logo.mime) console.log(`  logo: ${logo.mime} (${logo.bytes.length} bytes)`);
             if (logo !== null && !logo.mime) console.log('  logo: removed');
+            for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
           });
         } finally {
           db.close();

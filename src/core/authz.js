@@ -209,6 +209,7 @@ const CLI_CAPABILITIES = {
   'year-end status': 'close.year',
   'year-end close': 'close.year',
   'year-end report': 'close.year',
+  'financial-statements report': 'close.year',
   'jaarrekening report': 'close.year',
   // export / fx
   'export xaf': 'export.manage',

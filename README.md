@@ -10,7 +10,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-773%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-806%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -582,15 +582,15 @@ Annual close and statutory reporting (Phase 4).
 |---------|---------|
 | `year-end status --year YYYY` | Open/closed, the year's result, per-account nets |
 | `year-end close --year YYYY [--dry-run]` | **Close the fiscal year**: reverse income/expense into 9900 (created on demand), then resultaatbestemming into 3000. Both entries `source='closing'`, `source_ref='fy:YYYY'`. Guards: draft entries in the year (`INCOMPLETE_YEAR`), double close (`ALREADY_CLOSED`), no activity (`EMPTY_YEAR`). **The P&L report excludes closing entries** — the year's flow stays visible after closing; the balans then shows equity including the result |
-| `jaarrekening report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx] [--out]` | Statutory annual accounts in the Dutch layout (Titel 9 Boek 2 BW): balans (vaste activa / vlottende activa / eigen vermogen / voorzieningen / lang- en kortlopende schulden) + W&V (klein model). `--format pdf` = the **KVK deposit package**; xlsx for the accountant |
+| `financial-statements report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx] [--out]` | Statutory annual accounts (NL: Dutch layout, Titel 9 Boek 2 BW — balans + W&V, `--format pdf` = the **KVK deposit package**; xlsx for the accountant; deprecated alias `jaarrekening report`) |
 | `icp readout --period YYYY-Qn` | **ICP listing**: EU btw-verlegde supplies per customer (from RE invoice lines), with their btw-ids. Fails `ICP_VAT_ID_MISSING` if a customer lacks one. Credit notes reduce the customer total |
 
 ```bash
 bukio year-end status --year 2026
 bukio year-end close --year 2026 --dry-run     # plan: result 1254.15 + postings
 bukio year-end close --year 2026               # entries #9 #10 posted
-bukio jaarrekening report --year 2026 --model klein        # JSON
-bukio jaarrekening report --year 2026 --model klein --format pdf   # jaarrekening-2026-klein.pdf (KVK)
+bukio financial-statements report --year 2026 --model klein   # JSON
+bukio financial-statements report --year 2026 --model klein --format pdf   # financial-statements-2026-klein.pdf (KVK)
 bukio icp readout --period 2026-Q3             # EU customers + amounts
 ```
 

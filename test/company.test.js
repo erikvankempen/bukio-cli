@@ -95,7 +95,7 @@ test('company show: returns the company record', () => {
   cli(t.file, ['company', 'update', '--city', 'Amsterdam']);
   const r = cli(t.file, ['company', 'show']);
   assert.equal(r.out.data.company.name, 'Test Coaching');
-  assert.equal(r.out.data.company.kvk, '12345678');
+  assert.equal(r.out.data.company.registration_id, '12345678');
   assert.equal(r.out.data.company.city, 'Amsterdam');
 });
 

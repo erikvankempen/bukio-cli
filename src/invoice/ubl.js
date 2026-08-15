@@ -12,6 +12,7 @@
 // Full Peppol validation (Schematron) is out of scope — verify via a
 // validation service before production use.
 import { computeInvoiceTotals, formatQty, lineDiscountCents } from './index.js';
+import { resolveProfile } from '../jurisdictions/index.js';
 
 function esc(s) {
   // XML 1.0 valid chars: strip control chars (0x00-0x08, 0x0B, 0x0C,
@@ -42,9 +43,9 @@ function addressBlock(partyName, p, taxId = null) {
   // Peppol BIS 3.0 BT-34: Seller electronic address (cbc:EndpointID, 1..1).
   // For Dutch companies this is the KVK number under scheme 9944 (the Peppol
   // registry code for the Dutch Chamber of Commerce). Emitted when present —
-  // the seller's kvk is always set (finalize requires it).
-  const endpoint = p.kvk
-    ? `\n        <cbc:EndpointID schemeID="9944">${esc(p.kvk)}</cbc:EndpointID>`
+  // the seller's registration id is always set (finalize requires it).
+  const endpoint = p.registration_id
+    ? `\n        <cbc:EndpointID schemeID="9944">${esc(p.registration_id)}</cbc:EndpointID>`
     : '';
   return `
         <cac:Party>${endpoint}
@@ -58,7 +59,7 @@ function addressBlock(partyName, p, taxId = null) {
           ${taxId ? `<cac:PartyTaxScheme><cbc:CompanyID schemeID="VAT">${esc(taxId)}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>` : ''}
           <cac:PartyLegalEntity>
             <cbc:RegistrationName>${esc(partyName)}</cbc:RegistrationName>
-            ${p.kvk ? `<cbc:CompanyID>${esc(p.kvk)}</cbc:CompanyID>` : ''}
+            ${p.registration_id ? `<cbc:CompanyID>${esc(p.registration_id)}</cbc:CompanyID>` : ''}
           </cac:PartyLegalEntity>
         </cac:Party>`;
 }
@@ -69,7 +70,22 @@ function addressBlock(partyName, p, taxId = null) {
  * the InvoiceLine) and on the total (AllowanceTotalAmount). VAT breakdown
  * bases are the discounted amounts, so the XML reconciles with the books.
  */
+// e-invoicing builders keyed by profile.documents.eInvoicing. NL is the
+// only format in Phase A ('peppol-bis-3.0'); future markets register theirs.
+const EINVOICING_BUILDERS = {
+  'peppol-bis-3.0': buildPeppolBis30,
+};
+
 export function invoiceToUbl(db, invoice) {
+  const { documents } = resolveProfile(db);
+  const builder = EINVOICING_BUILDERS[documents.eInvoicing];
+  if (!builder) {
+    throw Object.assign(new Error(`e-invoicing format '${documents.eInvoicing}' has no builder (registered: ${Object.keys(EINVOICING_BUILDERS).join(', ')})`), { code: 'FORMAT_NOT_SUPPORTED' });
+  }
+  return builder(db, invoice);
+}
+
+function buildPeppolBis30(db, invoice) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   // BT-25 (preceding invoice): the credit note's BillingReference must carry
   // the ORIGINAL invoice number, not the buyer reference. Look it up via
@@ -224,7 +240,7 @@ export function invoiceToUbl(db, invoice) {
       <cbc:ID>${esc(creditBillingRef)}</cbc:ID>
     </cac:InvoiceDocumentReference>
   </cac:BillingReference>` : ''}
-  <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.btw_id)}</cac:AccountingSupplierParty>
+  <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.tax_id)}</cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
     <cac:Party>
       ${contact.kvk ? `<cbc:EndpointID schemeID="9944">${esc(contact.kvk)}</cbc:EndpointID>` : ''}

@@ -16,12 +16,23 @@ import {
 import { formatAmount } from '../core/money.js';
 import { getAccountByCode } from '../core/accounts.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { resolveProfile } from '../jurisdictions/index.js';
 
-function parseBankFile(filePath, format, iban) {
+function parseBankFile(filePath, format, iban, db) {
   const content = readFileSync(filePath, 'utf8');
   const trimmed = content.trimStart();
   const detected = trimmed.startsWith('<') ? 'camt' : 'csv';
   const fmt = format && format !== 'auto' ? format : detected;
+  // capability gate: the detected/requested format must be declared in the
+  // jurisdiction profile's exchange.bankStatementFormats (NL: camt.053, csv)
+  if (db) {
+    const { exchange } = resolveProfile(db);
+    const formatIds = { camt: 'camt.053', csv: 'csv' };
+    const formatId = formatIds[fmt] ?? fmt;
+    if (!exchange.bankStatementFormats.includes(formatId)) {
+      throw Object.assign(new Error(`bank statement format '${formatId}' is not supported by the jurisdiction profile (exchange.bankStatementFormats: ${exchange.bankStatementFormats.join(', ')})`), { code: 'INVALID_FORMAT' });
+    }
+  }
   if (fmt === 'camt') {
     return parseCamt053(content);
   }
@@ -116,9 +127,9 @@ export function make(program) {
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
-        const transactions = parseBankFile(opts.file, opts.format, opts.iban);
         const db = ensureDb(ctx);
         try {
+          const transactions = parseBankFile(opts.file, opts.format, opts.iban, db);
           if (ctx.dryRun) {
             const preview = previewImport(db, { iban: opts.iban, transactions });
             output(ctx, {

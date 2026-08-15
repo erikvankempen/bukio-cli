@@ -32,7 +32,7 @@ export function pnl(db, { from, to }) {
     }
   }
   const rows = db.prepare(`
-    SELECT a.id, a.code, a.name, a.type, a.rgs_code,
+    SELECT a.id, a.code, a.name, a.type, a.taxonomy_code,
       COALESCE(SUM(p.amount_cents), 0) AS net_cents
     FROM accounts a
     LEFT JOIN (
@@ -49,7 +49,7 @@ export function pnl(db, { from, to }) {
   const known = new Set(PNL_GROUPS);
   const sections = PNL_GROUPS.map((code) => {
     const accounts = rows
-      .filter((r) => (r.rgs_code || 'overig') === code)
+      .filter((r) => (r.taxonomy_code || 'overig') === code)
       .map((r) => ({
         code: r.code,
         name: r.name,
@@ -58,16 +58,16 @@ export function pnl(db, { from, to }) {
       }))
       .filter((a) => a.amount_cents !== 0);
     return {
-      rgs_code: code,
+      taxonomy_code: code,
       label: rgsLabel(code),
       accounts,
       total_cents: accounts.reduce((s, a) => s + a.amount_cents, 0),
     };
   }).filter((s) => s.accounts.length > 0);
 
-  // catch-all: income/expense accounts with an unknown rgs_code
+  // catch-all: income/expense accounts with an unknown taxonomy_code
   const leftover = rows
-    .filter((r) => !known.has(r.rgs_code || 'overig'))
+    .filter((r) => !known.has(r.taxonomy_code || 'overig'))
     .map((r) => ({
       code: r.code,
       name: r.name,
@@ -77,14 +77,14 @@ export function pnl(db, { from, to }) {
     .filter((a) => a.amount_cents !== 0);
   if (leftover.length) {
     sections.push({
-      rgs_code: null,
+      taxonomy_code: null,
       label: 'Overig',
       accounts: leftover,
       total_cents: leftover.reduce((s, a) => s + a.amount_cents, 0),
     });
   }
 
-  // revenue/costs are driven by account TYPE, not rgs_code: imported legacy
+  // revenue/costs are driven by account TYPE, not taxonomy_code: imported legacy
   // charts often have no RGS codes, and a type-based split keeps the P&L
   // correct there (rgs only shapes the display sections).
   const revenue = rows.filter((r) => r.type === 'income').reduce((s, r) => s - r.net_cents, 0);

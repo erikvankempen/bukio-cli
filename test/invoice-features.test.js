@@ -32,7 +32,7 @@ function setupCompany({ vat = true } = {}) {
   db = openDb(':memory:');
   seedDefaultChart(db);
   db.prepare(`
-    INSERT INTO company (name, kvk, legal_form, btw_id, iban, address, postal_code, city, vat_module)
+    INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
     VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300', 'Industrieweg 12', '2712 CD', 'Zoetermeer', ?)
   `).run(vat ? 1 : 0);
   if (vat) enableVatModule(db);

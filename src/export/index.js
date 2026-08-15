@@ -22,6 +22,7 @@
 // Read-only: nothing is written to the DB except one audit-log row recording
 // that the export happened (who, when, which file).
 import { readFileSync, writeFileSync } from 'node:fs';
+import { resolveProfile } from '../jurisdictions/index.js';
 import { formatAmount } from '../core/money.js';
 import { record } from '../audit/index.js';
 import { fiscalYearWindow } from '../year-end/index.js';
@@ -89,7 +90,22 @@ function toBoekingen(postings) {
  * file; records an `export.xaf` audit row. Throws EXPORT_EMPTY_YEAR when the
  * year has no posted entries.
  */
+// audit-file builders keyed by profile.documents.auditFile. NL is the only
+// format in Phase A ('xaf-auditfile-4.0'); future markets register theirs.
+const XAF_BUILDERS = {
+  'xaf-auditfile-4.0': buildXafAuditfile40,
+};
+
 export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
+  const { documents } = resolveProfile(db);
+  const builder = XAF_BUILDERS[documents.auditFile];
+  if (!builder) {
+    throw Object.assign(new Error(`audit file format '${documents.auditFile}' has no builder (registered: ${Object.keys(XAF_BUILDERS).join(', ')})`), { code: 'FORMAT_NOT_SUPPORTED' });
+  }
+  return builder(db, { year, out, actor, dryRun });
+}
+
+function buildXafAuditfile40(db, { year, out, actor, dryRun }) {
   if (!/^\d{4}$/.test(String(year))) {
     const e = new Error(`year '${year}' must be YYYY`);
     e.code = 'INVALID_YEAR';
@@ -139,7 +155,7 @@ export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
   if (dryRun) {
     return {
       ok: true, path: out, year, dryRun: true,
-      company: { name: company.name, kvk: company.kvk },
+      company: { name: company.name, registration_id: company.registration_id },
       rekeningen: accounts.length,
       mutaties: posted.filter((e) => (byEntry.get(e.id) ?? []).length > 0).length,
     };
@@ -151,7 +167,7 @@ export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
   parts.push('  <XafHeader>');
   parts.push('    <Version>4.0</Version>');
   parts.push(`    <CompanyName>${esc(company.name)}</CompanyName>`);
-  parts.push(`    <CompanyID>${esc(company.kvk || '')}</CompanyID>`);
+  parts.push(`    <CompanyID>${esc(company.registration_id || '')}</CompanyID>`);
   parts.push(`    <FiscalYear>${esc(year)}</FiscalYear>`);
   parts.push(`    <StartDate>${fyFrom}</StartDate>`);
   parts.push(`    <EndDate>${fyTo}</EndDate>`);
@@ -207,7 +223,7 @@ export function exportXaf(db, { year, out, actor = 'human', dryRun = false }) {
     ok: true,
     path: out,
     year,
-    company: { name: company.name, kvk: company.kvk },
+    company: { name: company.name, registration_id: company.registration_id },
     rekeningen: accounts.length,
     mutaties: mutatieIds.length,
   };

@@ -71,7 +71,7 @@ test('audit --format json prints JSON even without the global --json flag', () =
 test('bank match post --dry-run rejects an already-matched transaction and a missing account', () => {
   const dbPath = tmpDb();
   const db = openDb(dbPath);
-  db.prepare('INSERT INTO company (name, kvk) VALUES (?, ?)').run('Demo BV', '12345678');
+  db.prepare('INSERT INTO company (name, registration_id) VALUES (?, ?)').run('Demo BV', '12345678');
   seedDefaultChart(db);
   db.prepare(`INSERT INTO bank_accounts (iban, account_code, name) VALUES (?, ?, ?)`).run('NL91ABNA0417164300', '1100', 'Betaalrekening');
   importTransactions(db, {
