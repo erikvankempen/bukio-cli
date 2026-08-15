@@ -221,6 +221,10 @@ export function make(program) {
             note: readout.note,
           };
           output(ctx, data, (d) => {
+            // Labels mirror the official Dutch OB form (fields 1a-5d, Dutch
+            // terms) on purpose: the readout is the NL-only transcription aid
+            // the user copies into the Belastingdienst portal — English labels
+            // would mismatch the official form.
             console.log(`OB-AANGIFTE ${d.period} (${d.from} .. ${d.to}) — manual filing aid`);
             console.log('  1a  omzet hoog           ', d.fields['1a'].amount);
             console.log('  1b  omzet laag           ', d.fields['1b'].amount);
@@ -249,7 +253,7 @@ export function make(program) {
     .command('file')
     .description('reclassify the outstanding VAT position to the settlement account at filing')
     .option('--period <period>', 'YYYY-Qn or YYYY-MM — used in the entry/audit label')
-    .option('--account <code>', `af-te-dragen account (default: the country profile's fileDefault, e.g. ${VAT_FILE_ACCOUNT_DEFAULT} for NL; auto-created when missing)`)
+    .option('--account <code>', `VAT payable account (default: the country profile's fileDefault, e.g. ${VAT_FILE_ACCOUNT_DEFAULT} for NL; auto-created when missing)`)
     .option('--desc <text>', 'entry description override')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
@@ -281,10 +285,10 @@ export function make(program) {
 
   vat
     .command('settle')
-    .description('book the bank payment that cancels the af-te-dragen balance; the rounding difference goes to the P&L')
-    .requiredOption('--tx <id>', 'unmatched bank transaction of the OB payment (incoming for a refund)')
+    .description('book the bank payment that cancels the VAT payable balance; the rounding difference goes to the P&L')
+    .requiredOption('--tx <id>', 'unmatched bank transaction of the VAT return payment (incoming for a refund)')
     .option('--period <period>', 'YYYY-Qn or YYYY-MM — used in the entry/audit label')
-    .option('--account <code>', `af-te-dragen account to settle (default: the country profile's fileDefault, e.g. ${VAT_FILE_ACCOUNT_DEFAULT} for NL — must match the account used at 'vat file', e.g. when it fell to the next free code)`)
+    .option('--account <code>', `VAT payable account to settle (default: the country profile's fileDefault, e.g. ${VAT_FILE_ACCOUNT_DEFAULT} for NL — must match the account used at 'vat file', e.g. when it fell to the next free code)`)
     .option('--difference-account <code>', `P&L account for the rounding difference (default: the country profile's differenceDefault, e.g. ${VAT_DIFFERENCE_ACCOUNT_DEFAULT} for NL)`)
     .option('--desc <text>', 'entry description override')
     .option('--dry-run', 'show the plan without writing')
