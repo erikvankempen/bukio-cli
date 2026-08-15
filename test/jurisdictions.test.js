@@ -702,6 +702,30 @@ test('B2: LU financial statements report the LSC abridged layout', () => {
   assert.equal(fs.pnl.resultat_cents, 10000);
 });
 
+test('B2: LU P&L — 73x subventions on line 4 and custom expenses subtract (review fix)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);
+  // custom accounts outside the default chart: 7300 subventions (income)
+  // and 6600 a custom expense account
+  cli(dbPath, ['account', 'add', '--code', '7300', '--name', "Subventions d'exploitation", '--type', 'income', '--normal-balance', 'credit']);
+  cli(dbPath, ['account', 'add', '--code', '6600', '--name', 'Autres charges', '--type', 'expense', '--normal-balance', 'debit']);
+  // capital in, sales + VAT, custom expense paid from bank, subvention received
+  cli(dbPath, ['entry', 'add', '--date', '2026-06-30', '--desc', 'exercice', '--postings',
+    '101:-1000,5131:1000,4011:11700,7021:-10000,461411:-1700,6600:500,5131:-500,7300:-200,5131:200',
+    '--post']);
+  const r = cli(dbPath, ['financial-statements', 'report', '--year', '2026', '--format', 'json']);
+  const fs = r.out.data.financial_statements;
+  assert.equal(fs.balans.balanced, true);
+  // 73x subventions map to line 4 'Autres produits d'exploitation'
+  const autresProduits = fs.pnl.lines.find((l) => l.label === "Autres produits d'exploitation");
+  assert.ok(autresProduits && autresProduits.total_cents === 20000, '73x subventions on line 4');
+  // the custom 6600 expense lands in the 'Autres' catch-all and is
+  // SUBTRACTED (sign -1) — not added to the result
+  const autres = fs.pnl.lines.find((l) => l.label === 'Autres');
+  assert.ok(autres && autres.total_cents === 50000, 'custom expense on the Autres catch-all');
+  assert.equal(fs.pnl.resultat_cents, 970000, 'resultat = CA + subventions - charges - custom expense');
+});
+
 test('B2: LU financial statements reject the NL model (INVALID_MODEL)', () => {
   const dbPath = tmpDb();
   cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);

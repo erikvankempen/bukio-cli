@@ -165,7 +165,7 @@ export default {
         ],
         pnl: [
           { label: 'Chiffre d\'affaires net', prefixes: ['70'], sign: 1 },
-          { label: 'Autres produits d\'exploitation', prefixes: ['71', '72', '74'], sign: 1 },
+          { label: 'Autres produits d\'exploitation', prefixes: ['71', '72', '73', '74'], sign: 1 },
           { label: 'Charges d\'exploitation', prefixes: ['60', '61', '62', '63', '64'], sign: -1 },
           { label: 'Produits financiers', prefixes: ['75'], sign: 1 },
           { label: 'Charges financières', prefixes: ['65'], sign: -1 },

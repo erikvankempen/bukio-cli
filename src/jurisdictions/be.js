@@ -69,8 +69,8 @@ export default {
       { code: '6', rateBp: 600, type: 'standard', euReverse: 0, description: '6% taux réduit' },
       { code: '0', rateBp: 0, type: 'standard', euReverse: 0, description: '0% taux zéro' },
       { code: 'V', rateBp: 0, type: 'exempt', euReverse: 0, description: 'Exonéré' },
-      { code: 'R', rateBp: 0, type: 'reverse', euReverse: 0, description: 'Autofacturatie (nationale)' },
-      { code: 'RE', rateBp: 0, type: 'reverse', euReverse: 1, description: 'Autofacturatie (UE)' },
+      { code: 'R', rateBp: 0, type: 'reverse', euReverse: 0, description: 'Autoliquidation (nationale)' },
+      { code: 'RE', rateBp: 0, type: 'reverse', euReverse: 1, description: 'Autoliquidation (UE)' },
       { code: 'M', rateBp: 0, type: 'margin', euReverse: 0, description: 'Marge' },
       { code: 'P', rateBp: 0, type: 'private', euReverse: 0, description: 'Usage privé' },
     ],
@@ -84,8 +84,9 @@ export default {
       ],
       fileDefault: '451',
       // the minimum plan designates no rounding-difference account —
-      // 648 (Charges d'exploitation diverses) is the per-firm convention;
-      // inert until the BE return engine lands
+      // 648 (Charges d'exploitation diverses) is the per-firm convention
+      // (brief, flagged unverified); 648 is seeded in the chart so
+      // `vat settle` posts to a real account
       differenceDefault: '648',
       afTeDragenName: 'TVA à payer',
     },
@@ -141,6 +142,7 @@ export default {
       { code: '620', name: 'Rémunérations — Bezoldigingen', type: 'expense', normalBalance: 'debit' },
       { code: '621', name: 'Cotisations patronales d\'assurances sociales — Werkgeversbijdragen sociale verzekeringen', type: 'expense', normalBalance: 'debit' },
       { code: '630', name: 'Dotations aux amortissements — Afschrijvingen', type: 'expense', normalBalance: 'debit' },
+      { code: '648', name: 'Charges d\'exploitation diverses — Diverse exploitatiekosten', type: 'expense', normalBalance: 'debit' },
       { code: '650', name: 'Charges des dettes — Kosten van schulden', type: 'expense', normalBalance: 'debit' },
       { code: '700', name: 'Ventes et prestations de services — Verkopen en dienstverleningen', type: 'income', normalBalance: 'credit' },
       { code: '74', name: 'Autres produits d\'exploitation — Andere bedrijfsopbrengsten', type: 'income', normalBalance: 'credit' },
@@ -179,5 +181,10 @@ export default {
     defaultLanguage: 'nl',
   },
 
+  // The BE minimum plan has no separate current-year result account: the
+  // result closes straight into overgedragen winst (140; a loss would go to
+  // 141). resultAccount == equityAccount makes the year-end appropriation
+  // entry post +result/-result on the same account (a harmless net-zero
+  // no-op) — the result lands in 140 via the close itself.
   closing: { resultAccount: '140', equityAccount: '140' },
 };

@@ -272,12 +272,16 @@ function buildJaarrekeningLu(db, { year, model, reporting }) {
   const leftoverPnl = pnlAccounts.filter((a) => !knownPnl.some((x) => String(a.code).startsWith(x)));
   if (leftoverPnl.length) {
     pnlLines.push({
-      label: 'Autres', sign: 1, accounts: leftoverPnl,
+      // sign -1 (a charge): PCN classes 70-75 cover every standard income
+      // class (incl. 73x subventions on line 4), so a non-matching account
+      // is a custom expense — treated as a cost like the NL 'kosten'
+      // handling of non-revenue lines. Custom INCOME accounts (e.g. 76x/77x,
+      // not standard PCN) would be mis-signed: documented limitation.
+      label: 'Autres', sign: -1, accounts: leftoverPnl,
       total_cents: leftoverPnl.reduce((s, a) => s + a.amount_cents, 0),
     });
   }
-  // resultat: produits (sign +1) minus charges (sign -1); the 'Autres'
-  // catch-all is display-only, like the NL 'Overig' line
+  // resultat: produits (sign +1) minus charges (sign -1)
   const resultatCents = pnlLines
     .filter((l) => l.sign !== undefined)
     .reduce((s, l) => s + l.sign * l.total_cents, 0);

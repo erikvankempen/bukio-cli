@@ -80,8 +80,9 @@ export default {
         { code: '1776', name: 'Umsatzsteuer 19 %', type: 'liability', normalBalance: 'credit' },
       ],
       fileDefault: '1780',
-      // year-end clearing runs via 1789/1790 (SKR 03 practice) — the
-      // rounding difference lands on the Zahllast settlement account
+      // year-end clearing runs via 1789/1790 (SKR 03 practice, brief §6 —
+      // the 1789/1790 flow is a B-milestone); the rounding difference lands
+      // on the Zahllast settlement account
       differenceDefault: '1780',
       afTeDragenName: 'Umsatzsteuer-Vorauszahlungen',
     },
