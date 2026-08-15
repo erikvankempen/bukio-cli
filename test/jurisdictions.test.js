@@ -841,6 +841,18 @@ test('B2: cross-border buyer EndpointID uses the BUYER country scheme (review fi
     finalizeInvoice(db, { id: inv2.id, actor: 'agent:test' });
     const xml2 = invoiceToUbl(db, getInvoice(db, inv2.id));
     assert.match(xml2, /<cbc:EndpointID schemeID="0195">B123456<\/cbc:EndpointID>/);
+    // unregistered-market buyer (PL is not among the 11 profiles): the
+    // buyerSchemeId catch falls back to the seller's scheme (0195)
+    const pl = createContact(db, {
+      name: 'Sp. z o.o. Test', address: 'Ulica 1', postalCode: '00-001', city: 'Warszawa',
+      country: 'PL', vatId: 'PL1234567890', kvk: '0000123456', actor: 'agent:test',
+    });
+    const inv3 = createInvoice(db, {
+      contactId: pl.id, date: '2026-07-10', lines: ['1x Prestation @ 100.00 @17'], actor: 'agent:test',
+    });
+    finalizeInvoice(db, { id: inv3.id, actor: 'agent:test' });
+    const xml3 = invoiceToUbl(db, getInvoice(db, inv3.id));
+    assert.match(xml3, /<cbc:EndpointID schemeID="0195">0000123456<\/cbc:EndpointID>/);
   } finally {
     db.close();
   }
@@ -890,7 +902,9 @@ test('B5: LU compliance calendar — TVA on the 15th + annual accounts in 7 mont
     // so the suite does not flap when run after mid-October 2026; compared
     // against the engine's UTC today, not local time)
     const q3 = obs.find((o) => o.type === 'TVA' && o.period === '2026-Q3');
-    assert.equal(q3.status, new Date().toISOString().slice(0, 10) < '2026-10-15' ? 'open' : 'overdue');
+    // exact mirror of the engine rule (deadline < today -> overdue): on the
+    // deadline day itself the obligation is still 'open'
+    assert.equal(q3.status, '2026-10-15' < new Date().toISOString().slice(0, 10) ? 'overdue' : 'open');
     // no NL types leak into the LU calendar
     assert.ok(!obs.some((o) => ['OB', 'ICP', 'JAARREKENING'].includes(o.type)), 'no NL filing types in the LU calendar');
   } finally {
