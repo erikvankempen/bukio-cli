@@ -603,9 +603,9 @@ export function make(program) {
             table(d.reminders, [
               { key: 'invoice_number', label: t('invlist.number', {}, locale) },
               { key: 'contact_name', label: t('invlist.customer', {}, locale) },
-              { key: 'due_date', label: 'due_date' },
+              { key: 'due_date', label: t('invlist.dueDate', {}, locale) },
               { key: 'days_overdue', label: t('invlist.days', {}, locale) },
-              { key: 'outstanding', label: 'outstanding' },
+              { key: 'outstanding', label: t('invlist.outstanding', {}, locale) },
               { key: 'remind', label: t('invlist.reminder', {}, locale) },
             ]);
             if (opts.draftEmails) {

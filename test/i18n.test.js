@@ -88,6 +88,12 @@ function bookSale() {
 }
 const entryDesc = (id) => db.prepare('SELECT description FROM journal_entries WHERE id = ?').get(id).description;
 
+test('reminders table labels localize fully (nl)', () => {
+  assert.equal(t('invlist.dueDate', {}, 'nl'), 'vervaldatum');
+  assert.equal(t('invlist.outstanding', {}, 'nl'), 'openstaand');
+  assert.equal(t('invlist.dueDate', {}, 'de'), 'Fälligkeitsdatum');
+});
+
 test('vat file description: English by default', () => {
   bookSale();
   const r = vatFile(db, { period: '2026-Q3', actor: 'agent:test' });
