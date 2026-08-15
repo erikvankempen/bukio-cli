@@ -121,6 +121,7 @@ export default {
     // additive (Phase B6): debtors account for invoice postings — was
     // hardcoded '1200' in buildInvoicePostings; value unchanged for NL
     debtorsAccount: '1200',
+    bankAccountDefault: '1100',
     inferTaxonomy: null, // NL keyword inference stays in code keyed by taxonomy='rgs'
     // current jaarrekening line lists verbatim (src/report/jaarrekening.js)
     statutoryAccounts: {

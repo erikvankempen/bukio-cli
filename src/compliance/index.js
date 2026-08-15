@@ -68,9 +68,18 @@ function luMonthlyDeadline(period) {
   return `${y}-${String(mm).padStart(2, '0')}-15`;
 }
 
+// quarter rules operate on YYYY-Qn; guard exported rule functions against
+// malformed input (complianceStatus only ever feeds Q1-4, but the rules are
+// public API)
+function assertQuarter(period) {
+  if (!/^\d{4}-Q[1-4]$/.test(String(period))) {
+    throw complianceError('INVALID_PERIOD_SHAPE', `expected YYYY-Qn, got '${period}'`);
+  }
+}
+
 // day D of the month following YYYY-MM
 function dayOfNextMonth(period, day) {
-  if (!/^\d{4}-\d{2}$/.test(String(period))) {
+  if (!/^\d{4}-\d{2}$/.test(String(period)) || Number(String(period).slice(5, 7)) < 1 || Number(String(period).slice(5, 7)) > 12) {
     throw complianceError('INVALID_PERIOD_SHAPE', `dayOfNextMonth expects YYYY-MM, got '${period}'`);
   }
   const [y, m] = String(period).split('-').map(Number);
@@ -132,6 +141,7 @@ const DEADLINE_RULES = {
   // accounts with the NBB within 7 months of FYE
   'be-vat-monthly': (period) => dayOfNextMonth(period, 20),
   'be-quarterly': (period) => {
+    assertQuarter(period);
     const q = Number(String(period).split('-')[1].replace('Q', ''));
     const m = q * 3 + 1;
     const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
@@ -143,6 +153,7 @@ const DEADLINE_RULES = {
   // accounts filed (Offenlegung) 12 months after the balance-sheet date
   // (§ 325 HGB)
   'de-ustva-quarterly': (period) => {
+    assertQuarter(period);
     const q = Number(String(period).split('-')[1].replace('Q', ''));
     const m = q * 3 + 1;
     const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
@@ -154,6 +165,7 @@ const DEADLINE_RULES = {
   // following month (Q2 -> 1 Sep); annual report (class B) within 5 months
   // of FYE
   'dk-quarterly': (period) => {
+    assertQuarter(period);
     const q = Number(String(period).split('-')[1].replace('Q', ''));
     const m = q * 3 + 3;
     const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
@@ -164,6 +176,7 @@ const DEADLINE_RULES = {
   // after the quarter (Q1 -> 12 May); annual accounts FILED within 8
   // months of FYE (PRH; prepared within 4)
   'fi-quarterly': (period) => {
+    assertQuarter(period);
     const q = Number(String(period).split('-')[1].replace('Q', ''));
     const m = q * 3 + 2;
     const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
@@ -188,6 +201,7 @@ const DEADLINE_RULES = {
   // 17th; Q1 -> 12 May, Q2 -> 17 Aug, Q3 -> 12 Nov, Q4 -> 12 Feb next
   // year); annual report filed with Bolagsverket within 7 months of FYE
   'se-quarterly': (period) => {
+    assertQuarter(period);
     const q = Number(String(period).split('-')[1].replace('Q', ''));
     const m = q * 3 + 2;
     const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
@@ -279,7 +293,14 @@ export function complianceStatus(db, { year }) {
     } else if (ft.periodShape === 'YYYY-Pn') {
       // bi-monthly filings (Phase B, NO): 6 periods per year with a fixed
       // schedule (P1 -> 10 Apr ... P6 -> 10 Feb next year); the previous
-      // year's P6 falls in this calendar year
+      // year's P6 falls in this calendar year.
+      // NOTE (attribution convention): like the Q4 mirror in YYYY-Qn, P6 is
+      // listed under BOTH its period year (deadline in the next year) and
+      // the following year as prevP6 — the year view answers "what do I owe
+      // for this year's periods"; YYYY-MM instead single-lists December via
+      // prevDec. The two branches answer period-year vs deadline-year; both
+      // list every obligation exactly once per deadline. Kept as-is: the
+      // Q4/P6 mirror predates Phase B (NL quarterly behaviour).
       for (const pn of ['1', '2', '3', '4', '5', '6']) {
         const deadline = rule(`${year}-P${pn}`);
         if (deadline < `${year}-01-01`) continue;

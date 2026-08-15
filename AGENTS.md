@@ -56,7 +56,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio report sales [--year YYYY] [--by contact\|item]` | Sales revenue for a year: per contact (net/vat/gross via the totals engine) or per item (net after per-line discounts; invoice-level discounts not allocated per line). |
 | `bukio contact statement --id N [--as-of D]` | Opgave: invoices + payments + payables with a running balance (positive = contact owes you). |
 | `bukio report <cmd> --format csv\|xlsx [--out PATH]` | Export any report; xlsx requires `--out`. |
-| `bukio bank add --iban IBAN [--name N] [--account-code CODE] [--dry-run]` | Register a bank account (default ledger code 1100). |
+| `bukio bank add --iban IBAN [--name N] [--account-code CODE] [--dry-run]` | Register a bank account (default: the country profile's bank account, NL 1100). |
 | `bukio bank import --file F --iban IBAN [--dry-run]` | Import CAMT.053 XML or bank CSV (idempotent by hash). |
 | `bukio bank match auto [--dry-run]` / `suggest` / `link --tx --entry` / `post --tx --account` | Reconcile: auto-match to entries, or post new entries from unmatched transactions. |
 | `bukio bank list` / `transactions [--state]` / `ignore --tx` / `unignore --tx` | Account balances, transaction states, ignore/unignore (own transfers). |

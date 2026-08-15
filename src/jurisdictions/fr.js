@@ -137,6 +137,7 @@ export default {
     ],
     // debtors account for invoice postings (PCG 411 Clients)
     debtorsAccount: '411',
+    bankAccountDefault: '512',
     inferTaxonomy: null,
     // statutoryAccounts omitted — PCG bilan layout is a B-milestone
   },

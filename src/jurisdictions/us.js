@@ -121,6 +121,7 @@ export default {
     ],
     // debtors account for invoice postings
     debtorsAccount: '1100',
+    bankAccountDefault: '1000',
     inferTaxonomy: null,
     // statutoryAccounts omitted — US GAAP presentation is a B-milestone
   },

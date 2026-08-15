@@ -1407,6 +1407,22 @@ test('BE: compliance calendar — VAT on the 20th + annual accounts in 7 months'
 
 // --- Phase B expansion: DE profile (DATEV SKR 03, EUR) -----------------------
 
+test('DE: bank add defaults to the profile bank account (1200), not NL 1100 (review fix)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test GmbH', '--country', 'DE', '--legal-form', 'gmbh', '--registration-id', 'HRB123456', '--tax-id', 'DE123456789', '--vat', 'on']);
+  const r = cli(dbPath, ['bank', 'add', '--iban', 'DE89370400440532013000', '--name', 'Geschäftskonto']);
+  assert.equal(r.out.data.bank_account.account_code, '1200');
+  assert.equal(getProfile('DE').reporting.bankAccountDefault, '1200');
+});
+
+test('NL: bank add still defaults to 1100 (byte-identity)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--country', 'NL', '--legal-form', 'bv', '--vat', 'on']);
+  const r = cli(dbPath, ['bank', 'add', '--iban', 'NL91ABNA0417164300', '--name', 'Betaalrekening']);
+  assert.equal(r.out.data.bank_account.account_code, '1100');
+  assert.equal(getProfile('NL').reporting.bankAccountDefault, '1100');
+});
+
 test('DE: getProfile returns the DE profile (EUR, de-DE, SKR 03 data)', () => {
   const p = getProfile('DE');
   assert.equal(p.meta.country, 'DE');

@@ -165,6 +165,7 @@ export default {
     ],
     // debtors account for invoice postings (1701 Myyntisaamiset)
     debtorsAccount: '1701',
+    bankAccountDefault: '1910',
     inferTaxonomy: null,
     // statutoryAccounts omitted — tilinpäätös layout is a B-milestone
   },

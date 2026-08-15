@@ -152,6 +152,7 @@ export default {
     ],
     // debtors account for invoice postings (SKR 03 1400)
     debtorsAccount: '1400',
+    bankAccountDefault: '1200',
     inferTaxonomy: null,
     // statutoryAccounts omitted — HGB layout is a B-milestone
   },

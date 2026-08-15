@@ -726,12 +726,14 @@ function validateNl12Vereisten(db, invoice) {
 
 /**
  * Validate the Luxembourg invoice requirements (loi modifiée du 12 février
- * 1979 art. 66; RCS): seller name/legal form/seat, "R.C.S. Luxembourg" +
- * number, TVA number (when the supplier is registered), issue date +
- * sequential number, both parties' names + addresses, supply date,
- * qty/nature, price excl. VAT + tax base by rate, VAT by rate, exemption
- * reason, "auto-liquidation" note on reverse charge. The autorisation
- * d'établissement has no schema field yet (documented, not validated).
+ * 1979 art. 66; RCS) — the checks implemented here cover the PARTY fields:
+ * seller name/legal form/seat, "R.C.S. Luxembourg" + number, TVA number
+ * (when the supplier is registered), customer name/address/city, and the
+ * customer TVA id on reverse-charge lines. The content-level rules from the
+ * law (issue date, sequential number, supply date, qty/nature, price excl.
+ * VAT, exemption reason, auto-liquidation note) are enforced by the invoice
+ * builder itself, not re-checked here. The autorisation d'établissement has
+ * no schema field yet (documented, not validated).
  */
 function validateLuVereisten(db, invoice) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 10:39:32 UTC — **✅ 876 passing · 0 failing (876 tests)**
+**Latest run:** 2026-08-15 11:11:37 UTC — **✅ 878 passing · 0 failing (878 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-101 passing · 0 failing
+103 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -773,6 +773,8 @@
     - ✅ BE: init --country BE creates a Belgian company with the PCMN chart
     - ✅ BE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ BE: compliance calendar — VAT on the 20th + annual accounts in 7 months
+    - ✅ DE: bank add defaults to the profile bank account (1200), not NL 1100 (review fix)
+    - ✅ NL: bank add still defaults to 1100 (byte-identity)
     - ✅ DE: getProfile returns the DE profile (EUR, de-DE, SKR 03 data)
     - ✅ DE: PLANNED is empty (all ten markets landed)
     - ✅ DE: init --country DE creates a German company with the SKR 03 chart

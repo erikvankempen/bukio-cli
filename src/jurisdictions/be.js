@@ -154,6 +154,7 @@ export default {
     ],
     // debtors account for invoice postings (PCMN 400 Clients)
     debtorsAccount: '400',
+    bankAccountDefault: '550',
     inferTaxonomy: null,
     // statutoryAccounts omitted — NBB layout is a B-milestone
   },

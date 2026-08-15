@@ -143,6 +143,7 @@ export default {
     ],
     // debtors account for invoice postings (1210 Debitorer)
     debtorsAccount: '1210',
+    bankAccountDefault: '1110',
     inferTaxonomy: null,
     // statutoryAccounts omitted — skema layout is a B-milestone
   },

@@ -136,6 +136,7 @@ export default {
     ],
     // debtors account for invoice postings (research §7 convention)
     debtorsAccount: '1100',
+    bankAccountDefault: '1000',
     inferTaxonomy: null,
     // statutoryAccounts omitted — FRS 102/105 layouts are a B-milestone
   },

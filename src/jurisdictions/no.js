@@ -157,6 +157,7 @@ export default {
     ],
     // debtors account for invoice postings (1500 Kundefordringer)
     debtorsAccount: '1500',
+    bankAccountDefault: '1920',
     inferTaxonomy: null,
     // statutoryAccounts omitted — årsregnskap layout is a B-milestone
   },

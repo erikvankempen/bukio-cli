@@ -143,6 +143,7 @@ export default {
     ],
     // debtors account for invoice postings (PCN 4011 Clients)
     debtorsAccount: '4011',
+    bankAccountDefault: '5131',
     // LSC statutory layout (B2, abridged) — lines grouped by PCN class
     // PREFIXES per the official tableau de passage (docs-research/
     // lu-pcn-2020.md §8); side overlap resolved by the balans engine.
