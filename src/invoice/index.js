@@ -33,7 +33,10 @@ const DISC_RE = /^-(\d+(?:\.\d{1,2})?)(%?)$/;
 // the price, so price-only lines ("DESC @ 100") parse correctly while
 // unknown codes ('@99') still fail validation with VAT_CODE_NOT_FOUND.
 // union of all registered profiles' codes (validation against the ACTIVE
-// profile's list still happens downstream — see VAT_CODE_NOT_FOUND)
+// profile's list still happens downstream — see VAT_CODE_NOT_FOUND).
+// NOTE: a price-only line ending in a bare dotted rate ('Dienst @ 5.5')
+// now tokenizes the rate as a VAT code and fails INVALID_LINE — write two
+// decimals ('Dienst @ 5.50') or pass the code explicitly ('@ 5.50 @5.5').
 const KNOWN_VAT_CODES = new Set(allTaxCodes());
 function isVatCodeToken(token) {
   const t = token.toUpperCase();

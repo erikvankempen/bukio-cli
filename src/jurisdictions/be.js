@@ -186,9 +186,11 @@ export default {
   },
 
   // The BE minimum plan has no separate current-year result account: the
-  // result closes straight into overgedragen winst (140; a loss would go to
-  // 141). resultAccount == equityAccount makes the year-end appropriation
-  // entry post +result/-result on the same account (a harmless net-zero
-  // no-op) — the result lands in 140 via the close itself.
+  // result closes straight into overgedragen winst (140). The generic
+  // year-end engine always posts the appropriation on resultAccount 140
+  // (a loss as a debit on 140; 141 is never referenced), and with
+  // resultAccount == equityAccount the +result/-result legs cancel on the
+  // same account (a harmless net-zero no-op) — the result lands in 140 via
+  // the close itself.
   closing: { resultAccount: '140', equityAccount: '140' },
 };

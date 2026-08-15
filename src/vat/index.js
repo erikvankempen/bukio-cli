@@ -513,7 +513,7 @@ export function vatSettle(db, {
     throw vatError('VAT_SETTLE_DIRECTION', `receiving a refund on ${account} (te ontvangen) requires an INCOMING bank transaction, got ${txAmountCents} cents`);
   }
   if (!getAccountByCode(db, differenceAccount)) {
-    throw vatError('INVALID_DIFFERENCE_ACCOUNT', `difference account ${differenceAccount} does not exist (pick an expense account, e.g. ${VAT_DIFFERENCE_ACCOUNT_DEFAULT})`);
+    throw vatError('INVALID_DIFFERENCE_ACCOUNT', `difference account ${differenceAccount} does not exist (pick an expense account, e.g. ${tax.accounts.differenceDefault})`);
   }
 
   // rounding difference: +debit (loss, paid more than booked) / -credit (gain,

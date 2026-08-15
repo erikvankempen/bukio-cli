@@ -306,7 +306,7 @@ export function complianceStatus(db, { year }) {
       overdue: obligations.filter((o) => o.status === 'overdue').length,
       open: obligations.filter((o) => o.status === 'open').length,
     },
-    note: 'Assumes quarterly OB/ICP filing; adapt if you file monthly. Never auto-files.',
+    note: 'Deadlines follow the country profile\'s filingTypes (NL quarterly, BE monthly 20th, DE quarterly UStVA, NO bi-monthly, ...). Never auto-files.',
   };
 }
 

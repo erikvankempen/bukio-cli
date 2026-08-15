@@ -147,6 +147,11 @@ test('item guards: name/unit/price/vat/account', () => {
   assert.throws(() => createItem(db, { name: 'X', unit: 'weeks', unitPriceCents: 100, actor: 'agent:test' }), { code: 'INVALID_UNIT' });
   assert.throws(() => createItem(db, { name: 'X', unit: 'h', unitPriceCents: 0, actor: 'agent:test' }), { code: 'INVALID_PRICE' });
   assert.throws(() => createItem(db, { name: 'X', unit: 'h', unitPriceCents: 100, vatCode: '999', actor: 'agent:test' }), { code: 'VAT_CODE_NOT_FOUND' });
+  // dotted rates (FR 5.5/2.1) are FORMAT-valid after the parser fix — the
+  // NL fixture still rejects them semantically (VAT_CODE_NOT_FOUND), while
+  // malformed codes stay INVALID_VAT_CODE
+  assert.throws(() => createItem(db, { name: 'X', unit: 'h', unitPriceCents: 100, vatCode: '5.5', actor: 'agent:test' }), { code: 'VAT_CODE_NOT_FOUND' });
+  assert.throws(() => createItem(db, { name: 'X', unit: 'h', unitPriceCents: 100, vatCode: '5..5', actor: 'agent:test' }), { code: 'INVALID_VAT_CODE' });
   assert.throws(() => createItem(db, { name: 'X', unit: 'h', unitPriceCents: 100, glAccount: '9999', actor: 'agent:test' }), { code: 'ACCOUNT_NOT_FOUND' });
   assert.throws(() => updateItem(db, { id: 999, actor: 'agent:test' }), { code: 'ITEM_NOT_FOUND' });
   // dry-run writes nothing
