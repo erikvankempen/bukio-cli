@@ -66,13 +66,13 @@ test('getProfile throws COUNTRY_NOT_SUPPORTED for valid-but-planned countries', 
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
   }
-  // all Phase B markets are implemented — PLANNED is empty
-  assert.deepEqual([...PLANNED].sort(), []);
+  // Phase B expansion wave is planned (research/implementation in progress)
+  assert.deepEqual([...PLANNED].sort(), ['BE', 'DE', 'DK', 'FI', 'NO', 'SE']);
 });
 
 test('getProfile throws PROFILE_NOT_FOUND for unknown valid codes', () => {
   assert.throws(() => getProfile('ZZ'), (e) => e.code === 'PROFILE_NOT_FOUND');
-  assert.throws(() => getProfile('DE'), (e) => e.code === 'PROFILE_NOT_FOUND');
+  assert.throws(() => getProfile('LT'), (e) => e.code === 'PROFILE_NOT_FOUND');
 });
 
 test('profiles are deep-frozen (static data — no consumer may mutate)', () => {
@@ -182,11 +182,11 @@ test('resolveProfile defaults to NL when no company row exists yet', () => {
 });
 
 test('resolveProfile throws for unsupported / unknown company countries (decision §9.1.6)', () => {
-  const dbDE = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'DE'] });
+  const dbLT = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'LT'] });
   try {
-    assert.throws(() => resolveProfile(dbDE), (e) => e.code === 'PROFILE_NOT_FOUND');
+    assert.throws(() => resolveProfile(dbLT), (e) => e.code === 'PROFILE_NOT_FOUND');
   } finally {
-    dbDE.close();
+    dbLT.close();
   }
   const dbZZ = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'ZZ'] });
   try {
@@ -217,9 +217,9 @@ function tmpDb() {
   return path.join(dir, 'test.db');
 }
 
-test('M3 init: --country DE (valid code, no profile) is rejected with PROFILE_NOT_FOUND', () => {
+test('M3 init: --country LT (valid code, no profile) is rejected with PROFILE_NOT_FOUND', () => {
   const dbPath = tmpDb();
-  const r = cli(dbPath, ['init', '--name', 'Test BV', '--country', 'DE'], { expectFail: true });
+  const r = cli(dbPath, ['init', '--name', 'Test BV', '--country', 'LT'], { expectFail: true });
   assert.equal(r.code, 1);
   assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
 });
@@ -468,9 +468,9 @@ test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('B1: LU is implemented — PLANNED is empty (all Phase B markets landed)', () => {
+test('B1: LU is implemented — PLANNED is the Phase B expansion wave', () => {
   assert.ok(!PLANNED.includes('LU'));
-  assert.deepEqual([...PLANNED].sort(), []);
+  assert.deepEqual([...PLANNED].sort(), ['BE', 'DE', 'DK', 'FI', 'NO', 'SE']);
   assert.equal(getProfile('LU').meta.country, 'LU');
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
@@ -880,9 +880,9 @@ test('GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)', () =>
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['gb-9-months', 'gb-ct600']);
 });
 
-test('GB: PLANNED is empty (all Phase B markets landed)', () => {
+test('GB: PLANNED is the Phase B expansion wave (BE/DE/DK/FI/NO/SE)', () => {
   assert.ok(!PLANNED.includes('GB'));
-  assert.deepEqual([...PLANNED].sort(), []);
+  assert.deepEqual([...PLANNED].sort(), ['BE', 'DE', 'DK', 'FI', 'NO', 'SE']);
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
   }
@@ -992,9 +992,9 @@ test('FR: getProfile returns the FR profile (EUR, fr, PCG data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('FR: PLANNED is empty (all Phase B markets landed)', () => {
+test('FR: PLANNED is the Phase B expansion wave (BE/DE/DK/FI/NO/SE)', () => {
   assert.ok(!PLANNED.includes('FR'));
-  assert.deepEqual([...PLANNED].sort(), []);
+  assert.deepEqual([...PLANNED].sort(), ['BE', 'DE', 'DK', 'FI', 'NO', 'SE']);
 });
 
 test('FR: init --country FR creates a French company with the PCG chart', () => {
@@ -1077,8 +1077,8 @@ test('US: getProfile returns the US profile (USD, en-US, no federal VAT)', () =>
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['us-1120', 'us-941']);
 });
 
-test('US: PLANNED is empty — every market in the memo is implemented', () => {
-  assert.deepEqual([...PLANNED].sort(), []);
+test('US: PLANNED is the Phase B expansion wave (BE/DE/DK/FI/NO/SE)', () => {
+  assert.deepEqual([...PLANNED].sort(), ['BE', 'DE', 'DK', 'FI', 'NO', 'SE']);
   assert.equal(getProfile('US').meta.country, 'US');
 });
 

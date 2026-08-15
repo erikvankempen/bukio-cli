@@ -27,7 +27,7 @@ import nl from './nl.js';
 import us from './us.js';
 
 /** ISO 3166-1 alpha-2 country codes that are valid but not implemented yet. */
-export const PLANNED = [];
+export const PLANNED = ['BE', 'DE', 'DK', 'FI', 'NO', 'SE'];
 
 const PROFILES = {
   NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr), US: deepFreeze(us),
