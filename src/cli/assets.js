@@ -72,7 +72,7 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const plan = {
-            name: opts.name || `Standaard ${opts.lifeMonths} maanden ${opts.method}`, method: opts.method,
+            name: opts.name || `Standard ${opts.lifeMonths} months ${opts.method}`, method: opts.method,
             lifeMonths: Number(opts.lifeMonths), residualBp: Number(opts.residualBp),
           };
           if (ctx.dryRun) {
@@ -101,8 +101,8 @@ export function make(program) {
           output(ctx, { schemes }, (d) => {
             table(d.schemes.map((s) => ({ id: s.id, name: s.name, method: s.method, life_months: s.life_months, residual_bp: s.residual_bp })), [
               { key: 'id', label: 'id' }, { key: 'name', label: 'name' },
-              { key: 'method', label: 'methode' }, { key: 'life_months', label: 'maanden' },
-              { key: 'residual_bp', label: 'restwaarde bp' },
+              { key: 'method', label: 'method' }, { key: 'life_months', label: 'months' },
+              { key: 'residual_bp', label: 'residual value bp' },
             ]);
           });
         } finally {
@@ -198,9 +198,9 @@ export function make(program) {
           output(ctx, { assets: data }, (d) => {
             table(d.assets.map((a) => ({ ...a, purchase_price: formatAmount(a.purchase_price_cents) })), [
               { key: 'id', label: 'id' }, { key: 'name', label: 'name' },
-              { key: 'category', label: 'categorie' }, { key: 'status', label: 'status' },
-              { key: 'purchase_date', label: 'aanschaf' },
-              { key: 'purchase_price', label: 'waarde' }, { key: 'scheme', label: 'schema' },
+              { key: 'category', label: 'category' }, { key: 'status', label: 'status' },
+              { key: 'purchase_date', label: 'purchase' },
+              { key: 'purchase_price', label: 'value' }, { key: 'scheme', label: 'scheme' },
             ]);
           });
         } finally {

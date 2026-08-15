@@ -69,7 +69,7 @@ export function make(program) {
           });
           if (ctx.dryRun) {
             output(ctx, result, (d) => {
-              console.log(`plan: import journal — ${d.boekstukken} boekstukken / ${d.lines} lines${d.create_missing ? ' (create missing accounts)' : ''}`);
+              console.log(`plan: import journal — ${d.boekstukken} records / ${d.lines} lines${d.create_missing ? ' (create missing accounts)' : ''}`);
               for (const e of d.entries.slice(0, 10)) {
                 console.log(`  ${e.date}  ${e.boekstuk}  (${e.lines} line${e.lines === 1 ? '' : 's'})`);
               }
@@ -80,7 +80,7 @@ export function make(program) {
             return;
           }
           output(ctx, result, (d) => {
-            console.log(`imported ${d.imported} boekstukken${d.duplicates ? ` (${d.duplicates} duplicates skipped)` : ''}`);
+            console.log(`imported ${d.imported} records${d.duplicates ? ` (${d.duplicates} duplicates skipped)` : ''}`);
             if (d.accounts_created.length) {
               console.log(`created accounts: ${d.accounts_created.map((a) => `${a.code} (${a.type})`).join(', ')}`);
             }

@@ -101,7 +101,7 @@ export function make(program) {
       } catch (err) { fail(ctx, err); }
     });
 
-  const mandate = payments.command('mandate').description('SEPA direct-debit mandates (incassovolmacht)');
+  const mandate = payments.command('mandate').description('SEPA direct-debit mandates');
   mandate
     .command('add')
     .description('register a signed mandate for a contact')

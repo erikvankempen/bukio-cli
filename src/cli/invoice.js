@@ -106,7 +106,7 @@ export function make(program) {
     .option('--city <city>', 'city')
     .option('--country <code>', 'country code')
     .option('--email <email>', 'email')
-    .option('--vat-id <id>', 'customer btw-id')
+    .option('--vat-id <id>', 'customer tax id')
     .option('--kvk <kvk>', 'customer KVK number')
     .option('--iban <iban>', 'bank account (IBAN)')
     .option('--dry-run', 'show the plan without writing')
@@ -330,7 +330,7 @@ export function make(program) {
         const db = ensureDb(ctx);
         const locale = resolveLocale(ctx, db);
         try {
-                    const invoices = listInvoices(db, { status: opts.status ?? null, type: opts.type ?? null }).map(fmtInvoice);
+          const invoices = listInvoices(db, { status: opts.status ?? null, type: opts.type ?? null }).map(fmtInvoice);
           output(ctx, { invoices }, (d) => {
             table(d.invoices, [
               { key: 'id', label: '#' },
@@ -411,7 +411,6 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
-        const locale = resolveLocale(ctx, db);
         try {
           const inv = getInvoice(db, opts.id);
           if (!inv) throw Object.assign(new Error(`invoice ${opts.id} does not exist`), { code: 'NOT_FOUND' });

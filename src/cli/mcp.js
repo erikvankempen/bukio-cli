@@ -337,7 +337,7 @@ tool({
       date: { type: 'string' }, description: { type: 'string' },
       postings: { type: 'array', items: { type: 'string' }, description: 'CODE:AMOUNT[@VATCODE]' },
       currency: { type: 'string' }, rate: { type: 'string' },
-      source_ref: { type: 'string', description: 'boekstuk reference (source_ref on the entry)' },
+      source_ref: { type: 'string', description: 'journal reference (source_ref on the entry)' },
       post: { type: 'boolean' }, actor: { type: 'string' }, mode: { type: 'string' },
     }, required: ['date', 'description', 'postings'],
   },
