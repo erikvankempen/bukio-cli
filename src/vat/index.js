@@ -225,10 +225,10 @@ const OB_LAYOUTS = {
 
 export function obReadout(db, { period }) {
   requireVat(db);
-  const { tax } = resolveProfile(db);
-  const builder = OB_LAYOUTS[tax.returnLayout];
+  const profile = resolveProfile(db);
+  const builder = OB_LAYOUTS[profile.tax.returnLayout];
   if (!builder) {
-    throw vatError('FORMAT_NOT_SUPPORTED', `return layout '${tax.returnLayout}' has no builder (registered: ${Object.keys(OB_LAYOUTS).join(', ')})`);
+    throw vatError('FORMAT_NOT_SUPPORTED', `no VAT-return layout for ${profile.meta.country} yet (a B-milestone; registered: ${Object.keys(OB_LAYOUTS).join(', ')})`);
   }
   return builder(db, { period });
 }

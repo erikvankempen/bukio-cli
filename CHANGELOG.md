@@ -6,6 +6,33 @@ match `package.json` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
+## [Unreleased]
+
+### Added
+
+- **Phase C: AT Austria + IE Ireland** — two more jurisdiction profiles
+  (thirteen live):
+  - **AT** — Einheitskontenrahmen (EKR) chart (BMF SAF-T verified, 3-digit
+    codes zero-padded), USt 20/13/10, Kleinunternehmer ≤ €55K, UID
+    (ATU + 8 digits) / Peppol 9914, UVA quarterly (15th of the second
+    following month; monthly above €100K) + annual USt-Erklärung 30 Jun.
+  - **IE** — UK-style chart (no statutory chart), VAT 23/13.5/9/4.8/0,
+    registration thresholds €85K goods / €42.5K services, CRO + IE-format
+    VAT number / Peppol 9935, VAT3 bi-monthly returns (23rd of the month
+    after the period; the `YYYY-Pn` shape) + annual accounts/CT1 in 9 months.
+  - Research briefs at `docs-research/{at,ie}-profile.md`; strict dispatch
+    keeps the B-milestones loud (UVA/VAT3 return engines, UGB/CA 2014
+    accounts, SAF-T AT (OECD-style ≠ Auditfile), § 11 UStG / s. 108B VATCA
+    invoice rule sets).
+- **PLANNED now holds Phase D** (`IT`, `ES`, `PT`) — `init --country`
+  answers `COUNTRY_NOT_SUPPORTED` for them (CH remains parked).
+- **Profile-aware init output** — the `vat: module enabled` line shows the
+  profile's clearing accounts (NL 1500/2500, AT 2500/3500, IE 2110/2100, …)
+  instead of a hardcoded NL pair.
+- **Clearer B-milestone errors** — `FORMAT_NOT_SUPPORTED` now names the
+  country and the milestone ("no invoice compliance rule set for AT yet…",
+  "no VAT-return layout for IE yet…") instead of `'undefined'`.
+
 ## [0.16.0] — 2026-08-15
 
 ### Added

@@ -120,7 +120,17 @@ function renderInit(data) {
   console.log(`db:       ${data.db}`);
   console.log(`chart:    ${data.chart.accounts} accounts (default chart)`);
   if (data.chart.created != null) console.log(`seeded:   ${data.chart.created} new`);
-  if (data.company.vat_module) console.log('vat:      module enabled (incl. 1500/2500)');
+  if (data.company.vat_module) {
+    const profile = getProfile(data.company.country);
+    const ledger = profile.tax.accounts?.ledger ?? [];
+    if (ledger.length >= 2) {
+      console.log(`vat:      module enabled (clearing ${ledger[0].code}/${ledger[1].code})`);
+    } else {
+      // no VAT ledger (e.g. the US profile: system 'none', ledger []) —
+      // the module is on but there are no clearing accounts to name
+      console.log('vat:      module enabled');
+    }
+  }
   for (const w of data.warnings ?? []) console.error(`warning: ${w}`);
   console.log(data.dryRun ? '(dry run — nothing written)' : 'initialised.');
 }

@@ -696,7 +696,7 @@ export function validateCompliance(db, invoice) {
   const profile = resolveProfile(db);
   const rule = INVOICE_COMPLIANCE_RULES[profile.documents.invoiceCompliance];
   if (!rule) {
-    throw invoiceError('FORMAT_NOT_SUPPORTED', `invoice compliance rule '${profile.documents.invoiceCompliance}' has no implementation (registered: ${Object.keys(INVOICE_COMPLIANCE_RULES).join(', ')})`);
+    throw invoiceError('FORMAT_NOT_SUPPORTED', `no invoice compliance rule set for ${profile.meta.country} yet (a B-milestone; registered: ${Object.keys(INVOICE_COMPLIANCE_RULES).join(', ')})`);
   }
   return rule(db, invoice);
 }

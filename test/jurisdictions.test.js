@@ -68,8 +68,8 @@ test('getProfile throws COUNTRY_NOT_SUPPORTED for valid-but-planned countries', 
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
   }
-  // all ten markets are implemented — PLANNED is empty
-  assert.deepEqual([...PLANNED].sort(), []);
+  // Phase D markets (IT/ES/PT) are planned — PLANNED holds them
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
 });
 
 test('getProfile throws PROFILE_NOT_FOUND for unknown valid codes', () => {
@@ -470,9 +470,9 @@ test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('B1: LU is implemented — PLANNED is empty (all ten markets landed)', () => {
+test('B1: LU is implemented — PLANNED holds the Phase D markets', () => {
   assert.ok(!PLANNED.includes('LU'));
-  assert.deepEqual([...PLANNED].sort(), []);
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
   assert.equal(getProfile('LU').meta.country, 'LU');
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
@@ -1062,9 +1062,9 @@ test('GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)', () =>
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['gb-9-months', 'gb-ct600']);
 });
 
-test('GB: PLANNED is empty (all ten markets landed)', () => {
+test('GB: PLANNED holds the Phase D markets', () => {
   assert.ok(!PLANNED.includes('GB'));
-  assert.deepEqual([...PLANNED].sort(), []);
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
   }
@@ -1174,9 +1174,9 @@ test('FR: getProfile returns the FR profile (EUR, fr, PCG data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('FR: PLANNED is empty (all ten markets landed)', () => {
+test('FR: PLANNED holds the Phase D markets', () => {
   assert.ok(!PLANNED.includes('FR'));
-  assert.deepEqual([...PLANNED].sort(), []);
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
 });
 
 test('FR: init --country FR creates a French company with the PCG chart', () => {
@@ -1279,8 +1279,8 @@ test('US: getProfile returns the US profile (USD, en-US, no federal VAT)', () =>
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['us-1120', 'us-941']);
 });
 
-test('US: PLANNED is empty (all ten markets landed)', () => {
-  assert.deepEqual([...PLANNED].sort(), []);
+test('US: PLANNED holds the Phase D markets', () => {
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
   assert.equal(getProfile('US').meta.country, 'US');
 });
 
@@ -1290,6 +1290,11 @@ test('US: init --country US creates a USD company with the US chart', () => {
   assert.equal(r.out.data.company.country, 'US');
   assert.equal(r.out.data.company.base_currency, 'USD');
   assert.equal(r.out.data.company.locale, 'en');
+  // --vat on must not crash the init render: the US profile has NO VAT ledger
+  // (system 'none', ledger []) — the profile-aware clearing-account message
+  // falls back to a plain "module enabled" line (Phase C review finding).
+  const rVat = cli(tmpDb(), ['init', '--name', 'Acme LLC', '--country', 'US', '--legal-form', 'llc', '--vat', 'on']);
+  assert.equal(rVat.out.data.company.vat_module, 1);
   const db = openDb(dbPath);
   try {
     const accounts = db.prepare('SELECT code, name, taxonomy FROM accounts WHERE active = 1').all();
@@ -1385,9 +1390,9 @@ test('BE: getProfile returns the BE profile (EUR, nl-BE, PCN-BE data)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['be-vat-monthly', 'be-7-months']);
 });
 
-test('BE: PLANNED is empty (all ten markets landed)', () => {
+test('BE: PLANNED holds the Phase D markets', () => {
   assert.ok(!PLANNED.includes('BE'));
-  assert.deepEqual([...PLANNED].sort(), []);
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
 });
 
 test('BE: init --country BE creates a Belgian company with the PCMN chart', () => {
@@ -1513,9 +1518,9 @@ test('DE: getProfile returns the DE profile (EUR, de-DE, SKR 03 data)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['de-ustva-quarterly', 'de-annual-vat', 'de-12-months']);
 });
 
-test('DE: PLANNED is empty (all ten markets landed)', () => {
+test('DE: PLANNED holds the Phase D markets', () => {
   assert.ok(!PLANNED.includes('DE'));
-  assert.deepEqual([...PLANNED].sort(), []);
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
 });
 
 test('DE: init --country DE creates a German company with the SKR 03 chart', () => {
@@ -1627,9 +1632,9 @@ test('DK: getProfile returns the DK profile (DKK, da-DK, 25% VAT only)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['dk-quarterly', 'dk-5-months']);
 });
 
-test('DK: PLANNED is empty (all ten markets landed)', () => {
+test('DK: PLANNED holds the Phase D markets', () => {
   assert.ok(!PLANNED.includes('DK'));
-  assert.deepEqual([...PLANNED].sort(), []);
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
 });
 
 test('DK: init --country DK creates a Danish company with the kontoplan', () => {
@@ -1737,9 +1742,9 @@ test('FI: getProfile returns the FI profile (EUR, fi-FI, 25.5% VAT)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['fi-quarterly', 'fi-8-months']);
 });
 
-test('FI: PLANNED is empty (all ten markets landed)', () => {
+test('FI: PLANNED holds the Phase D markets', () => {
   assert.ok(!PLANNED.includes('FI'));
-  assert.deepEqual([...PLANNED].sort(), []);
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
 });
 
 test('FI: init --country FI creates a Finnish company with the model chart', () => {
@@ -1848,9 +1853,9 @@ test('NO: getProfile returns the NO profile (NOK, nb-NO, NS 4102)', () => {
   assert.equal(p.compliance.filingTypes[0].periodShape, 'YYYY-Pn'); // bi-monthly shape
 });
 
-test('NO: PLANNED is empty (all ten markets landed)', () => {
+test('NO: PLANNED holds the Phase D markets', () => {
   assert.ok(!PLANNED.includes('NO'));
-  assert.deepEqual([...PLANNED].sort(), []);
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
 });
 
 test('NO: init --country NO creates a Norwegian company with the NS 4102 chart', () => {
@@ -1961,9 +1966,9 @@ test('SE: getProfile returns the SE profile (SEK, sv-SE, BAS 2023)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['se-quarterly', 'se-7-months']);
 });
 
-test('SE: PLANNED is empty — every expansion market is implemented', () => {
+test('SE: PLANNED holds the Phase D markets', () => {
   assert.ok(!PLANNED.includes('SE'));
-  assert.deepEqual([...PLANNED].sort(), []);
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
 });
 
 test('SE: init --country SE creates a Swedish company with the BAS chart', () => {
@@ -2025,6 +2030,249 @@ test('SE: compliance calendar — quarterly VAT 12th of 2nd month (Aug 17th) + a
     assert.equal(obs.find((o) => o.type === 'ANNUAL_ACCOUNTS' && o.period === '2026').deadline, '2027-07-31');
     // no NL/LU/GB/FR/US/BE/DE/DK/FI/NO types leak into the SE calendar
     assert.ok(!obs.some((o) => ['OB', 'ICP', 'JAARREKENING', 'TVA', 'COMPTES_ANNUELS', 'CT600', 'FEDERAL_INCOME_TAX', 'PAYROLL_941', 'UMSATZSTEUER_VORANMELDUNG', 'UMSATZSTEUER_JAHRESERKLAERUNG'].includes(o.type)));
+  } finally {
+    db.close();
+  }
+});
+
+// --- Phase C: AT profile (Einheitskontenrahmen, EUR) ------------------------
+
+test('AT: getProfile returns the AT profile (EUR, de-AT, EKR data)', () => {
+  const p = getProfile('AT');
+  assert.equal(p.meta.country, 'AT');
+  assert.equal(p.meta.baseCurrency, 'EUR');
+  assert.equal(p.meta.locale, 'de-AT');
+  assert.ok(p.meta.legalForms.includes('gmbh'));
+  assert.ok(!p.meta.legalForms.includes('bv')); // NL form rejected
+  // Peppol scheme: 9914 = Österreichische UID (not 9930 DE / not 9944 NL)
+  assert.equal(p.identifiers.peppolSchemeId, '9914');
+  assert.ok(p.identifiers.vatIdFormat.test('ATU12345678'));
+  assert.ok(!p.identifiers.vatIdFormat.test('DE123456789'));
+  assert.equal(p.tax.standardRateBp, 2000);
+  assert.equal(p.tax.smallBusinessScheme, 'kleinunternehmer'); // €55K since 2025
+  // the first income account is the default sales account — the 20% Erlöse
+  // account for a VAT-registered GmbH (not a § 6 exemption account)
+  assert.equal(p.reporting.defaultChart.find((a) => a.type === 'income').code, '4000');
+  assert.deepEqual(p.tax.codes.map((c) => c.code), ['20', '13', '10', 'V', 'R', 'RE', 'M', 'P']);
+  // EKR VAT accounts: 2500 Vorsteuer (input) / 3500 Umsatzsteuer (output);
+  // settlement on 3500 (the EKR has single VAT accounts, no per-rate split)
+  assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['2500', '3500']);
+  assert.equal(p.tax.accounts.fileDefault, '3500');
+  assert.equal(p.reporting.debtorsAccount, '2000'); // Forderungen L+L Inland
+  // EKR closing: Jahresgewinn/-verlust 9350 -> Gewinnvortrag 9380
+  assert.equal(p.closing.resultAccount, '9350');
+  assert.equal(p.closing.equityAccount, '9380');
+  assert.equal(p.reporting.taxonomy, null);
+  // chart: EKR codes (3-digit codes zero-padded to bukio's 4-digit form)
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '2800' && a.name === 'Guthaben bei Kreditinstituten'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '2700' && a.name === 'Kassa'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '4000' && a.name === 'Erlöse 20 %'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '0620')); // zero-padded Büromaschinen
+  assert.ok(p.reporting.defaultChart.length >= 28);
+  // B-milestones stay unregistered (strict dispatch fails loudly)
+  assert.equal(p.tax.returnLayout, undefined);
+  assert.equal(p.reporting.format, undefined);
+  assert.equal(p.documents.invoiceCompliance, undefined);
+  assert.equal(p.documents.auditFile, undefined);
+  assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
+  assert.equal(p.documents.eInvoicing, 'peppol-bis-3.0');
+  // AT deadlines: UVA quarterly (15th of the second following month), annual
+  // VAT 30 June (electronic)
+  assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['at-uva-quarterly', 'at-annual-vat']);
+});
+
+test('AT: PLANNED holds the Phase D markets', () => {
+  assert.ok(!PLANNED.includes('AT'));
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
+});
+
+test('AT: init --country AT creates an Austrian company with the EKR chart', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Muster GmbH', '--country', 'AT', '--legal-form', 'gmbh', '--vat', 'on']);
+  assert.equal(r.out.data.company.country, 'AT');
+  assert.equal(r.out.data.company.base_currency, 'EUR');
+  assert.equal(r.out.data.company.locale, 'de-AT');
+  const db = openDb(dbPath);
+  try {
+    const accounts = db.prepare('SELECT code, name, taxonomy FROM accounts WHERE active = 1').all();
+    assert.ok(accounts.some((a) => a.code === '2800' && a.name === 'Guthaben bei Kreditinstituten'));
+    assert.ok(accounts.some((a) => a.code === '2500' && a.name === 'Vorsteuer'));
+    assert.ok(accounts.some((a) => a.code === '3500' && a.name === 'Umsatzsteuer'));
+    for (const a of accounts) assert.equal(a.taxonomy, null);
+    // Document language follows the profile — AT defaults to English (only
+    // nl* locales default to Dutch), explicit --language still overrides.
+    const c = createContact(db, { name: 'Kunde GmbH' });
+    const inv = createInvoice(db, { contactId: c.id, lines: ['Dienst @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
+    assert.equal(inv.language, 'en');
+    const invNl = createInvoice(db, { contactId: c.id, lines: ['Dienst @ 10.00'], date: '2026-08-11', language: 'nl', actor: 'agent:test' });
+    assert.equal(invNl.language, 'nl');
+  } finally {
+    db.close();
+  }
+  // NL legal form rejected for AT
+  const bad = cli(tmpDb(), ['init', '--name', 'X', '--country', 'AT', '--legal-form', 'bv'], { expectFail: true });
+  assert.equal(bad.out.error.code, 'INVALID_LEGAL_FORM');
+  // KOR is an NL-only scheme
+  const kor = cli(tmpDb(), ['init', '--name', 'X', '--country', 'AT', '--legal-form', 'gmbh', '--kor'], { expectFail: true });
+  assert.equal(kor.out.error.code, 'INVALID_VAT_CHOICE');
+});
+
+test('AT: strict dispatch — unregistered formats fail loudly (no fallback)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Muster GmbH', '--country', 'AT', '--legal-form', 'gmbh', '--vat', 'on']);
+  let r = cli(dbPath, ['financial-statements', 'report', '--year', '2026'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
+  r = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', '/tmp/xaf-at.xml'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED'); // SAF-T AT is a different schema
+  r = cli(dbPath, ['vat', 'readout', '--period', '2026-Q1'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED'); // UVA engine is a B-milestone
+  const db = openDb(dbPath);
+  try {
+    assert.throws(
+      () => validateCompliance(db, { invoice_type: 'invoice', lines: [] }),
+      (e) => e.code === 'FORMAT_NOT_SUPPORTED',
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('AT: compliance calendar — UVA 15th of second following month + annual VAT 30 Jun', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Muster GmbH', '--country', 'AT', '--legal-form', 'gmbh', '--vat', 'on']);
+  const db = openDb(dbPath);
+  try {
+    const r = complianceStatus(db, { year: 2026 });
+    const obs = r.obligations;
+    // quarterly UVA due the 15th of the SECOND following month (§ 21 UStG)
+    assert.equal(obs.find((o) => o.type === 'UMSATZSTEUER_VORANMELDUNG' && o.period === '2026-Q1').deadline, '2026-05-15');
+    assert.equal(obs.find((o) => o.type === 'UMSATZSTEUER_VORANMELDUNG' && o.period === '2026-Q2').deadline, '2026-08-15');
+    assert.equal(obs.find((o) => o.type === 'UMSATZSTEUER_VORANMELDUNG' && o.period === '2026-Q3').deadline, '2026-11-15');
+    assert.equal(obs.find((o) => o.type === 'UMSATZSTEUER_VORANMELDUNG' && o.period === '2026-Q4').deadline, '2027-02-15');
+    assert.equal(obs.find((o) => o.type === 'UMSATZSTEUER_VORANMELDUNG' && o.period === '2025-Q4').deadline, '2026-02-15');
+    // annual USt-Erklärung 30 June of the following year (electronic filing)
+    assert.equal(obs.find((o) => o.type === 'UMSATZSTEUER_JAHRESERKLAERUNG' && o.period === '2026').deadline, '2027-06-30');
+    // no NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE types leak into the AT calendar
+    assert.ok(!obs.some((o) => ['OB', 'ICP', 'JAARREKENING', 'TVA', 'COMPTES_ANNUELS', 'CT600', 'FEDERAL_INCOME_TAX', 'PAYROLL_941', 'VAT3', 'ANNUAL_ACCOUNTS', 'VAT'].includes(o.type)));
+  } finally {
+    db.close();
+  }
+});
+
+// --- Phase C: IE profile (UK-style chart, EUR, VAT3 bi-monthly) -------------
+
+test('IE: getProfile returns the IE profile (EUR, en, UK-style chart)', () => {
+  const p = getProfile('IE');
+  assert.equal(p.meta.country, 'IE');
+  assert.equal(p.meta.baseCurrency, 'EUR');
+  assert.equal(p.meta.locale, 'en');
+  assert.ok(p.meta.legalForms.includes('ltd'));
+  assert.ok(!p.meta.legalForms.includes('gmbh')); // AT form rejected
+  // Peppol scheme: 9935 = Ireland VAT number (not 9932 GB / 9944 NL)
+  assert.equal(p.identifiers.peppolSchemeId, '9935');
+  assert.ok(p.identifiers.vatIdFormat.test('IE1234567T'));
+  assert.ok(p.identifiers.vatIdFormat.test('IE1234567TW'));
+  assert.ok(!p.identifiers.vatIdFormat.test('DE123456789'));
+  assert.equal(p.tax.standardRateBp, 2300);
+  assert.equal(p.tax.smallBusinessScheme, 'threshold'); // €85K goods / €42.5K services
+  // the first income account is the default sales account
+  assert.equal(p.reporting.defaultChart.find((a) => a.type === 'income').code, '4000');
+  assert.deepEqual(p.tax.codes.map((c) => c.code), ['23', '13.5', '9', '4.8', '0', 'V', 'R', 'RE', 'M', 'P']);
+  // UK-style VAT control accounts: 2110 input / 2100 output; settlement 2120
+  assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['2110', '2100']);
+  assert.equal(p.tax.accounts.fileDefault, '2120');
+  assert.equal(p.reporting.debtorsAccount, '1100');
+  // closing: Profit/(loss) for the year 3300 -> P&L account 3200
+  assert.equal(p.closing.resultAccount, '3300');
+  assert.equal(p.closing.equityAccount, '3200');
+  assert.equal(p.reporting.taxonomy, null);
+  // chart: UK-style codes (1000s assets ... 7000s expenses)
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '1000' && a.name === 'Bank — current account'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '2100' && a.name === 'VAT on sales (output)'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '4000' && a.name === 'Sales — goods'));
+  assert.ok(p.reporting.defaultChart.length >= 35);
+  // B-milestones stay unregistered (strict dispatch fails loudly)
+  assert.equal(p.tax.returnLayout, undefined);
+  assert.equal(p.reporting.format, undefined);
+  assert.equal(p.documents.invoiceCompliance, undefined);
+  assert.equal(p.documents.auditFile, undefined);
+  assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
+  assert.equal(p.documents.eInvoicing, 'peppol-bis-3.0');
+  // IE deadlines: VAT3 bi-monthly (23rd), annual accounts + CT1 9 months
+  assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['ie-bimonthly', 'ie-9-months', 'ie-9-months']);
+});
+
+test('IE: PLANNED holds the Phase D markets', () => {
+  assert.ok(!PLANNED.includes('IE'));
+  assert.deepEqual([...PLANNED].sort(), ['ES', 'IT', 'PT']);
+});
+
+test('IE: init --country IE creates an Irish company with the UK-style chart', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Acme Ltd', '--country', 'IE', '--legal-form', 'ltd', '--vat', 'on']);
+  assert.equal(r.out.data.company.country, 'IE');
+  assert.equal(r.out.data.company.base_currency, 'EUR');
+  assert.equal(r.out.data.company.locale, 'en');
+  const db = openDb(dbPath);
+  try {
+    const accounts = db.prepare('SELECT code, name, taxonomy FROM accounts WHERE active = 1').all();
+    assert.ok(accounts.some((a) => a.code === '1000' && a.name === 'Bank — current account'));
+    assert.ok(accounts.some((a) => a.code === '2100' && a.name === 'VAT on sales (output)'));
+    assert.ok(accounts.some((a) => a.code === '2110' && a.name === 'VAT on purchases (reclaimable)'));
+    for (const a of accounts) assert.equal(a.taxonomy, null);
+    // Document language follows the profile — IE defaults to English
+    const c = createContact(db, { name: 'Customer Ltd' });
+    const inv = createInvoice(db, { contactId: c.id, lines: ['Service @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
+    assert.equal(inv.language, 'en');
+  } finally {
+    db.close();
+  }
+  // AT legal form rejected for IE
+  const bad = cli(tmpDb(), ['init', '--name', 'X', '--country', 'IE', '--legal-form', 'gmbh'], { expectFail: true });
+  assert.equal(bad.out.error.code, 'INVALID_LEGAL_FORM');
+  // KOR is an NL-only scheme
+  const kor = cli(tmpDb(), ['init', '--name', 'X', '--country', 'IE', '--legal-form', 'ltd', '--kor'], { expectFail: true });
+  assert.equal(kor.out.error.code, 'INVALID_VAT_CHOICE');
+});
+
+test('IE: strict dispatch — unregistered formats fail loudly (no fallback)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Acme Ltd', '--country', 'IE', '--legal-form', 'ltd', '--vat', 'on']);
+  let r = cli(dbPath, ['financial-statements', 'report', '--year', '2026'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
+  r = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', '/tmp/xaf-ie.xml'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
+  r = cli(dbPath, ['vat', 'readout', '--period', '2026-P1'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED'); // VAT3 9-box engine is a B-milestone
+  const db = openDb(dbPath);
+  try {
+    assert.throws(
+      () => validateCompliance(db, { invoice_type: 'invoice', lines: [] }),
+      (e) => e.code === 'FORMAT_NOT_SUPPORTED',
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('IE: compliance calendar — VAT3 bi-monthly 23rd + annual accounts/CT1 9 months', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Acme Ltd', '--country', 'IE', '--legal-form', 'ltd', '--vat', 'on']);
+  const db = openDb(dbPath);
+  try {
+    const r = complianceStatus(db, { year: 2026 });
+    const obs = r.obligations;
+    // VAT3 bi-monthly, due the 23rd of the month after the period end
+    assert.equal(obs.find((o) => o.type === 'VAT3' && o.period === '2026-P1').deadline, '2026-03-23');
+    assert.equal(obs.find((o) => o.type === 'VAT3' && o.period === '2026-P2').deadline, '2026-05-23');
+    assert.equal(obs.find((o) => o.type === 'VAT3' && o.period === '2026-P5').deadline, '2026-11-23');
+    assert.equal(obs.find((o) => o.type === 'VAT3' && o.period === '2026-P6').deadline, '2027-01-23');
+    assert.equal(obs.find((o) => o.type === 'VAT3' && o.period === '2025-P6').deadline, '2026-01-23');
+    // annual accounts + CT1 due 9 months after the FYE (12-31 -> 09-30)
+    assert.equal(obs.find((o) => o.type === 'ANNUAL_ACCOUNTS' && o.period === '2026').deadline, '2027-09-30');
+    assert.equal(obs.find((o) => o.type === 'CT1' && o.period === '2026').deadline, '2027-09-30');
+    // no NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE/AT types leak into the IE calendar
+    assert.ok(!obs.some((o) => ['OB', 'ICP', 'JAARREKENING', 'TVA', 'COMPTES_ANNUELS', 'CT600', 'FEDERAL_INCOME_TAX', 'PAYROLL_941', 'UMSATZSTEUER_VORANMELDUNG', 'UMSATZSTEUER_JAHRESERKLAERUNG', 'VAT'].includes(o.type)));
   } finally {
     db.close();
   }

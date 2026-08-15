@@ -210,6 +210,31 @@ const DEADLINE_RULES = {
     return `${y}-${String(month).padStart(2, '0')}-${day}`;
   },
   'se-7-months': (company, year) => monthsAfterFyEnd(company, year, 7),
+  // AT (research §10, BMF/usp.gv.at): UVA due the 15th of the SECOND
+  // following month — quarterly when prior-year turnover ≤ €100,000, monthly
+  // above (§ 21 UStG); the annual USt-Erklärung is due 30 June of the
+  // following year (mandatory electronic filing)
+  'at-uva-quarterly': (period) => {
+    assertQuarter(period);
+    const q = Number(String(period).split('-')[1].replace('Q', ''));
+    const m = q * 3 + 2;
+    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
+    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-15`;
+  },
+  'at-annual-vat': (company, year) => `${Number(year) + 1}-06-30`,
+  // IE (research §8, Revenue): VAT3 bi-monthly returns — six two-month
+  // periods per year, due the 23rd of the month after the period end
+  // (P1 Jan/Feb -> 23 Mar ... P6 Nov/Dec -> 23 Jan next year); annual
+  // accounts + Form B1 to the CRO and Form CT1 to Revenue within 9 months
+  // of the FYE / period end
+  'ie-bimonthly': (period) => {
+    const m = String(period).match(/^(\d{4})-P([1-6])$/);
+    if (!m) throw complianceError('INVALID_PERIOD', `period '${period}' must be YYYY-Pn`);
+    const schedule = { 1: '03-23', 2: '05-23', 3: '07-23', 4: '09-23', 5: '11-23' };
+    if (m[2] === '6') return `${Number(m[1]) + 1}-01-23`;
+    return `${m[1]}-${schedule[m[2]]}`;
+  },
+  'ie-9-months': (company, year) => monthsAfterFyEnd(company, year, 9),
 };
 
 export function isFiled(db, type, period) {
