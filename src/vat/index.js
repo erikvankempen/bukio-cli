@@ -369,9 +369,14 @@ export function vatNetPosition(db) {
 function ensureVatSettlementAccount(db, account) {
   const resolved = resolveVatSettlementAccount(db, account);
   if (!getAccountByCode(db, resolved)) {
+    // taxonomy code only when the profile's chart is taxonomy-mapped (NL RGS:
+    // BSCH.12); stamping the NL code on PCN/SKR-03/PCG charts would pollute
+    // the taxonomy column with a foreign scheme
+    const { reporting } = resolveProfile(db);
+    const usesTaxonomy = reporting.defaultChart.some((a) => a.taxonomyCode);
     createAccount(db, {
       code: resolved, name: vatSettlementAccountName(db), type: 'liability',
-      normalBalance: 'credit', taxonomyCode: 'BSCH.12',
+      normalBalance: 'credit', taxonomyCode: usesTaxonomy ? 'BSCH.12' : null,
     });
   }
   return resolved;

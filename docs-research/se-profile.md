@@ -77,6 +77,7 @@ No statutory chart in Sweden; BAS 2023 (BAS-kontoplan, from [bas.se](https://www
 | 2621 | Utgående moms på försäljning inom Sverige, 12 % (Output VAT 12 %) | liability | credit |
 | 2631 | Utgående moms på försäljning inom Sverige, 6 % (Output VAT 6 %) | liability | credit |
 | 2641 | Debiterad ingående moms (Input VAT) | liability | debit |
+> NOTE (implementation): 2641 is typed `asset` in the profile (not `liability` as tabulated) — the engine's VAT ledger requires one asset (input) + one liability (output) account; the input balance lives on 2641. Documented in src/jurisdictions/se.js.
 | 2650 | Redovisningskonto för moms (VAT settlement) | liability | credit |
 | 2710 | Personalskatt (Withholding tax on salaries) | liability | credit |
 | 2730 | Lagstadgade sociala avgifter o särskild löneskatt (Statutory social contributions) | liability | credit |

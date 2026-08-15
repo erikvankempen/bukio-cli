@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 11:11:37 UTC — **✅ 878 passing · 0 failing (878 tests)**
+**Latest run:** 2026-08-15 12:35:20 UTC — **✅ 879 passing · 0 failing (879 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-103 passing · 0 failing
+104 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -746,6 +746,7 @@
     - ✅ BE: vat file/settle resolve the profile defaults via the CLI (review fix)
     - ✅ B2: LU P&L — mixed leftover (custom expense + custom income) reconciles (review fix)
     - ✅ B2: LU P&L — 73x subventions on line 4 and custom expenses subtract (review fix)
+    - ✅ B2: cross-border buyer EndpointID uses the BUYER country scheme (review fix)
     - ✅ B2: LU financial statements reject the NL model (INVALID_MODEL)
     - ✅ B2: NL financial statements keep the klein default (byte-identical)
     - ✅ B5: LU compliance calendar — TVA on the 15th + annual accounts in 7 months
@@ -805,7 +806,7 @@
 
 2 passing · 0 failing
 
-    - ✅ migrations 021+022 upgrade a 020 DB: new columns, CHECK removals, renames, backfill
+    - ✅ migrations 021-024 upgrade a 020 DB: new columns, CHECK removals, renames, backfill
     - ✅ migration 021 keeps company data lossless across the rebuild
 
 ### money.test.js — integer-cents money helpers

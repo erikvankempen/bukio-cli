@@ -176,7 +176,7 @@ export default {
       },
     },
     inferTaxonomy: null, // PCN keyword inference is a B-milestone
-    // statutoryAccounts omitted — LU LSC layout is B2
+    // statutoryAccounts registered below (format 'lu-lsc' + models)
   },
 
   compliance: {

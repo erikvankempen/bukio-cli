@@ -12,7 +12,7 @@
 // Full Peppol validation (Schematron) is out of scope — verify via a
 // validation service before production use.
 import { computeInvoiceTotals, formatQty, lineDiscountCents } from './index.js';
-import { resolveProfile } from '../jurisdictions/index.js';
+import { getProfile, resolveProfile } from '../jurisdictions/index.js';
 
 function esc(s) {
   // XML 1.0 valid chars: strip control chars (0x00-0x08, 0x0B, 0x0C,
@@ -84,6 +84,22 @@ export function invoiceToUbl(db, invoice) {
     throw Object.assign(new Error(`e-invoicing format '${documents.eInvoicing}' has no builder (registered: ${Object.keys(EINVOICING_BUILDERS).join(', ')})`), { code: 'FORMAT_NOT_SUPPORTED' });
   }
   return builder(db, invoice, profile);
+}
+
+// The buyer's EndpointID scheme must identify the registry that ISSUED the
+// buyer's number (e.g. NL KVK -> 9944, LU RCS -> 0195). Same-market buyers
+// (contact.country unset or equal) use the seller's scheme; a cross-border
+// buyer in one of the registered markets resolves their own country's
+// scheme; buyers in unregistered markets keep the seller's scheme (the
+// number is then best-effort, same as the pre-existing behaviour).
+function buyerSchemeId(profile, contact) {
+  const buyerCountry = (contact.country ?? profile.meta.country).toUpperCase();
+  if (buyerCountry === profile.meta.country.toUpperCase()) return profile.identifiers.peppolSchemeId;
+  try {
+    return getProfile(buyerCountry).identifiers?.peppolSchemeId ?? profile.identifiers.peppolSchemeId;
+  } catch {
+    return profile.identifiers.peppolSchemeId;
+  }
 }
 
 function buildPeppolBis30(db, invoice, profile) {
@@ -247,7 +263,7 @@ function buildPeppolBis30(db, invoice, profile) {
   <cac:AccountingSupplierParty>${addressBlock(company.name, company, company.tax_id, profile.identifiers.peppolSchemeId, profile.meta.country)}</cac:AccountingSupplierParty>
   <cac:AccountingCustomerParty>
     <cac:Party>
-      ${contact.kvk ? `<cbc:EndpointID schemeID="${profile.identifiers.peppolSchemeId}">${esc(contact.kvk)}</cbc:EndpointID>` : ''}
+      ${contact.kvk ? `<cbc:EndpointID schemeID="${buyerSchemeId(profile, contact)}">${esc(contact.kvk)}</cbc:EndpointID>` : ''}
       <cac:PartyName><cbc:Name>${esc(contact.name)}</cbc:Name></cac:PartyName>
       <cac:PostalAddress>
         <cbc:StreetName>${esc(contact.address ?? '')}</cbc:StreetName>

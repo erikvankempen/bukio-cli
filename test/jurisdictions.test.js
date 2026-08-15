@@ -812,6 +812,40 @@ test('B2: LU P&L — 73x subventions on line 4 and custom expenses subtract (rev
   assert.equal(fs.pnl.resultat_cents, 970000, 'resultat = CA + subventions - charges - custom expense');
 });
 
+test('B2: cross-border buyer EndpointID uses the BUYER country scheme (review fix)', () => {
+  // LU seller + NL buyer: the buyer's KVK was issued by the Dutch KVK
+  // registry -> scheme 9944, NOT the seller's LU RCS scheme (0195)
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--registration-id', 'B123456', '--tax-id', 'LU12345678', '--vat', 'on']);
+  cli(dbPath, ['company', 'update', '--address', '1 rue du Test', '--postal-code', 'L-1234', '--city', 'Luxembourg']);
+  const db = openDb(dbPath);
+  try {
+    const nl = createContact(db, {
+      name: 'ACME B.V.', address: 'Straat 1', postalCode: '1000 AA', city: 'Amsterdam',
+      country: 'NL', vatId: 'NL999999999B01', kvk: '98765432', actor: 'agent:test',
+    });
+    const inv = createInvoice(db, {
+      contactId: nl.id, date: '2026-07-10', lines: ['1x Prestation @ 100.00 @17'], actor: 'agent:test',
+    });
+    finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+    const xml = invoiceToUbl(db, getInvoice(db, inv.id));
+    assert.match(xml, /<cbc:EndpointID schemeID="9944">98765432<\/cbc:EndpointID>/);
+    // same-market buyer (no country -> LU) still gets the seller's 0195
+    const lu = createContact(db, {
+      name: 'Sàrl LU', address: '1 rue du Test', postalCode: 'L-1234', city: 'Luxembourg',
+      vatId: 'LU99999999', kvk: 'B123456', actor: 'agent:test',
+    });
+    const inv2 = createInvoice(db, {
+      contactId: lu.id, date: '2026-07-10', lines: ['1x Prestation @ 100.00 @17'], actor: 'agent:test',
+    });
+    finalizeInvoice(db, { id: inv2.id, actor: 'agent:test' });
+    const xml2 = invoiceToUbl(db, getInvoice(db, inv2.id));
+    assert.match(xml2, /<cbc:EndpointID schemeID="0195">B123456<\/cbc:EndpointID>/);
+  } finally {
+    db.close();
+  }
+});
+
 test('B2: LU financial statements reject the NL model (INVALID_MODEL)', () => {
   const dbPath = tmpDb();
   cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);

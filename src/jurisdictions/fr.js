@@ -130,8 +130,11 @@ export default {
       { code: '661', name: 'Charges d\'intérêts', type: 'expense', normalBalance: 'debit' },
       { code: '681', name: 'Dotations aux amortissements', type: 'expense', normalBalance: 'debit' },
       { code: '695', name: 'Impôts sur les bénéfices', type: 'expense', normalBalance: 'debit' },
-      { code: '701', name: 'Ventes de produits finis', type: 'income', normalBalance: 'credit' },
+      // 706 first: postingDefaults picks the first income account as the
+      // default sales account — for the service-focused SME market that is
+      // 'Prestations de services', not the product-sales account (701)
       { code: '706', name: 'Prestations de services', type: 'income', normalBalance: 'credit' },
+      { code: '701', name: 'Ventes de produits finis', type: 'income', normalBalance: 'credit' },
       { code: '707', name: 'Ventes de marchandises', type: 'income', normalBalance: 'credit' },
       { code: '708', name: 'Produits des activités annexes', type: 'income', normalBalance: 'credit' },
     ],
