@@ -13,6 +13,7 @@ import {
 } from '../vat/index.js';
 import { getTransaction, linkTransaction } from '../bank/index.js';
 import { ensureDb, makeCtx, output, fail, table, dbError } from './util.js';
+import { t, resolveLocale } from '../i18n/index.js';
 import { validateDate } from '../core/entries.js';
 
 import { toEurPostings, resolveRate } from '../fx/index.js';
@@ -260,19 +261,21 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const result = vatFile(db, {
             account: opts.account ?? null, period: opts.period ?? null,
             desc: opts.desc ?? null, actor: ctx.actor, dryRun: ctx.dryRun,
+            locale: resolveLocale(ctx, db),
           });
           output(ctx, result, (d) => {
             if (d.dryRun) {
-              console.log(`plan: reclassify ${formatAmount(d.liability_cents)} ${d.owe ? 'payable' : 'receivable'} to ${d.account}`);
+              console.log(`plan: reclassify ${formatAmount(d.liability_cents)} ${t('dir.' + (d.owe ? 'payable' : 'receivable'), {}, locale)} to ${d.account}`);
               for (const p of d.postings) console.log(`  ${p.code}  ${formatAmount(p.amount_cents)}`);
               console.log('(dry run — nothing written)');
               return;
             }
-            console.log(`entry #${d.entry_id}  reclassified ${formatAmount(d.liability_cents)} ${d.owe ? 'payable' : 'receivable'} to ${d.account}`);
+            console.log(`entry #${d.entry_id}  reclassified ${formatAmount(d.liability_cents)} ${t('dir.' + (d.owe ? 'payable' : 'receivable'), {}, locale)} to ${d.account}`);
             for (const p of d.postings) console.log(`  ${p.code}  ${formatAmount(p.amount_cents)}`);
           });
         } finally {
@@ -296,6 +299,7 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const txId = Number(opts.tx);
           const tx = getTransaction(db, txId);
@@ -309,9 +313,10 @@ export function make(program) {
               account: opts.account ?? null,
               differenceAccount: opts.differenceAccount ?? null,
               period: opts.period ?? null, desc: opts.desc ?? null, actor: ctx.actor, dryRun: true,
+              locale: resolveLocale(ctx, db),
             });
             output(ctx, { ...result, tx_id: tx.id }, (d) => {
-              console.log(`plan: settle ${formatAmount(d.paid_cents)} against VAT payable ${formatAmount(d.liability_cents)} on ${d.account} (${d.owe ? 'payable' : 'receivable'})`);
+              console.log(`plan: settle ${formatAmount(d.paid_cents)} against VAT payable ${formatAmount(d.liability_cents)} on ${d.account} (${t('dir.' + (d.owe ? 'payable' : 'receivable'), {}, locale)})`);
               for (const p of d.postings) console.log(`  ${p.code}  ${formatAmount(p.amount_cents)}`);
               console.log(`  rounding difference -> ${d.difference_account}: ${formatAmount(d.difference_cents)}`);
               console.log('(dry run — nothing written)');
@@ -327,13 +332,14 @@ export function make(program) {
               account: opts.account ?? null,
               differenceAccount: opts.differenceAccount ?? null,
               period: opts.period ?? null, desc: opts.desc ?? null, actor: ctx.actor, dryRun: false,
+              locale: resolveLocale(ctx, db),
             });
             linkTransaction(db, { txId, entryId: result.entry_id, method: 'manual', actor: ctx.actor });
             return result;
           })();
           const linked = getTransaction(db, txId);
           output(ctx, { ...settled, tx: { id: tx.id, date: tx.date, amount: formatAmount(tx.amount_cents), state: linked.state } }, (d) => {
-            console.log(`entry #${d.entry_id}  settled VAT return payment of ${formatAmount(d.paid_cents)} against ${d.account} (${d.owe ? 'payable' : 'receivable'})`);
+            console.log(`entry #${d.entry_id}  settled VAT return payment of ${formatAmount(d.paid_cents)} against ${d.account} (${t('dir.' + (d.owe ? 'payable' : 'receivable'), {}, locale)})`);
             for (const p of d.postings) console.log(`  ${p.code}  ${formatAmount(p.amount_cents)}`);
             console.log(`  rounding difference -> ${d.difference_account}: ${formatAmount(d.difference_cents)}  (tx #${d.tx.id} matched)`);
           });

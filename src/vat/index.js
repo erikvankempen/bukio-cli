@@ -10,6 +10,7 @@
 // VAT ledger legs) and computes the OB-aangifte fields for manual filing.
 import { vatError } from './errors.js';
 import { createAccount, getAccountByCode } from '../core/accounts.js';
+import { t } from '../i18n/index.js';
 import { createEntry, parsePostingSpecs, postEntry } from '../core/entries.js';
 import { formatAmount } from '../core/money.js';
 import { getProfile, resolveProfile } from '../jurisdictions/index.js';
@@ -438,7 +439,7 @@ function resolveVatSettlementAccount(db, account) {
  * whole euros, and the cent-level difference is settled to the P&L later
  * (vatSettle), never by distorting the VAT clearing accounts.
  */
-export function vatFile(db, { account = null, period = null, desc = null, actor = 'human', dryRun = false }) {
+export function vatFile(db, { account = null, period = null, desc = null, actor = 'human', dryRun = false, locale = 'en' }) {
   requireVat(db);
   const { tax } = resolveProfile(db);
   account = account ?? tax.accounts.fileDefault;
@@ -470,7 +471,11 @@ export function vatFile(db, { account = null, period = null, desc = null, actor 
   ].filter((p) => p.amountCents !== 0);
   const owe = net > 0;
   const liability = Math.abs(net);
-  const description = desc ?? `VAT return${period ? ` ${period}` : ''} — transfer to ${account} (${owe ? 'payable' : 'receivable'})`;
+  const description = desc ?? t('vat.file.description', {
+    period: period ? ` ${period}` : '',
+    account,
+    direction: owe ? t('dir.payable', {}, locale) : t('dir.receivable', {}, locale),
+  }, locale);
 
   if (dryRun) {
     return {
@@ -508,7 +513,7 @@ export function vatFile(db, { account = null, period = null, desc = null, actor 
 export function vatSettle(db, {
   txAmountCents, txDate, bankAccountCode, account = null,
   differenceAccount = null,
-  period = null, desc = null, actor = 'human', dryRun = false,
+  period = null, desc = null, actor = 'human', dryRun = false, locale = 'en',
 }) {
   requireVat(db);
   const { tax } = resolveProfile(db);
@@ -547,7 +552,11 @@ export function vatSettle(db, {
     { code: bankAccountCode, amountCents: txAmountCents },
   ];
   if (difference !== 0) postings.push({ code: differenceAccount, amountCents: difference });
-  const description = desc ?? `VAT return payment${period ? ` ${period}` : ''} — ${vatSettlementAccountName(db)} (rounding difference ${formatAmount(difference)})`;
+  const description = desc ?? t('vat.settle.description', {
+    period: period ? ` ${period}` : '',
+    account: vatSettlementAccountName(db),
+    amount: formatAmount(difference),
+  }, locale);
 
   if (dryRun) {
     return {

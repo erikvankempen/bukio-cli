@@ -11,6 +11,7 @@ import {
   createContact, updateContact, createInvoice, creditInvoice, finalizeInvoice, getInvoice,
   formatQty, invoiceReminders, listContacts, listInvoices, markPaid, contactStatement,
 } from '../invoice/index.js';
+import { t, resolveLocale } from '../i18n/index.js';
 import { invoiceToPdf } from '../invoice/pdf.js';
 import { invoiceToUbl } from '../invoice/ubl.js';
 import { sendPeppolInvoice } from '../invoice/peppol.js';
@@ -328,16 +329,17 @@ export function make(program) {
       try {
         const db = ensureDb(ctx);
         try {
+          const locale = resolveLocale(ctx, db);
           const invoices = listInvoices(db, { status: opts.status ?? null, type: opts.type ?? null }).map(fmtInvoice);
           output(ctx, { invoices }, (d) => {
             table(d.invoices, [
               { key: 'id', label: '#' },
-              { key: 'invoice_number', label: 'nummer' },
-              { key: 'invoice_type', label: 'type' },
-              { key: 'date', label: 'datum' },
-              { key: 'contact_name', label: 'klant' },
-              { key: 'gross', label: 'totaal' },
-              { key: 'status', label: 'status' },
+              { key: 'invoice_number', label: t('invlist.number', {}, locale) },
+              { key: 'invoice_type', label: t('invlist.type', {}, locale) },
+              { key: 'date', label: t('invlist.date', {}, locale) },
+              { key: 'contact_name', label: t('invlist.customer', {}, locale) },
+              { key: 'gross', label: t('invlist.total', {}, locale) },
+              { key: 'status', label: t('invlist.status', {}, locale) },
             ]);
           });
         } finally {
@@ -364,8 +366,8 @@ export function make(program) {
             console.log(`${i.invoice_number ?? 'concept'} [${i.status}] ${i.date} — ${i.contact_name}`);
             for (const l of i.lines) console.log(`  ${l.line_no}. ${l.description}  ${l.quantity}x ${l.unit_price}${l.vat_code ? ` @${l.vat_code}` : ''} = ${l.amount}`);
             console.log(`  net ${i.net} / vat ${i.vat} / total ${i.gross}`);
-            for (const p of i.payments) console.log(`  paid ${p.date}: ${p.amount} (${p.method})`);
-            if (i.outstanding_cents > 0) console.log(`  outstanding: ${formatAmount(i.outstanding_cents)}`);
+            for (const p of i.payments) console.log(`  ${t('entry.paid', { date: p.date, amount: p.amount, method: p.method }, locale)}`);
+            if (i.outstanding_cents > 0) console.log(`  ${t('entry.outstanding', { amount: formatAmount(i.outstanding_cents) }, locale)}`);
           });
         } finally {
           db.close();
@@ -580,32 +582,31 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const result = invoiceReminders(db, { withinDays: Number(opts.withinDays) });
+          const locale = resolveLocale(ctx, db);
           if (opts.draftEmails) {
             const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
             result.reminders = result.reminders.map((r) => {
               const to = r.contact_email;
-              const subject = `Payment reminder invoice ${r.invoice_number}`;
-              const lines = [
-                `Dear ${r.contact_name},`,
-                '',
-                `Invoice ${r.invoice_number} still has ${r.outstanding} outstanding (due ${r.due_date}).`,
-                company?.iban ? `Please transfer the amount to IBAN ${company.iban} with reference ${r.invoice_number}.` : `Please transfer the outstanding amount with reference ${r.invoice_number}.`,
-                '',
-                'Kind regards,',
-                company?.name ?? ' ',
-              ];
+              const subject = t('email.reminderSubject', { number: r.invoice_number }, locale);
+              const transfer = company?.iban
+                ? t('email.reminderTransferIban', { iban: company.iban, number: r.invoice_number }, locale)
+                : t('email.reminderTransferPlain', { number: r.invoice_number }, locale);
+              const lines = t('email.reminderBody', {
+                name: r.contact_name, number: r.invoice_number,
+                outstanding: r.outstanding, dueDate: r.due_date, transfer, company: company?.name ?? ' ',
+              }, locale).split('\n');
               return { ...r, draft_email: { to, subject, body: lines.join('\n') } };
             });
           }
           output(ctx, result, (d) => {
-            if (!d.count) { console.log(`no reminders as of ${d.as_of}`); return; }
+            if (!d.count) { console.log(t('reminder.none', { date: d.as_of }, locale)); return; }
             table(d.reminders, [
-              { key: 'invoice_number', label: 'invoice' },
-              { key: 'contact_name', label: 'customer' },
+              { key: 'invoice_number', label: t('invlist.number', {}, locale) },
+              { key: 'contact_name', label: t('invlist.customer', {}, locale) },
               { key: 'due_date', label: 'due_date' },
-              { key: 'days_overdue', label: 'days' },
+              { key: 'days_overdue', label: t('invlist.days', {}, locale) },
               { key: 'outstanding', label: 'outstanding' },
-              { key: 'remind', label: 'reminder' },
+              { key: 'remind', label: t('invlist.reminder', {}, locale) },
             ]);
             if (opts.draftEmails) {
               for (const r of d.reminders) {

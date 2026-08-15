@@ -11,6 +11,7 @@ import { jaarrekening } from '../report/jaarrekening.js';
 import { jaarrekeningToPdf } from '../report/jaarrekening-pdf.js';
 import { icpReadout } from '../icp/index.js';
 import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { t, resolveLocale } from '../i18n/index.js';
 
 export function make(program) {
   const yearEnd = program.command('year-end').description('annual close (afsluiting boekjaar)');
@@ -23,11 +24,12 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const result = yearEndClose(db, { year: opts.year, actor: ctx.actor, dryRun: ctx.dryRun });
           if (result.dryRun) {
             output(ctx, result, (d) => {
-              console.log(`plan: close ${d.year} — result ${formatAmount(d.result_cents)}${d.create_9900 ? ' (creates account 9900)' : ''}`);
+              console.log(t('yearend.plan', { year: d.year, amount: formatAmount(d.result_cents), extra: d.create_9900 ? ' (creates account 9900)' : '' }, locale));
               for (const e of d.entries) {
                 console.log(`  ${e.description}`);
                 for (const p of e.postings) console.log(`    ${p.code}  ${formatAmount(p.amountCents).padStart(12)}`);
@@ -38,7 +40,7 @@ export function make(program) {
           }
           output(ctx, result, (d) => {
             if (!d.closed) { console.log(d.message); return; }
-            console.log(`${d.year} closed — result ${formatAmount(d.result_cents)} (entries #${d.entries.map((e) => e.id).join(', #')}, posted)`);
+            console.log(t('yearend.closed', { year: d.year, amount: formatAmount(d.result_cents), entries: d.entries.map((e) => e.id).join(', #') }, locale));
           });
         } finally {
           db.close();
@@ -55,11 +57,12 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const s = yearEndStatus(db, { year: opts.year });
           output(ctx, { status: s }, (d) => {
             const st = d.status;
-            console.log(`${st.year}: ${st.closed ? 'CLOSED' : 'open'} — result ${formatAmount(st.result_cents)}`);
+            console.log(t('yearend.status', { year: st.year, state: st.closed ? 'CLOSED' : 'open', amount: formatAmount(st.result_cents) }, locale));
             for (const a of st.accounts) console.log(`  ${a.code}  ${a.name.padEnd(30)} ${formatAmount(a.net_cents)}`);
             for (const e of st.closing_entries) console.log(`  closing entry #${e.id} ${e.date} "${e.description}"`);
           });
@@ -147,6 +150,7 @@ export function make(program) {
       const ctx = makeCtx(command);
       try {
         const db = ensureDb(ctx);
+        const locale = resolveLocale(ctx, db);
         try {
           const r = icpReadout(db, { period: opts.period });
           output(ctx, r, (d) => {
