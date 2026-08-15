@@ -80,6 +80,18 @@ function luAnnualAccountsDeadline(company, year) {
   const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
   return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 }
+// Last day of the month N months after the fiscal-year-end month of the
+// fiscal year ENDING in `year` (Companies House / HMRC style deadlines).
+function monthsAfterFyEnd(company, year, n) {
+  const fy = company.fiscal_year_end || '12-31';
+  const parts = String(fy).split('-');
+  const mm = Number(parts[parts.length - 2]);
+  const total = mm + n;
+  const y = Number(year) + Math.floor((total - 1) / 12);
+  const m = ((total - 1) % 12) + 1;
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+}
 const DEADLINE_RULES = {
   'nl-quarterly': (period) => quarterDeadline(period).deadline,
   'nl-13-months': (company, year) => jaarrekeningDeadline(company, year),
@@ -87,6 +99,10 @@ const DEADLINE_RULES = {
   'lu-monthly': luMonthlyDeadline,
   'lu-annual': (company, year) => `${Number(year) + 1}-03-01`, // TVA annual return, 1 March next year
   'lu-7-months': luAnnualAccountsDeadline,
+  // GB (Companies House, CA 2006 s.442): annual accounts 9 months after
+  // FYE; CT600 corporation tax return 12 months after the period end
+  'gb-9-months': (company, year) => monthsAfterFyEnd(company, year, 9),
+  'gb-ct600': (company, year) => monthsAfterFyEnd(company, year, 12),
 };
 
 export function isFiled(db, type, period) {

@@ -66,11 +66,11 @@ test('getProfile throws COUNTRY_NOT_SUPPORTED for valid-but-planned countries', 
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
   }
-  assert.ok(PLANNED.includes('GB'));
   assert.ok(PLANNED.includes('US'));
   assert.ok(PLANNED.includes('FR'));
-  // LU is implemented (Phase B1) — it must NOT be in PLANNED
+  // LU (Phase B1) and GB (Phase B) are implemented — not in PLANNED
   assert.ok(!PLANNED.includes('LU'));
+  assert.ok(!PLANNED.includes('GB'));
 });
 
 test('getProfile throws PROFILE_NOT_FOUND for unknown valid codes', () => {
@@ -185,11 +185,11 @@ test('resolveProfile defaults to NL when no company row exists yet', () => {
 });
 
 test('resolveProfile throws for unsupported / unknown company countries (decision §9.1.6)', () => {
-  const dbGB = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'GB'] });
+  const dbUS = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'US'] });
   try {
-    assert.throws(() => resolveProfile(dbGB), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
+    assert.throws(() => resolveProfile(dbUS), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
   } finally {
-    dbGB.close();
+    dbUS.close();
   }
   const dbZZ = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'ZZ'] });
   try {
@@ -220,9 +220,9 @@ function tmpDb() {
   return path.join(dir, 'test.db');
 }
 
-test('M3 init: --country GB is rejected with COUNTRY_NOT_SUPPORTED', () => {
+test('M3 init: --country US (still planned) is rejected with COUNTRY_NOT_SUPPORTED', () => {
   const dbPath = tmpDb();
-  const r = cli(dbPath, ['init', '--name', 'Test BV', '--country', 'GB'], { expectFail: true });
+  const r = cli(dbPath, ['init', '--name', 'Test BV', '--country', 'US'], { expectFail: true });
   assert.equal(r.code, 1);
   assert.equal(r.out.error.code, 'COUNTRY_NOT_SUPPORTED');
 });
@@ -471,9 +471,9 @@ test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('B1: LU is implemented — PLANNED is now GB/US/FR only', () => {
+test('B1: LU is implemented — PLANNED is now US/FR only', () => {
   assert.ok(!PLANNED.includes('LU'));
-  assert.deepEqual([...PLANNED].sort(), ['FR', 'GB', 'US']);
+  assert.deepEqual([...PLANNED].sort(), ['FR', 'US']);
   assert.equal(getProfile('LU').meta.country, 'LU');
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
@@ -846,4 +846,113 @@ test('B3: NL XAF export is unchanged (byte-identical, xaf-auditfile-4.0)', () =>
   assert.match(xml, /<Xaf xmlns="http:\/\/www\.auditfiles\.nl\/XAF\/4\.0">/);
   assert.match(xml, /<RekeningCode>1200<\/RekeningCode>/);
   assert.ok(!xml.includes('<AuditFile>'), 'NL still emits the Dutch XAF, never FAIA');
+});
+
+// --- Phase B: GB profile (UK conventions, GBP) ------------------------------
+
+test('GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)', () => {
+  const p = getProfile('GB');
+  assert.equal(p.meta.country, 'GB');
+  assert.equal(p.meta.baseCurrency, 'GBP');
+  assert.equal(p.meta.locale, 'en-GB');
+  assert.equal(p.meta.defaultFiscalYearEnd, '03-31'); // tax-year aligned
+  assert.ok(p.meta.legalForms.includes('private-limited-company'));
+  assert.ok(!p.meta.legalForms.includes('bv')); // NL form rejected
+  assert.equal(p.tax.standardRateBp, 2000);
+  assert.equal(p.tax.smallBusinessScheme, 'flat-rate');
+  assert.deepEqual(p.tax.codes.map((c) => c.code), ['20', '5', '0', 'V', 'R', 'M', 'P']);
+  // VAT control accounts per the UK chart convention
+  assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['2110', '2100']);
+  assert.equal(p.reporting.debtorsAccount, '1100');
+  // UK closing: current-year result 3300 -> retained earnings 3200
+  assert.equal(p.closing.resultAccount, '3300');
+  assert.equal(p.closing.equityAccount, '3200');
+  assert.equal(p.reporting.taxonomy, null); // no statutory taxonomy
+  // chart per the QuickBooks/Xero convention (research §7)
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '1000' && a.name === 'Bank — current account'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '4000' && a.name === 'Sales — goods'));
+  assert.ok(p.reporting.defaultChart.length >= 40);
+  // B-milestones stay unregistered (strict dispatch fails loudly)
+  assert.equal(p.tax.returnLayout, undefined);
+  assert.equal(p.reporting.format, undefined);
+  assert.equal(p.documents.invoiceCompliance, undefined);
+  assert.equal(p.documents.eInvoicing, undefined); // 2029 mandate, no Peppol scheme yet
+  assert.equal(p.documents.auditFile, undefined);
+  assert.deepEqual(p.exchange.paymentFormats, []); // SEPA is not a domestic rail
+  // GB deadlines: annual accounts 9 months after FYE, CT600 12 months
+  assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['gb-9-months', 'gb-ct600']);
+});
+
+test('GB: PLANNED is now US/FR only', () => {
+  assert.ok(!PLANNED.includes('GB'));
+  assert.deepEqual([...PLANNED].sort(), ['FR', 'US']);
+  for (const cc of PLANNED) {
+    assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
+  }
+});
+
+test('GB: init --country GB creates a GBP company with the UK chart', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Test Ltd', '--country', 'GB', '--legal-form', 'private-limited-company', '--vat', 'on']);
+  assert.equal(r.out.data.company.country, 'GB');
+  assert.equal(r.out.data.company.base_currency, 'GBP');
+  assert.equal(r.out.data.company.locale, 'en-GB');
+  const db = openDb(dbPath);
+  try {
+    const accounts = db.prepare('SELECT code, name, taxonomy FROM accounts WHERE active = 1').all();
+    assert.ok(accounts.some((a) => a.code === '1000' && a.name === 'Bank — current account'));
+    assert.ok(accounts.some((a) => a.code === '4000' && a.name === 'Sales — goods'));
+    assert.ok(accounts.some((a) => a.code === '1100' && a.name === 'Trade debtors (accounts receivable)'));
+    // no statutory taxonomy: GB account rows carry null
+    for (const a of accounts) assert.equal(a.taxonomy, null);
+  } finally {
+    db.close();
+  }
+  // NL legal form rejected for GB
+  const bad = cli(tmpDb(), ['init', '--name', 'X', '--country', 'GB', '--legal-form', 'bv'], { expectFail: true });
+  assert.equal(bad.out.error.code, 'INVALID_LEGAL_FORM');
+  // KOR is an NL-only scheme
+  const kor = cli(tmpDb(), ['init', '--name', 'X', '--country', 'GB', '--legal-form', 'private-limited-company', '--kor'], { expectFail: true });
+  assert.equal(kor.out.error.code, 'INVALID_VAT_CHOICE');
+});
+
+test('GB: strict dispatch — unregistered formats fail loudly (no fallback)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test Ltd', '--country', 'GB', '--legal-form', 'private-limited-company', '--vat', 'on']);
+  // financial statements: FRS 102/105 iXBRL is a B-milestone
+  let r = cli(dbPath, ['financial-statements', 'report', '--year', '2026'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
+  // XAF export: no UK SAF-T
+  r = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', '/tmp/xaf-gb.xml'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
+  // VAT readout: the 9-box return engine is a B-milestone
+  r = cli(dbPath, ['vat', 'readout', '--period', '2026-Q1'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
+  // invoice compliance: reg. 14 rule set is a B-milestone
+  const db = openDb(dbPath);
+  try {
+    assert.throws(
+      () => validateCompliance(db, { invoice_type: 'invoice', lines: [] }),
+      (e) => e.code === 'FORMAT_NOT_SUPPORTED',
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('GB: compliance calendar — annual accounts in 9 months, CT600 in 12', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test Ltd', '--country', 'GB', '--legal-form', 'private-limited-company', '--vat', 'on']);
+  const db = openDb(dbPath);
+  try {
+    const r = complianceStatus(db, { year: 2026 });
+    const obs = r.obligations;
+    // FY ending 2026-03-31: accounts due 2026-12-31 (+9 months), CT600 2027-03-31 (+12)
+    assert.equal(obs.find((o) => o.type === 'ANNUAL_ACCOUNTS' && o.period === '2026').deadline, '2026-12-31');
+    assert.equal(obs.find((o) => o.type === 'CT600' && o.period === '2026').deadline, '2027-03-31');
+    // no NL or LU types leak into the GB calendar
+    assert.ok(!obs.some((o) => ['OB', 'ICP', 'JAARREKENING', 'TVA', 'COMPTES_ANNUELS'].includes(o.type)));
+  } finally {
+    db.close();
+  }
 });
