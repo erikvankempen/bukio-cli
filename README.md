@@ -376,7 +376,7 @@ Per-account debit/credit/net totals from **posted** entries, with a final BALANC
 
 ### `bukio report balance-sheet`
 
-Balance sheet as of a date, grouped by RGS hoofdgroep (Materiële vaste activa, Voorraden, Vorderingen, Liquide middelen / Eigen vermogen, Kortlopende schulden, …). Includes the computed **Nog te verdelen resultaat** (net result of income/expense accounts). Invariant: **total assets = total liabilities + equity + result** — the report says `BALANCED` or `UNBALANCED!`. (`balans` is a deprecated alias.)
+Balance sheet as of a date, grouped by RGS hoofdgroep (Materiële vaste activa, Voorraden, Vorderingen, Liquide middelen / Eigen vermogen, Kortlopende schulden, …). Includes the computed **undistributed result** (net result of income/expense accounts). Invariant: **total assets = total liabilities + equity + result** — the report says `BALANCED` or `UNBALANCED!`. (`balans` is a deprecated alias.)
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -386,7 +386,7 @@ Balance sheet as of a date, grouped by RGS hoofdgroep (Materiële vaste activa, 
 
 ### `bukio report pnl`
 
-Winst- en verliesrekening for a period, grouped by RGS hoofdgroep (Omzet, Inkoopwaarde van de omzet, Personeelskosten, Afschrijvingen, Overige bedrijfskosten, Financiële baten en lasten, …). Reports revenue, costs and **Netto resultaat**.
+Profit and loss statement for a period, grouped by RGS hoofdgroep (Omzet, Inkoopwaarde van de omzet, Personeelskosten, Afschrijvingen, Overige bedrijfskosten, Financiële baten en lasten, …). Reports revenue, costs and **net result**.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -422,7 +422,7 @@ Open-items and revenue analytics (v0.14) — all exportable with `--format csv|x
 |---------|---------|
 | `report aging [--as-of D] [--kind debtors\|creditors\|both]` | Open items per contact bucketed by days past due (current/30/60/90+); creditors show `in_batch` amounts separately — the agent's daily cash pulse |
 | `report sales --year YYYY [--by contact\|item]` | Sales revenue: per contact (net/vat/gross via the totals engine) or per item (net after per-line discounts; invoice-level discounts are not allocated per line) |
-| `contact statement --id N [--as-of D]` | Opgave: the contact's invoices + payments + payables with a running balance (positive = they owe you) |
+| `contact statement --id N [--as-of D]` | Statement (alias: `opgave`): the contact's invoices + payments + payables with a running balance (positive = they owe you) |
 
 ```bash
 bukio report aging --kind debtors --format csv --out ~/exports/aging.csv
@@ -542,7 +542,7 @@ Outgoing invoicing (FR3) — compliant with the 12 verplichte factuurvereisten, 
 
 | Command | Purpose |
 |---------|---------|
-| `contact add --name N [--address] [--postal-code] [--city] [--vat-id] [--kvk] [--email]` | Add a customer (vat-id required when btw verlegd) |
+| `contact add --name N [--address] [--postal-code] [--city] [--vat-id] [--kvk] [--email]` | Add a customer (VAT id required when reverse charge) |
 | `contact list` | List contacts |
 | `item add --name N [--description] [--unit h\|day\|month\|unit\|session\|km\|kg\|project] --price P [--vat] [--gl]` / `item list` / `item show --id` / `item update --id [--price] [--unit] [--vat] [--gl] [--deactivate]` | **Items catalog (v0.13)**: reusable products/services; invoice lines snapshot the price/VAT at creation, so later edits never rewrite existing invoices; `--deactivate` blocks new invoices (existing keep their snapshots) |
 | `invoice create --contact <id> --lines "2x Consultancy @ 150.00 @21,1x Rapportage @ 400.00 @9" --date YYYY-MM-DD [--due-days 30] [--reference] [--dry-run]` | Create a draft invoice. Line spec: `[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]` — fractional quantities (`1.5x`), per-line discounts (`@-10%` or `@-25.00`) |
@@ -554,11 +554,11 @@ Outgoing invoicing (FR3) — compliant with the 12 verplichte factuurvereisten, 
 | `invoice ubl --id N [--out PATH]` | Export **UBL 2.1 / Peppol BIS 3.0 (EN 16931)** XML |
 | `invoice credit --id N [--reason]` | Create a credit note (draft) from a finalized invoice (inherits language + discounts) |
 | `invoice pay --id N --date [--amount]` | Record a payment (tracking; the posting comes from the bank flow) |
-| `contact statement --id N [--as-of D]` | **Opgave (v0.14)**: the contact's invoices + payments + payables with a running balance |
+| `contact statement --id N [--as-of D]` | **Statement (alias `opgave`, v0.14)**: the contact's invoices + payments + payables with a running balance |
 | `invoice email --id N [--to] [--subject] [--body] [--no-pdf] [--dry-run]` | **Email the finalized invoice PDF (v0.14)** via SMTP (`BUKIO_SMTP_HOST/PORT/USER/PASS/FROM` env). Delivery is audited (`invoice.email`); dry-run renders + validates but sends nothing. Status is `sent` from finalize onward |
 | `invoice peppol-send --id N [--endpoint] [--dry-run]` | POST the UBL to a Peppol access-point provider (`BUKIO_PEPPOL_ENDPOINT` + `BUKIO_PEPPOL_TOKEN` env) |
 
-**Compliance (validated at finalize):** supplier name/KvK/btw-id/address/postal/city (set at `init`), invoice date, sequential number, customer name+address+city, line descriptions/quantities/prices, VAT rate + amount per rate, totals, and the customer's btw-id when a line carries `@R`/`@RE` (btw verlegd). Missing data fails with `SUPPLIER_INCOMPLETE` / `CUSTOMER_INCOMPLETE` / `CUSTOMER_VAT_REQUIRED`.
+**Compliance (validated at finalize):** supplier name/KvK/btw-id/address/postal/city (set at `init`), invoice date, sequential number, customer name+address+city, line descriptions/quantities/prices, VAT rate + amount per rate, totals, and the customer's VAT id when a line carries `@R`/`@RE` (reverse charge). Missing data fails with `SUPPLIER_INCOMPLETE` / `CUSTOMER_INCOMPLETE` / `CUSTOMER_VAT_REQUIRED`.
 
 **Payment matching:** `bank match auto` now recognizes incoming payments against unpaid sales invoices (exact outstanding amount, oldest due first) — it marks the invoice paid, posts Bank/Debiteuren, and reconciles the transaction. The OB readout picks up invoiced sales automatically.
 

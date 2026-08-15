@@ -151,7 +151,7 @@ export function make(program) {
             ...d.liabilities_and_equity.sections.flatMap((s) => s.accounts.map((a) => ({
               side: 'passiva', rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
             }))),
-            { side: 'passiva', rgs: '', group: 'Nog te verdelen resultaat', code: '', name: '', amount: d.liabilities_and_equity.result },
+            { side: 'passiva', rgs: '', group: 'undistributed result', code: '', name: '', amount: d.liabilities_and_equity.result },
           ];
           await emitReport(ctx, opts, data, {
             csvColumns: [
@@ -182,7 +182,7 @@ export function make(program) {
                 for (const a of s.accounts) console.log(`    ${a.code}  ${a.name.padEnd(30)} ${fmt(a.balance_cents)}`);
                 console.log(`    ${''.padEnd(32)} ${fmt(s.total_cents)}`);
               }
-              console.log(`  Nog te verdelen resultaat  ${d.liabilities_and_equity.result}`);
+              console.log(`  undistributed result  ${d.liabilities_and_equity.result}`);
               console.log(`  totaal passiva: ${d.liabilities_and_equity.total}`);
               console.log(d.balanced ? 'BALANCED' : 'UNBALANCED!');
             },
@@ -225,7 +225,7 @@ export function make(program) {
             ...d.sections.flatMap((s) => s.accounts.map((a) => ({
               rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.amount_cents),
             }))),
-            { rgs: '', group: 'Netto resultaat', code: '', name: '', amount: d.result },
+            { rgs: '', group: 'net result', code: '', name: '', amount: d.result },
           ];
           await emitReport(ctx, opts, data, {
             csvColumns: [
@@ -234,7 +234,7 @@ export function make(program) {
             ],
             csvRows: flatRows,
             sheets: (d) => [{
-              name: 'Winst en verlies',
+              name: 'Profit and loss',
               columns: [
                 { header: 'rgs', key: 'rgs' }, { header: 'group', key: 'group' },
                 { header: 'code', key: 'code' }, { header: 'name', key: 'name' }, { header: 'amount', key: 'amount' },
@@ -242,15 +242,15 @@ export function make(program) {
               rows: flatRows(d),
             }],
             render: (d) => {
-              console.log(`WINST- EN VERLIESREKENING ${d.from} .. ${d.to}`);
+              console.log(`PROFIT AND LOSS ${d.from} .. ${d.to}`);
               for (const s of d.sections) {
                 console.log(`  ${s.label} (${s.taxonomy_code})`);
                 for (const a of s.accounts) console.log(`    ${a.code}  ${a.name.padEnd(30)} ${fmt(a.amount_cents)}`);
                 console.log(`    ${''.padEnd(32)} ${fmt(s.total_cents)}`);
               }
-              console.log(`  opbrengsten: ${d.revenue}`);
-              console.log(`  kosten:      ${d.costs}`);
-              console.log(`  resultaat:   ${d.result}`);
+              console.log(`  revenue: ${d.revenue}`);
+              console.log(`  costs:      ${d.costs}`);
+              console.log(`  result:     ${d.result}`);
             },
           });
         } finally {

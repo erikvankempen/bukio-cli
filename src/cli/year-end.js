@@ -27,7 +27,7 @@ export function make(program) {
           const result = yearEndClose(db, { year: opts.year, actor: ctx.actor, dryRun: ctx.dryRun });
           if (result.dryRun) {
             output(ctx, result, (d) => {
-              console.log(`plan: close ${d.year} — resultaat ${formatAmount(d.result_cents)}${d.create_9900 ? ' (creates account 9900)' : ''}`);
+              console.log(`plan: close ${d.year} — result ${formatAmount(d.result_cents)}${d.create_9900 ? ' (creates account 9900)' : ''}`);
               for (const e of d.entries) {
                 console.log(`  ${e.description}`);
                 for (const p of e.postings) console.log(`    ${p.code}  ${formatAmount(p.amountCents).padStart(12)}`);
@@ -38,7 +38,7 @@ export function make(program) {
           }
           output(ctx, result, (d) => {
             if (!d.closed) { console.log(d.message); return; }
-            console.log(`${d.year} closed — resultaat ${formatAmount(d.result_cents)} (entries #${d.entries.map((e) => e.id).join(', #')}, posted)`);
+            console.log(`${d.year} closed — result ${formatAmount(d.result_cents)} (entries #${d.entries.map((e) => e.id).join(', #')}, posted)`);
           });
         } finally {
           db.close();
@@ -59,7 +59,7 @@ export function make(program) {
           const s = yearEndStatus(db, { year: opts.year });
           output(ctx, { status: s }, (d) => {
             const st = d.status;
-            console.log(`${st.year}: ${st.closed ? 'CLOSED' : 'open'} — resultaat ${formatAmount(st.result_cents)}`);
+            console.log(`${st.year}: ${st.closed ? 'CLOSED' : 'open'} — result ${formatAmount(st.result_cents)}`);
             for (const a of st.accounts) console.log(`  ${a.code}  ${a.name.padEnd(30)} ${formatAmount(a.net_cents)}`);
             for (const e of st.closing_entries) console.log(`  closing entry #${e.id} ${e.date} "${e.description}"`);
           });
@@ -141,7 +141,7 @@ export function make(program) {
   const icp = program.command('icp').description('ICP listing (intracommunautaire prestaties)');
   icp
     .command('readout')
-    .description('EU btw-verlegde supplies per customer for the ICP listing (manual filing aid)')
+    .description('EU reverse-charge supplies per customer for the ICP listing (manual filing aid)')
     .requiredOption('--period <yyyy-qn>', 'quarter, e.g. 2026-Q3')
     .action((opts, command) => {
       const ctx = makeCtx(command);

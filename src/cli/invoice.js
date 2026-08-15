@@ -65,7 +65,7 @@ export function make(program) {
     .option('--city <city>', 'city')
     .option('--country <code>', 'country code', 'NL')
     .option('--email <email>', 'email')
-    .option('--vat-id <id>', 'customer btw-id (required for btw verlegd)')
+    .option('--vat-id <id>', 'customer VAT id (required for reverse charge)')
     .option('--kvk <kvk>', 'customer KVK number')
     .option('--iban <iban>', 'bank account (IBAN) — needed to include the contact in payment batches')
     .option('--dry-run', 'validate without writing')
@@ -165,7 +165,7 @@ export function make(program) {
 
   contact
     .command('statement')
-    .description('opgave: invoices + payments + payables with a running balance')
+    .description('statement: invoices + payments + payables with a running balance')
     .requiredOption('--id <id>', 'contact id')
     .option('--as-of <yyyy-mm-dd>', 'statement date (default: today)')
     .option('--format <format>', 'json|csv|xlsx|human')
@@ -365,7 +365,7 @@ export function make(program) {
             for (const l of i.lines) console.log(`  ${l.line_no}. ${l.description}  ${l.quantity}x ${l.unit_price}${l.vat_code ? ` @${l.vat_code}` : ''} = ${l.amount}`);
             console.log(`  net ${i.net} / btw ${i.vat} / totaal ${i.gross}`);
             for (const p of i.payments) console.log(`  betaald ${p.date}: ${p.amount} (${p.method})`);
-            if (i.outstanding_cents > 0) console.log(`  openstaand: ${formatAmount(i.outstanding_cents)}`);
+            if (i.outstanding_cents > 0) console.log(`  outstanding: ${formatAmount(i.outstanding_cents)}`);
           });
         } finally {
           db.close();
@@ -584,14 +584,14 @@ export function make(program) {
             const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
             result.reminders = result.reminders.map((r) => {
               const to = r.contact_email;
-              const subject = `Betalingsherinnering factuur ${r.invoice_number}`;
+              const subject = `Payment reminder invoice ${r.invoice_number}`;
               const lines = [
-                `Beste ${r.contact_name},`,
+                `Dear ${r.contact_name},`,
                 '',
-                `Voor factuur ${r.invoice_number} staat nog ${r.outstanding} open (vervaldatum ${r.due_date}).`,
-                company?.iban ? `Wilt u dit bedrag overmaken naar IBAN ${company.iban} o.v.v. ${r.invoice_number}?` : `Wilt u het openstaande bedrag overmaken o.v.v. ${r.invoice_number}?`,
+                `Invoice ${r.invoice_number} still has ${r.outstanding} outstanding (due ${r.due_date}).`,
+                company?.iban ? `Please transfer the amount to IBAN ${company.iban} with reference ${r.invoice_number}.` : `Please transfer the outstanding amount with reference ${r.invoice_number}.`,
                 '',
-                'Met vriendelijke groet,',
+                'Kind regards,',
                 company?.name ?? ' ',
               ];
               return { ...r, draft_email: { to, subject, body: lines.join('\n') } };
@@ -602,9 +602,9 @@ export function make(program) {
             table(d.reminders, [
               { key: 'invoice_number', label: 'factuur' },
               { key: 'contact_name', label: 'klant' },
-              { key: 'due_date', label: 'vervaldatum' },
+              { key: 'due_date', label: 'due_date' },
               { key: 'days_overdue', label: 'dagen' },
-              { key: 'outstanding', label: 'openstaand' },
+              { key: 'outstanding', label: 'outstanding' },
               { key: 'remind', label: 'herinnering' },
             ]);
             if (opts.draftEmails) {

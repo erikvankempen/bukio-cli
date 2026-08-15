@@ -54,7 +54,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio report journal [--year YYYY]` | Journal export (one row per posting). |
 | `bukio report aging [--as-of D] [--kind debtors\|creditors\|both]` | Open items per contact, bucketed by days past due (current/30/60/90+); creditors show `in_batch` separately. |
 | `bukio report sales [--year YYYY] [--by contact\|item]` | Sales revenue for a year: per contact (net/vat/gross via the totals engine) or per item (net after per-line discounts; invoice-level discounts not allocated per line). |
-| `bukio contact statement --id N [--as-of D]` | Opgave: invoices + payments + payables with a running balance (positive = contact owes you). |
+| `bukio contact statement --id N [--as-of D]` | Statement (alias: `opgave`): invoices + payments + payables with a running balance (positive = contact owes you). |
 | `bukio report <cmd> --format csv\|xlsx [--out PATH]` | Export any report; xlsx requires `--out`. |
 | `bukio bank add --iban IBAN [--name N] [--account-code CODE] [--dry-run]` | Register a bank account (default: the country profile's bank account, NL 1100). |
 | `bukio bank import --file F --iban IBAN [--dry-run]` | Import CAMT.053 XML or bank CSV (idempotent by hash). |

@@ -24,7 +24,7 @@ export function make(program) {
             console.log(`MONTH-END ${d.period} (${d.from} .. ${d.to})`);
             console.log(`  entries:  ${d.entries.draft} draft`);
             console.log(`  bank:     ${d.bank.unmatched} unmatched`);
-            if (d.vat) console.log(`  vat:      ${d.vat.quarter} → te betalen/ontvangen ${d.vat.to_pay}`);
+            if (d.vat) console.log(`  vat:      ${d.vat.quarter} → payable/receivable ${d.vat.to_pay}`);
             console.log(`  invoices: ${d.invoices.draft} draft, ${d.invoices.overdue} overdue (${formatAmount(d.invoices.overdue_total_cents)})`);
             console.log(`  recurring:${d.recurring.due} due by ${d.to}`);
             console.log(`  totals:   debet ${formatAmount(d.totals.debit_cents)} / credit ${formatAmount(d.totals.credit_cents)} ${d.totals.balanced ? 'BALANCED' : 'UNBALANCED!'}`);

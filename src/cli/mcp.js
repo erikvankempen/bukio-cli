@@ -185,13 +185,13 @@ tool({
   handler: (db) => ({ accounts: listAccounts(db) }),
 });
 tool({
-  name: 'vat_readout', description: 'OB-aangifte fields 1a-5d for manual filing (never auto-files)', schema: {
+  name: 'vat_readout', description: 'VAT return fields 1a-5d for manual filing (never auto-files)', schema: {
     type: 'object', properties: { period: { type: 'string', description: 'YYYY-Qn or YYYY-MM' } }, required: ['period'],
   },
   handler: (db, args) => obReadout(db, { period: args.period }),
 });
 tool({
-  name: 'icp_readout', description: 'ICP listing: EU btw-verlegde supplies per customer', schema: {
+  name: 'icp_readout', description: 'ICP listing: EU reverse-charge supplies per customer', schema: {
     type: 'object', properties: { period: { type: 'string', description: 'YYYY-Qn' } }, required: ['period'],
   },
   handler: (db, args) => icpReadout(db, { period: args.period }),
@@ -806,7 +806,7 @@ tool({
 });
 tool({
   name: 'contact_add', mutating: true,
-  description: 'register an invoice counterparty (EU customers need a btw-id for verlegd/ICP)',
+  description: 'register an invoice counterparty (EU customers need a VAT id for reverse charge/ICP)',
   schema: {
     type: 'object', properties: {
       name: { type: 'string' }, address: { type: 'string' }, postal_code: { type: 'string' },

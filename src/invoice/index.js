@@ -718,7 +718,7 @@ function validateNl12Vereisten(db, invoice) {
 
   const hasReverse = invoice.lines.some((l) => l.vat_code === 'R' || l.vat_code === 'RE');
   if (hasReverse && !contact.vat_id) {
-    throw invoiceError('CUSTOMER_VAT_REQUIRED', 'btw verlegd op de factuur: het btw-id van de klant is verplicht (vereiste 7)');
+    throw invoiceError('CUSTOMER_VAT_REQUIRED', 'reverse-charge invoice: the customer VAT id is required (requirement 7)');
   }
 
   return { ok: true, vereisten: 12 };
