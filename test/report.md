@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 14:12:08 UTC — **✅ 879 passing · 0 failing (879 tests)**
+**Latest run:** 2026-08-15 14:45:59 UTC — **✅ 886 passing · 0 failing (886 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -553,6 +553,18 @@
     - ✅ account add/deactivate/reactivate/import are audited (they mutated silently before)
     - ✅ every emitted error code in src/ is documented in AGENTS.md §7
     - ✅ MCP on a missing database errors NO_DATABASE instead of silently creating an empty company
+
+### i18n.test.js — 
+
+7 passing · 0 failing
+
+    - ✅ t: missing locale falls back to English, missing key falls back to the key
+    - ✅ t: {param} interpolation
+    - ✅ resolveLocale: flag > env > en (UI stays English unless opted in)
+    - ✅ legacy shims: label/unitLabel/LABELS/UNITS keep the old API and values
+    - ✅ vat file description: English by default
+    - ✅ vat file description: Dutch when localized (locale: nl)
+    - ✅ vat file description: --desc override still wins over localization
 
 ### import-invoice.test.js — inbound UBL (EN 16931/Peppol) invoice import into payables: idempotent, VAT reported not booked
 
