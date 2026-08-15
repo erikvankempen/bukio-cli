@@ -14,12 +14,14 @@
 // verbatim from the previously hardcoded module constants, so NL behavior is
 // byte-identical. LU (./lu.js) is the first Phase B market profile (PCN 2020
 // chart, French labels), GB (./gb.js) the second (QuickBooks/Xero-style
-// chart, GBP), FR (./fr.js) the third (PCG chart) and US (./us.js) the
-// fourth (no-VAT, state-level sales tax); each registers only formats with
-// existing builders — anything else fails loudly via the strict dispatch.
+// chart, GBP), FR (./fr.js) the third (PCG chart), US (./us.js) the fourth
+// (no-VAT, state-level sales tax) and BE (./be.js) the fifth (PCN-BE
+// minimum plan); each registers only formats with existing builders —
+// anything else fails loudly via the strict dispatch.
 //
 // Consumers must resolve profiles ONLY through this registry — never read
 // company.country directly (see the profile-sprawl rule in the Phase A plan).
+import be from './be.js';
 import fr from './fr.js';
 import gb from './gb.js';
 import lu from './lu.js';
@@ -27,10 +29,10 @@ import nl from './nl.js';
 import us from './us.js';
 
 /** ISO 3166-1 alpha-2 country codes that are valid but not implemented yet. */
-export const PLANNED = ['BE', 'DE', 'DK', 'FI', 'NO', 'SE'];
+export const PLANNED = ['DE', 'DK', 'FI', 'NO', 'SE'];
 
 const PROFILES = {
-  NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr), US: deepFreeze(us),
+  NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr), US: deepFreeze(us), BE: deepFreeze(be),
 };
 
 export function jurisdictionError(code, message) {

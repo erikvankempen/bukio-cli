@@ -67,6 +67,14 @@ function luMonthlyDeadline(period) {
   const [y, mm] = month === 12 ? [year + 1, 1] : [year, month + 1];
   return `${y}-${String(mm).padStart(2, '0')}-15`;
 }
+
+// day D of the month following YYYY-MM
+function dayOfNextMonth(period, day) {
+  const [y, m] = String(period).split('-').map(Number);
+  const ny = m === 12 ? y + 1 : y;
+  const nm = m === 12 ? 1 : m + 1;
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
 function luAnnualAccountsDeadline(company, year) {
   // LSC (loi 19.12.2002): accounts approved within 6 months of the FY end,
   // deposited with the RCS within 1 month of approval (~7 months). Last day
@@ -116,6 +124,17 @@ const DEADLINE_RULES = {
     return `${y}-${String(m).padStart(2, '0')}-15`;
   },
   'us-941': (period) => quarterDeadline(period).deadline, // same month-end shape as NL
+  // BE (research §10): VAT monthly due the 20th of the following month;
+  // quarterly option (25th of the month after the quarter); annual
+  // accounts with the NBB within 7 months of FYE
+  'be-vat-monthly': (period) => dayOfNextMonth(period, 20),
+  'be-quarterly': (period) => {
+    const q = Number(String(period).split('-')[1].replace('Q', ''));
+    const m = q * 3 + 1;
+    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
+    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-25`;
+  },
+  'be-7-months': (company, year) => monthsAfterFyEnd(company, year, 7),
 };
 
 export function isFiled(db, type, period) {
