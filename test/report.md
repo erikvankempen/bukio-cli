@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 08:24:06 UTC — **✅ 869 passing · 0 failing (869 tests)**
+**Latest run:** 2026-08-15 08:48:56 UTC — **✅ 870 passing · 0 failing (870 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-94 passing · 0 failing
+95 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -740,6 +740,7 @@
     - ✅ B6: LU reverse charge requires the customer TVA number (auto-liquidation)
     - ✅ B6: NL invoice compliance is unchanged (byte-identical, nl-12-vereisten)
     - ✅ B2: LU financial statements report the LSC abridged layout
+    - ✅ DE: UBL reverse-charge line percent is profile-driven, not NL 21.00 (review fix)
     - ✅ B2: LU P&L — 73x subventions on line 4 and custom expenses subtract (review fix)
     - ✅ B2: LU financial statements reject the NL model (INVALID_MODEL)
     - ✅ B2: NL financial statements keep the klein default (byte-identical)

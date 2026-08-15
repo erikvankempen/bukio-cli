@@ -256,7 +256,7 @@ function buildJaarrekeningLu(db, { year, model, reporting }) {
   // P&L over the fiscal year (shared fiscalYearWindow with the balans close)
   const [pnlFrom, pnlTo] = fiscalYearWindow(db, year);
   const p = pnl(db, { from: pnlFrom, to: pnlTo });
-  const pnlAccounts = p.sections.flatMap((s) => (s.accounts ?? []).map((a) => ({ code: a.code, name: a.name, amount_cents: a.amount_cents ?? 0 })));
+  const pnlAccounts = p.sections.flatMap((s) => (s.accounts ?? []).map((a) => ({ code: a.code, name: a.name, type: a.type, amount_cents: a.amount_cents ?? 0 })));
   const pnlLines = [];
   for (const line of LINES.pnl) {
     const hits = pnlAccounts.filter((a) => line.prefixes.some((x) => String(a.code).startsWith(x)));
@@ -271,13 +271,15 @@ function buildJaarrekeningLu(db, { year, model, reporting }) {
   const knownPnl = LINES.pnl.flatMap((l) => l.prefixes);
   const leftoverPnl = pnlAccounts.filter((a) => !knownPnl.some((x) => String(a.code).startsWith(x)));
   if (leftoverPnl.length) {
+    // per-account sign: pnl exposes the account type, so a leftover custom
+    // expense (the realistic case — PCN classes 70-75 cover every standard
+    // income class incl. 73x subventions) subtracts, while a custom income
+    // account (e.g. 76x/77x, not standard PCN) adds. The line total stays
+    // the raw amount sum (display convention: charge lines positive, the
+    // sign does the math); for mixed leftovers the net decides.
+    const net = leftoverPnl.reduce((s, a) => s + (a.type === 'income' ? a.amount_cents : -a.amount_cents), 0);
     pnlLines.push({
-      // sign -1 (a charge): PCN classes 70-75 cover every standard income
-      // class (incl. 73x subventions on line 4), so a non-matching account
-      // is a custom expense — treated as a cost like the NL 'kosten'
-      // handling of non-revenue lines. Custom INCOME accounts (e.g. 76x/77x,
-      // not standard PCN) would be mis-signed: documented limitation.
-      label: 'Autres', sign: -1, accounts: leftoverPnl,
+      label: 'Autres', sign: net < 0 ? -1 : 1, accounts: leftoverPnl,
       total_cents: leftoverPnl.reduce((s, a) => s + a.amount_cents, 0),
     });
   }

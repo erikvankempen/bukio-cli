@@ -129,7 +129,7 @@ function buildPeppolBis30(db, invoice, profile) {
   const taxSubtotals = [...subtotalMap.values()].map((s) => {
     // AE (reverse charge): emit the code's configured rate when one exists
     // (e.g. 9% verlegd constructiewerk); the default R/RE codes carry 0%
-    // (reverse charge has no VAT) and fall back to the NL standard rate 21.00
+    // (reverse charge has no VAT) and fall back to the PROFILE standard rate
     const percent = s.cat === 'AE' ? (s.rateBp > 0 ? (s.rateBp / 100).toFixed(2) : (profile.tax.standardRateBp / 100).toFixed(2)) : (s.rateBp / 100).toFixed(2);
     return `
       <cac:TaxSubtotal>
@@ -185,7 +185,10 @@ function buildPeppolBis30(db, invoice, profile) {
       : l.vat_code === '0' ? 'Z'
         : (l.vat_code === 'V' || l.vat_code === 'M') ? 'E'
           : (l.vat_code ? 'S' : 'E');
-    const percent = (l.vat_code === 'R' || l.vat_code === 'RE') ? (l.vat_rate_bp > 0 ? (l.vat_rate_bp / 100).toFixed(2) : '21.00') : (l.vat_rate_bp / 100).toFixed(2);
+    // line-level percent must match the TaxSubtotal: AE falls back to the
+    // PROFILE standard rate (a hardcoded 21.00 broke reverse-charge lines in
+    // every non-NL market — EN 16931 BR-S-09-type inconsistency)
+    const percent = (l.vat_code === 'R' || l.vat_code === 'RE') ? (l.vat_rate_bp > 0 ? (l.vat_rate_bp / 100).toFixed(2) : (profile.tax.standardRateBp / 100).toFixed(2)) : (l.vat_rate_bp / 100).toFixed(2);
     const unitCode = UNIT_CODE_MAP[l.unit] ?? 'C62';
     // Peppol BIS 3.0: credit notes use cac:CreditNoteLine +
     // cbc:CreditNoteLineQuantity, invoices use cac:InvoiceLine +

@@ -21,6 +21,7 @@ import {
   createContact, createInvoice, finalizeInvoice, getInvoice, validateCompliance,
 } from '../src/invoice/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
+import { XMLParser } from 'fast-xml-parser';
 import { exportXaf } from '../src/export/index.js';
 import { complianceStatus, markFiled } from '../src/compliance/index.js';
 import { getProfile, PLANNED, normalizeCountry, resolveProfile } from '../src/jurisdictions/index.js';
@@ -700,6 +701,27 @@ test('B2: LU financial statements report the LSC abridged layout', () => {
   const ca = fs.pnl.lines.find((l) => l.label === "Chiffre d'affaires net");
   assert.ok(ca && ca.total_cents === 10000, 'revenue on the CA line');
   assert.equal(fs.pnl.resultat_cents, 10000);
+});
+
+test('DE: UBL reverse-charge line percent is profile-driven, not NL 21.00 (review fix)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test GmbH', '--country', 'DE', '--legal-form', 'gmbh', '--vat', 'on']);
+  const db = openDb(dbPath);
+  try {
+    const contact = createContact(db, { name: 'Kunde', address: 'Str 1', postalCode: '10115', city: 'Berlin', vatId: 'DE999999999', actor: 'agent:test' });
+    const inv = createInvoice(db, { contactId: contact.id, date: '2026-07-10', lines: ['Beratung @ 1 @ 100.00 @R'] });
+    const xml = invoiceToUbl(db, getInvoice(db, inv.id));
+    const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true, parseTagValue: false });
+    const root = parser.parse(xml)['Invoice'];
+    // the AE line percent must follow the DE profile (19%), not the NL 21.00
+    assert.equal(root['InvoiceLine']['Item']['ClassifiedTaxCategory']['Percent'], '19.00');
+    const subtotal = root['TaxTotal']['TaxSubtotal'];
+    const sub = Array.isArray(subtotal) ? subtotal.find((s) => s['TaxCategory']['ID'] === 'AE') : subtotal;
+    assert.ok(sub, 'AE TaxSubtotal present');
+    assert.equal(sub['TaxCategory']['Percent'], '19.00');
+  } finally {
+    db.close();
+  }
 });
 
 test('B2: LU P&L — 73x subventions on line 4 and custom expenses subtract (review fix)', () => {

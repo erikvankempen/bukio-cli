@@ -40,7 +40,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 
 | Command | Purpose |
 |---------|---------|
-| `bukio init --name X [--country NL] [--registration-id ..] [--tax-id ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + the country profile's default chart (NL: 29-account RGS-mapped; see §3.1 for all ten profiles). Jurisdiction defaults come from the profile: chart, VAT codes/rates, identifiers, fiscal year end, compliance deadlines. Deprecated aliases: `--kvk` = `--registration-id`, `--btw-id` = `--tax-id`. Fails `ALREADY_INITIALISED` if done. |
+| `bukio init --name X [--country NL] [--registration-id ..] [--tax-id ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + the country profile's default chart (NL: 29-account RGS-mapped; see §3.1 for all eleven profiles). Jurisdiction defaults come from the profile: chart, VAT codes/rates, identifiers, fiscal year end, compliance deadlines. Deprecated aliases: `--kvk` = `--registration-id`, `--btw-id` = `--tax-id`. Fails `ALREADY_INITIALISED` if done. |
 | `bukio entry add --date YYYY-MM-DD --desc ".." --postings "CODE:AMT,CODE:AMT" [--post] [--dry-run]` | Create (and optionally post) a balanced journal entry. |
 | `bukio entry post --id N [--dry-run]` | Post a draft entry. |
 | `bukio entry reverse --id N [--reason ".."] [--dry-run]` | Post a contra-entry that cancels entry N. |
@@ -166,7 +166,7 @@ the booked amounts.
 
 ---
 
-### 3.1 Jurisdiction profiles (10 markets)
+### 3.1 Jurisdiction profiles (11 markets)
 
 `init --country <cc>` seeds the profile's default chart and applies its
 defaults (chart convention, VAT codes/rates, identifiers, fiscal year end,
@@ -183,7 +183,7 @@ profile or `PROFILE_NOT_FOUND`.
 | BE Belgium | PCN-BE minimum plan (AR 12-09-1983) | EUR | 21 / 12 / 6 / 0 | franchise (€25K, from 2025) | KBO / 0208 | peppol-bis-3.0 (B2B mandate since 1 Jan 2026) |
 | DE Germany | DATEV SKR 03 | EUR | 19 / 7 / 0 | kleinunternehmer (€25k/€100k) | USt-IdNr / 9930 | peppol-bis-3.0 (EN 16931 accepted) |
 | DK Denmark | Standardkontoplan-aligned | DKK | 25 (no reduced band) | — | CVR / 0184 | peppol-bis-3.0 (B2B voluntary) |
-| FI Finland | Liikekirjuri model chart | EUR | 25.5 / 13.5 / 10 / 0 | franchise (€20K) | Y-tunnus / 0037 | peppol-bis-3.0 (B2B voluntary) |
+| FI Finland | Liikekirjuri model chart | EUR | 25.5 / 13.5 / 10 / 0 | franchise (€20K) | LY-tunnus / 0037 | peppol-bis-3.0 (B2B voluntary) |
 | NO Norway | NS 4102 standard kontoplan | NOK | 25 / 15 / 12 / 0 | — (NOK 50K registration threshold) | org.nr / 0192 | peppol-bis-3.0 (EHF 3.0; B2G mandatory) |
 | SE Sweden | BAS 2023 | SEK | 25 / 12 / 6 / 0 | franchise (SEK 120K) | org.nr / 0007 | peppol-bis-3.0 (B2G mandatory) |
 
@@ -830,12 +830,12 @@ authz off.
 | `INVALID_ROLE` / `ROLE_NOT_GRANTED` / `LAST_OWNER` | Role registry: unknown role, revoking a role the actor does not hold, or revoking the LAST owner (a company needs at least one owner — to turn authz off and to mediate key revokes) | Use one of `owner\|bookkeeper\|payments\|tax\|assets\|readonly`; grant the role first; grant `owner` to another actor before stepping down |
 | `INVALID_DESCRIPTION` / `INVALID_POSTINGS` / `INVALID_AMOUNT_CENTS` | Description empty, posting spec malformed, or a posting amount is 0 | Fix the argument — every entry needs a description, ≥2 non-zero postings |
 | `INVALID_LEGAL_FORM` / `INVALID_VAT_CHOICE` / `INVALID_FISCAL_YEAR_END` | `init` got a bad legal form, `--vat` other than `on`/`off`, or an impossible `--fiscal-year-end` (e.g. `99-99`, `02-30`) | Use the values the flag help shows (calendar dates only) |
-| `INVALID_COUNTRY` / `COUNTRY_NOT_SUPPORTED` / `PROFILE_NOT_FOUND` / `COUNTRY_IMMUTABLE` | `init --country` / jurisdiction-profile resolution: not an ISO 3166-1 alpha-2 code, a valid country with no profile implemented yet (PLANNED is empty — all ten profiles NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE are live), no profile for a valid code, or `company update --country` trying to change the country after init (one company = one country) | Use a 2-letter code; supported: NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE; re-init a new DB for another country |
+| `INVALID_COUNTRY` / `COUNTRY_NOT_SUPPORTED` / `PROFILE_NOT_FOUND` / `COUNTRY_IMMUTABLE` | `init --country` / jurisdiction-profile resolution: not an ISO 3166-1 alpha-2 code, a valid country with no profile implemented yet (PLANNED is empty — all eleven profiles NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE are live, so a planned-but-unimplemented code currently raises `PROFILE_NOT_FOUND`), no profile for a valid code, or `company update --country` trying to change the country after init (one company = one country) | Use a 2-letter code; supported: NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE; re-init a new DB for another country |
 | `INVALID_IBAN` / `INVALID_NAME` / `INVALID_TYPE` / `NOTHING_TO_UPDATE` | Bad company/contact field on `init`/`company update`/`contact add` (IBAN mod-97 validated) | Fix the value; pass at least one change to `company update` |
 | `COMPANY_REQUIRED` / `COMPANY_INCOMPLETE` / `NOT_INITIALISED` | Company missing or incomplete (e.g. no valid company IBAN for SEPA) | Run `init`, then `company update` to complete the profile |
 | `FORMAT_NOT_SUPPORTED` | A jurisdiction profile declares a document/format with no registered builder (audit file, e-invoicing, OB return layout, financial-statements layout, FX source, invoice compliance rule) | Profile-format dispatch is strict: an unregistered key fails loudly instead of silently falling back to the NL format — register the builder or fix the profile |
 | `PAYMENT_FORMAT_NOT_SUPPORTED` | SEPA export (pain.001/pain.008) hit a format the jurisdiction profile does not declare in exchange.paymentFormats | The declared formats come from the profile; every SEPA market declares sepa-pain.001 + sepa-pain.008 |
-| `DEADLINE_RULE_NOT_FOUND` / `INVALID_PERIOD_SHAPE` | compliance calendar hit a filing type whose deadlineRule or periodShape has no implementation (nl-quarterly, nl-13-months + the lu/be/de/dk/fi/no/se rules; shapes YYYY-Qn, YYYY-MM, YYYY-Pn, YYYY) | Filing types come from the jurisdiction profile; add the rule/shape or fix the profile |
+| `DEADLINE_RULE_NOT_FOUND` / `INVALID_PERIOD_SHAPE` | compliance calendar hit a filing type whose deadlineRule or periodShape has no implementation (nl-*, lu-*, gb-*, us-*, be-*, de-*, dk-*, fi-*, no-*, se-* rules; shapes YYYY-Qn, YYYY-MM, YYYY-Pn, YYYY) | Filing types come from the jurisdiction profile; add the rule/shape or fix the profile |
 | `INVALID_CURRENCY` / `INVALID_RATE` / `INVALID_FX_AMOUNT` / `INVALID_FX_CURRENCY` / `FX_RATE_NOT_FOUND` | FX rate or foreign-currency posting is malformed, or no rate exists | `fx set` a rate, pass `--rate`, or allow the ECB fetch |
 | `ECB_FETCH_FAILED` / `ECB_RATE_NOT_AVAILABLE` | ECB unreachable, or the currency/date has no reference rate | Retry later or `fx set` a rate manually |
 | `INVALID_FREQUENCY` / `INVALID_RUNS` / `INVALID_RANGE` / `INVALID_REVERSE` | Recurring template arguments malformed (frequency, run count, date range, reverse flag) | Fix the template arguments |
