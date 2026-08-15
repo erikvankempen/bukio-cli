@@ -1273,30 +1273,30 @@ against this same codebase.
 
 | Model | API calls | Input | Cached input | Output | Reasoning | Est. cost |
 |---|---|---|---|---|---|---|
-| DeepSeek V4 Flash | 10,659 | 31.76M | 2,227.34M | 9.14M | 5.28M | $14.72 |
+| DeepSeek V4 Flash | 11,215 | 33.86M | 2,294.04M | 9.71M | 5.70M | $15.48 |
 | MiMo-V2.5-Pro (review subagents) | 574 | 6.82M | 42.12M | 1.06M | — | $4.05 |
 | Other models (minimax-m2.5, mimo-v2.5) | 29 | 0.19M | 0.80M | 0.02M | 0.01M | $0.04 |
-| **Total** | **11,262** | **38.77M** | **2,270.27M** | **10.22M** | **5.29M** | **$18.80** |
+| **Total** | **11,818** | **40.87M** | **2,336.96M** | **10.79M** | **5.71M** | **$19.56** |
 
-**$18.80 total** at official list prices for the entire project (11,262
-API calls across all development sessions, ≈ 2.32B tokens).
+**$19.56 total** at official list prices for the entire project (11,818
+API calls across all development sessions, ≈ 2.39B tokens).
 
 ### Developer Time (contributed, unpaid)
 
 Beyond API spend, this project took my review-and-direction time. Because
 the agent does the building, my own messages are the only interaction
-channel — so I measure my time by them: across the 32 working sessions
-(Aug 4–15, 2026) I sent **927 messages**, each costed at **≈ 60 s of
+channel — so I measure my time by them: across the 24 working sessions
+(Aug 4–15, 2026, plus 178 review-subagent sessions) I sent **996 messages**, each costed at **≈ 60 s of
 overhead** (reading, deciding, reviewing) plus composition time scaled by
 message length and complexity (≈ 2 min/message effective). That works out to
-**≈ 31 hours total**, all contributed unpaid.
+**≈ 33 hours total**, all contributed unpaid.
 
 At a **senior** Dutch software-developer rate of **≈ €45/hour** (Amsterdam
 senior average, 2026: €45/h
 [Glassdoor](https://www.glassdoor.com/Salaries/amsterdam-netherlands-senior-software-engineer-salary-SRCH_IL.0,21_IM1112_KO22,46.htm),
 €45.50/h
 [SalaryExpert](https://www.salaryexpert.com/salary/job/software-developer/netherlands/amsterdam);
-the national average is lower), my time is worth **≈ €1,395**.
+the national average is lower), my time is worth **≈ €1,490**.
 
 Stated plainly, so nothing is hidden:
 
@@ -1306,31 +1306,31 @@ Stated plainly, so nothing is hidden:
   professional rate overstates the market value of my review time by a wide
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
-- **It was free:** the ≈ €1,395 is an imputed opportunity cost, not money paid.
-  My out-of-pocket spend remains **$18.80** in API costs.
+- **It was free:** the ≈ €1,490 is an imputed opportunity cost, not money paid.
+  My out-of-pocket spend remains **$19.56** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
-  conventional code review of a 32.6 KLOC codebase would take; treat them as
+  conventional code review of a 34.2 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
 
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **32,555 non-blank, non-comment lines of JavaScript**
-across 138 files (17,709 in `src/`, 14,701 in `test/`, 145 in `bin/` +
-`scripts/`), i.e. **32.56 KLOC**
+model (Boehm, 1981): **34,223 non-blank, non-comment lines of JavaScript**
+across 138 files (19,139 in `src/`, 14,928 in `test/`, 156 in `bin/` +
+`scripts/`), i.e. **34.22 KLOC**
 (measured with `scc` v3.7.0).
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 93.1 PM | 14.0 months | ~7 developers | ≈ €838K |
-| Semi-detached | 148.3 PM | 14.4 months | ~10 developers | ≈ €1,335K |
-| Embedded | 235.2 PM | 14.3 months | ~16 developers | ≈ €2,117K |
+| Organic | 98.0 PM | 14.3 months | ~7 developers | ≈ €882K |
+| Semi-detached | 156.9 PM | 14.7 months | ~11 developers | ≈ €1,412K |
+| Embedded | 249.7 PM | 14.6 months | ~17 developers | ≈ €2,247K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
 **Comparison:** a conventional team building this would estimate **≈ 93–235
-person-months (≈ €838K–€2,117K)**; the AI-assisted build consumed **$18.80 in
-API costs plus ≈ €1,395 of my review-and-direction time (contributed, unpaid
+person-months (≈ €882K–€2,247K)**; the AI-assisted build consumed **$19.56 in
+API costs plus ≈ €1,490 of my review-and-direction time (contributed, unpaid
 — see above)** over 32 working sessions in eleven days — still a tiny fraction of
 the conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
