@@ -180,6 +180,19 @@ const DEADLINE_RULES = {
     return `${m[1]}-${schedule[m[2]]}`;
   },
   'no-7-months': (company, year) => monthsAfterFyEnd(company, year, 7),
+  // SE (research §10, Skatteverket): quarterly momsredovisning due the
+  // 12th of the SECOND month after the quarter (August shifts to the
+  // 17th; Q1 -> 12 May, Q2 -> 17 Aug, Q3 -> 12 Nov, Q4 -> 12 Feb next
+  // year); annual report filed with Bolagsverket within 7 months of FYE
+  'se-quarterly': (period) => {
+    const q = Number(String(period).split('-')[1].replace('Q', ''));
+    const m = q * 3 + 2;
+    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
+    const month = ((m - 1) % 12) + 1;
+    const day = month === 8 ? 17 : 12; // August exception
+    return `${y}-${String(month).padStart(2, '0')}-${day}`;
+  },
+  'se-7-months': (company, year) => monthsAfterFyEnd(company, year, 7),
 };
 
 export function isFiled(db, type, period) {
