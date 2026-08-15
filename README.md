@@ -1353,6 +1353,8 @@ context. If your agent is unable to help, shoot me a message at
 
 Eleven jurisdiction profiles (NL plus the ten-market expansion; see AGENTS.md §3.1 for the full table). `bukio init --country <cc>` seeds the country's chart convention (RGS, PCN 2020, PCG, SKR 03, BAS 2023, NS 4102, …), VAT codes/rates, identifiers and compliance calendar. Format dispatch is strict: markets whose engines are B-milestones fail loudly (`FORMAT_NOT_SUPPORTED`) — no market ever silently gets another market's output.
 
+**Planned:** **Phase C** — AT Austria (EKR chart, USt 20/10/13, UID, UVA) + IE Ireland (UK-style chart, VAT 23/13.5/9/0, CRO, VAT3 bi-monthly). **Phase D** — IT Italy (Piano dei conti, IVA 22/10/4, Partita IVA, SdI/FatturaPA e-invoicing), ES Spain (PGC, IVA 21/10/4, NIF, Verifactu), PT Portugal (SNC, IVA 23/13/6, NIPC, ATCUD). **Parked** — CH Switzerland (CHF base currency, QR-bill, not a Peppol country).
+
 | Country | Currency | VAT (2026) | Chart convention | Peppol scheme | Locale |
 |---|---|---|---|---|---|
 | NL Netherlands | EUR | 21 / 9 / 0 | RGS-mapped | 9944 (kvk) | nl |
@@ -1389,6 +1391,8 @@ Eleven jurisdiction profiles (NL plus the ten-market expansion; see AGENTS.md §
 | 13 | Actor security layers: **Tier 0** signed actor commands (per-company key registry, enforcement, `audit verify`) + **Tier 0.5 per-actor authorizations** — capability families + roles (`actor authz`, `actor roles`, `actor can`, `actor who-can`), deny-by-default segregation-of-duties gate in the sign gate (CLI + MCP), owner-mediated key revoke | Every command signed and attributable; agents act only within their role — the actor who books is not the one who files or pays — **✅ done (dev branch, 746 tests green)** | done |
 | 14 | Multi-jurisdiction profiles: eleven (NL + the ten-market expansion LU/GB/FR/US/BE/DE/DK/FI/NO/SE) — country chart conventions, VAT codes + rates, identifiers + Peppol schemes, compliance calendars; strict format dispatch (unbuilt formats fail loudly, no silent fallbacks) | One research-verified profile per market (docs-research/*.md); PLANNED empty — **✅ done (dev branch, 891 tests green)** | done |
 | 15 | Localization (i18n): optional `--locale` / `BUKIO_LOCALE` mechanism with English default + locale tables for all 11 markets (en, nl, nl-be, de, fr, fr-lu, da, fi, nb, sv); curated wiring of PDF labels, emails, CLI renders, VAT descriptions | English default, opt-in per market — **✅ done (dev branch, 891 tests green)** | done |
+| 16 | Phase C: AT Austria (EKR chart, USt 20/10/13, Kleinunternehmer ≤ €35K, UID/FN, UVA, Peppol) + IE Ireland (UK-style chart, VAT 23/13.5/9/0, CRO + IE VAT, VAT3 bi-monthly, Peppol) — profiles, i18n (de→AT ok, en→IE ok), contract tests | Two more markets, same recipe as Phase B — research briefs first (docs-research/at-profile.md, ie-profile.md) | planned |
+| 17 | Phase D: IT Italy (Piano dei conti, IVA 22/10/4, Partita IVA, liquidazione IVA + F24, **SdI/FatturaPA domestic e-invoicing**) + ES Spain (PGC, IVA 21/10/4, NIF, Modelo 303/390, **Verifactu**) + PT Portugal (SNC, IVA 23/13/6, NIPC, **ATCUD**) | Three more markets; domestic e-invoicing formats (FatturaPA XML, Verifactu, ATCUD) land with their profiles or as a follow-up — research briefs first (docs-research/it-profile.md, es-profile.md, pt-profile.md) | planned |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 
