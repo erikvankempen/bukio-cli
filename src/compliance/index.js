@@ -135,6 +135,18 @@ const DEADLINE_RULES = {
     return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-25`;
   },
   'be-7-months': (company, year) => monthsAfterFyEnd(company, year, 7),
+  // DE (research §10): UStVA due the 10th of the month after the quarter;
+  // annual VAT return 31 July of the following year (§ 149 AO); annual
+  // accounts filed (Offenlegung) 12 months after the balance-sheet date
+  // (§ 325 HGB)
+  'de-ustva-quarterly': (period) => {
+    const q = Number(String(period).split('-')[1].replace('Q', ''));
+    const m = q * 3 + 1;
+    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
+    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-10`;
+  },
+  'de-annual-vat': (company, year) => `${Number(year) + 1}-07-31`,
+  'de-12-months': (company, year) => monthsAfterFyEnd(company, year, 12),
 };
 
 export function isFiled(db, type, period) {
