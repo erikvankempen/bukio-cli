@@ -67,10 +67,10 @@ test('getProfile throws COUNTRY_NOT_SUPPORTED for valid-but-planned countries', 
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
   }
   assert.ok(PLANNED.includes('US'));
-  assert.ok(PLANNED.includes('FR'));
-  // LU (Phase B1) and GB (Phase B) are implemented — not in PLANNED
+  // LU, GB and FR (Phase B) are implemented — not in PLANNED
   assert.ok(!PLANNED.includes('LU'));
   assert.ok(!PLANNED.includes('GB'));
+  assert.ok(!PLANNED.includes('FR'));
 });
 
 test('getProfile throws PROFILE_NOT_FOUND for unknown valid codes', () => {
@@ -471,9 +471,9 @@ test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('B1: LU is implemented — PLANNED is now US/FR only', () => {
+test('B1: LU is implemented — PLANNED is now US only', () => {
   assert.ok(!PLANNED.includes('LU'));
-  assert.deepEqual([...PLANNED].sort(), ['FR', 'US']);
+  assert.deepEqual([...PLANNED].sort(), ['US']);
   assert.equal(getProfile('LU').meta.country, 'LU');
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
@@ -883,9 +883,9 @@ test('GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)', () =>
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['gb-9-months', 'gb-ct600']);
 });
 
-test('GB: PLANNED is now US/FR only', () => {
+test('GB: PLANNED is now US only', () => {
   assert.ok(!PLANNED.includes('GB'));
-  assert.deepEqual([...PLANNED].sort(), ['FR', 'US']);
+  assert.deepEqual([...PLANNED].sort(), ['US']);
   for (const cc of PLANNED) {
     assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
   }
@@ -952,6 +952,94 @@ test('GB: compliance calendar — annual accounts in 9 months, CT600 in 12', () 
     assert.equal(obs.find((o) => o.type === 'CT600' && o.period === '2026').deadline, '2027-03-31');
     // no NL or LU types leak into the GB calendar
     assert.ok(!obs.some((o) => ['OB', 'ICP', 'JAARREKENING', 'TVA', 'COMPTES_ANNUELS'].includes(o.type)));
+  } finally {
+    db.close();
+  }
+});
+
+// --- Phase B: FR profile (PCG, TVA 20/10/5.5/2.1) ---------------------------
+
+test('FR: getProfile returns the FR profile (EUR, fr, PCG data)', () => {
+  const p = getProfile('FR');
+  assert.equal(p.meta.country, 'FR');
+  assert.equal(p.meta.baseCurrency, 'EUR');
+  assert.equal(p.meta.locale, 'fr');
+  assert.ok(p.meta.legalForms.includes('sarl'));
+  assert.ok(!p.meta.legalForms.includes('bv')); // NL form rejected
+  assert.equal(p.identifiers.peppolSchemeId, '0002'); // SIREN scheme
+  assert.ok(p.identifiers.vatIdFormat.test('FR12345678901'));
+  assert.equal(p.tax.standardRateBp, 2000);
+  assert.equal(p.tax.smallBusinessScheme, 'franchise'); // €85K/€37.5K
+  assert.deepEqual(p.tax.codes.map((c) => c.code), ['20', '10', '5.5', '2.1', '0', 'V', 'R', 'RE', 'M', 'P']);
+  // PCG TVA accounts: 44566 input / 44571 output; settlement 44551
+  assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['44566', '44571']);
+  assert.equal(p.tax.accounts.fileDefault, '44551');
+  assert.equal(p.reporting.debtorsAccount, '411');
+  // PCG closing: 120 résultat -> 110 report à nouveau
+  assert.equal(p.closing.resultAccount, '120');
+  assert.equal(p.closing.equityAccount, '110');
+  assert.equal(p.reporting.taxonomy, null);
+  // chart: verified PCG codes incl. the contra-asset 281 (migration 023)
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '512' && a.name === 'Banques'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '706' && a.name === 'Prestations de services'));
+  assert.ok(p.reporting.defaultChart.some((a) => a.code === '281' && a.normalBalance === 'credit'));
+  assert.ok(p.reporting.defaultChart.length >= 40);
+  // B-milestones stay unregistered (strict dispatch fails loudly)
+  assert.equal(p.tax.returnLayout, undefined);
+  assert.equal(p.reporting.format, undefined);
+  assert.equal(p.documents.invoiceCompliance, undefined);
+  assert.equal(p.documents.auditFile, undefined); // FEC is a B-milestone
+  assert.deepEqual(p.compliance.filingTypes, []);
+  // e-invoicing registered: EN 16931 UBL accepted in the FR mandate
+  assert.equal(p.documents.eInvoicing, 'peppol-bis-3.0');
+  assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
+});
+
+test('FR: PLANNED is now US only', () => {
+  assert.ok(!PLANNED.includes('FR'));
+  assert.deepEqual([...PLANNED].sort(), ['US']);
+  assert.throws(() => getProfile('US'), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
+});
+
+test('FR: init --country FR creates a French company with the PCG chart', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'SAS Test', '--country', 'FR', '--legal-form', 'sas', '--vat', 'on']);
+  assert.equal(r.out.data.company.country, 'FR');
+  assert.equal(r.out.data.company.base_currency, 'EUR');
+  assert.equal(r.out.data.company.locale, 'fr');
+  const db = openDb(dbPath);
+  try {
+    const accounts = db.prepare('SELECT code, name, taxonomy FROM accounts WHERE active = 1').all();
+    assert.ok(accounts.some((a) => a.code === '512' && a.name === 'Banques'));
+    assert.ok(accounts.some((a) => a.code === '706' && a.name === 'Prestations de services'));
+    assert.ok(accounts.some((a) => a.code === '281')); // contra-asset accepted (023)
+    for (const a of accounts) assert.equal(a.taxonomy, null);
+  } finally {
+    db.close();
+  }
+  // NL legal form rejected for FR
+  const bad = cli(tmpDb(), ['init', '--name', 'X', '--country', 'FR', '--legal-form', 'bv'], { expectFail: true });
+  assert.equal(bad.out.error.code, 'INVALID_LEGAL_FORM');
+  // KOR is an NL-only scheme
+  const kor = cli(tmpDb(), ['init', '--name', 'X', '--country', 'FR', '--legal-form', 'sas', '--kor'], { expectFail: true });
+  assert.equal(kor.out.error.code, 'INVALID_VAT_CHOICE');
+});
+
+test('FR: strict dispatch — unregistered formats fail loudly (no fallback)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'SAS Test', '--country', 'FR', '--legal-form', 'sas', '--vat', 'on']);
+  let r = cli(dbPath, ['financial-statements', 'report', '--year', '2026'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
+  r = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', '/tmp/xaf-fr.xml'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED'); // FEC is the FR audit file, not XAF
+  r = cli(dbPath, ['vat', 'readout', '--period', '2026-Q1'], { expectFail: true });
+  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED'); // CA3 return engine is a B-milestone
+  const db = openDb(dbPath);
+  try {
+    assert.throws(
+      () => validateCompliance(db, { invoice_type: 'invoice', lines: [] }),
+      (e) => e.code === 'FORMAT_NOT_SUPPORTED',
+    );
   } finally {
     db.close();
   }

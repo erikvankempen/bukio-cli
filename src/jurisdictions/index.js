@@ -13,20 +13,24 @@
 // accounts. The NL profile (./nl.js) is the reference implementation — cut
 // verbatim from the previously hardcoded module constants, so NL behavior is
 // byte-identical. LU (./lu.js) is the first Phase B market profile (PCN 2020
-// chart, French labels) and GB (./gb.js) the second (QuickBooks/Xero-style
-// chart, GBP); each registers only formats with existing builders — anything
-// else fails loudly via the strict dispatch.
+// chart, French labels), GB (./gb.js) the second (QuickBooks/Xero-style
+// chart, GBP) and FR (./fr.js) the third (PCG chart); each registers only
+// formats with existing builders — anything else fails loudly via the strict
+// dispatch.
 //
 // Consumers must resolve profiles ONLY through this registry — never read
 // company.country directly (see the profile-sprawl rule in the Phase A plan).
+import fr from './fr.js';
 import gb from './gb.js';
 import lu from './lu.js';
 import nl from './nl.js';
 
 /** ISO 3166-1 alpha-2 country codes that are valid but not implemented yet. */
-export const PLANNED = ['US', 'FR'];
+export const PLANNED = ['US'];
 
-const PROFILES = { NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb) };
+const PROFILES = {
+  NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr),
+};
 
 export function jurisdictionError(code, message) {
   const e = new Error(message);

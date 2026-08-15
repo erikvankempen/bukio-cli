@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 06:25:30 UTC — **✅ 829 passing · 0 failing (829 tests)**
+**Latest run:** 2026-08-15 06:33:43 UTC — **✅ 833 passing · 0 failing (833 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-54 passing · 0 failing
+58 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -730,7 +730,7 @@
     - ✅ M9: bank import resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ review-fix: account add --taxonomy-code works; --rgs-code alias maps and warns
     - ✅ B1: getProfile returns the LU profile (French, PCN 2020 data)
-    - ✅ B1: LU is implemented — PLANNED is now US/FR only
+    - ✅ B1: LU is implemented — PLANNED is now US only
     - ✅ B1: the LU profile is deep-frozen
     - ✅ B1: init --country LU creates a French LU company with the PCN chart
     - ✅ B1: LU strict dispatch — unregistered formats fail loudly (no NL fallback)
@@ -747,10 +747,14 @@
     - ✅ B3: LU export xaf produces the FAIA 2.01 reduced-B audit file
     - ✅ B3: NL XAF export is unchanged (byte-identical, xaf-auditfile-4.0)
     - ✅ GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)
-    - ✅ GB: PLANNED is now US/FR only
+    - ✅ GB: PLANNED is now US only
     - ✅ GB: init --country GB creates a GBP company with the UK chart
     - ✅ GB: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ GB: compliance calendar — annual accounts in 9 months, CT600 in 12
+    - ✅ FR: getProfile returns the FR profile (EUR, fr, PCG data)
+    - ✅ FR: PLANNED is now US only
+    - ✅ FR: init --country FR creates a French company with the PCG chart
+    - ✅ FR: strict dispatch — unregistered formats fail loudly (no fallback)
 
 ### migration-021.test.js — 
 
