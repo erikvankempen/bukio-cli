@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 14:45:59 UTC — **✅ 886 passing · 0 failing (886 tests)**
+**Latest run:** 2026-08-15 15:00:07 UTC — **✅ 888 passing · 0 failing (888 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -556,7 +556,7 @@
 
 ### i18n.test.js — 
 
-7 passing · 0 failing
+9 passing · 0 failing
 
     - ✅ t: missing locale falls back to English, missing key falls back to the key
     - ✅ t: {param} interpolation
@@ -564,6 +564,8 @@
     - ✅ legacy shims: label/unitLabel/LABELS/UNITS keep the old API and values
     - ✅ vat file description: English by default
     - ✅ vat file description: Dutch when localized (locale: nl)
+    - ✅ locale normalization: de-DE -> de, en-GB -> en, nl-BE -> nl-be, fr-LU -> fr-lu
+    - ✅ per-locale spot checks: every market table resolves its own language
     - ✅ vat file description: --desc override still wins over localization
 
 ### import-invoice.test.js — inbound UBL (EN 16931/Peppol) invoice import into payables: idempotent, VAT reported not booked
