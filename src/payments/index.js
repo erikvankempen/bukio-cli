@@ -215,7 +215,7 @@ export function createPaymentBatch(db, {
   date = null, debitIban = null, lines = [], payableIds = [], kind = 'transfer', actor = 'human', dryRun = false,
 }) {
   if (!['transfer', 'direct_debit'].includes(kind)) {
-    throw paymentsError('INVALID_KIND', "batch kind must be 'transfer' (SEPA credit) or 'direct_debit' (incasso)");
+    throw paymentsError('INVALID_KIND', "batch kind must be 'transfer' (SEPA credit) or 'direct_debit'");
   }
   const company = getCompany(db);
   if (!company) throw paymentsError('COMPANY_REQUIRED', 'company is not initialised');
@@ -279,9 +279,9 @@ export function createPaymentBatch(db, {
     if (!p) { fail(lineNo, 'PAYABLE_NOT_FOUND', `payable ${id} does not exist`); continue; }
     if (p.status !== 'unpaid') { fail(lineNo, 'PAYABLE_NOT_UNPAID', `payable ${id} is ${p.status}`); continue; }
     if (kind === 'transfer') {
-      if (p.payment_method !== 'transfer') { fail(lineNo, 'PAYABLE_DIRECT_DEBIT', `payable ${id} is paid by direct debit (incasso) — excluded from transfer batches`); continue; }
+      if (p.payment_method !== 'transfer') { fail(lineNo, 'PAYABLE_DIRECT_DEBIT', `payable ${id} is paid by direct debit — excluded from transfer batches`); continue; }
     } else if (p.payment_method !== 'direct_debit') {
-      fail(lineNo, 'PAYABLE_NOT_DIRECT_DEBIT', `payable ${id} is a transfer (betaalbaar) — not an incasso; use a transfer batch`); continue;
+      fail(lineNo, 'PAYABLE_NOT_DIRECT_DEBIT', `payable ${id} is a transfer — not a direct debit; use a transfer batch`); continue;
     }
     const c = getContact(db, p.contact_id);
     const iban = normalizeIban(c?.iban ?? '');
