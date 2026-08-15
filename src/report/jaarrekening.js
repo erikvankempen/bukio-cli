@@ -274,19 +274,22 @@ function buildJaarrekeningLu(db, { year, model, reporting }) {
     // per-account sign: pnl exposes the account type, so a leftover custom
     // expense (the realistic case — PCN classes 70-75 cover every standard
     // income class incl. 73x subventions) subtracts, while a custom income
-    // account (e.g. 76x/77x, not standard PCN) adds. The line total stays
-    // the raw amount sum (display convention: charge lines positive, the
-    // sign does the math); for mixed leftovers the net decides.
+    // account (e.g. 76x/77x, not standard PCN) adds. total_cents stays the
+    // raw amount sum for display (charge lines positive); resultat uses
+    // net_cents directly so MIXED leftovers (expense + income) reconcile
+    // with the balans result instead of mis-signed raw sums.
     const net = leftoverPnl.reduce((s, a) => s + (a.type === 'income' ? a.amount_cents : -a.amount_cents), 0);
     pnlLines.push({
-      label: 'Autres', sign: net < 0 ? -1 : 1, accounts: leftoverPnl,
+      label: 'Autres', sign: 1, accounts: leftoverPnl,
       total_cents: leftoverPnl.reduce((s, a) => s + a.amount_cents, 0),
+      net_cents: net,
     });
   }
-  // resultat: produits (sign +1) minus charges (sign -1)
+  // resultat: produits (sign +1) minus charges (sign -1); a line carrying
+  // net_cents (the 'Autres' catch-all) contributes that directly
   const resultatCents = pnlLines
     .filter((l) => l.sign !== undefined)
-    .reduce((s, l) => s + l.sign * l.total_cents, 0);
+    .reduce((s, l) => s + (l.net_cents !== undefined ? l.net_cents : l.sign * l.total_cents), 0);
   report.pnl = {
     lines: pnlLines,
     resultat_cents: resultatCents,

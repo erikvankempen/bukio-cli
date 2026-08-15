@@ -371,7 +371,21 @@ function afTeDragenName(db) {
 }
 
 function isAfTeDragenAccount(db, a) {
-  return Boolean(a && a.name === afTeDragenName(db) && a.type === 'liability' && a.normal_balance === 'credit');
+  if (!a) return false;
+  const { tax, reporting } = resolveProfile(db);
+  // the profile-declared settlement account is the canonical af-te-dragen
+  // position when it is the SEEDED chart account (bilingual charts: BE 451
+  // 'TVA à payer — Te betalen BTW', DE 1780, GB 2120 — labels differ from
+  // afTeDragenName), so name-equality alone no longer silently falls to a
+  // numeric successor. A FOREIGN account parked on the fileDefault code
+  // (NL legacy-import collisions; 2510 is auto-created, never seeded)
+  // still falls through to the next free code.
+  const seeded = (reporting.defaultChart ?? []).find((c) => c.code === tax.accounts.fileDefault);
+  if (
+    seeded && a.code === tax.accounts.fileDefault
+    && a.name === seeded.name && a.type === 'liability' && a.normal_balance === 'credit'
+  ) return true;
+  return a.name === afTeDragenName(db) && a.type === 'liability' && a.normal_balance === 'credit';
 }
 
 /**

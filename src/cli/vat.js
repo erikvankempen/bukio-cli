@@ -249,7 +249,7 @@ export function make(program) {
     .command('file')
     .description("reclassify the outstanding VAT position to 'Af te dragen omzetbelasting' at filing")
     .option('--period <period>', 'YYYY-Qn or YYYY-MM — used in the entry/audit label')
-    .option('--account <code>', `af-te-dragen account (default ${VAT_FILE_ACCOUNT_DEFAULT}, auto-created when missing)`)
+    .option('--account <code>', `af-te-dragen account (default: the country profile's fileDefault, e.g. ${VAT_FILE_ACCOUNT_DEFAULT} for NL; auto-created when missing)`)
     .option('--desc <text>', 'entry description override')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
@@ -258,7 +258,7 @@ export function make(program) {
         const db = ensureDb(ctx);
         try {
           const result = vatFile(db, {
-            account: opts.account ?? VAT_FILE_ACCOUNT_DEFAULT, period: opts.period ?? null,
+            account: opts.account ?? null, period: opts.period ?? null,
             desc: opts.desc ?? null, actor: ctx.actor, dryRun: ctx.dryRun,
           });
           output(ctx, result, (d) => {
@@ -284,8 +284,8 @@ export function make(program) {
     .description('book the bank payment that cancels the af-te-dragen balance; the rounding difference goes to the P&L')
     .requiredOption('--tx <id>', 'unmatched bank transaction of the OB payment (incoming for a refund)')
     .option('--period <period>', 'YYYY-Qn or YYYY-MM — used in the entry/audit label')
-    .option('--account <code>', `af-te-dragen account to settle (default ${VAT_FILE_ACCOUNT_DEFAULT} — must match the account used at 'vat file', e.g. when it fell to the next free code)`)
-    .option('--difference-account <code>', `P&L account for the rounding difference (default ${VAT_DIFFERENCE_ACCOUNT_DEFAULT})`)
+    .option('--account <code>', `af-te-dragen account to settle (default: the country profile's fileDefault, e.g. ${VAT_FILE_ACCOUNT_DEFAULT} for NL — must match the account used at 'vat file', e.g. when it fell to the next free code)`)
+    .option('--difference-account <code>', `P&L account for the rounding difference (default: the country profile's differenceDefault, e.g. ${VAT_DIFFERENCE_ACCOUNT_DEFAULT} for NL)`)
     .option('--desc <text>', 'entry description override')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => {
@@ -302,8 +302,8 @@ export function make(program) {
           if (ctx.dryRun) {
             const result = vatSettle(db, {
               txAmountCents: tx.amount_cents, txDate: tx.date, bankAccountCode: tx.account_code,
-              account: opts.account ?? VAT_FILE_ACCOUNT_DEFAULT,
-              differenceAccount: opts.differenceAccount ?? VAT_DIFFERENCE_ACCOUNT_DEFAULT,
+              account: opts.account ?? null,
+              differenceAccount: opts.differenceAccount ?? null,
               period: opts.period ?? null, desc: opts.desc ?? null, actor: ctx.actor, dryRun: true,
             });
             output(ctx, { ...result, tx_id: tx.id }, (d) => {
@@ -320,8 +320,8 @@ export function make(program) {
           const settled = db.transaction(() => {
             const result = vatSettle(db, {
               txAmountCents: tx.amount_cents, txDate: tx.date, bankAccountCode: tx.account_code,
-              account: opts.account ?? VAT_FILE_ACCOUNT_DEFAULT,
-              differenceAccount: opts.differenceAccount ?? VAT_DIFFERENCE_ACCOUNT_DEFAULT,
+              account: opts.account ?? null,
+              differenceAccount: opts.differenceAccount ?? null,
               period: opts.period ?? null, desc: opts.desc ?? null, actor: ctx.actor, dryRun: false,
             });
             linkTransaction(db, { txId, entryId: result.entry_id, method: 'manual', actor: ctx.actor });

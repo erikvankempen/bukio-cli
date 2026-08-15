@@ -34,7 +34,11 @@ const PACKAGE_VERSION = JSON.parse(
 ).version;
 
 function esc(s) {
+  // XML 1.0 valid chars: strip control chars (0x00-0x08, 0x0B, 0x0C,
+  // 0x0E-0x1F) that would make the document schema-invalid, then escape
+  // the five special characters (same contract as the UBL builder)
   return String(s ?? '')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

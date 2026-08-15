@@ -277,25 +277,30 @@ export function computeInvoiceTotals(lines, discountType = null, discountValue =
 // --- contacts -------------------------------------------------------------
 
 export function createContact(db, {
-  name, address = null, postalCode = null, city = null, country = 'NL',
+  name, address = null, postalCode = null, city = null, country = null,
   email = null, vatId = null, kvk = null, iban = null, actor = 'human', dryRun = false,
 }) {
   if (!name || typeof name !== 'string' || !name.trim()) throw invoiceError('INVALID_NAME', 'contact needs a name');
   if (iban != null && !isValidIban(iban)) throw invoiceError('INVALID_IBAN', `'${iban}' is not a valid IBAN`);
+  // a contact without an explicit country is assumed to be in the issuer's
+  // market (NL contacts stay 'NL'; a LU company's customers default to 'LU'
+  // — the old hardcoded 'NL' default put a wrong BT-40 country on
+  // e-invoices in every non-NL market)
+  const cc = country ?? resolveProfile(db).meta.country;
   // canonical storage form — same as updateContact and every consumer
   // (normalizeIban strips spaces AND dashes; a space-only strip kept dashes,
   // so create vs update stored the same IBAN in two different shapes)
   const cleanIban = iban != null ? normalizeIban(iban) : null;
   if (dryRun) {
     return {
-      action: 'contact.create', name, address, postalCode, city, country, email,
+      action: 'contact.create', name, address, postalCode, city, country: cc, email,
       vatId, kvk, iban: cleanIban, dryRun: true,
     };
   }
   const info = db.prepare(`
     INSERT INTO contacts (name, address, postal_code, city, country, email, vat_id, kvk, iban, created_by)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(name, address, postalCode, city, country, email, vatId, kvk, cleanIban, actor);
+  `).run(name, address, postalCode, city, cc, email, vatId, kvk, cleanIban, actor);
   record(db, { actor, action: 'contact.create', command: 'contact add', args: { name, iban: iban ? true : false }, outcome: 'ok' });
   return getContact(db, info.lastInsertRowid);
 }

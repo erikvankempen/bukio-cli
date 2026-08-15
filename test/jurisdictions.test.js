@@ -24,6 +24,7 @@ import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { XMLParser } from 'fast-xml-parser';
 import { exportXaf } from '../src/export/index.js';
 import { complianceStatus, markFiled } from '../src/compliance/index.js';
+import { vatSettle } from '../src/vat/index.js';
 import { getProfile, PLANNED, normalizeCountry, resolveProfile } from '../src/jurisdictions/index.js';
 
 const MIGRATIONS_DIR = path.join(import.meta.dirname, '..', 'migrations');
@@ -715,6 +716,8 @@ test('DE: UBL reverse-charge line percent is profile-driven, not NL 21.00 (revie
     const root = parser.parse(xml)['Invoice'];
     // the AE line percent must follow the DE profile (19%), not the NL 21.00
     assert.equal(root['InvoiceLine']['Item']['ClassifiedTaxCategory']['Percent'], '19.00');
+    // the buyer country falls back to the profile country (DE), not NL
+    assert.equal(root['AccountingCustomerParty']['Party']['PostalAddress']['Country']['IdentificationCode'], 'DE');
     const subtotal = root['TaxTotal']['TaxSubtotal'];
     const sub = Array.isArray(subtotal) ? subtotal.find((s) => s['TaxCategory']['ID'] === 'AE') : subtotal;
     assert.ok(sub, 'AE TaxSubtotal present');
@@ -722,6 +725,44 @@ test('DE: UBL reverse-charge line percent is profile-driven, not NL 21.00 (revie
   } finally {
     db.close();
   }
+});
+
+test('BE: vat file/settle resolve the profile defaults via the CLI (review fix)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--country', 'BE', '--legal-form', 'bv', '--vat', 'on']);
+  cli(dbPath, ['entry', 'add', '--date', '2026-06-30', '--desc', 'omzet', '--postings', '400:1210,700:-1000,451:-210', '--post']);
+  // file: the af-te-dragen default is the BE profile's fileDefault (451) —
+  // the CLI used to hardcode the NL 2510
+  const plan = cli(dbPath, ['vat', 'file', '--dry-run']);
+  assert.equal(plan.out.data.account, '451');
+  assert.equal(plan.out.data.owe, true);
+  const filed = cli(dbPath, ['vat', 'file']);
+  assert.ok(filed.out.data.entry_id, 'vat file posted');
+  // settle: the difference account defaults to the BE profile's 648
+  const db = openDb(dbPath);
+  try {
+    const settle = vatSettle(db, { txAmountCents: -21000, txDate: '2026-07-01', bankAccountCode: '550', dryRun: true });
+    assert.equal(settle.difference_account, '648');
+    assert.equal(settle.difference_cents, 0);
+  } finally {
+    db.close();
+  }
+});
+
+test('B2: LU P&L — mixed leftover (custom expense + custom income) reconciles (review fix)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);
+  cli(dbPath, ['account', 'add', '--code', '6600', '--name', 'Autres charges', '--type', 'expense', '--normal-balance', 'debit']);
+  cli(dbPath, ['account', 'add', '--code', '7700', '--name', 'Autres produits', '--type', 'income', '--normal-balance', 'credit']);
+  cli(dbPath, ['entry', 'add', '--date', '2026-06-30', '--desc', 'exercice', '--postings',
+    '101:-1000,5131:1000,4011:11700,7021:-10000,461411:-1700,6600:500,5131:-500,7700:-200,5131:200', '--post']);
+  const r = cli(dbPath, ['financial-statements', 'report', '--year', '2026', '--format', 'json']);
+  const fs = r.out.data.financial_statements;
+  assert.equal(fs.balans.balanced, true);
+  const autres = fs.pnl.lines.find((l) => l.label === 'Autres');
+  assert.ok(autres && autres.total_cents === 70000, 'display total is the raw sum (500 expense + 200 income)');
+  // resultat uses the signed net: CA 10000 + custom income 200 - custom expense 500
+  assert.equal(fs.pnl.resultat_cents, 970000, 'resultat reconciles for mixed leftovers');
 });
 
 test('B2: LU P&L — 73x subventions on line 4 and custom expenses subtract (review fix)', () => {

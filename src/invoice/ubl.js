@@ -253,7 +253,7 @@ function buildPeppolBis30(db, invoice, profile) {
         <cbc:StreetName>${esc(contact.address ?? '')}</cbc:StreetName>
         <cbc:CityName>${esc(contact.city ?? '')}</cbc:CityName>
         <cbc:PostalZone>${esc(contact.postal_code ?? '')}</cbc:PostalZone>
-        <cac:Country><cbc:IdentificationCode>${esc(contact.country ?? 'NL')}</cbc:IdentificationCode></cac:Country>
+        <cac:Country><cbc:IdentificationCode>${esc(contact.country ?? profile.meta.country)}</cbc:IdentificationCode></cac:Country>
       </cac:PostalAddress>${buyerTax}
       <cac:PartyLegalEntity>
         <cbc:RegistrationName>${esc(contact.name)}</cbc:RegistrationName>
