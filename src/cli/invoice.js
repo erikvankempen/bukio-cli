@@ -364,7 +364,7 @@ export function make(program) {
           if (!inv) throw Object.assign(new Error(`invoice ${opts.id} does not exist`), { code: 'NOT_FOUND' });
           output(ctx, { invoice: fmtInvoice(inv) }, (d) => {
             const i = d.invoice;
-            console.log(`${i.invoice_number ?? 'concept'} [${i.status}] ${i.date} — ${i.contact_name}`);
+            console.log(`${i.invoice_number ?? t('status.draft', {}, locale)} [${i.status}] ${i.date} — ${i.contact_name}`);
             for (const l of i.lines) console.log(`  ${l.line_no}. ${l.description}  ${l.quantity}x ${l.unit_price}${l.vat_code ? ` @${l.vat_code}` : ''} = ${l.amount}`);
             console.log(`  net ${i.net} / vat ${i.vat} / total ${i.gross}`);
             for (const p of i.payments) console.log(`  ${t('entry.paid', { date: p.date, amount: p.amount, method: p.method }, locale)}`);
@@ -390,7 +390,7 @@ export function make(program) {
         try {
           const inv = getInvoice(db, opts.id);
           if (!inv) throw Object.assign(new Error(`invoice ${opts.id} does not exist`), { code: 'NOT_FOUND' });
-          if (!inv.invoice_number) throw Object.assign(new Error('finalize the invoice first — a concept has no number yet'), { code: 'NOT_FINALIZED' });
+          if (!inv.invoice_number) throw Object.assign(new Error('finalize the invoice first — a draft has no number yet'), { code: 'NOT_FINALIZED' });
           const outPath = opts.out ?? `${inv.invoice_number}.pdf`;
           const result = await invoiceToPdf(db, inv, { outPath });
           output(ctx, { path: result.path, bytes: result.bytes }, (d) => console.log(`wrote ${d.path} (${d.bytes} bytes)`));
