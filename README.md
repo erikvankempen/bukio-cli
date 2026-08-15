@@ -1307,7 +1307,7 @@ Stated plainly, so nothing is hidden:
 - **It was free:** the ≈ €1,395 is an imputed opportunity cost, not money paid.
   My out-of-pocket spend remains **$18.80** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
-  conventional code review of a 28.3 KLOC codebase would take; treat them as
+  conventional code review of a 32.6 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
 
 ### COCOMO benchmark
