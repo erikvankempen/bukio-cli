@@ -157,6 +157,29 @@ const DEADLINE_RULES = {
     return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-01`;
   },
   'dk-5-months': (company, year) => monthsAfterFyEnd(company, year, 5),
+  // FI (research §10): quarterly VAT due the 12th of the second month
+  // after the quarter (Q1 -> 12 May); annual accounts FILED within 8
+  // months of FYE (PRH; prepared within 4)
+  'fi-quarterly': (period) => {
+    const q = Number(String(period).split('-')[1].replace('Q', ''));
+    const m = q * 3 + 2;
+    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
+    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-12`;
+  },
+  'fi-8-months': (company, year) => monthsAfterFyEnd(company, year, 8),
+  // NO (research §10, Altinn): bi-monthly mva-meldingen — 6 periods per
+  // year, due 1 month + 10 days after the period end (P3 May/Jun is the
+  // 31 Aug summer exception, P6 Nov/Dec due 10 Feb next year); annual
+  // accounts approved ≤ 6 months + filed ≤ 1 month after FYE (31 July
+  // for calendar year)
+  'no-bimonthly': (period) => {
+    const m = String(period).match(/^(\d{4})-P([1-6])$/);
+    if (!m) throw complianceError('INVALID_PERIOD', `period '${period}' must be YYYY-Pn`);
+    const schedule = { 1: '04-10', 2: '06-10', 3: '08-31', 4: '10-10', 5: '12-10' };
+    if (m[2] === '6') return `${Number(m[1]) + 1}-02-10`;
+    return `${m[1]}-${schedule[m[2]]}`;
+  },
+  'no-7-months': (company, year) => monthsAfterFyEnd(company, year, 7),
 };
 
 export function isFiled(db, type, period) {
@@ -237,6 +260,17 @@ export function complianceStatus(db, { year }) {
       }
       const prevDec = rule(`${Number(year) - 1}-12`);
       if (prevDec >= `${year}-01-01`) push(ft.type, `${Number(year) - 1}-12`, prevDec);
+    } else if (ft.periodShape === 'YYYY-Pn') {
+      // bi-monthly filings (Phase B, NO): 6 periods per year with a fixed
+      // schedule (P1 -> 10 Apr ... P6 -> 10 Feb next year); the previous
+      // year's P6 falls in this calendar year
+      for (const pn of ['1', '2', '3', '4', '5', '6']) {
+        const deadline = rule(`${year}-P${pn}`);
+        if (deadline < `${year}-01-01`) continue;
+        push(ft.type, `${year}-P${pn}`, deadline);
+      }
+      const prevP6 = rule(`${Number(year) - 1}-P6`);
+      if (prevP6 >= `${year}-01-01`) push(ft.type, `${Number(year) - 1}-P6`, prevP6);
     } else if (ft.periodShape === 'YYYY') {
       const deadline = rule(company, year);
       push(ft.type, String(year), deadline, { books_closed: isBooksClosed(db, year) });
@@ -245,7 +279,7 @@ export function complianceStatus(db, { year }) {
         push(ft.type, String(Number(year) - 1), prevDeadline, { books_closed: isBooksClosed(db, Number(year) - 1) });
       }
     } else {
-      throw complianceError('INVALID_PERIOD_SHAPE', `period shape '${ft.periodShape}' is not supported (registered: YYYY-Qn, YYYY-MM, YYYY)`);
+      throw complianceError('INVALID_PERIOD_SHAPE', `period shape '${ft.periodShape}' is not supported (registered: YYYY-Qn, YYYY-MM, YYYY-Pn, YYYY)`);
     }
   }
 

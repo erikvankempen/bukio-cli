@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 07:33:04 UTC — **✅ 853 passing · 0 failing (853 tests)**
+**Latest run:** 2026-08-15 07:48:38 UTC — **✅ 863 passing · 0 failing (863 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-78 passing · 0 failing
+88 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -730,7 +730,7 @@
     - ✅ M9: bank import resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ review-fix: account add --taxonomy-code works; --rgs-code alias maps and warns
     - ✅ B1: getProfile returns the LU profile (French, PCN 2020 data)
-    - ✅ B1: LU is implemented — PLANNED is FI/NO/SE
+    - ✅ B1: LU is implemented — PLANNED is SE only
     - ✅ B1: the LU profile is deep-frozen
     - ✅ B1: init --country LU creates a French LU company with the PCN chart
     - ✅ B1: LU strict dispatch — unregistered formats fail loudly (no NL fallback)
@@ -747,34 +747,44 @@
     - ✅ B3: LU export xaf produces the FAIA 2.01 reduced-B audit file
     - ✅ B3: NL XAF export is unchanged (byte-identical, xaf-auditfile-4.0)
     - ✅ GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)
-    - ✅ GB: PLANNED is FI/NO/SE
+    - ✅ GB: PLANNED is SE only
     - ✅ GB: init --country GB creates a GBP company with the UK chart
     - ✅ GB: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ GB: compliance calendar — annual accounts in 9 months, CT600 in 12
     - ✅ FR: getProfile returns the FR profile (EUR, fr, PCG data)
-    - ✅ FR: PLANNED is FI/NO/SE
+    - ✅ FR: PLANNED is SE only
     - ✅ FR: init --country FR creates a French company with the PCG chart
     - ✅ FR: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ US: getProfile returns the US profile (USD, en-US, no federal VAT)
-    - ✅ US: PLANNED is FI/NO/SE
+    - ✅ US: PLANNED is SE only
     - ✅ US: init --country US creates a USD company with the US chart
     - ✅ US: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ US: compliance calendar — 1120 on 15 Apr + 941 quarterly (month-end)
     - ✅ BE: getProfile returns the BE profile (EUR, nl-BE, PCN-BE data)
-    - ✅ BE: PLANNED is FI/NO/SE
+    - ✅ BE: PLANNED is SE only
     - ✅ BE: init --country BE creates a Belgian company with the PCMN chart
     - ✅ BE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ BE: compliance calendar — VAT on the 20th + annual accounts in 7 months
     - ✅ DE: getProfile returns the DE profile (EUR, de-DE, SKR 03 data)
-    - ✅ DE: PLANNED is FI/NO/SE
+    - ✅ DE: PLANNED is SE only
     - ✅ DE: init --country DE creates a German company with the SKR 03 chart
     - ✅ DE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ DE: compliance calendar — UStVA 10th + annual VAT 31 Jul + accounts 12 mo
     - ✅ DK: getProfile returns the DK profile (DKK, da-DK, 25% VAT only)
-    - ✅ DK: PLANNED is FI/NO/SE
+    - ✅ DK: PLANNED is SE only
     - ✅ DK: init --country DK creates a Danish company with the kontoplan
     - ✅ DK: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ DK: compliance calendar — quarterly VAT 1st of 3rd month + accounts 5 months
+    - ✅ FI: getProfile returns the FI profile (EUR, fi-FI, 25.5% VAT)
+    - ✅ FI: PLANNED is SE only
+    - ✅ FI: init --country FI creates a Finnish company with the model chart
+    - ✅ FI: strict dispatch — unregistered formats fail loudly (no fallback)
+    - ✅ FI: compliance calendar — quarterly VAT 12th of 2nd month + accounts in 8 months
+    - ✅ NO: getProfile returns the NO profile (NOK, nb-NO, NS 4102)
+    - ✅ NO: PLANNED is SE only
+    - ✅ NO: init --country NO creates a Norwegian company with the NS 4102 chart
+    - ✅ NO: strict dispatch — unregistered formats fail loudly (no fallback)
+    - ✅ NO: compliance calendar — bi-monthly VAT (6/yr) + accounts by 31 July
 
 ### migration-021.test.js — 
 

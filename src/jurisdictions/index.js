@@ -16,26 +16,30 @@
 // chart, French labels), GB (./gb.js) the second (QuickBooks/Xero-style
 // chart, GBP), FR (./fr.js) the third (PCG chart), US (./us.js) the fourth
 // (no-VAT, state-level sales tax), BE (./be.js) the fifth (PCN-BE minimum
-// plan), DE (./de.js) the sixth (DATEV SKR 03) and DK (./dk.js) the seventh
-// (Standardkontoplan-aligned, DKK); each registers only formats with
-// existing builders — anything else fails loudly via the strict dispatch.
+// plan), DE (./de.js) the sixth (DATEV SKR 03), DK (./dk.js) the seventh
+// (Standardkontoplan-aligned, DKK), FI (./fi.js) the eighth (Liikekirjuri
+// model chart) and NO (./no.js) the ninth (NS 4102, NOK); each registers
+// only formats with existing builders — anything else fails loudly via the
+// strict dispatch.
 //
 // Consumers must resolve profiles ONLY through this registry — never read
 // company.country directly (see the profile-sprawl rule in the Phase A plan).
 import be from './be.js';
 import de from './de.js';
 import dk from './dk.js';
+import fi from './fi.js';
 import fr from './fr.js';
 import gb from './gb.js';
 import lu from './lu.js';
 import nl from './nl.js';
+import no from './no.js';
 import us from './us.js';
 
 /** ISO 3166-1 alpha-2 country codes that are valid but not implemented yet. */
-export const PLANNED = ['FI', 'NO', 'SE'];
+export const PLANNED = ['SE'];
 
 const PROFILES = {
-  NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr), US: deepFreeze(us), BE: deepFreeze(be), DE: deepFreeze(de), DK: deepFreeze(dk),
+  NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr), US: deepFreeze(us), BE: deepFreeze(be), DE: deepFreeze(de), DK: deepFreeze(dk), FI: deepFreeze(fi), NO: deepFreeze(no),
 };
 
 export function jurisdictionError(code, message) {
