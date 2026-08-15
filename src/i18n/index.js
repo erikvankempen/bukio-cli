@@ -59,8 +59,8 @@ export const TABLES = {
     // --- invoice list / reminders tables ---
     'invlist.number': 'number', 'invlist.type': 'type', 'invlist.date': 'date',
     'invlist.customer': 'customer', 'invlist.total': 'total', 'invlist.status': 'status',
-    'invlist.days': 'days', 'invlist.reminder': 'reminder',
     'reminder.none': 'no reminders as of {date}',
+    'invlist.days': 'days', 'invlist.reminder': 'reminder',
     'entry.paid': 'paid {date}: {amount} ({method})',
     'entry.outstanding': 'outstanding: {amount}',
     // --- month-end / year-end renders ---
@@ -105,8 +105,8 @@ export const TABLES = {
     // --- invoice list / reminders tables ---
     'invlist.number': 'nummer', 'invlist.type': 'type', 'invlist.date': 'datum',
     'invlist.customer': 'klant', 'invlist.total': 'totaal', 'invlist.status': 'status',
-    'invlist.days': 'dagen', 'invlist.reminder': 'herinnering',
     'reminder.none': 'geen herinneringen per {date}',
+    'invlist.days': 'dagen', 'invlist.reminder': 'herinnering',
     'entry.paid': 'betaald {date}: {amount} ({method})',
     'entry.outstanding': 'openstaand: {amount}',
     // --- month-end / year-end renders ---
