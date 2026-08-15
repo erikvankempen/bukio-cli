@@ -57,7 +57,7 @@ function columnNames(db, table) {
   return db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
 }
 
-test('migrations 021+022 upgrade a 020 DB: new columns, CHECK removals, renames, backfill', () => {
+test('migrations 021-024 upgrade a 020 DB: new columns, CHECK removals, renames, backfill', () => {
   const file = buildDbAt020();
   const db = openDb(file); // runs the real migration runner (001 → 022)
   try {
