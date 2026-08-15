@@ -156,10 +156,10 @@ export function make(program) {
           output(ctx, r, (d) => {
             console.log(`ICP ${d.period}: ${d.customers.length} EU customer(s), total ${d.total}`);
             table(d.customers, [
-              { key: 'name', label: 'klant' },
-              { key: 'vat_id', label: 'btw-id' },
-              { key: 'country', label: 'land' },
-              { key: 'amount', label: 'bedrag' },
+              { key: 'name', label: 'customer' },
+              { key: 'vat_id', label: 'tax id' },
+              { key: 'country', label: 'country' },
+              { key: 'amount', label: 'amount' },
             ]);
             console.log(d.note);
           });

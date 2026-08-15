@@ -211,7 +211,10 @@ error codes, MCP tool names/descriptions, chart/account identifiers, and
 statutory artifacts (OB readout labels 1a–5d, statutory jaarrekening XLSX
 'Winst en verlies', statutory model labels, RGS group names, command aliases,
 bank/import CSV header aliases). Documents keep their own language field
-(`invoice create --language nl|en`).
+(`invoice create --language nl|en`): when omitted it follows the company
+profile (Dutch for NL/BE companies, English for every other market — no
+market is the de facto base); the per-locale `pdf.*` table keys are reserved
+for document-language expansion.
 
 ## 4. JSON contracts
 

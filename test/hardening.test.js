@@ -832,9 +832,9 @@ test('CLI: assets register --format csv has a header row and totals', () => {
   cli(dbPath, ['assets', 'add', '--name', 'Laptop', '--purchase-date', '2026-01-01', '--purchase-price', '1200.00', '--depreciation-start', '2026-01-01', '--recognition-date', '2026-01-01']);
   const csv = runRaw(dbPath, ['assets', 'register', '--format', 'csv']).raw;
   const lines = csv.trim().split('\n');
-  assert.ok(lines[0].startsWith('id,naam,categorie'), `header row expected, got: ${lines[0]}`);
+  assert.ok(lines[0].startsWith('id,name,category'), `header row expected, got: ${lines[0]}`);
   assert.ok(csv.includes('Laptop'), 'asset row must be present');
-  assert.ok(csv.includes('TOTAAL'), 'totals row must be present');
+  assert.ok(csv.includes('TOTAL'), 'totals row must be present');
 });
 
 test('CLI: assets register --format json emits JSON without the global --json flag (round 11)', () => {

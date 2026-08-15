@@ -148,12 +148,12 @@ export function make(program) {
           };
           const flatRows = (d) => [
             ...d.assets.sections.flatMap((s) => s.accounts.map((a) => ({
-              side: 'activa', rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
+              side: 'assets', rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
             }))),
             ...d.liabilities_and_equity.sections.flatMap((s) => s.accounts.map((a) => ({
-              side: 'passiva', rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
+              side: 'liabilities', rgs: s.taxonomy_code, group: s.label, code: a.code, name: a.name, amount: fmt(a.balance_cents),
             }))),
-            { side: 'passiva', rgs: '', group: t('report.undistributedResult', {}, locale), code: '', name: '', amount: d.liabilities_and_equity.result },
+            { side: 'liabilities', rgs: '', group: t('report.undistributedResult', {}, locale), code: '', name: '', amount: d.liabilities_and_equity.result },
           ];
           await emitReport(ctx, opts, data, {
             csvColumns: [

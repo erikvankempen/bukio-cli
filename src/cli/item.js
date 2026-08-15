@@ -74,12 +74,12 @@ export function make(program) {
           output(ctx, { items }, (d) => {
             table(d.items, [
               { key: 'id', label: '#' },
-              { key: 'name', label: 'naam' },
-              { key: 'unit', label: 'eenheid' },
-              { key: 'unit_price', label: 'prijs' },
-              { key: 'vat_code', label: 'btw' },
-              { key: 'gl_account', label: 'grootboek' },
-              { key: 'active', label: 'actief' },
+              { key: 'name', label: 'name' },
+              { key: 'unit', label: 'unit' },
+              { key: 'unit_price', label: 'price' },
+              { key: 'vat_code', label: 'VAT' },
+              { key: 'gl_account', label: 'ledger' },
+              { key: 'active', label: 'active' },
             ]);
           });
         } finally {
@@ -104,13 +104,13 @@ export function make(program) {
           output(ctx, { item: fmtItem(row) }, (d) => {
             table([d.item], [
               { key: 'id', label: '#' },
-              { key: 'name', label: 'naam' },
-              { key: 'description', label: 'omschrijving' },
-              { key: 'unit', label: 'eenheid' },
-              { key: 'unit_price', label: 'prijs' },
-              { key: 'vat_code', label: 'btw' },
-              { key: 'gl_account', label: 'grootboek' },
-              { key: 'active', label: 'actief' },
+              { key: 'name', label: 'name' },
+              { key: 'description', label: 'description' },
+              { key: 'unit', label: 'unit' },
+              { key: 'unit_price', label: 'price' },
+              { key: 'vat_code', label: 'VAT' },
+              { key: 'gl_account', label: 'ledger' },
+              { key: 'active', label: 'active' },
             ]);
           });
         } finally {

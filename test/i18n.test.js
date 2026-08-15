@@ -88,6 +88,26 @@ function bookSale() {
 }
 const entryDesc = (id) => db.prepare('SELECT description FROM journal_entries WHERE id = ?').get(id).description;
 
+test('all 8 full locale tables carry the identical key set (parity guard)', () => {
+  // nl-be/fr-lu are regional override subsets by design — only the 8 full
+  // tables (en pivot + nl/de/fr/da/fi/nb/sv) must be key-identical.
+  const FULL = ['en', 'nl', 'de', 'fr', 'da', 'fi', 'nb', 'sv'];
+  const base = new Set(Object.keys(TABLES.en));
+  for (const loc of FULL) {
+    assert.deepEqual(Object.keys(TABLES[loc]).sort(), Object.keys(TABLES.en).sort(),
+      `key set mismatch in table '${loc}'`);
+  }
+  for (const ov of ['nl-be', 'fr-lu']) {
+    assert.ok(Object.keys(TABLES[ov]).every((k) => k in TABLES.en),
+      `override '${ov}' must only contain keys present in en`);
+  }
+  // the pivot table itself must not lose keys silently
+  assert.ok(base.size >= 88, `expected >= 88 keys in en, got ${base.size}`);
+  for (const k of ['report.totalAssets', 'company.name', 'invlist.dueDate']) {
+    assert.ok(base.has(k), `missing ${k}`);
+  }
+});
+
 test('company show + balance-sheet labels localize (round-10 review keys)', () => {
   assert.equal(t('company.name', {}, 'nl'), 'naam');
   assert.equal(t('company.language', {}, 'nl'), 'taal');

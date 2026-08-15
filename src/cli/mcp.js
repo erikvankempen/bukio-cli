@@ -665,7 +665,7 @@ tool({
 });
 tool({
   name: 'payments_batch_create', mutating: true,
-  description: 'create a SEPA batch: type transfer (pain.001) from transfer payables, or direct_debit (pain.008, incasso) from direct-debit payables (each needs a contact mandate)',
+  description: 'create a SEPA batch: type transfer (pain.001) from transfer payables, or direct_debit (pain.008) from direct-debit payables (each needs a contact mandate)',
   schema: {
     type: 'object', properties: {
       payable_ids: { type: 'array', items: { type: 'number' } },
@@ -712,7 +712,7 @@ tool({
     guardExecute(ctx, args);
     if (modeOf(args) === 'dry-run') {
       // validate like the real path (finalizeInvoice dryRun: existence,
-      // status, the 12 factuurvereisten) — the old plan echoed ok for
+      // status, the 12 statutory invoice requirements) — the old plan echoed ok for
       // nonexistent/draft-incomplete invoices
       return finalizeInvoice(db, { id: args.id, actor: args.actor ?? ctx.actor, dryRun: true });
     }
@@ -832,7 +832,7 @@ tool({
 // --- fixed assets ------------------------------------------------------------
 
 tool({
-  name: 'assets_register', description: 'activastaat: cost, cumulative depreciation, book value per asset',
+  name: 'assets_register', description: 'fixed asset register: cost, cumulative depreciation, book value per asset',
   schema: { type: 'object', properties: { as_of: { type: 'string' } } },
   handler: (db, args) => register(db, { asOf: args.as_of ?? null }),
 });

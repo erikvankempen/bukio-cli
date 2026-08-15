@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 15:12:53 UTC — **✅ 889 passing · 0 failing (889 tests)**
+**Latest run:** 2026-08-15 18:14:52 UTC — **✅ 891 passing · 0 failing (891 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -556,12 +556,14 @@
 
 ### i18n.test.js — 
 
-10 passing · 0 failing
+12 passing · 0 failing
 
     - ✅ t: missing locale falls back to English, missing key falls back to the key
     - ✅ t: {param} interpolation
     - ✅ resolveLocale: flag > env > en (UI stays English unless opted in)
     - ✅ legacy shims: label/unitLabel/LABELS/UNITS keep the old API and values
+    - ✅ all 8 full locale tables carry the identical key set (parity guard)
+    - ✅ company show + balance-sheet labels localize (round-10 review keys)
     - ✅ reminders table labels localize fully (nl)
     - ✅ vat file description: English by default
     - ✅ vat file description: Dutch when localized (locale: nl)

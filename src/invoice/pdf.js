@@ -39,7 +39,7 @@ export function invoiceHtml(db, invoice) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   const contact = invoice.contact;
   const isCredit = invoice.invoice_type === 'credit';
-  const lang = invoice.language ?? 'nl';
+  const lang = invoice.language ?? 'en';
   const L = (k) => label(k, lang);
 
   const totals = computeInvoiceTotals(invoice.lines, invoice.discount_type, invoice.discount_value);

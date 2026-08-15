@@ -1530,6 +1530,13 @@ test('DE: init --country DE creates a German company with the SKR 03 chart', () 
     assert.ok(accounts.some((a) => a.code === '1200' && a.name === 'Bank'));
     assert.ok(accounts.some((a) => a.code === '8400' && a.name === 'Erlöse 19 % USt'));
     for (const a of accounts) assert.equal(a.taxonomy, null);
+    // Document language follows the profile — DE defaults to English, not NL
+    // (no market is the de facto base; NL is the only Dutch-speaking default).
+    const c = createContact(db, { name: 'Kunde GmbH' });
+    const inv = createInvoice(db, { contactId: c.id, lines: ['Dienst @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
+    assert.equal(inv.language, 'en');
+    const invNl = createInvoice(db, { contactId: c.id, lines: ['Dienst @ 10.00'], date: '2026-08-11', language: 'nl', actor: 'agent:test' });
+    assert.equal(invNl.language, 'nl'); // explicit --language still overrides
   } finally {
     db.close();
   }

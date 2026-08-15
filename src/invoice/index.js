@@ -519,14 +519,22 @@ function normalizeLineObject(l) {
  * Lines come from `lines` (free-form line specs) OR `items` (catalog item
  * specs "ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]" — price/VAT overrides apply
  * to this invoice only). `discountType/discountValue` apply to the TOTAL,
- * before VAT. `language` is 'nl' (default) or 'en'.
+ * before VAT. `language` is 'nl' or 'en'; when omitted it follows the
+ * company profile (Dutch for NL/BE companies, English for every other
+ * market) — no market is the de facto base.
  */
 export function createInvoice(db, {
   contactId, lines = null, items = null, date, dueDays = 30, deliveryDate = null,
   description = null, reference = null, notes = null, discountType = null,
-  discountValue = null, language = 'nl', actor = 'human', dryRun = false,
+  discountValue = null, language = null, actor = 'human', dryRun = false,
 }) {
   const contact = getContact(db, contactId);
+  if (language == null) {
+    // Document language follows the company profile, not a hardcoded market:
+    // NL/BE (Dutch-speaking) default to 'nl', every other market to 'en'.
+    const comp = db.prepare('SELECT locale FROM company WHERE id = 1').get();
+    language = comp && comp.locale && comp.locale.startsWith('nl') ? 'nl' : 'en';
+  }
   if (!contact) throw invoiceError('CONTACT_NOT_FOUND', `contact ${contactId} does not exist`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw invoiceError('INVALID_DATE', `date '${date}' must be YYYY-MM-DD`);
   {
