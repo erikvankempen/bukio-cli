@@ -470,7 +470,7 @@ export function vatFile(db, { account = null, period = null, desc = null, actor 
   ].filter((p) => p.amountCents !== 0);
   const owe = net > 0;
   const liability = Math.abs(net);
-  const description = desc ?? `OB-aangifte${period ? ` ${period}` : ''} verlegging naar ${account} (${owe ? 'te betalen' : 'te ontvangen'})`;
+  const description = desc ?? `VAT return${period ? ` ${period}` : ''} — transfer to ${account} (${owe ? 'payable' : 'receivable'})`;
 
   if (dryRun) {
     return {
@@ -517,16 +517,16 @@ export function vatSettle(db, {
   if (!Number.isInteger(txAmountCents)) throw vatError('INVALID_AMOUNT', 'tx amount must be an integer number of cents');
   const balance = accountBalance(db, account);
   if (balance === 0) {
-    throw vatError('VAT_SETTLE_NOTHING', `no outstanding balance on ${account} (af te dragen omzetbelasting) to settle`);
+    throw vatError('VAT_SETTLE_NOTHING', `no outstanding balance on ${account} (${vatSettlementAccountName(db)}) to settle`);
   }
   const owe = balance < 0; // af-te-dragen credit (negative) = te betalen
   const liability = Math.abs(balance);
   const paid = Math.abs(txAmountCents);
   if (owe && txAmountCents >= 0) {
-    throw vatError('VAT_SETTLE_DIRECTION', `paying ${account} (te betalen) requires an OUTGOING bank transaction, got +${paid} cents`);
+    throw vatError('VAT_SETTLE_DIRECTION', `paying ${account} (payable) requires an OUTGOING bank transaction, got +${paid} cents`);
   }
   if (!owe && txAmountCents <= 0) {
-    throw vatError('VAT_SETTLE_DIRECTION', `receiving a refund on ${account} (te ontvangen) requires an INCOMING bank transaction, got ${txAmountCents} cents`);
+    throw vatError('VAT_SETTLE_DIRECTION', `receiving a refund on ${account} (receivable) requires an INCOMING bank transaction, got ${txAmountCents} cents`);
   }
   if (!getAccountByCode(db, differenceAccount)) {
     throw vatError('INVALID_DIFFERENCE_ACCOUNT', `difference account ${differenceAccount} does not exist (pick an expense account, e.g. ${tax.accounts.differenceDefault})`);
@@ -547,7 +547,7 @@ export function vatSettle(db, {
     { code: bankAccountCode, amountCents: txAmountCents },
   ];
   if (difference !== 0) postings.push({ code: differenceAccount, amountCents: difference });
-  const description = desc ?? `Betaling OB-aangifte${period ? ` ${period}` : ''} — af te dragen omzetbelasting (afrondingsverschil ${formatAmount(difference)})`;
+  const description = desc ?? `VAT return payment${period ? ` ${period}` : ''} — ${vatSettlementAccountName(db)} (rounding difference ${formatAmount(difference)})`;
 
   if (dryRun) {
     return {
