@@ -32,7 +32,7 @@ function setup() {
 beforeEach(setup);
 
 test('t: missing locale falls back to English, missing key falls back to the key', () => {
-  assert.equal(t('dir.payable', {}, 'fr'), 'payable'); // unknown locale -> en
+  assert.equal(t('dir.payable', {}, 'xx'), 'payable'); // unknown locale -> en
   assert.equal(t('no.such.key', {}, 'nl'), 'no.such.key'); // unknown key -> key
   assert.equal(t('dir.payable', {}, 'nl'), 'te betalen'); // known nl
   assert.equal(t('dir.payable'), 'payable'); // default en
@@ -98,6 +98,37 @@ test('vat file description: Dutch when localized (locale: nl)', () => {
   bookSale();
   const r = vatFile(db, { period: '2026-Q3', actor: 'agent:test', locale: 'nl' });
   assert.equal(entryDesc(r.entry_id), 'OB-aangifte 2026-Q3 verlegging naar 2510 (te betalen)');
+});
+
+test('locale normalization: de-DE -> de, en-GB -> en, nl-BE -> nl-be, fr-LU -> fr-lu', () => {
+  assert.equal(t('dir.payable', {}, 'de-DE'), 'zu zahlen');
+  assert.equal(t('dir.payable', {}, 'DE-DE'), 'zu zahlen'); // case-insensitive
+  assert.equal(t('dir.payable', {}, 'en-GB'), 'payable'); // en-gb -> en
+  assert.equal(t('dir.payable', {}, 'en-US'), 'payable');
+  assert.equal(t('pdf.kvk', {}, 'nl-BE'), 'KBO'); // regional override first
+  assert.equal(t('dir.payable', {}, 'nl-BE'), 'te betalen'); // ...then base language
+  assert.equal(t('pdf.kvk', {}, 'fr-LU'), 'RCS'); // lu override
+  assert.equal(t('pdf.kvk', {}, 'fr'), 'SIREN'); // fr base
+});
+
+test('per-locale spot checks: every market table resolves its own language', () => {
+  const spots = {
+    de: [['pdf.invoice', 'RECHNUNG'], ['status.overdue', 'überfällig'], ['report.revenue', 'Erlöse']],
+    fr: [['pdf.invoice', 'FACTURE'], ['dir.receivable', 'à recevoir'], ['email.reminderSubject', 'Rappel de paiement — facture 2026-001']],
+    da: [['pdf.invoice', 'FAKTURA'], ['status.paid', 'betalt'], ['vat.file.description', 'Momsangivelse 2026-Q3 — overførsel til 2510 (skyldig)']],
+    fi: [['pdf.invoice', 'LASKU'], ['status.draft', 'luonnos'], ['dir.debit', 'debet']],
+    nb: [['pdf.invoice', 'FAKTURA'], ['status.overdue', 'forfalt'], ['vat.settle.description', 'Betaling av mva-melding 2026-Q3 — 2510 (avrundingsdifferanse 0.01)']],
+    sv: [['pdf.invoice', 'FAKTURA'], ['status.paid', 'betald'], ['report.netResult', 'nettoresultat']],
+  };
+  for (const [loc, checks] of Object.entries(spots)) {
+    for (const [key, expected] of checks) {
+      const actual = t(key, {
+        period: ' 2026-Q3', account: '2510', direction: 'skyldig',
+        number: '2026-001', amount: '0.01',
+      }, loc);
+      assert.equal(actual, expected, `${loc}.${key}`);
+    }
+  }
 });
 
 test('vat file description: --desc override still wins over localization', () => {

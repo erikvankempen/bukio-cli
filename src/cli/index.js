@@ -49,7 +49,7 @@ export async function runCli(argv) {
     .option('--actor <who>', "acting entity '<role>:<name>' — e.g. agent:bartholomeus, human:erik (or BUKIO_ACTOR env; required)", undefined)
     .option('--sign-key <path>', 'explicit private-key file to sign with (default: the actor\'s key in <config>/keys)', undefined)
     .option('--server <url>', 'remote bukio server — POST a signed command envelope instead of running locally (or BUKIO_SERVER env)', undefined)
-    .option('--locale <code>', 'output language for human-facing text (or BUKIO_LOCALE env; default: the company locale, else English)', undefined)
+    .option('--locale <code>', 'output language for human-facing text (or BUKIO_LOCALE env; default English; tables: en, nl, nl-be, de, fr, fr-lu, da, fi, nb, sv)', undefined)
     .showHelpAfterError();
 
   initCmd(program);
