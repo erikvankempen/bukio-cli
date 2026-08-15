@@ -394,24 +394,29 @@ function buildFaiaReducedB(db, { year, out, actor, dryRun }) {
   }
   parts.push('    </GeneralLedgerAccounts>');
   // TaxTable: the Company/TaxRegistration TaxType keyrefs this table — a
-  // TaxRegistration without a matching TaxTableEntry fails XSD validation
+  // TaxRegistration without a matching TaxTableEntry fails XSD validation.
+  // The table is only emitted when the company carries a TVA number: a
+  // TVA-less company must not declare a TVA entry it cannot back with a
+  // TaxRegistration (keyref consistency for the TVA-less edge case).
   const taxCodes = resolveProfile(db).tax.codes;
-  parts.push('    <TaxTable>');
-  parts.push('      <TaxTableEntry>');
-  parts.push('        <TaxType>TVA</TaxType>');
-  parts.push('        <Description>Taxe sur la valeur ajoutée</Description>');
-  for (const c of taxCodes) {
-    parts.push('        <TaxCodeDetails>');
-    parts.push(`          <TaxCode>${esc(c.code)}</TaxCode>`);
-    parts.push(`          <Description>${esc(c.description)}</Description>`);
-    if (c.type === 'standard') {
-      parts.push(`          <TaxPercentage>${(c.rateBp / 100).toFixed(2)}</TaxPercentage>`);
+  if (company.tax_id) {
+    parts.push('    <TaxTable>');
+    parts.push('      <TaxTableEntry>');
+    parts.push('        <TaxType>TVA</TaxType>');
+    parts.push('        <Description>Taxe sur la valeur ajoutée</Description>');
+    for (const c of taxCodes) {
+      parts.push('        <TaxCodeDetails>');
+      parts.push(`          <TaxCode>${esc(c.code)}</TaxCode>`);
+      parts.push(`          <Description>${esc(c.description)}</Description>`);
+      if (c.type === 'standard') {
+        parts.push(`          <TaxPercentage>${(c.rateBp / 100).toFixed(2)}</TaxPercentage>`);
+      }
+      parts.push('          <Country>LU</Country>');
+      parts.push('        </TaxCodeDetails>');
     }
-    parts.push('          <Country>LU</Country>');
-    parts.push('        </TaxCodeDetails>');
+    parts.push('      </TaxTableEntry>');
+    parts.push('    </TaxTable>');
   }
-  parts.push('      </TaxTableEntry>');
-  parts.push('    </TaxTable>');
   parts.push('  </MasterFiles>');
 
   let totalDebit = 0;

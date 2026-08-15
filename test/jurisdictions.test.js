@@ -727,6 +727,29 @@ test('DE: UBL reverse-charge line percent is profile-driven, not NL 21.00 (revie
   }
 });
 
+test('BE: vat book auto VAT legs land on the profile ledger, not NL 2500/1500 (review fix)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--country', 'BE', '--legal-form', 'bv', '--vat', 'on']);
+  cli(dbPath, ['vat', 'book', '--date', '2026-08-15', '--desc', 'omzet', '--postings', '700:-1000@21,400:1210', '--post']);
+  const tb = cli(dbPath, ['report', 'trial-balance']);
+  const accounts = tb.out.data.accounts;
+  const out = accounts.find((a) => a.code === '451');
+  assert.ok(out && out.net_cents === -21000, 'output VAT leg on 451 (BE ledger), not 2500');
+  assert.ok(!accounts.some((a) => a.code === '2500' || a.code === '1500'), 'no NL clearing accounts created');
+  assert.equal(tb.out.data.balanced, true);
+});
+
+test('FR: vat book accepts dotted VAT codes (@5.5) and posts to 44571 (review fix)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'SARL Test', '--country', 'FR', '--legal-form', 'sarl', '--vat', 'on']);
+  cli(dbPath, ['vat', 'book', '--date', '2026-08-15', '--desc', 'omzet', '--postings', '701:-1000@5.5,411:1055', '--post']);
+  const tb = cli(dbPath, ['report', 'trial-balance']);
+  const accounts = tb.out.data.accounts;
+  const out = accounts.find((a) => a.code === '44571');
+  assert.ok(out && out.net_cents === -5500, '5.5% output leg on 44571');
+  assert.equal(tb.out.data.balanced, true);
+});
+
 test('BE: vat file/settle resolve the profile defaults via the CLI (review fix)', () => {
   const dbPath = tmpDb();
   cli(dbPath, ['init', '--name', 'Test BV', '--country', 'BE', '--legal-form', 'bv', '--vat', 'on']);
@@ -908,6 +931,27 @@ test('B3: LU export xaf produces the FAIA 2.01 reduced-B audit file', () => {
   assert.ok(!xml.includes('<Xaf '), 'never the Dutch XAF root');
 });
 
+
+test('B3: FAIA omits the TaxTable for a TVA-less company (review fix)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--registration-id', 'B123456', '--tax-id', 'LU12345678', '--vat', 'on']);
+  cli(dbPath, ['company', 'update', '--address', '1 rue du Test', '--postal-code', 'L-1234', '--city', 'Luxembourg']);
+  const db = openDb(dbPath);
+  try {
+    db.prepare('UPDATE company SET tax_id = NULL WHERE id = 1').run();
+  } finally {
+    db.close();
+  }
+  cli(dbPath, ['entry', 'add', '--date', '2026-08-15', '--desc', 'test', '--postings', '4011:11700,7021:-10000,461411:-1700', '--post']);
+  const outPath = path.join(tmpdir(), `faia-notax-${Date.now()}.xml`);
+  const r = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', outPath]);
+  assert.equal(r.out.data.mutaties, 1);
+  const xml = readFileSync(outPath, 'utf8');
+  // the TVA TaxTable keyrefs the TaxRegistration — a TVA-less company must
+  // not declare a TVA table entry it cannot back with a registration
+  assert.ok(!xml.includes('<TaxTable'), 'no TaxTable for a TVA-less company');
+  assert.ok(!xml.includes('<TaxRegistration'), 'no TaxRegistration without a TVA number');
+});
 test('B3: NL XAF export is unchanged (byte-identical, xaf-auditfile-4.0)', () => {
   const dbPath = tmpDb();
   cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678', '--tax-id', 'NL123456789B01', '--vat', 'on']);
@@ -1375,6 +1419,9 @@ test('DE: getProfile returns the DE profile (EUR, de-DE, SKR 03 data)', () => {
   assert.ok(p.identifiers.vatIdFormat.test('DE123456789'));
   assert.equal(p.tax.standardRateBp, 1900);
   assert.equal(p.tax.smallBusinessScheme, 'kleinunternehmer'); // €25k/€100k since 2025
+  // the first income account is the default sales account (postingDefaults)
+  // — must be the standard 19% sales account, NOT the §19 Kleinunternehmer one
+  assert.equal(p.reporting.defaultChart.find((a) => a.type === 'income').code, '8400');
   assert.deepEqual(p.tax.codes.map((c) => c.code), ['19', '7', '0', 'V', 'R', 'RE', 'M', 'P']);
   // SKR 03 VAT accounts: 1570 input / 1776 output; settlement 1780
   assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['1570', '1776']);

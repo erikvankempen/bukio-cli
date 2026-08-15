@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 10:05:31 UTC — **✅ 873 passing · 0 failing (873 tests)**
+**Latest run:** 2026-08-15 10:39:32 UTC — **✅ 876 passing · 0 failing (876 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-98 passing · 0 failing
+101 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -741,6 +741,8 @@
     - ✅ B6: NL invoice compliance is unchanged (byte-identical, nl-12-vereisten)
     - ✅ B2: LU financial statements report the LSC abridged layout
     - ✅ DE: UBL reverse-charge line percent is profile-driven, not NL 21.00 (review fix)
+    - ✅ BE: vat book auto VAT legs land on the profile ledger, not NL 2500/1500 (review fix)
+    - ✅ FR: vat book accepts dotted VAT codes (@5.5) and posts to 44571 (review fix)
     - ✅ BE: vat file/settle resolve the profile defaults via the CLI (review fix)
     - ✅ B2: LU P&L — mixed leftover (custom expense + custom income) reconciles (review fix)
     - ✅ B2: LU P&L — 73x subventions on line 4 and custom expenses subtract (review fix)
@@ -749,6 +751,7 @@
     - ✅ B5: LU compliance calendar — TVA on the 15th + annual accounts in 7 months
     - ✅ B5: LU TVA filings mark through the registry and flip the status
     - ✅ B3: LU export xaf produces the FAIA 2.01 reduced-B audit file
+    - ✅ B3: FAIA omits the TaxTable for a TVA-less company (review fix)
     - ✅ B3: NL XAF export is unchanged (byte-identical, xaf-auditfile-4.0)
     - ✅ GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)
     - ✅ GB: PLANNED is empty (all ten markets landed)

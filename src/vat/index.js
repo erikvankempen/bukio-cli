@@ -68,7 +68,7 @@ export function parseVatPostingSpecs(raw) {
     for (const token of String(item).split(',')) {
       const t = token.trim();
       if (!t) continue;
-      const m = t.match(/^(\d{1,6}):(.+?)(?:@([A-Z0-9]+))?$/);
+      const m = t.match(/^(\d{1,6}):(.+?)(?:@([A-Z0-9.]+))?$/);
       if (!m) throw vatError('INVALID_POSTING', `posting '${t}' must be CODE:AMOUNT[@VATCODE] (e.g. 8000:-100.00@21)`);
       out.push({ code: m[1], amountCents: parsePostingSpecs([`${m[1]}:${m[2]}`])[0].amountCents, vatCode: m[3] ?? null });
     }
@@ -90,6 +90,17 @@ export function expandVatPostings(db, specs) {
   const vatLegs = [];
   // reverse charge / privégebruik VAT is due at the standard rate — per profile
   const reverseRate = resolveProfile(db).tax.reverseChargeEffectiveRateBp;
+  // the auto VAT legs land on the PROFILE's clearing accounts (NL 1500/2500,
+  // BE 411/451, FR 44566/44571, GB 2110/2100, LU 421611/461411, ...) — the
+  // old hardcoded '2500'/'1500' posted to nonexistent accounts (ACCOUNT_
+  // NOT_FOUND) or silently misbooked onto foreign codes on every non-NL
+  // market (e.g. NO 1500 is Kundefordringer/debtors, 2500 Betalbar skatt)
+  const { tax } = resolveProfile(db);
+  const inputAcc = tax.accounts.ledger.find((a) => a.type === 'asset');
+  const outputAcc = tax.accounts.ledger.find((a) => a.type === 'liability');
+  if (!inputAcc || !outputAcc) {
+    throw vatError('FORMAT_NOT_SUPPORTED', `the jurisdiction profile's VAT ledger must declare one asset and one liability clearing account (got: ${tax.accounts.ledger.map((a) => a.code).join(', ')})`);
+  }
 
   for (const spec of specs) {
     const account = getAccountByCode(db, spec.code);
@@ -114,7 +125,7 @@ export function expandVatPostings(db, specs) {
         : Math.round(Math.abs(spec.amountCents * effectiveRateBp / 10000)) * Math.sign(spec.amountCents);
 
       const isOutput = account.type === 'income' || vat.type === 'private';
-      const vatAccountCode = (vat.type === 'reverse' || isOutput) ? '2500' : '1500';
+      const vatAccountCode = isOutput ? outputAcc.code : inputAcc.code;
       expanded.push({
         code: spec.code, amountCents: spec.amountCents,
         vatCode: vat.code, vatAmountCents: vatAmount,

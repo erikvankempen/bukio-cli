@@ -10,7 +10,7 @@
 import { createAccount, getAccountByCode } from '../core/accounts.js';
 import { createEntry, postEntry } from '../core/entries.js';
 import { record } from '../audit/index.js';
-import { getProfile, resolveProfile , allTaxCodes } from '../jurisdictions/index.js';
+import { resolveProfile, allTaxCodes } from '../jurisdictions/index.js';
 import { isValidIban, normalizeIban } from '../core/iban.js';
 import { isVatEnabled, listVatCodes } from '../vat/index.js';
 import { getItem } from '../items/index.js';

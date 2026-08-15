@@ -70,6 +70,9 @@ function luMonthlyDeadline(period) {
 
 // day D of the month following YYYY-MM
 function dayOfNextMonth(period, day) {
+  if (!/^\d{4}-\d{2}$/.test(String(period))) {
+    throw complianceError('INVALID_PERIOD_SHAPE', `dayOfNextMonth expects YYYY-MM, got '${period}'`);
+  }
   const [y, m] = String(period).split('-').map(Number);
   const ny = m === 12 ? y + 1 : y;
   const nm = m === 12 ? 1 : m + 1;

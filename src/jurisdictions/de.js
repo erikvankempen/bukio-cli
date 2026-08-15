@@ -141,10 +141,14 @@ export default {
       { code: '4600', name: 'Werbekosten', type: 'expense', normalBalance: 'debit' },
       { code: '4830', name: 'Abschreibungen auf Sachanlagen', type: 'expense', normalBalance: 'debit' },
       { code: '4900', name: 'Sonstige betriebliche Aufwendungen', type: 'expense', normalBalance: 'debit' },
-      { code: '8195', name: 'Erlöse Kleinunternehmer § 19 UStG', type: 'income', normalBalance: 'credit' },
+      // 8400 first: postingDefaults (src/invoice/index.js) picks the first
+      // income account as the default sales account — for a VAT-registered
+      // GmbH that is the 19% sales account, NOT the §19 Kleinunternehmer
+      // account (8195, a niche exemption), which is listed last
+      { code: '8400', name: 'Erlöse 19 % USt', type: 'income', normalBalance: 'credit' },
       { code: '8200', name: 'Erlöse', type: 'income', normalBalance: 'credit' },
       { code: '8300', name: 'Erlöse 7 % USt', type: 'income', normalBalance: 'credit' },
-      { code: '8400', name: 'Erlöse 19 % USt', type: 'income', normalBalance: 'credit' },
+      { code: '8195', name: 'Erlöse Kleinunternehmer § 19 UStG', type: 'income', normalBalance: 'credit' },
     ],
     // debtors account for invoice postings (SKR 03 1400)
     debtorsAccount: '1400',
