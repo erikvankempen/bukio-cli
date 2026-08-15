@@ -48,10 +48,45 @@ export function jaarrekeningDeadline(company, year) {
 }
 
 // Deadline rules keyed by profile.compliance.filingTypes[].deadlineRule.
-// Both rules return a 'YYYY-MM-DD' deadline string.
+// Rules return a 'YYYY-MM-DD' deadline string. Phase B5 adds the LU rules
+// (TVA: 15th of the month after the period; annual 1 March; annual accounts
+// deposit within ~7 months of the FY end per the LSC 2002 law).
+function luQuarterDeadline(period) {
+  const m = String(period).match(/^(\d{4})-Q([1-4])$/);
+  if (!m) throw complianceError('INVALID_PERIOD', `period '${period}' must be YYYY-Qn`);
+  const [, year, qn] = m;
+  const months = { 1: '04-15', 2: '07-15', 3: '10-15', 4: '01-15' };
+  return `${qn === '4' ? Number(year) + 1 : year}-${months[qn]}`;
+}
+function luMonthlyDeadline(period) {
+  const m = String(period).match(/^(\d{4})-(\d{2})$/);
+  if (!m) throw complianceError('INVALID_PERIOD', `period '${period}' must be YYYY-MM`);
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  if (month < 1 || month > 12) throw complianceError('INVALID_PERIOD', `period '${period}' must be YYYY-MM`);
+  const [y, mm] = month === 12 ? [year + 1, 1] : [year, month + 1];
+  return `${y}-${String(mm).padStart(2, '0')}-15`;
+}
+function luAnnualAccountsDeadline(company, year) {
+  // LSC (loi 19.12.2002): accounts approved within 6 months of the FY end,
+  // deposited with the RCS within 1 month of approval (~7 months). Last day
+  // of the month 7 months after the FY-end month.
+  const fy = company.fiscal_year_end || '12-31';
+  const parts = String(fy).split('-');
+  const mm = Number(parts[parts.length - 2]);
+  const total = mm + 7;
+  const y = Number(year) + Math.floor((total - 1) / 12);
+  const m = ((total - 1) % 12) + 1;
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+}
 const DEADLINE_RULES = {
   'nl-quarterly': (period) => quarterDeadline(period).deadline,
   'nl-13-months': (company, year) => jaarrekeningDeadline(company, year),
+  'lu-quarterly': luQuarterDeadline,
+  'lu-monthly': luMonthlyDeadline,
+  'lu-annual': (company, year) => `${Number(year) + 1}-03-01`, // TVA annual return, 1 March next year
+  'lu-7-months': luAnnualAccountsDeadline,
 };
 
 export function isFiled(db, type, period) {
@@ -109,7 +144,7 @@ export function complianceStatus(db, { year }) {
   for (const ft of compliance.filingTypes) {
     const rule = DEADLINE_RULES[ft.deadlineRule];
     if (!rule) {
-      throw complianceError('DEADLINE_RULE_NOT_FOUND', `deadline rule '${ft.deadlineRule}' is not implemented (Phase A: nl-quarterly, nl-13-months)`);
+      throw complianceError('DEADLINE_RULE_NOT_FOUND', `deadline rule '${ft.deadlineRule}' is not implemented (registered: ${Object.keys(DEADLINE_RULES).join(', ')})`);
     }
     if (ft.periodShape === 'YYYY-Qn') {
       for (const qn of ['1', '2', '3', '4']) {
@@ -121,6 +156,17 @@ export function complianceStatus(db, { year }) {
       // the Q4 obligation of the previous year falls in this calendar year
       const prevQ4 = rule(`${Number(year) - 1}-Q4`);
       if (prevQ4 >= `${year}-01-01`) push(ft.type, `${Number(year) - 1}-Q4`, prevQ4);
+    } else if (ft.periodShape === 'YYYY-MM') {
+      // monthly filings (Phase B5, LU > €620K band): months 01-11 have
+      // deadlines in this calendar year; the previous December's return is
+      // due on 15 January of this year
+      for (const mm of ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11']) {
+        const deadline = rule(`${year}-${mm}`);
+        if (deadline < `${year}-01-01`) continue;
+        push(ft.type, `${year}-${mm}`, deadline);
+      }
+      const prevDec = rule(`${Number(year) - 1}-12`);
+      if (prevDec >= `${year}-01-01`) push(ft.type, `${Number(year) - 1}-12`, prevDec);
     } else if (ft.periodShape === 'YYYY') {
       const deadline = rule(company, year);
       push(ft.type, String(year), deadline, { books_closed: isBooksClosed(db, year) });
@@ -129,7 +175,7 @@ export function complianceStatus(db, { year }) {
         push(ft.type, String(Number(year) - 1), prevDeadline, { books_closed: isBooksClosed(db, Number(year) - 1) });
       }
     } else {
-      throw complianceError('INVALID_PERIOD_SHAPE', `period shape '${ft.periodShape}' is not supported (Phase A: YYYY-Qn, YYYY)`);
+      throw complianceError('INVALID_PERIOD_SHAPE', `period shape '${ft.periodShape}' is not supported (registered: YYYY-Qn, YYYY-MM, YYYY)`);
     }
   }
 

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 05:38:19 UTC — **✅ 817 passing · 0 failing (817 tests)**
+**Latest run:** 2026-08-15 05:56:30 UTC — **✅ 822 passing · 0 failing (822 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-42 passing · 0 failing
+47 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -739,6 +739,11 @@
     - ✅ B6: LU supplier requirements — missing RCS / TVA fail with French messages
     - ✅ B6: LU reverse charge requires the customer TVA number (auto-liquidation)
     - ✅ B6: NL invoice compliance is unchanged (byte-identical, nl-12-vereisten)
+    - ✅ B2: LU financial statements report the LSC abridged layout
+    - ✅ B2: LU financial statements reject the NL model (INVALID_MODEL)
+    - ✅ B2: NL financial statements keep the klein default (byte-identical)
+    - ✅ B5: LU compliance calendar — TVA on the 15th + annual accounts in 7 months
+    - ✅ B5: LU TVA filings mark through the registry and flip the status
 
 ### migration-021.test.js — 
 

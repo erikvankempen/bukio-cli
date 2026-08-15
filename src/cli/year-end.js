@@ -88,7 +88,7 @@ export function make(program) {
           return;
         }
         if (opts.format === 'pdf') {
-          const outPath = opts.out ?? `financial-statements-${opts.year}-${opts.model}.pdf`;
+          const outPath = opts.out ?? `financial-statements-${opts.year}-${report.model}.pdf`;
           const result = await jaarrekeningToPdf(report, { outPath });
           output(ctx, { path: result.path, bytes: result.bytes, ...(warnings ? { warnings } : {}) },
             (d) => {
@@ -99,7 +99,7 @@ export function make(program) {
         }
         if (opts.format === 'xlsx') {
           const { renderJaarrekeningXlsx } = await import('../report/jaarrekening-xlsx.js');
-          const outPath = opts.out ?? `financial-statements-${opts.year}-${opts.model}.xlsx`;
+          const outPath = opts.out ?? `financial-statements-${opts.year}-${report.model}.xlsx`;
           const result = await renderJaarrekeningXlsx(report, { outPath });
           output(ctx, { path: result.path, bytes: result.bytes, ...(warnings ? { warnings } : {}) },
             (d) => {
@@ -122,7 +122,7 @@ export function make(program) {
     .command('report')
     .description('annual accounts in the jurisdiction statutory layout')
     .requiredOption('--year <yyyy>', 'fiscal year')
-    .option('--model <micro|klein>', 'statutory model', 'klein')
+    .option('--model <model>', 'statutory model (per the country profile: NL micro|klein, LU abrege)')
     .option('--format <json|pdf|xlsx>', 'output format', 'json')
     .option('--out <path>', 'output path (pdf/xlsx)')
     .action(reportAction(false));
@@ -133,7 +133,7 @@ export function make(program) {
     .command('report')
     .description('[deprecated] alias for financial-statements report')
     .requiredOption('--year <yyyy>', 'fiscal year')
-    .option('--model <micro|klein>', 'statutory model', 'klein')
+    .option('--model <model>', 'statutory model (per the country profile: NL micro|klein, LU abrege)')
     .option('--format <json|pdf|xlsx>', 'output format', 'json')
     .option('--out <path>', 'output path (pdf/xlsx)')
     .action(reportAction(true));

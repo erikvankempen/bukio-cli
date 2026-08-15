@@ -17,9 +17,8 @@
 // instead of silently producing Dutch output:
 //   - tax.returnLayout            omitted → OB readout fails (LU eCDF returns
 //                                  are a B-milestone)
-//   - reporting.format            omitted → jaarrekening fails (LU LSC
-//                                  layout is B2)
-//   - reporting.statutoryAccounts omitted → same, B2
+// Registered since B2: reporting.format 'lu-lsc' + statutoryAccounts
+// (LSC abridged layout).
 //   - documents.auditFile         omitted → XAF export fails (FAIA is B3)
 // Registered since B6: documents.invoiceCompliance 'lu-invoice-vereisten'
 // (loi TVA art. 66 + RCS rule set).
@@ -92,8 +91,7 @@ export default {
   },
 
   reporting: {
-    // format omitted — the LU LSC statutory layout (bilan/CPP per PCN classes,
-    // eCDF XSD) is B2; financial statements fail loudly for LU until then
+    format: 'lu-lsc', // B2: LSC abridged (abrégé) layout — the SME default
     taxonomy: 'pcn', // PCN 2020 taxonomy discriminator (account rows)
     // defaultChart per docs-research/lu-pcn-2020.md §9 — imputation (I)
     // accounts only, codes verbatim from the official annex (2–6 digits;
@@ -145,15 +143,52 @@ export default {
     ],
     // debtors account for invoice postings (PCN 4011 Clients)
     debtorsAccount: '4011',
+    // LSC statutory layout (B2, abridged) — lines grouped by PCN class
+    // PREFIXES per the official tableau de passage (docs-research/
+    // lu-pcn-2020.md §8); side overlap resolved by the balans engine.
+    // P&L signs: produits +1, charges -1.
+    statutoryAccounts: {
+      models: ['abrege'],
+      lines: {
+        activa: [
+          { label: 'Capital souscrit non versé', prefixes: ['102', '103'] },
+          { label: 'Frais d\'établissement', prefixes: ['20'] },
+          { label: 'Actif immobilisé', prefixes: ['21', '22', '23', '24', '25'] },
+          { label: 'Actif circulant', prefixes: ['3', '40', '41', '42', '50', '513', '516', '517', '518'] },
+          { label: 'Comptes de régularisation', prefixes: ['481', '484', '486'] },
+        ],
+        passiva: [
+          { label: 'Capitaux propres', prefixes: ['10', '11', '12', '13', '141', '142', '15', '16'] },
+          { label: 'Provisions', prefixes: ['18'] },
+          { label: 'Dettes', prefixes: ['192', '193', '194', '431', '432', '441', '442', '451', '452', '46', '47'] },
+          { label: 'Comptes de régularisation', prefixes: ['482', '483', '485', '487'] },
+        ],
+        pnl: [
+          { label: 'Chiffre d\'affaires net', prefixes: ['70'], sign: 1 },
+          { label: 'Autres produits d\'exploitation', prefixes: ['71', '72', '74'], sign: 1 },
+          { label: 'Charges d\'exploitation', prefixes: ['60', '61', '62', '63', '64'], sign: -1 },
+          { label: 'Produits financiers', prefixes: ['75'], sign: 1 },
+          { label: 'Charges financières', prefixes: ['65'], sign: -1 },
+          { label: 'Impôts sur le résultat', prefixes: ['67'], sign: -1 },
+          { label: 'Autres impôts', prefixes: ['68'], sign: -1 },
+        ],
+      },
+    },
     inferTaxonomy: null, // PCN keyword inference is a B-milestone
     // statutoryAccounts omitted — LU LSC layout is B2
   },
 
   compliance: {
-    // B5: TVA frequencies by turnover band (annual/quarterly/monthly with
-    // 1 March / 15th deadlines) need YYYY-MM period shapes + lu-* deadline
-    // rules; until then the LU calendar is intentionally empty
-    filingTypes: [],
+    // B5: TVA quarterly is the DEFAULT band (€112K–€620K turnover — the
+    // middle band most SMEs sit in); the annual (<€112K, lu-annual) and
+    // monthly (>€620K, lu-monthly, YYYY-MM shape) bands are registered in
+    // the DEADLINE_RULES engine but need a per-company turnover band
+    // selection (later refinement). The annual informative return
+    // (1 May) is not calendarised yet.
+    filingTypes: [
+      { type: 'TVA', periodShape: 'YYYY-Qn', deadlineRule: 'lu-quarterly' },
+      { type: 'COMPTES_ANNUELS', periodShape: 'YYYY', deadlineRule: 'lu-7-months' },
+    ],
   },
 
   exchange: {

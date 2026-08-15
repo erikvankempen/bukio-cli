@@ -22,6 +22,7 @@ import {
 } from '../src/invoice/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { exportXaf } from '../src/export/index.js';
+import { complianceStatus, markFiled } from '../src/compliance/index.js';
 import { getProfile, PLANNED, normalizeCountry, resolveProfile } from '../src/jurisdictions/index.js';
 
 const MIGRATIONS_DIR = path.join(import.meta.dirname, '..', 'migrations');
@@ -451,9 +452,17 @@ test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
   // B1 scope: formats without an engine are deliberately unregistered
   // (strict dispatch fails loudly instead of producing Dutch output)
   assert.equal(p.tax.returnLayout, undefined);
-  assert.equal(p.reporting.format, undefined);
   assert.equal(p.documents.auditFile, undefined);
-  assert.deepEqual(p.compliance.filingTypes, []);
+  // B5: the LU compliance calendar is registered (quarterly TVA default band
+  // + annual accounts within ~7 months of the FY end)
+  assert.deepEqual(p.compliance.filingTypes, [
+    { type: 'TVA', periodShape: 'YYYY-Qn', deadlineRule: 'lu-quarterly' },
+    { type: 'COMPTES_ANNUELS', periodShape: 'YYYY', deadlineRule: 'lu-7-months' },
+  ]);
+  // B2: the LU LSC statutory layout is registered (abridged model)
+  assert.equal(p.reporting.format, 'lu-lsc');
+  assert.deepEqual(p.reporting.statutoryAccounts.models, ['abrege']);
+  assert.ok(p.reporting.statutoryAccounts.lines.activa.length >= 5);
   // B6: the LU invoice compliance rule set is registered
   assert.equal(p.documents.invoiceCompliance, 'lu-invoice-vereisten');
   // e-invoicing IS registered: B2G mandatory in LU since 18 Mar 2023
@@ -519,11 +528,8 @@ test('B1: init --country LU creates a French LU company with the PCN chart', () 
 test('B1: LU strict dispatch — unregistered formats fail loudly (no NL fallback)', () => {
   const dbPath = tmpDb();
   cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);
-  // financial statements: the LU LSC layout is B2 — never a Dutch one
-  let r = cli(dbPath, ['financial-statements', 'report', '--year', '2026'], { expectFail: true });
-  assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
   // XAF export: FAIA is B3 — never the Dutch audit file
-  r = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', '/tmp/xaf-lu.xml'], { expectFail: true });
+  let r = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', '/tmp/xaf-lu.xml'], { expectFail: true });
   assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
   // VAT readout: the LU eCDF return layout is a B-milestone
   r = cli(dbPath, ['vat', 'readout', '--period', '2026-Q1'], { expectFail: true });
@@ -662,6 +668,105 @@ test('B6: NL invoice compliance is unchanged (byte-identical, nl-12-vereisten)',
     assert.equal(fin.entry.state, 'posted');
     // the NL rule set still reports 12 vereisten
     assert.equal(validateCompliance(db, getInvoice(db, inv.id)).vereisten, 12);
+  } finally {
+    db.close();
+  }
+});
+
+// --- Phase B B2: LU statutory accounts (LSC abridged layout) -----------------
+
+test('B2: LU financial statements report the LSC abridged layout', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--registration-id', 'B123456', '--tax-id', 'LU12345678', '--vat', 'on']);
+  cli(dbPath, ['company', 'update', '--address', '1 rue du Test', '--postal-code', 'L-1234', '--city', 'Luxembourg']);
+  const db = openDb(dbPath);
+  try {
+    createContact(db, {
+      name: 'Client SARL', address: '1 rue du Test', postalCode: 'L-1234', city: 'Luxembourg',
+      vatId: 'LU99999999', actor: 'agent:test',
+    });
+    const inv = createInvoice(db, {
+      contactId: 1, date: '2026-08-15', lines: ['1x Prestation @ 100.00 @17'], actor: 'agent:test',
+    });
+    finalizeInvoice(db, { id: inv.id, actor: 'agent:test' }); // books 4011 +11700 / 7021 -10000 / 461411 -1700
+  } finally {
+    db.close();
+  }
+  const r = cli(dbPath, ['financial-statements', 'report', '--year', '2026', '--format', 'json']);
+  const fs = r.out.data.financial_statements;
+  assert.equal(fs.model, 'abrege'); // profile-driven default, not 'klein'
+  assert.equal(fs.as_of, '2026-12-31');
+  assert.equal(fs.balans.balanced, true);
+  const activa = fs.balans.activa;
+  const passiva = fs.balans.passiva;
+  assert.ok(activa.some((l) => l.label === 'Actif circulant' && l.total_cents === 11700), 'debtors leg on Actif circulant');
+  assert.ok(passiva.some((l) => l.label === 'Dettes' && l.total_cents === 1700), 'output VAT on Dettes');
+  assert.ok(passiva.some((l) => l.label === 'Capitaux propres' && l.total_cents === 10000), 'unclosed result folded into Capitaux propres');
+  const ca = fs.pnl.lines.find((l) => l.label === "Chiffre d'affaires net");
+  assert.ok(ca && ca.total_cents === 10000, 'revenue on the CA line');
+  assert.equal(fs.pnl.resultat_cents, 10000);
+});
+
+test('B2: LU financial statements reject the NL model (INVALID_MODEL)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);
+  const r = cli(dbPath, ['financial-statements', 'report', '--year', '2026', '--model', 'klein'], { expectFail: true });
+  assert.equal(r.out.error.code, 'INVALID_MODEL');
+  // the abridged model is the default for LU — no --model needed
+  const ok = cli(dbPath, ['financial-statements', 'report', '--year', '2026']);
+  assert.equal(ok.out.data.financial_statements.model, 'abrege');
+});
+
+test('B2: NL financial statements keep the klein default (byte-identical)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--vat', 'on']);
+  const r = cli(dbPath, ['financial-statements', 'report', '--year', '2026']);
+  assert.equal(r.out.data.financial_statements.model, 'klein');
+  // explicit micro still works
+  const m = cli(dbPath, ['financial-statements', 'report', '--year', '2026', '--model', 'micro']);
+  assert.equal(m.out.data.financial_statements.model, 'micro');
+});
+
+// --- Phase B B5: LU compliance calendar -------------------------------------
+
+test('B5: LU compliance calendar — TVA on the 15th + annual accounts in 7 months', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);
+  const db = openDb(dbPath);
+  try {
+    const r = complianceStatus(db, { year: 2026 });
+    const obs = r.obligations;
+    // TVA quarterly on the 15th of the month after the quarter (not the NL
+    // month-end deadlines)
+    assert.equal(obs.find((o) => o.type === 'TVA' && o.period === '2026-Q1').deadline, '2026-04-15');
+    assert.equal(obs.find((o) => o.type === 'TVA' && o.period === '2026-Q2').deadline, '2026-07-15');
+    assert.equal(obs.find((o) => o.type === 'TVA' && o.period === '2026-Q3').deadline, '2026-10-15');
+    assert.equal(obs.find((o) => o.type === 'TVA' && o.period === '2026-Q4').deadline, '2027-01-15');
+    // the previous year's Q4 return falls in this calendar year (15 Jan)
+    assert.equal(obs.find((o) => o.type === 'TVA' && o.period === '2025-Q4').deadline, '2026-01-15');
+    // annual accounts: deposit within ~7 months of the FY end (LSC 2002 law)
+    const ac = obs.find((o) => o.type === 'COMPTES_ANNUELS' && o.period === '2026');
+    assert.equal(ac.deadline, '2027-07-31');
+    // Q3 2026 is still open (deadline after today)
+    assert.equal(obs.find((o) => o.type === 'TVA' && o.period === '2026-Q3').status, 'open');
+    // no NL types leak into the LU calendar
+    assert.ok(!obs.some((o) => ['OB', 'ICP', 'JAARREKENING'].includes(o.type)), 'no NL filing types in the LU calendar');
+  } finally {
+    db.close();
+  }
+});
+
+test('B5: LU TVA filings mark through the registry and flip the status', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);
+  const db = openDb(dbPath);
+  try {
+    const marked = markFiled(db, { type: 'TVA', period: '2026-Q1', date: '2026-04-10', actor: 'agent:test' });
+    assert.equal(marked.type, 'TVA');
+    const r = complianceStatus(db, { year: 2026 });
+    assert.equal(r.obligations.find((o) => o.type === 'TVA' && o.period === '2026-Q1').status, 'filed');
+    // marking an unregistered type fails loudly
+    assert.throws(() => markFiled(db, { type: 'OB', period: '2026-Q1' }), { code: 'INVALID_TYPE' });
   } finally {
     db.close();
   }
