@@ -452,9 +452,10 @@ test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
   // (strict dispatch fails loudly instead of producing Dutch output)
   assert.equal(p.tax.returnLayout, undefined);
   assert.equal(p.reporting.format, undefined);
-  assert.equal(p.documents.invoiceCompliance, undefined);
   assert.equal(p.documents.auditFile, undefined);
   assert.deepEqual(p.compliance.filingTypes, []);
+  // B6: the LU invoice compliance rule set is registered
+  assert.equal(p.documents.invoiceCompliance, 'lu-invoice-vereisten');
   // e-invoicing IS registered: B2G mandatory in LU since 18 Mar 2023
   assert.equal(p.documents.eInvoicing, 'peppol-bis-3.0');
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
@@ -527,40 +528,140 @@ test('B1: LU strict dispatch — unregistered formats fail loudly (no NL fallbac
   // VAT readout: the LU eCDF return layout is a B-milestone
   r = cli(dbPath, ['vat', 'readout', '--period', '2026-Q1'], { expectFail: true });
   assert.equal(r.out.error.code, 'FORMAT_NOT_SUPPORTED');
-  // invoice compliance: the LU rule set is B6
-  const db = openDb(dbPath);
-  try {
-    assert.throws(
-      () => validateCompliance(db, { invoice_type: 'invoice', lines: [] }),
-      (e) => e.code === 'FORMAT_NOT_SUPPORTED',
-    );
-  } finally {
-    db.close();
-  }
+  // invoice compliance is registered since B6 (tested in the B6 section)
 });
 
 test('B1: LU UBL invoice emits the RCS scheme 0195 and country LU (never 9944)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--registration-id', 'B123456', '--vat', 'on']);
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--registration-id', 'B123456', '--tax-id', 'LU12345678', '--vat', 'on']);
+  cli(dbPath, ['company', 'update', '--address', '1 rue du Test', '--postal-code', 'L-1234', '--city', 'Luxembourg']);
   const db = openDb(dbPath);
   try {
     createContact(db, {
       name: 'Client SARL', address: '1 rue du Test', postalCode: 'L-1234', city: 'Luxembourg',
       vatId: 'LU99999999', kvk: 'B654321', actor: 'agent:test',
     });
-    // NOTE: LU invoices cannot be finalized in B1 (finalizeInvoice runs the
-    // compliance rule set, which is deliberately unregistered until B6) —
-    // UBL generation is tested on the created invoice, which is all the
-    // builder needs (it reads company + invoice fields, not posting state)
     const inv = createInvoice(db, {
       contactId: 1, date: '2026-08-15', lines: ['1x Prestation @ 100.00 @17'], actor: 'agent:test',
     });
+    finalizeInvoice(db, { id: inv.id, actor: 'agent:test' }); // B6: LU compliance passes
     const xml = invoiceToUbl(db, getInvoice(db, inv.id));
     // BT-34/BT-49: RCS scheme 0195, never the Dutch KVK scheme 9944
     assert.ok(xml.includes('schemeID="0195"'), 'endpoints use the RCS scheme 0195');
     assert.ok(!xml.includes('schemeID="9944"'), 'never the Dutch KVK scheme');
     assert.match(xml, /<cbc:IdentificationCode>LU<\/cbc:IdentificationCode>/);
     assert.ok(xml.includes('LU99999999'), 'buyer carries the LU TVA id');
+  } finally {
+    db.close();
+  }
+});
+
+// --- Phase B B6: LU invoice compliance rule set -----------------------------
+
+test('B6: LU invoice finalizes end-to-end (compliance rule set registered)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--registration-id', 'B123456', '--tax-id', 'LU12345678', '--vat', 'on']);
+  cli(dbPath, ['company', 'update', '--address', '1 rue du Test', '--postal-code', 'L-1234', '--city', 'Luxembourg']);
+  const db = openDb(dbPath);
+  try {
+    createContact(db, {
+      name: 'Client SARL', address: '1 rue du Test', postalCode: 'L-1234', city: 'Luxembourg',
+      vatId: 'LU99999999', actor: 'agent:test',
+    });
+    const inv = createInvoice(db, {
+      contactId: 1, date: '2026-08-15', lines: ['1x Prestation @ 100.00 @17'], actor: 'agent:test',
+    });
+    const fin = finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+    assert.equal(fin.invoice.invoice_number, '2026-0001');
+    assert.equal(fin.invoice.status, 'sent'); // finalized
+    assert.equal(fin.entry.state, 'posted');
+    // books: debiteuren 4011 / omzet 7021 / TVA en aval 461411 (LU chart)
+    const postings = db.prepare(
+      "SELECT a.code, p.amount_cents FROM postings p JOIN accounts a ON a.id = p.account_id JOIN journal_entries e ON e.id = p.entry_id WHERE e.id = ? ORDER BY a.code",
+    ).all(fin.entry.id);
+    const codes = postings.map((p) => `${p.code}:${p.amount_cents}`).join(' ');
+    assert.ok(codes.includes('4011:11700'), `debiteuren leg on the PCN debtors account: ${codes}`);
+    assert.ok(codes.includes('7021:-10000'), `revenue on 7021: ${codes}`);
+    assert.ok(codes.includes('461411:-1700'), `output VAT on 461411: ${codes}`);
+  } finally {
+    db.close();
+  }
+});
+
+test('B6: LU supplier requirements — missing RCS / TVA fail with French messages', () => {
+  // LU company WITHOUT a registration id (RCS number)
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--vat', 'on']);
+  cli(dbPath, ['company', 'update', '--address', '1 rue du Test', '--postal-code', 'L-1234', '--city', 'Luxembourg']);
+  const db = openDb(dbPath);
+  try {
+    createContact(db, {
+      name: 'Client SARL', address: '1 rue du Test', postalCode: 'L-1234', city: 'Luxembourg',
+      vatId: 'LU99999999', actor: 'agent:test',
+    });
+    const inv = createInvoice(db, {
+      contactId: 1, date: '2026-08-15', lines: ['1x Prestation @ 100.00 @17'], actor: 'agent:test',
+    });
+    assert.throws(
+      () => finalizeInvoice(db, { id: inv.id, actor: 'agent:test' }),
+      (e) => e.code === 'SUPPLIER_INCOMPLETE' && e.message.includes('numéro RCS'),
+    );
+    // a TVA-registered LU supplier without a TVA number also fails
+    db.prepare("UPDATE company SET registration_id = 'B123456' WHERE id = 1").run();
+    assert.throws(
+      () => finalizeInvoice(db, { id: inv.id, actor: 'agent:test' }),
+      (e) => e.code === 'SUPPLIER_INCOMPLETE' && e.message.includes('numéro de TVA'),
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('B6: LU reverse charge requires the customer TVA number (auto-liquidation)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Sàrl Test', '--country', 'LU', '--legal-form', 'sarl', '--registration-id', 'B123456', '--tax-id', 'LU12345678', '--vat', 'on']);
+  cli(dbPath, ['company', 'update', '--address', '1 rue du Test', '--postal-code', 'L-1234', '--city', 'Luxembourg']);
+  const db = openDb(dbPath);
+  try {
+    createContact(db, {
+      name: 'Client SARL', address: '1 rue du Test', postalCode: 'L-1234', city: 'Luxembourg',
+      actor: 'agent:test', // no vat_id
+    });
+    const inv = createInvoice(db, {
+      contactId: 1, date: '2026-08-15', lines: ['1x Prestation @ 100.00 @RE'], actor: 'agent:test',
+    });
+    assert.throws(
+      () => finalizeInvoice(db, { id: inv.id, actor: 'agent:test' }),
+      (e) => e.code === 'CUSTOMER_VAT_REQUIRED' && e.message.includes('auto-liquidation'),
+    );
+    // with the customer TVA id the same invoice finalizes
+    db.prepare("UPDATE contacts SET vat_id = 'FR12345678901' WHERE id = 1").run();
+    const fin = finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+    assert.equal(fin.invoice.status, 'sent');
+    assert.equal(fin.entry.state, 'posted');
+  } finally {
+    db.close();
+  }
+});
+
+test('B6: NL invoice compliance is unchanged (byte-identical, nl-12-vereisten)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678', '--tax-id', 'NL123456789B01', '--vat', 'on']);
+  cli(dbPath, ['company', 'update', '--address', 'Industrieweg 12', '--postal-code', '2712 CD', '--city', 'Zoetermeer']);
+  const db = openDb(dbPath);
+  try {
+    createContact(db, {
+      name: 'ACME B.V.', address: 'Straat 1', postalCode: '1000 AA', city: 'Amsterdam',
+      vatId: 'NL999999999B01', actor: 'agent:test',
+    });
+    const inv = createInvoice(db, {
+      contactId: 1, date: '2026-08-15', lines: ['2x Consultancy @ 150.00 @21'], actor: 'agent:test',
+    });
+    const fin = finalizeInvoice(db, { id: inv.id, actor: 'agent:test' });
+    assert.equal(fin.invoice.status, 'sent');
+    assert.equal(fin.entry.state, 'posted');
+    // the NL rule set still reports 12 vereisten
+    assert.equal(validateCompliance(db, getInvoice(db, inv.id)).vereisten, 12);
   } finally {
     db.close();
   }

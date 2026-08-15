@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 05:18:34 UTC — **✅ 813 passing · 0 failing (813 tests)**
+**Latest run:** 2026-08-15 05:38:19 UTC — **✅ 817 passing · 0 failing (817 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -695,7 +695,7 @@
 
 ### jurisdictions.test.js — 
 
-38 passing · 0 failing
+42 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -735,6 +735,10 @@
     - ✅ B1: init --country LU creates a French LU company with the PCN chart
     - ✅ B1: LU strict dispatch — unregistered formats fail loudly (no NL fallback)
     - ✅ B1: LU UBL invoice emits the RCS scheme 0195 and country LU (never 9944)
+    - ✅ B6: LU invoice finalizes end-to-end (compliance rule set registered)
+    - ✅ B6: LU supplier requirements — missing RCS / TVA fail with French messages
+    - ✅ B6: LU reverse charge requires the customer TVA number (auto-liquidation)
+    - ✅ B6: NL invoice compliance is unchanged (byte-identical, nl-12-vereisten)
 
 ### migration-021.test.js — 
 

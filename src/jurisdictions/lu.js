@@ -20,9 +20,9 @@
 //   - reporting.format            omitted → jaarrekening fails (LU LSC
 //                                  layout is B2)
 //   - reporting.statutoryAccounts omitted → same, B2
-//   - documents.invoiceCompliance omitted → invoice validation fails (LU
-//                                  rule set is B6)
 //   - documents.auditFile         omitted → XAF export fails (FAIA is B3)
+// Registered since B6: documents.invoiceCompliance 'lu-invoice-vereisten'
+// (loi TVA art. 66 + RCS rule set).
 //   - compliance.filingTypes      [] → calendar shows nothing (turnover-band
 //                                  TVA frequencies need YYYY-MM period shapes,
 //                                  B5)
@@ -143,6 +143,8 @@ export default {
       { code: '708', name: 'Autres éléments du chiffre d\'affaires', type: 'income', normalBalance: 'credit' },
       { code: '7488', name: 'Produits d\'exploitation divers', type: 'income', normalBalance: 'credit' },
     ],
+    // debtors account for invoice postings (PCN 4011 Clients)
+    debtorsAccount: '4011',
     inferTaxonomy: null, // PCN keyword inference is a B-milestone
     // statutoryAccounts omitted — LU LSC layout is B2
   },
@@ -162,8 +164,8 @@ export default {
   },
 
   documents: {
-    // invoiceCompliance omitted — LU rule set (RCS + TVA + établissement)
-    // is B6; invoice validation fails loudly for LU until then
+    invoiceCompliance: 'lu-invoice-vereisten', // B6: loi TVA art. 66 + RCS
+    // (autorisation d'établissement has no schema field — documented only)
     eInvoicing: 'peppol-bis-3.0', // B2G mandatory since 18 Mar 2023; the UBL
     // builder is EU-generic and reads identifiers.peppolSchemeId (0195 = RCS)
     // auditFile omitted — FAIA (AED audit file) is B3
