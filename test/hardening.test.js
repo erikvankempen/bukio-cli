@@ -652,6 +652,7 @@ test('jaarrekening XLSX guards formula injection in account and company names', 
   const nameCell = wb.getWorksheet('Balans').getCell('A3');
   assert.ok(String(nameCell.value).startsWith("'=HYPERLINK"), `company name must be guarded, got: ${nameCell.value}`);
   // hostile account name in the W&V sheet must be guarded too
+  // the statutory jaarrekening XLSX keeps its Dutch sheet names (statutory document)
   const wv = wb.getWorksheet('Winst en verlies');
   let guarded = false;
   wv.eachRow((row) => {
