@@ -31,6 +31,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | JSON output | `--json` (global flag — works before or after the subcommand) |
 | Signing key | `--sign-key <path>`, or the actor's session, or `BUKIO_SIGNING_PASSPHRASE` (human keys), or the actor's key file at `<config>/keys/<role>-<name>.key` — in that order |
 | Config dir | env `BUKIO_CONFIG_DIR` (default `~/.bukio`) — keys in `keys/`, sessions in `sessions/`, nonce cache `nonces.json` |
+| Output language | `--locale <code>` or env `BUKIO_LOCALE` (default: `en`) — human-facing output language, see §3.2 |
 
 > **Single company per database.** One company = one database file. To work on company B, point `--db` at its file. Never mix companies in one database.
 
@@ -173,26 +174,50 @@ defaults (chart convention, VAT codes/rates, identifiers, fiscal year end,
 deadlines). PLANNED is empty — every ISO 3166-1 alpha-2 code is either a live
 profile or `PROFILE_NOT_FOUND`.
 
-| Country | Chart convention | Currency | VAT rates (2026) | Small-business scheme | Identifier / Peppol scheme | e-Invoicing |
-|---|---|---|---|---|---|---|
-| NL Netherlands | RGS-mapped | EUR | 21 / 9 / 0 | kor | kvk / 9944 | peppol-bis-3.0 |
-| LU Luxembourg | PCN 2020 | EUR | 17 / 14 / 8 / 3 | franchise (€50K) | RCS / 0195 | peppol-bis-3.0 (+ FAIA audit file) |
-| GB United Kingdom | QuickBooks/Xero-style | GBP | 20 / 5 / 0 | flat-rate (≤ £150K) | CRN / — (2026 roadmap) | — |
-| FR France | PCG (plan comptable général) | EUR | 20 / 10 / 5.5 / 2.1 | franchise (€85K / €37.5K) | SIREN / 0002 | peppol-bis-3.0 |
-| US United States | QuickBooks-style (no statutory chart) | USD | no federal VAT | — | EIN / — | — |
-| BE Belgium | PCN-BE minimum plan (AR 12-09-1983) | EUR | 21 / 12 / 6 / 0 | franchise (€25K, from 2025) | KBO / 0208 | peppol-bis-3.0 (B2B mandate since 1 Jan 2026) |
-| DE Germany | DATEV SKR 03 | EUR | 19 / 7 / 0 | kleinunternehmer (€25k/€100k) | USt-IdNr / 9930 | peppol-bis-3.0 (EN 16931 accepted) |
-| DK Denmark | Standardkontoplan-aligned | DKK | 25 (no reduced band) | — | CVR / 0184 | peppol-bis-3.0 (B2B voluntary) |
-| FI Finland | Liikekirjuri model chart | EUR | 25.5 / 13.5 / 10 / 0 | franchise (€20K) | LY-tunnus / 0037 | peppol-bis-3.0 (B2B voluntary) |
-| NO Norway | NS 4102 standard kontoplan | NOK | 25 / 15 / 12 / 0 | — (NOK 50K registration threshold) | org.nr / 0192 | peppol-bis-3.0 (EHF 3.0; B2G mandatory) |
-| SE Sweden | BAS 2023 | SEK | 25 / 12 / 6 / 0 | franchise (SEK 120K) | org.nr / 0007 | peppol-bis-3.0 (B2G mandatory) |
+| Country | Chart convention | Currency | VAT rates (2026) | Small-business scheme | Identifier / Peppol scheme | e-Invoicing | Locale |
+|---|---|---|---|---|---|---|---|
+| NL Netherlands | RGS-mapped | EUR | 21 / 9 / 0 | kor | kvk / 9944 | peppol-bis-3.0 | nl |
+| LU Luxembourg | PCN 2020 | EUR | 17 / 14 / 8 / 3 | franchise (€50K) | RCS / 0195 | peppol-bis-3.0 (+ FAIA audit file) | fr-lu |
+| GB United Kingdom | QuickBooks/Xero-style | GBP | 20 / 5 / 0 | flat-rate (≤ £150K) | CRN / — (2026 roadmap) | — | en |
+| FR France | PCG (plan comptable général) | EUR | 20 / 10 / 5.5 / 2.1 | franchise (€85K / €37.5K) | SIREN / 0002 | peppol-bis-3.0 | fr |
+| US United States | QuickBooks-style (no statutory chart) | USD | no federal VAT | — | EIN / — | — | en |
+| BE Belgium | PCN-BE minimum plan (AR 12-09-1983) | EUR | 21 / 12 / 6 / 0 | franchise (€25K, from 2025) | KBO / 0208 | peppol-bis-3.0 (B2B mandate since 1 Jan 2026) | nl-be |
+| DE Germany | DATEV SKR 03 | EUR | 19 / 7 / 0 | kleinunternehmer (€25k/€100k) | USt-IdNr / 9930 | peppol-bis-3.0 (EN 16931 accepted) | de |
+| DK Denmark | Standardkontoplan-aligned | DKK | 25 (no reduced band) | — | CVR / 0184 | peppol-bis-3.0 (B2B voluntary) | da |
+| FI Finland | Liikekirjuri model chart | EUR | 25.5 / 13.5 / 10 / 0 | franchise (€20K) | LY-tunnus / 0037 | peppol-bis-3.0 (B2B voluntary) | fi |
+| NO Norway | NS 4102 standard kontoplan | NOK | 25 / 15 / 12 / 0 | — (NOK 50K registration threshold) | org.nr / 0192 | peppol-bis-3.0 (EHF 3.0; B2G mandatory) | nb |
+| SE Sweden | BAS 2023 | SEK | 25 / 12 / 6 / 0 | franchise (SEK 120K) | org.nr / 0007 | peppol-bis-3.0 (B2G mandatory) | sv |
 
 Strict dispatch: a profile registers only formats with existing builders —
 `financial-statements`, `vat readout`, `export xaf`, invoice compliance, etc.
 fail with `FORMAT_NOT_SUPPORTED` for markets whose engine is a B-milestone
 (no silent fallback to the NL format). See §7 error codes.
 
+### 3.2 Localization (i18n)
+
+Human-facing output is **English by default**; localization is opt-in per
+invocation: `--locale <code>` (global flag) or `BUKIO_LOCALE` env. Locale
+resolution: `--locale` → `BUKIO_LOCALE` → `en`. Regional codes resolve to
+their base language first (`nl-be` → Belgian-Dutch table → Dutch → English;
+`fr-lu` → Luxembourg overrides → French → English; `en-GB`/`en-US` → English).
+Tables: `en`, `nl`, `nl-be`, `de`, `fr`, `fr-lu`, `da`, `fi`, `nb`, `sv`.
+
+What localizes: invoice PDF labels/units (when the invoice language allows),
+invoice + reminder emails, CLI table headers and renders, VAT file/settle
+descriptions, status/direction labels.
+
+What **never** localizes: `--json` output (keys, error messages, amounts),
+error codes, MCP tool names/descriptions, chart/account identifiers, and
+statutory artifacts (OB readout labels 1a–5d, statutory jaarrekening XLSX
+'Winst en verlies', statutory model labels, RGS group names, command aliases,
+bank/import CSV header aliases). Documents keep their own language field
+(`invoice create --language nl|en`).
+
 ## 4. JSON contracts
+
+The `--json` contract is language-independent: keys, error codes, messages
+and amounts stay English regardless of `--locale`/`BUKIO_LOCALE`. Never
+parse localized (human) output — always `--json`.
 
 ### Success
 

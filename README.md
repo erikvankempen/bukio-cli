@@ -34,6 +34,8 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 - **SEPA payment batches** — a payables register (purchase invoices, `transfer` vs `direct_debit`/incasso), batch creation from unpaid invoices or CSV, and **pain.001 export** (`001.03`/`001.09`) for upload in any Dutch bank portal. **Direct debit** adds an incassovolmacht register (`payments mandate add`, core/b2b) and **pain.008.001.02 export** (one `PmtInf` per scheme, FRST/RCUR auto-assigned). One export per batch (unique `MsgId` — re-uploading would double-pay); the ledger is untouched until the bank statement import books the payments.
 - **One company per database** — a second company is a second SQLite file (`--db` or `BUKIO_DB`).
 - **Local-first** — no cloud, no lock-in. Your 7-year administration stays yours.
+- **Eleven jurisdictions** — `bukio init --country <cc>` seeds the country's chart convention (RGS, PCN 2020, PCG, SKR 03, BAS 2023, NS 4102, …), VAT codes/rates, identifiers and compliance calendar (NL, LU, GB, FR, US, BE, DE, DK, FI, NO, SE — see [Supported jurisdictions](#supported-jurisdictions)). Format dispatch is strict: unbuilt markets fail loudly (`FORMAT_NOT_SUPPORTED`), never silently fall back.
+- **Localization (i18n)** — optional and opt-in: `--locale <code>` / `BUKIO_LOCALE` switches human-facing output to Dutch, Belgian Dutch, German, French, Luxembourg French, Danish, Finnish, Norwegian or Swedish; **English is the default** whenever localization is off (see [Localization](#localization-i18n)). JSON, error codes and statutory documents never localize.
 
 ## Quick start
 
@@ -63,19 +65,21 @@ Read the repository README.md and AGENTS.md files, configure `bukio mcp` as a lo
 5. [Core Concepts](#core-concepts)
 6. [Command Reference](#command-reference)
 7. [Global Flags](#global-flags)
-8. [Money Format](#money-format)
-9. [Integrity & Safety Model](#integrity--safety-model)
-10. [The Database](#the-database)
-11. [Using Agents](#using-agents)
-12. [Scheduling recurring actions (cron)](#scheduling-recurring-actions-cron)
-13. [Project Layout](#project-layout)
-14. [Development & Testing](#development--testing)
-15. [Error Codes](#error-codes)
-16. [Common Tasks](#common-tasks)
-17. [EU AI Act Transparency](#eu-ai-act-transparency)
-18. [AI Development Cost & Token Usage](#ai-development-cost--token-usage)
-19. [Troubleshooting](#troubleshooting)
-20. [Roadmap](#roadmap)
+8. [Localization (i18n)](#localization-i18n)
+9. [Money Format](#money-format)
+10. [Integrity & Safety Model](#integrity--safety-model)
+11. [The Database](#the-database)
+12. [Using Agents](#using-agents)
+13. [Scheduling recurring actions (cron)](#scheduling-recurring-actions-cron)
+14. [Project Layout](#project-layout)
+15. [Development & Testing](#development--testing)
+16. [Error Codes](#error-codes)
+17. [Common Tasks](#common-tasks)
+18. [EU AI Act Transparency](#eu-ai-act-transparency)
+19. [AI Development Cost & Token Usage](#ai-development-cost--token-usage)
+20. [Troubleshooting](#troubleshooting)
+21. [Supported jurisdictions](#supported-jurisdictions)
+22. [Roadmap](#roadmap)
 
 ---
 
@@ -846,6 +850,7 @@ bukio actor who-can 'entry post'         # the SoD review matrix
 | Flag | Env var | Default | Description |
 |------|---------|---------|-------------|
 | `--json` | — | off | Machine-readable JSON output (see below) |
+| `--locale <code>` | `BUKIO_LOCALE` | `en` | Output language for human-facing text (see [Localization](#localization-i18n)) |
 | `--db <path>` | `BUKIO_DB` | `~/.bukio/bukio.db` | Database file |
 | `--actor <who>` | `BUKIO_ACTOR` | *(required)* | Acting entity — `'<role>:<name>'`, e.g. `agent:bartholomeus`, `human:erik` |
 | `--sign-key <path>` | — | actor session → `BUKIO_SIGNING_PASSPHRASE` → actor key file | Explicit private key to sign with; by default the signing key resolves in that order |
@@ -865,6 +870,20 @@ With `--json`, every command prints exactly one JSON document to stdout and exit
 ```
 
 All amounts appear both as integer cents (`amount_cents`) and formatted strings (`amount: "1234.56"`). The schema is stable and versioned with the tool — agents can rely on it.
+
+---
+
+## Localization (i18n)
+
+Human-facing output is **English by default**. Localization is optional and opt-in:
+
+- `--locale <code>` (global flag) or `BUKIO_LOCALE` env — the output language for human-facing text.
+- Unknown locales and disabled localization fall back to **English**; regional codes resolve to their base language (e.g. `nl-BE` → Belgian-Dutch table → Dutch → English).
+- Locale tables: `en` (default), `nl`, `nl-be`, `de`, `fr`, `fr-lu`, `da`, `fi`, `nb`, `sv` — covering all eleven markets.
+
+**What localizes:** invoice PDF labels and units, invoice + reminder emails, CLI table headers and renders (invoice list, reminders, P&L, balance sheet, month-end, year-end), VAT file/settle descriptions, status and direction labels.
+
+**What never localizes:** the `--json` contract (keys, messages, amounts stay English), error codes, MCP tool names/descriptions, chart and account identifiers, and statutory artifacts — the OB readout labels (fields 1a–5d), the statutory jaarrekening XLSX sheet ('Winst en verlies'), statutory model labels ('Onverdeeld resultaat'), RGS group names, command aliases. Documents keep their own language field (`invoice create --language nl|en`).
 
 ---
 
@@ -1235,14 +1254,15 @@ is the measured token consumption and its cost at **official list prices**
 (per 1M tokens; OpenCode Go / DeepSeek API, Aug 2026): **DeepSeek V4 Flash**
 **$0.14** input (cache miss), **$0.0028** cached input, **$0.28** output;
 **MiMo-V2.5-Pro** **$0.435** input, **$0.003625** cached input, **$0.87**
-output. Reasoning tokens are billed at the output rate. Data is captured by
+output. Reasoning tokens are billed at the output rate; other models
+(minimax-m2.5) are priced at the OpenCode Go list rate. Data is captured by
 the `bukio-token-track` tool from the agent's session telemetry — including
-delegation subagent sessions (snapshot 2026-08-11, 07:09).
+delegation subagent sessions, bukio-cli sessions only (snapshot 2026-08-15).
 
 **Proven stack:** bukio-cli is developed and operated end-to-end with
 **Hermes Agent** (Nous Research) via OpenCode Go. The main development
-sessions ran **DeepSeek V4 Flash** (a small number of calls via the DeepSeek
-API directly); the parallel code-review subagents (delegation batches) ran
+sessions ran **DeepSeek V4 Flash** (a handful of calls via the DeepSeek
+API and other providers directly); the parallel code-review subagents (delegation batches) ran
 **MiMo-V2.5-Pro**, also via OpenCode Go. The live day-to-day operations
 (bank imports, invoice booking, month-end checks) run on the same stack
 against this same codebase.
@@ -1251,31 +1271,30 @@ against this same codebase.
 
 | Model | API calls | Input | Cached input | Output | Reasoning | Est. cost |
 |---|---|---|---|---|---|---|
-| DeepSeek V4 Flash | 6,952 | 19.46M | 1,650.94M | 5.21M | 2.59M | $9.53 |
+| DeepSeek V4 Flash | 10,659 | 31.76M | 2,227.34M | 9.14M | 5.28M | $14.72 |
 | MiMo-V2.5-Pro (review subagents) | 574 | 6.82M | 42.12M | 1.06M | — | $4.05 |
-| MiMo-V2.5 | 11 | 0.03M | — | 0.01M | — | $0.01 |
-| **Total** | **7,537** | **26.31M** | **1,693.06M** | **6.28M** | **2.59M** | **$13.59** |
+| Other models (minimax-m2.5, mimo-v2.5) | 29 | 0.19M | 0.80M | 0.02M | 0.01M | $0.04 |
+| **Total** | **11,262** | **38.77M** | **2,270.27M** | **10.22M** | **5.29M** | **$18.80** |
 
-**$13.59 total** at official list prices for the entire project (7,537
-API calls across all development sessions, ≈ 1.73B tokens). An additional 8 API
-calls (≈ 9K tokens) ran on MiMo-V2.5 at ≈ $0.00.
+**$18.80 total** at official list prices for the entire project (11,262
+API calls across all development sessions, ≈ 2.32B tokens).
 
 ### Developer Time (contributed, unpaid)
 
 Beyond API spend, this project took my review-and-direction time. Because
 the agent does the building, my own messages are the only interaction
-channel — so I measure my time by them: across the 18 working sessions
-(Aug 4–11, 2026) I sent **263 messages** (~45 K characters), each costed
-at **≈ 60 s of overhead** (reading, deciding, reviewing) plus composition
-time scaled by message length and complexity. That works out to
-**≈ 8.8 hours total**, all contributed unpaid.
+channel — so I measure my time by them: across the 32 working sessions
+(Aug 4–15, 2026) I sent **927 messages**, each costed at **≈ 60 s of
+overhead** (reading, deciding, reviewing) plus composition time scaled by
+message length and complexity (≈ 2 min/message effective). That works out to
+**≈ 31 hours total**, all contributed unpaid.
 
 At a **senior** Dutch software-developer rate of **≈ €45/hour** (Amsterdam
 senior average, 2026: €45/h
 [Glassdoor](https://www.glassdoor.com/Salaries/amsterdam-netherlands-senior-software-engineer-salary-SRCH_IL.0,21_IM1112_KO22,46.htm),
 €45.50/h
 [SalaryExpert](https://www.salaryexpert.com/salary/job/software-developer/netherlands/amsterdam);
-the national average is lower), my time is worth **≈ €396**.
+the national average is lower), my time is worth **≈ €1,395**.
 
 Stated plainly, so nothing is hidden:
 
@@ -1285,8 +1304,8 @@ Stated plainly, so nothing is hidden:
   professional rate overstates the market value of my review time by a wide
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
-- **It was free:** the ≈ €396 is an imputed opportunity cost, not money paid.
-  My out-of-pocket spend remains **$13.59** in API costs.
+- **It was free:** the ≈ €1,395 is an imputed opportunity cost, not money paid.
+  My out-of-pocket spend remains **$18.80** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
   conventional code review of a 28.3 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
@@ -1294,23 +1313,23 @@ Stated plainly, so nothing is hidden:
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **28,254 non-blank, non-comment lines of JavaScript**
-across 122 files (15,333 in `src/`, 12,783 in `test/`, 138 in `bin/` +
-`scripts/`), i.e. **28.25 KLOC**
+model (Boehm, 1981): **32,555 non-blank, non-comment lines of JavaScript**
+across 138 files (17,709 in `src/`, 14,701 in `test/`, 145 in `bin/` +
+`scripts/`), i.e. **32.56 KLOC**
 (measured with `scc` v3.7.0).
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 80.1 PM | 13.2 months | ~6 developers | ≈ €721K |
-| Semi-detached | 126.6 PM | 13.6 months | ~9 developers | ≈ €1,139K |
-| Embedded | 198.4 PM | 13.6 months | ~15 developers | ≈ €1,786K |
+| Organic | 93.1 PM | 14.0 months | ~7 developers | ≈ €838K |
+| Semi-detached | 148.3 PM | 14.4 months | ~10 developers | ≈ €1,335K |
+| Embedded | 235.2 PM | 14.3 months | ~16 developers | ≈ €2,117K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 80–198
-person-months (≈ €721K–€1,786K)**; the AI-assisted build consumed **$13.59 in
-API costs plus ≈ €396 of my review-and-direction time (contributed, unpaid
-— see above)** over 18 working sessions in a single week — still a tiny fraction of
+**Comparison:** a conventional team building this would estimate **≈ 93–235
+person-months (≈ €838K–€2,117K)**; the AI-assisted build consumed **$18.80 in
+API costs plus ≈ €1,395 of my review-and-direction time (contributed, unpaid
+— see above)** over 32 working sessions in eleven days — still a tiny fraction of
 the conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.
@@ -1330,19 +1349,19 @@ context. If your agent is unable to help, shoot me a message at
 
 Eleven jurisdiction profiles (NL plus the ten-market expansion; see AGENTS.md §3.1 for the full table). `bukio init --country <cc>` seeds the country's chart convention (RGS, PCN 2020, PCG, SKR 03, BAS 2023, NS 4102, …), VAT codes/rates, identifiers and compliance calendar. Format dispatch is strict: markets whose engines are B-milestones fail loudly (`FORMAT_NOT_SUPPORTED`) — no market ever silently gets another market's output.
 
-| Country | Currency | VAT (2026) | Chart convention | Peppol scheme |
-|---|---|---|---|---|
-| NL Netherlands | EUR | 21 / 9 / 0 | RGS-mapped | 9944 (kvk) |
-| LU Luxembourg | EUR | 17 / 14 / 8 / 3 | PCN 2020 | 0195 (RCS) |
-| GB United Kingdom | GBP | 20 / 5 / 0 | QuickBooks/Xero-style | — (2026 roadmap) |
-| FR France | EUR | 20 / 10 / 5.5 / 2.1 | PCG (plan comptable général) | 0002 (SIREN) |
-| US United States | USD | no federal VAT | QuickBooks-style | — |
-| BE Belgium | EUR | 21 / 12 / 6 / 0 | PCN-BE minimum plan (AR 12-09-1983) | 0208 (KBO) |
-| DE Germany | EUR | 19 / 7 / 0 | DATEV SKR 03 | 9930 (USt-IdNr) |
-| DK Denmark | DKK | 25 (no reduced band) | Standardkontoplan-aligned | 0184 (CVR) |
-| FI Finland | EUR | 25.5 / 13.5 / 10 / 0 | Liikekirjuri model chart | 0037 (LY-tunnus) |
-| NO Norway | NOK | 25 / 15 / 12 / 0 | NS 4102 standard kontoplan | 0192 (org.nr) |
-| SE Sweden | SEK | 25 / 12 / 6 / 0 | BAS 2023 | 0007 (org.nr) |
+| Country | Currency | VAT (2026) | Chart convention | Peppol scheme | Locale |
+|---|---|---|---|---|---|
+| NL Netherlands | EUR | 21 / 9 / 0 | RGS-mapped | 9944 (kvk) | nl |
+| LU Luxembourg | EUR | 17 / 14 / 8 / 3 | PCN 2020 | 0195 (RCS) | fr (fr-lu) |
+| GB United Kingdom | GBP | 20 / 5 / 0 | QuickBooks/Xero-style | — (2026 roadmap) | en |
+| FR France | EUR | 20 / 10 / 5.5 / 2.1 | PCG (plan comptable général) | 0002 (SIREN) | fr |
+| US United States | USD | no federal VAT | QuickBooks-style | — | en |
+| BE Belgium | EUR | 21 / 12 / 6 / 0 | PCN-BE minimum plan (AR 12-09-1983) | 0208 (KBO) | nl-be |
+| DE Germany | EUR | 19 / 7 / 0 | DATEV SKR 03 | 9930 (USt-IdNr) | de |
+| DK Denmark | DKK | 25 (no reduced band) | Standardkontoplan-aligned | 0184 (CVR) | da |
+| FI Finland | EUR | 25.5 / 13.5 / 10 / 0 | Liikekirjuri model chart | 0037 (LY-tunnus) | fi |
+| NO Norway | NOK | 25 / 15 / 12 / 0 | NS 4102 standard kontoplan | 0192 (org.nr) | nb |
+| SE Sweden | SEK | 25 / 12 / 6 / 0 | BAS 2023 | 0007 (org.nr) | sv |
 
 ---
 
@@ -1365,6 +1384,7 @@ Eleven jurisdiction profiles (NL plus the ten-market expansion; see AGENTS.md §
 | 12 | Inbound e-invoicing + delivery + cash management: attachments in-DB (`attach`), encrypted/rotated backups, aging/statement/sales reports, `import invoice` (EN 16931/Peppol UBL → payables), `invoice email` (SMTP), SEPA direct debit (`mandate` + pain.008) | The 2027 e-invoice mandate both ways: receive UBL invoices, email the PDF, collect by incasso — **✅ done (v0.14.1, 603 tests green)** | planned |
 | 13 | Actor security layers: **Tier 0** signed actor commands (per-company key registry, enforcement, `audit verify`) + **Tier 0.5 per-actor authorizations** — capability families + roles (`actor authz`, `actor roles`, `actor can`, `actor who-can`), deny-by-default segregation-of-duties gate in the sign gate (CLI + MCP), owner-mediated key revoke | Every command signed and attributable; agents act only within their role — the actor who books is not the one who files or pays — **✅ done (dev branch, 746 tests green)** | done |
 | 14 | Multi-jurisdiction profiles: eleven (NL + the ten-market expansion LU/GB/FR/US/BE/DE/DK/FI/NO/SE) — country chart conventions, VAT codes + rates, identifiers + Peppol schemes, compliance calendars; strict format dispatch (unbuilt formats fail loudly, no silent fallbacks) | One research-verified profile per market (docs-research/*.md); PLANNED empty — **✅ done (dev branch, 889 tests green)** | done |
+| 15 | Localization (i18n): optional `--locale` / `BUKIO_LOCALE` mechanism with English default + locale tables for all 11 markets (en, nl, nl-be, de, fr, fr-lu, da, fi, nb, sv); curated wiring of PDF labels, emails, CLI renders, VAT descriptions | English default, opt-in per market — **✅ done (dev branch, 889 tests green)** | done |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 
