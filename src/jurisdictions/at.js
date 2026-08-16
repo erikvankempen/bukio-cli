@@ -33,9 +33,9 @@
 //   - documents.auditFile   omitted → XAF export fails (SAF-T AT is a
 //                            different XML schema — OECD-style, not the
 //                            Belastingdienst Auditfile)
-//   - documents.invoiceCompliance omitted → invoice finalization fails
-//                            (§ 11 UStG full-invoice rule set is a
-//                            B-milestone)
+//   - documents.invoiceCompliance → the art. 226 EU baseline is registered
+//                            ('eu-invoice-vereisten'); § 11 UStG full-invoice
+//                            additions are a B-milestone
 // Registered: e-invoicing 'peppol-bis-3.0' (AT is a Peppol participant;
 // B2G e-invoicing mandatory since 2014, B2B voluntary; scheme 9914 = UID),
 // SEPA, CAMT.053, ECB, closing 9350 -> 9380.
@@ -170,7 +170,7 @@ export default {
   },
 
   documents: {
-    // invoiceCompliance omitted — § 11 UStG rule set is a B-milestone
+    invoiceCompliance: 'eu-invoice-vereisten', // art. 226 VAT Directive baseline
     eInvoicing: 'peppol-bis-3.0', // Peppol participant; B2G e-invoicing
     // mandatory since 2014 (e-Rechnung.gv.at), B2B voluntary (EU mandate
     // planned from 2027/2028); scheme 9914 = UID

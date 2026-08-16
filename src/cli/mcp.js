@@ -391,7 +391,7 @@ tool({
 });
 tool({
   name: 'invoice_create', mutating: true,
-  description: 'create a draft invoice: contact_id + line specs ("2x Dienst @ 150.00 @21", per-line discount "@-10%" or "@-25.00", fractional qty "1.5x") OR item specs ("1:2@140.00@21@-10%"); discount_pct/discount_amount_cents apply to the total before VAT; language nl|en',
+  description: 'create a draft invoice: contact_id + line specs ("2x Dienst @ 150.00 @21", per-line discount "@-10%" or "@-25.00", fractional qty "1.5x") OR item specs ("1:2@140.00@21@-10%"); discount_pct/discount_amount_cents apply to the total before VAT; language is an i18n table code (en/nl/de/fr/da/fi/nb/sv/it/es/pt/nl-be/fr-lu, default: the company profile\'s language)',
   schema: {
     type: 'object', properties: {
       contact_id: { type: 'number' },

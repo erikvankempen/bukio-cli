@@ -88,7 +88,8 @@ Confidence: high.
 - `reporting.format` — UGB Jahresabschluss (B-milestone)
 - `documents.auditFile` — **SAF-T AT** exists but is an OECD-style XML, NOT the
   Dutch Auditfile Financieel 4.0 the XAF builder emits (B-milestone)
-- `documents.invoiceCompliance` — § 11 UStG rule set (B-milestone)
+- `documents.invoiceCompliance` — **registered: the art. 226 EU baseline**
+  ('eu-invoice-vereisten'); § 11 UStG additions are a B-milestone
 
 ## 8. at.js mapping
 

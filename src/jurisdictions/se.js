@@ -176,8 +176,7 @@ export default {
   },
 
   documents: {
-    // invoiceCompliance omitted — mervärdesskattelagen rule set is a
-    // B-milestone
+    invoiceCompliance: 'eu-invoice-vereisten', // art. 226 baseline (mervärdesskattelagen additions are a B-milestone)
     eInvoicing: 'peppol-bis-3.0', // B2G mandatory via Peppol (Peppol BIS
     // Billing 3.0 EN 16931; SFS 2018:1277); B2B voluntary; Svefaktura is
     // the legacy standard

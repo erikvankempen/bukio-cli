@@ -28,9 +28,9 @@
 //                            Act 2014 / FRS 102 accounts are a B-milestone)
 //   - documents.auditFile   omitted → XAF export fails (no Irish SAF-T;
 //                            Revenue e-audit via ROS is API-based)
-//   - documents.invoiceCompliance omitted → invoice finalization fails
-//                            (VAT Consolidation Act 2010 s. 108B/113 rule
-//                            set is a B-milestone)
+//   - documents.invoiceCompliance → the art. 226 EU baseline is registered
+//                            ('eu-invoice-vereisten'); VAT Consolidation Act
+//                            2010 s. 108B/113 additions are a B-milestone
 // Registered: e-invoicing 'peppol-bis-3.0' (IE is a Peppol participant;
 // no B2B mandate yet — EU directive rolling out 2027+; scheme 9935 = VAT
 // number), SEPA, CAMT.053, ECB, closing 3300 -> 3200.
@@ -169,8 +169,7 @@ export default {
   },
 
   documents: {
-    // invoiceCompliance omitted — VATCA 2010 s. 108B/113 rule set is a
-    // B-milestone
+    invoiceCompliance: 'eu-invoice-vereisten', // art. 226 baseline (VATCA 2010 s. 108B/113 additions are a B-milestone)
     eInvoicing: 'peppol-bis-3.0', // Peppol participant; no B2B mandate yet
     // (EU e-invoicing directive rolling out 2027+); scheme 9935 = VAT number
     // auditFile omitted — no Irish SAF-T; Revenue e-audit via ROS is

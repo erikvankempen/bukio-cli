@@ -86,7 +86,7 @@ test('migration 018: fresh DB gains the six signature columns + actor_keys + set
   const keys = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((r) => r.name);
   assert.ok(keys.includes('actor_keys'));
   assert.ok(keys.includes('settings'));
-  assert.equal(db.pragma('user_version', { simple: true }), 24);
+  assert.equal(db.pragma('user_version', { simple: true }), 25); // 001-025 (025: invoice language CHECK removal)
 });
 
 test('migration 019: actor_keys gains a composite (actor, keyid) primary key', () => {

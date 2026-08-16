@@ -235,7 +235,7 @@ export function make(program) {
     .option('--notes <text>', 'free-text note (printed on the invoice)')
     .option('--discount-pct <pct>', 'discount on the total, percentage (e.g. 5)')
     .option('--discount-amount <amount>', 'discount on the total, fixed amount (e.g. 50.00)')
-    .option('--language <lang>', "invoice language: 'nl' or 'en' (default: follows the company profile)")
+    .option('--language <lang>', 'invoice document language (en, nl, de, fr, da, fi, nb, sv, it, es, pt, nl-be, fr-lu; default: the company profile\'s language)')
     .option('--dry-run', 'validate without writing')
     .action((opts, command) => {
       const ctx = makeCtx(command);

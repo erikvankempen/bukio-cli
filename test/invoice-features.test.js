@@ -22,6 +22,7 @@ import { createItem, getItem, listItems, updateItem } from '../src/items/index.j
 import { createTemplate, runDue } from '../src/recurring/index.js';
 import { invoiceToUbl } from '../src/invoice/ubl.js';
 import { invoiceHtml, invoiceToPdf } from '../src/invoice/pdf.js';
+import { defaultSubject } from '../src/invoice/email.js';
 import { unitLabel } from '../src/invoice/i18n.js';
 import { autoMatch, getOrCreateBankAccount, importTransactions } from '../src/bank/index.js';
 import { trialBalance } from '../src/report/trial-balance.js';
@@ -366,14 +367,20 @@ test('finalize with discounts books a balanced entry', () => {
 
 // --- language -------------------------------------------------------------
 
-test('invoice language: nl default, en allowed, invalid rejected', () => {
+test('invoice language: nl default, any i18n table accepted, unknown rejected', () => {
   const c = addContact();
   const inv = createInvoice(db, { contactId: c.id, lines: ['Ding @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
   assert.equal(inv.language, 'nl');
   const en = createInvoice(db, { contactId: c.id, lines: ['Ding @ 10.00'], date: '2026-08-11', language: 'en', actor: 'agent:test' });
   assert.equal(en.language, 'en');
+  // the rendered PDF is fully localised: every i18n table is a valid
+  // document language (Phase D + full-localization request)
+  const de = createInvoice(db, { contactId: c.id, lines: ['Ding @ 10.00'], date: '2026-08-11', language: 'de', actor: 'agent:test' });
+  assert.equal(de.language, 'de');
+  const it = createInvoice(db, { contactId: c.id, lines: ['Ding @ 10.00'], date: '2026-08-12', language: 'it', actor: 'agent:test' });
+  assert.equal(it.language, 'it');
   assert.throws(
-    () => createInvoice(db, { contactId: c.id, lines: ['Ding @ 10.00'], date: '2026-08-11', language: 'de', actor: 'agent:test' }),
+    () => createInvoice(db, { contactId: c.id, lines: ['Ding @ 10.00'], date: '2026-08-11', language: 'xx', actor: 'agent:test' }),
     { code: 'INVALID_LANGUAGE' },
   );
 });
@@ -874,4 +881,35 @@ test('company logo: format, size and dimension guards', () => {
 
   const got = runCli(['company', 'logo', '--out', path.join(dir, 'x.png')], dbPath);
   assert.equal(got.data.mime, 'image/svg+xml');
+});
+
+test('review fix: PDF reverse-charge label + email language follow the document language (no Dutch fallback)', () => {
+  // ES invoice with a reverse-charge line: the PDF must show the Spanish
+  // label, never the Dutch 'verlegd'
+  const dir = mkdtempSync(path.join(tmpdir(), 'bukio-es-'));
+  const dbPath = path.join(dir, 'test.db');
+  runCli(['init', '--name', 'Perez SL', '--country', 'ES', '--legal-form', 'sl', '--vat', 'on',
+    '--registration-id', 'M-123456', '--tax-id', 'ESB12345678', '--address', 'Calle 1',
+    '--postal-code', '28001', '--city', 'Madrid'], dbPath);
+  const db2 = openDb(dbPath);
+  try {
+    const c = createContact(db2, { name: 'Cliente SL', address: 'Calle 2', city: 'Barcelona' });
+    const inv = createInvoice(db2, { contactId: c.id, lines: ['Servicio @ 100.00 @R'], date: '2026-08-10', actor: 'agent:test' });
+    assert.equal(inv.language, 'es');
+    const html = invoiceHtml(db2, getInvoice(db2, inv.id));
+    assert.match(html, /inversión del sujeto pasivo/); // i18n 'pdf.reverseCharge' (es)
+    assert.doesNotMatch(html, /verlegd/); // no Dutch fallback on a Spanish PDF
+    // the same document in English keeps the English label
+    const en = createInvoice(db2, { contactId: c.id, lines: ['Servicio @ 100.00 @R'], date: '2026-08-11', language: 'en', actor: 'agent:test' });
+    assert.match(invoiceHtml(db2, getInvoice(db2, en.id)), /reverse charge/);
+    assert.doesNotMatch(invoiceHtml(db2, getInvoice(db2, en.id)), /inversión del sujeto pasivo/);
+    // invoice emails follow the document language too (no Dutch fallback)
+    assert.equal(defaultSubject('it', '2026-0001', 'Rossi SRL'), 'Fattura 2026-0001 — Rossi SRL');
+    assert.equal(defaultSubject('es', '2026-0001', 'Perez SL'), 'Factura 2026-0001 — Perez SL');
+    assert.equal(defaultSubject('de', '2026-0001', 'Muster GmbH'), 'Rechnung 2026-0001 — Muster GmbH');
+    assert.equal(defaultSubject('nl', '2026-0001', 'Demo BV'), 'Factuur 2026-0001 — Demo BV');
+    assert.ok(defaultSubject('xx', '2026-0001', 'X'), 'unknown language falls back to the English table value'); // t() -> en
+  } finally {
+    db2.close();
+  }
 });

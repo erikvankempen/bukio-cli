@@ -75,7 +75,8 @@ Confidence: high.
 - `tax.returnLayout` — VAT3 9-box return engine (B-milestone)
 - `reporting.format` — Companies Act 2014 / FRS 102 accounts (B-milestone)
 - `documents.auditFile` — no Irish SAF-T (B-milestone)
-- `documents.invoiceCompliance` — VATCA 2010 s. 108B/113 rule set (B-milestone)
+- `documents.invoiceCompliance` — **registered: the art. 226 EU baseline**
+  ('eu-invoice-vereisten'); s. 108B/113 additions are a B-milestone
 
 ## 8. ie.js mapping
 

@@ -14,6 +14,7 @@ import { resolveProfile, allTaxCodes } from '../jurisdictions/index.js';
 import { isValidIban, normalizeIban } from '../core/iban.js';
 import { isVatEnabled, listVatCodes } from '../vat/index.js';
 import { getItem } from '../items/index.js';
+import { TABLES } from '../i18n/index.js';
 import { parseBankAmount } from '../bank/csv.js';
 import { formatAmount } from '../core/money.js';
 
@@ -42,6 +43,24 @@ function isVatCodeToken(token) {
   const t = token.toUpperCase();
   if (KNOWN_VAT_CODES.has(t)) return true;
   return /^[A-Z]{1,2}$/.test(t) || /^\d{1,2}$/.test(t);
+}
+
+/**
+ * The document language for a company: the profile's base language when the
+ * i18n module has a table for it (de-AT -> de, it -> it, nl-be -> nl, ...),
+ * 'en' otherwise. Every market is its own base — no hardcoded market; the
+ * rendered PDF is fully localised (labels, units, emails, statuses).
+ */
+function defaultDocumentLanguage(db) {
+  let locale = null;
+  try {
+    const row = db.prepare('SELECT locale FROM company WHERE id = 1').get();
+    locale = row ? row.locale : null;
+  } catch {
+    locale = null; // pre-init / no company row yet
+  }
+  const base = locale ? String(locale).split('-')[0] : 'en';
+  return TABLES[base] ? base : 'en';
 }
 
 /** Format a milli-quantity for humans: 2000 -> '2', 1500 -> '1.5'. */
@@ -519,9 +538,10 @@ function normalizeLineObject(l) {
  * Lines come from `lines` (free-form line specs) OR `items` (catalog item
  * specs "ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]" — price/VAT overrides apply
  * to this invoice only). `discountType/discountValue` apply to the TOTAL,
- * before VAT. `language` is 'nl' or 'en'; when omitted it follows the
- * company profile (Dutch for NL/BE companies, English for every other
- * market) — no market is the de facto base.
+ * before VAT. `language` is any i18n table code (en/nl/de/fr/da/fi/nb/sv/
+ * it/es/pt plus the nl-be/fr-lu overrides); when omitted it follows the
+ * company profile (de-AT -> de, it -> it, nl-be -> nl, ...) — every market
+ * is its own base, no market is the de facto base.
  */
 export function createInvoice(db, {
   contactId, lines = null, items = null, date, dueDays = 30, deliveryDate = null,
@@ -530,10 +550,8 @@ export function createInvoice(db, {
 }) {
   const contact = getContact(db, contactId);
   if (language == null) {
-    // Document language follows the company profile, not a hardcoded market:
-    // NL/BE (Dutch-speaking) default to 'nl', every other market to 'en'.
-    const comp = db.prepare('SELECT locale FROM company WHERE id = 1').get();
-    language = comp && comp.locale && comp.locale.startsWith('nl') ? 'nl' : 'en';
+    // Document language follows the company profile (see defaultDocumentLanguage)
+    language = defaultDocumentLanguage(db);
   }
   if (!contact) throw invoiceError('CONTACT_NOT_FOUND', `contact ${contactId} does not exist`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw invoiceError('INVALID_DATE', `date '${date}' must be YYYY-MM-DD`);
@@ -559,8 +577,8 @@ export function createInvoice(db, {
       throw invoiceError('INVALID_DATE', `delivery-date '${deliveryDate}' is not a valid calendar date`);
     }
   }
-  if (!['nl', 'en'].includes(language)) {
-    throw invoiceError('INVALID_LANGUAGE', "language must be 'nl' or 'en'");
+  if (!Object.keys(TABLES).includes(language)) {
+    throw invoiceError('INVALID_LANGUAGE', `language '${language}' is not a supported i18n table (${Object.keys(TABLES).join(', ')})`);
   }
   if (discountType != null) assertLineDiscount(discountType, discountValue);
 
@@ -690,6 +708,11 @@ const INVOICE_COMPLIANCE_RULES = {
   // Phase B6: Luxembourg invoice requirements (loi TVA + RCS). French error
   // messages, same error-code contract as the NL rule set.
   'lu-invoice-vereisten': validateLuVereisten,
+  // Phase D + full-localization: the harmonized art. 226 EU VAT Directive
+  // baseline, registered for every EU market without a specific rule set.
+  // Unblocks invoice finalization (and thus the localized PDF) for
+  // AT/BE/DE/DK/ES/FI/FR/IE/IT/NO/PT/SE; NL/LU keep their national rules.
+  'eu-invoice-vereisten': validateEuVereisten,
 };
 
 export function validateCompliance(db, invoice) {
@@ -730,6 +753,49 @@ function validateNl12Vereisten(db, invoice) {
   }
 
   return { ok: true, vereisten: 12 };
+}
+
+/**
+ * Validate the harmonized EU invoice requirements (art. 226 VAT Directive
+ * 2006/112/EC) — the party-field baseline every EU member state implements:
+ * supplier name/registration number/tax id (when registered)/address/postal
+ * code/city, customer name/address/city, and the customer VAT id on
+ * reverse-charge lines. Content-level rules (sequential number, supply
+ * date, qty/nature, price excl. VAT, exemption reason, reverse-charge note)
+ * are enforced by the invoice builder itself, not re-checked here. English
+ * messages, same error-code contract as the NL/LU rule sets. Registered for
+ * the EU markets without a national rule set (AT/BE/DE/DK/ES/FI/FR/IE/IT/
+ * NO/PT/SE); NL and LU keep their national rules.
+ */
+function validateEuVereisten(db, invoice) {
+  const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
+  const contact = invoice.contact;
+
+  const missingSupplier = [];
+  // the supplier tax id is a requirement only when the supplier HAS one
+  // (art. 226(b)) — a VAT-exempt business (vat module off, no tax id)
+  // must still be able to invoice
+  const supplierHasVat = company.vat_module === 1 || Boolean(company.tax_id);
+  if (!company.name) missingSupplier.push('company name');
+  if (supplierHasVat && !company.tax_id) missingSupplier.push('tax id');
+  if (!company.registration_id) missingSupplier.push('registration number');
+  if (!company.address) missingSupplier.push('address');
+  if (!company.postal_code) missingSupplier.push('postal code');
+  if (!company.city) missingSupplier.push('city');
+  if (missingSupplier.length) {
+    throw invoiceError('SUPPLIER_INCOMPLETE', `supplier details missing (art. 226(a)-(c) EU VAT Directive): ${missingSupplier.join(', ')} — set them with init/company update`);
+  }
+
+  if (!contact.name || !contact.address || !contact.city) {
+    throw invoiceError('CUSTOMER_INCOMPLETE', 'customer details missing (art. 226(5) EU VAT Directive): name, address and city are required');
+  }
+
+  const hasReverse = invoice.lines.some((l) => l.vat_code === 'R' || l.vat_code === 'RE');
+  if (hasReverse && !contact.vat_id) {
+    throw invoiceError('CUSTOMER_VAT_REQUIRED', 'reverse-charge invoice: the customer VAT id is required (art. 226(14) EU VAT Directive)');
+  }
+
+  return { ok: true, vereisten: 8 };
 }
 
 /**
@@ -958,7 +1024,7 @@ export function creditInvoice(db, { id, date = null, reason = null, actor = 'hum
     // derived in the UBL builder via credit_for_invoice_id
     reference: original.reference ?? original.invoice_number,
     discountType: original.discount_type, discountValue: original.discount_value,
-    language: original.language ?? 'nl',
+    language: original.language ?? defaultDocumentLanguage(db),
     actor,
   }).id;
   db.prepare("UPDATE invoices SET invoice_type = 'credit', credit_for_invoice_id = ? WHERE id = ?")

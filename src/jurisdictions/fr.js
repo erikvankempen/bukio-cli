@@ -161,8 +161,7 @@ export default {
   },
 
   documents: {
-    // invoiceCompliance omitted — CGI art. 289 mention obligatoires rule
-    // set is a B-milestone (invoice finalization fails loudly until then)
+    invoiceCompliance: 'eu-invoice-vereisten', // art. 226 baseline (CGI art. 289 additions are a B-milestone)
     eInvoicing: 'peppol-bis-3.0', // EN 16931 UBL; FR mandate (Factur-X/UBL
     // via PDPs) accepts it; scheme 0002 = SIREN from identifiers
     // auditFile omitted — FEC (CGI art. 54 septies) is a B-milestone

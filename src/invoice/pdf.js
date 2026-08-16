@@ -49,7 +49,7 @@ export function invoiceHtml(db, invoice) {
   const rows = invoice.lines.map((l, i) => {
     const disc = lineDiscountCents(l);
     const vatTxt = l.vat_rate_bp ? `${(l.vat_rate_bp / 100).toFixed(1)}%`
-      : (l.vat_code === 'R' || l.vat_code === 'RE') ? (lang === 'en' ? 'reverse charge' : 'verlegd') : '-';
+      : (l.vat_code === 'R' || l.vat_code === 'RE') ? L('reverseCharge') : '-';
     return `
       <tr>
         <td>${i + 1}</td>

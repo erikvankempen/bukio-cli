@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-15 20:24:57 UTC — **✅ 891 passing · 0 failing (891 tests)**
+**Latest run:** 2026-08-16 03:57:40 UTC — **✅ 915 passing · 0 failing (915 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -562,7 +562,7 @@
     - ✅ t: {param} interpolation
     - ✅ resolveLocale: flag > env > en (UI stays English unless opted in)
     - ✅ legacy shims: label/unitLabel/LABELS/UNITS keep the old API and values
-    - ✅ all 8 full locale tables carry the identical key set (parity guard)
+    - ✅ all 11 full locale tables carry the identical key set (parity guard)
     - ✅ company show + balance-sheet labels localize (round-10 review keys)
     - ✅ reminders table labels localize fully (nl)
     - ✅ vat file description: English by default
@@ -636,7 +636,7 @@
 
 ### invoice-features.test.js — 
 
-37 passing · 0 failing
+38 passing · 0 failing
 
     - ✅ fractional quantities parse to milli-units
     - ✅ line discounts parse (pct and amount)
@@ -658,7 +658,7 @@
     - ✅ computeInvoiceTotals is deterministic across recomputes (getInvoice consistency)
     - ✅ booking with discounts: omzet uses discounted nets, VAT per rate
     - ✅ finalize with discounts books a balanced entry
-    - ✅ invoice language: nl default, en allowed, invalid rejected
+    - ✅ invoice language: nl default, any i18n table accepted, unknown rejected
     - ✅ CLI: --discount-pct and --discount-amount together are rejected
     - ✅ credit note inherits language, total discount and line discounts
     - ✅ UBL: formatted quantity, unit code, language, discounted tax bases
@@ -675,6 +675,7 @@
     - ✅ bank autoMatch: discounted invoice does NOT match a partial/off payment
     - ✅ company logo: set (PNG), extract round-trip, remove; audits
     - ✅ company logo: format, size and dimension guards
+    - ✅ review fix: PDF reverse-charge label + email language follow the document language (no Dutch fallback)
 
 ### invoice.test.js — invoicing: lifecycle, 12-vereisten, credit notes, payments, reminders
 
@@ -712,7 +713,7 @@
 
 ### jurisdictions.test.js — 
 
-104 passing · 0 failing
+127 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -747,7 +748,7 @@
     - ✅ M9: bank import resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ review-fix: account add --taxonomy-code works; --rgs-code alias maps and warns
     - ✅ B1: getProfile returns the LU profile (French, PCN 2020 data)
-    - ✅ B1: LU is implemented — PLANNED is empty (all ten markets landed)
+    - ✅ B1: LU is implemented — PLANNED is empty (all sixteen markets landed)
     - ✅ B1: the LU profile is deep-frozen
     - ✅ B1: init --country LU creates a French LU company with the PCN chart
     - ✅ B1: LU strict dispatch — unregistered formats fail loudly (no NL fallback)
@@ -772,58 +773,81 @@
     - ✅ B3: FAIA omits the TaxTable for a TVA-less company (review fix)
     - ✅ B3: NL XAF export is unchanged (byte-identical, xaf-auditfile-4.0)
     - ✅ GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)
-    - ✅ GB: PLANNED is empty (all ten markets landed)
+    - ✅ GB: PLANNED is empty (all sixteen markets landed)
     - ✅ GB: init --country GB creates a GBP company with the UK chart
     - ✅ GB: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ GB: compliance calendar — annual accounts in 9 months, CT600 in 12
     - ✅ FR: getProfile returns the FR profile (EUR, fr, PCG data)
-    - ✅ FR: PLANNED is empty (all ten markets landed)
+    - ✅ FR: PLANNED is empty (all sixteen markets landed)
     - ✅ FR: init --country FR creates a French company with the PCG chart
     - ✅ FR: dotted VAT codes (5.5/2.1) parse in the invoice line spec (review fix)
     - ✅ FR: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ US: getProfile returns the US profile (USD, en-US, no federal VAT)
-    - ✅ US: PLANNED is empty (all ten markets landed)
+    - ✅ US: PLANNED is empty (all sixteen markets landed)
     - ✅ US: init --country US creates a USD company with the US chart
     - ✅ US: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ US: compliance calendar — 1120 on 15 Apr + 941 quarterly (month-end)
     - ✅ BE: getProfile returns the BE profile (EUR, nl-BE, PCN-BE data)
-    - ✅ BE: PLANNED is empty (all ten markets landed)
+    - ✅ BE: PLANNED is empty (all sixteen markets landed)
     - ✅ BE: init --country BE creates a Belgian company with the PCMN chart
     - ✅ BE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ BE: compliance calendar — VAT on the 20th + annual accounts in 7 months
     - ✅ DE: bank add defaults to the profile bank account (1200), not NL 1100 (review fix)
     - ✅ NL: bank add still defaults to 1100 (byte-identity)
     - ✅ DE: getProfile returns the DE profile (EUR, de-DE, SKR 03 data)
-    - ✅ DE: PLANNED is empty (all ten markets landed)
+    - ✅ DE: PLANNED is empty (all sixteen markets landed)
     - ✅ DE: init --country DE creates a German company with the SKR 03 chart
     - ✅ DE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ DE: compliance calendar — UStVA 10th + annual VAT 31 Jul + accounts 12 mo
     - ✅ DK: getProfile returns the DK profile (DKK, da-DK, 25% VAT only)
-    - ✅ DK: PLANNED is empty (all ten markets landed)
+    - ✅ DK: PLANNED is empty (all sixteen markets landed)
     - ✅ DK: init --country DK creates a Danish company with the kontoplan
     - ✅ DK: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ DK: compliance calendar — quarterly VAT 1st of 3rd month + accounts 5 months
     - ✅ FI: getProfile returns the FI profile (EUR, fi-FI, 25.5% VAT)
-    - ✅ FI: PLANNED is empty (all ten markets landed)
+    - ✅ FI: PLANNED is empty (all sixteen markets landed)
     - ✅ FI: init --country FI creates a Finnish company with the model chart
     - ✅ FI: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ FI: compliance calendar — quarterly VAT 12th of 2nd month + accounts in 8 months
     - ✅ NO: getProfile returns the NO profile (NOK, nb-NO, NS 4102)
-    - ✅ NO: PLANNED is empty (all ten markets landed)
+    - ✅ NO: PLANNED is empty (all sixteen markets landed)
     - ✅ NO: init --country NO creates a Norwegian company with the NS 4102 chart
     - ✅ NO: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ NO: compliance calendar — bi-monthly VAT (6/yr) + accounts by 31 July
     - ✅ SE: getProfile returns the SE profile (SEK, sv-SE, BAS 2023)
-    - ✅ SE: PLANNED is empty — every expansion market is implemented
+    - ✅ SE: PLANNED is empty (all sixteen markets landed)
     - ✅ SE: init --country SE creates a Swedish company with the BAS chart
     - ✅ SE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ SE: compliance calendar — quarterly VAT 12th of 2nd month (Aug 17th) + accounts 7 months
+    - ✅ AT: getProfile returns the AT profile (EUR, de-AT, EKR data)
+    - ✅ AT: PLANNED is empty (all sixteen markets landed)
+    - ✅ AT: init --country AT creates an Austrian company with the EKR chart
+    - ✅ AT: strict dispatch — unregistered formats fail loudly (no fallback)
+    - ✅ AT: compliance calendar — UVA 15th of second following month + annual VAT 30 Jun
+    - ✅ IE: getProfile returns the IE profile (EUR, en, UK-style chart)
+    - ✅ IE: PLANNED is empty (all sixteen markets landed)
+    - ✅ IE: init --country IE creates an Irish company with the UK-style chart
+    - ✅ IE: strict dispatch — unregistered formats fail loudly (no fallback)
+    - ✅ IE: compliance calendar — VAT3 bi-monthly 23rd + annual accounts/CT1 9 months
+    - ✅ IT: getProfile returns the IT profile (EUR, it, convention chart)
+    - ✅ IT: init --country IT creates an Italian company with the convention chart
+    - ✅ IT: strict dispatch — unregistered formats fail loudly (no fallback)
+    - ✅ IT: compliance calendar — liquidazione 16th of 2nd month + Dichiarazione 30 Apr + bilancio
+    - ✅ ES: getProfile returns the ES profile (EUR, es, PGC chart)
+    - ✅ ES: init --country ES creates a Spanish company with the PGC chart
+    - ✅ ES: strict dispatch — unregistered formats fail loudly (no fallback)
+    - ✅ ES: compliance calendar — Modelo 303 quarterly + 390 + 200 + cuentas anuales
+    - ✅ PT: getProfile returns the PT profile (EUR, pt, SNC chart)
+    - ✅ PT: init --country PT creates a Portuguese company with the SNC chart
+    - ✅ PT: strict dispatch — unregistered formats fail loudly (no fallback)
+    - ✅ PT: compliance calendar — Declaração Periódica 20th of 2nd month + IRC + IES
+    - ✅ EU baseline: a DE company finalizes invoices end-to-end (art. 226 rule + de document language)
 
 ### migration-021.test.js — 
 
 2 passing · 0 failing
 
-    - ✅ migrations 021-024 upgrade a 020 DB: new columns, CHECK removals, renames, backfill
+    - ✅ migrations 021-025 upgrade a 020 DB: new columns, CHECK removals, renames, backfill
     - ✅ migration 021 keeps company data lossless across the rebuild
 
 ### money.test.js — integer-cents money helpers

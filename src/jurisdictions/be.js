@@ -178,7 +178,7 @@ export default {
   },
 
   documents: {
-    // invoiceCompliance omitted — WBTW rule set is a B-milestone
+    invoiceCompliance: 'eu-invoice-vereisten', // art. 226 baseline (WBTW additions are a B-milestone)
     eInvoicing: 'peppol-bis-3.0', // CONFIRMED: BE mandates B2B e-invoicing
     // via Peppol since 1 Jan 2026; Peppol BIS 3.0 = EN 16931 UBL 2.1
     // auditFile omitted — no Belgian SAF-T

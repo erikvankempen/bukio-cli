@@ -22,11 +22,11 @@ export function emailError(code, message) {
   return e;
 }
 
-function defaultSubject(lang, invoiceNumber, companyName) {
+export function defaultSubject(lang, invoiceNumber, companyName) {
   return t('email.invoiceSubject', { number: invoiceNumber, company: companyName }, lang);
 }
 
-function defaultBody(lang, invoiceNumber, gross, companyName) {
+export function defaultBody(lang, invoiceNumber, gross, companyName) {
   return t('email.invoiceBody', { number: invoiceNumber, gross, company: companyName }, lang);
 }
 
@@ -45,7 +45,9 @@ export async function emailInvoice(db, {
 
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   const companyName = company?.name ?? 'Bukio';
-  const lang = invoice.language === 'en' ? 'en' : 'nl';
+  // the email follows the invoice's document language (any i18n table; t()
+  // falls back en -> key, so an unknown code still yields English)
+  const lang = invoice.language ?? 'en';
   const recipient = to ?? invoice.contact?.email ?? null;
   if (!recipient) throw emailError('CONTACT_EMAIL_MISSING', 'the contact has no email address — pass --to');
 
