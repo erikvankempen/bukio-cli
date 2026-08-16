@@ -41,6 +41,15 @@ merged to `main` and released.
   e-Factura RO, SK 2027) stay documented B-milestones. English-document
   defaults; art. 226 EU baseline + cross-border Peppol BIS inherited.
 
+- **i18n refactor: per-language table modules** — `src/i18n/index.js`'s
+  single `TABLES` literal split into `src/i18n/locales/<lang>.js` (one
+  module per language: en/nl/nl-be/de/fr/fr-lu/da/fi/nb/sv/it/es/pt);
+  `index.js` keeps the machinery (`t`/`label`/`unitLabel`/`resolveLocale`,
+  LABELS/UNITS backwards-compat exports) and re-assembles `TABLES` from
+  imports. Public API unchanged; keys/values byte-identical; the parity
+  guard still pins 89 keys across all 11 full tables. Behavior-neutral —
+  944/944 green.
+
 ## [0.16.1] — 2026-08-16
 
 ### Added
