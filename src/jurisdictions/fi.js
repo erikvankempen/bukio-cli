@@ -189,8 +189,7 @@ export default {
   },
 
   documents: {
-    // invoiceCompliance omitted — arvonlisäverolaki rule set is a
-    // B-milestone
+    invoiceCompliance: 'eu-invoice-vereisten', // art. 226 baseline (arvonlisäverolaki additions are a B-milestone)
     eInvoicing: 'peppol-bis-3.0', // B2B is NOT mandated (research §11 —
     // only B2G is); Peppol BIS 3.0 is accepted for voluntary transmission
     // and the e-Invoicing Act 241/2019 gives buyers a right to request it

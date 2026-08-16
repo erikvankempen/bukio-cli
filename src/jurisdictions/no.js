@@ -181,7 +181,7 @@ export default {
   },
 
   documents: {
-    // invoiceCompliance omitted — mva-loven rule set is a B-milestone
+    invoiceCompliance: 'eu-invoice-vereisten', // art. 226 baseline (mva-loven additions are a B-milestone)
     eInvoicing: 'peppol-bis-3.0', // EHF 3.0 = Peppol BIS 3.0 UBL profile:
     // B2G mandatory since 2012, B2B voluntary (B2B mandate proposed for
     // 2027-2030, not law)

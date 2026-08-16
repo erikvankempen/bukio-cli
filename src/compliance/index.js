@@ -210,6 +210,85 @@ const DEADLINE_RULES = {
     return `${y}-${String(month).padStart(2, '0')}-${day}`;
   },
   'se-7-months': (company, year) => monthsAfterFyEnd(company, year, 7),
+  // AT (research §10, BMF/usp.gv.at): UVA due the 15th of the SECOND
+  // following month — quarterly when prior-year turnover ≤ €100,000, monthly
+  // above (§ 21 UStG); the annual USt-Erklärung is due 30 June of the
+  // following year (mandatory electronic filing)
+  'at-uva-quarterly': (period) => {
+    assertQuarter(period);
+    const q = Number(String(period).split('-')[1].replace('Q', ''));
+    const m = q * 3 + 2;
+    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
+    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-15`;
+  },
+  'at-annual-vat': (company, year) => `${Number(year) + 1}-06-30`,
+  // IE (research §8, Revenue): VAT3 bi-monthly returns — six two-month
+  // periods per year, due the 23rd of the month after the period end
+  // (P1 Jan/Feb -> 23 Mar ... P6 Nov/Dec -> 23 Jan next year); annual
+  // accounts + Form B1 to the CRO and Form CT1 to Revenue within 9 months
+  // of the FYE / period end
+  'ie-bimonthly': (period) => {
+    const m = String(period).match(/^(\d{4})-P([1-6])$/);
+    if (!m) throw complianceError('INVALID_PERIOD', `period '${period}' must be YYYY-Pn`);
+    const schedule = { 1: '03-23', 2: '05-23', 3: '07-23', 4: '09-23', 5: '11-23' };
+    if (m[2] === '6') return `${Number(m[1]) + 1}-01-23`;
+    return `${m[1]}-${schedule[m[2]]}`;
+  },
+  'ie-9-months': (company, year) => monthsAfterFyEnd(company, year, 9),
+  // IT (research §8, Agenzia Entrate): liquidazione IVA quarterly versamento
+  // by the 16th of the SECOND month after the quarter (Q1 -> 16 May; +1%
+  // interest vs monthly; monthly above €400K turnover is the 16th of the
+  // following month — the quarterly rule is the SME default); Dichiarazione
+  // IVA 30 April of the following year; bilancio approved within 120 days
+  // and deposited within 30 days of approval (~5 months after FYE)
+  'it-liquidazione-quarterly': (period) => {
+    assertQuarter(period);
+    const q = Number(String(period).split('-')[1].replace('Q', ''));
+    const m = q * 3 + 2;
+    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
+    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-16`;
+  },
+  'it-dichiarazione-iva': (company, year) => `${Number(year) + 1}-04-30`,
+  'it-bilancio': (company, year) => monthsAfterFyEnd(company, year, 5),
+  // ES (research §8, AEAT): Modelo 303 quarterly within the first 20 days
+  // after the quarter (Q1 20 Apr, Q2 20 Jul, Q3 20 Oct, Q4 30 Jan next
+  // year); Modelo 390 annual summary 30 Jan; Modelo 200 (Impuesto sobre
+  // Sociedades, 25%) within 25 days of the 6 months after FYE; cuentas
+  // anuales deposited at the Registro Mercantil 7 months after FYE
+  'es-303-quarterly': (period) => {
+    assertQuarter(period);
+    const q = Number(String(period).split('-')[1].replace('Q', ''));
+    if (q === 4) return `${Number(String(period).split('-')[0]) + 1}-01-30`;
+    const m = q * 3 + 1;
+    return `${String(period).split('-')[0]}-${String(m).padStart(2, '0')}-20`;
+  },
+  'es-390': (company, year) => `${Number(year) + 1}-01-30`,
+  'es-200': (company, year) => {
+    // Modelo 200 (Impuesto sobre Sociedades, 25%): due within the first 25
+    // days of the month FOLLOWING the 6-month point after FYE (calendar
+    // year -> 1-25 July of the following year)
+    const fy = company.fiscal_year_end || '12-31';
+    const parts = String(fy).split('-');
+    const mm = Number(parts[parts.length - 2]);
+    const total = mm + 7;
+    const y = Number(year) + Math.floor((total - 1) / 12);
+    const m = ((total - 1) % 12) + 1;
+    return `${y}-${String(m).padStart(2, '0')}-25`;
+  },
+  'es-7-months': (company, year) => monthsAfterFyEnd(company, year, 7),
+  // PT (research §8, AT/PwC): Declaração Periódica due the 20th of the
+  // SECOND month after the period (quarterly for SMEs: Q1 20 May, Q2 20
+  // Aug, Q3 20 Nov, Q4 20 Feb next year; monthly above €650K / intra-EC);
+  // Modelo 22 (IRC, 21%) 31 May; annual accounts via IES 15 July
+  'pt-dp-quarterly': (period) => {
+    assertQuarter(period);
+    const q = Number(String(period).split('-')[1].replace('Q', ''));
+    const m = q * 3 + 2;
+    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
+    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-20`;
+  },
+  'pt-irc': (company, year) => `${Number(year) + 1}-05-31`,
+  'pt-ies': (company, year) => `${Number(year) + 1}-07-15`,
 };
 
 export function isFiled(db, type, period) {

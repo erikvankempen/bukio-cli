@@ -170,7 +170,7 @@ export default {
   },
 
   documents: {
-    // invoiceCompliance omitted — momsloven rule set is a B-milestone
+    invoiceCompliance: 'eu-invoice-vereisten', // art. 226 baseline (momsloven additions are a B-milestone)
     eInvoicing: 'peppol-bis-3.0', // voluntary B2B via Peppol; B2G is
     // OIOUBL/NemHandel (a different format — the mandate does not apply
     // to this builder's output)

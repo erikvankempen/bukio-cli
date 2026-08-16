@@ -177,7 +177,7 @@ export default {
   },
 
   documents: {
-    // invoiceCompliance omitted — § 14 UStG rule set is a B-milestone
+    invoiceCompliance: 'eu-invoice-vereisten', // art. 226 baseline (§ 14 UStG additions are a B-milestone)
     eInvoicing: 'peppol-bis-3.0', // BMF FAQ: any EN 16931-conformant format
     // accepted; Peppol BIS 3.0 UBL is one (scheme 9930 = USt-IdNr). B2B
     // issue mandate from 1 Jan 2028 (large from 1 Jan 2027).

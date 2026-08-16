@@ -6,6 +6,65 @@ match `package.json` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
+## [0.16.1] — 2026-08-16
+
+### Added
+
+- **Phase C: AT Austria + IE Ireland** — two more jurisdiction profiles
+  (thirteen live):
+  - **AT** — Einheitskontenrahmen (EKR) chart (BMF SAF-T verified, 3-digit
+    codes zero-padded), USt 20/13/10, Kleinunternehmer ≤ €55K, UID
+    (ATU + 8 digits) / Peppol 9914, UVA quarterly (15th of the second
+    following month; monthly above €100K) + annual USt-Erklärung 30 Jun.
+  - **IE** — UK-style chart (no statutory chart), VAT 23/13.5/9/4.8/0,
+    registration thresholds €85K goods / €42.5K services, CRO + IE-format
+    VAT number / Peppol 9935, VAT3 bi-monthly returns (23rd of the month
+    after the period; the `YYYY-Pn` shape) + annual accounts/CT1 in 9 months.
+  - Research briefs at `docs-research/{at,ie}-profile.md`; strict dispatch
+    keeps the B-milestones loud (UVA/VAT3 return engines, UGB/CA 2014
+    accounts, SAF-T AT (OECD-style ≠ Auditfile), § 11 UStG / s. 108B VATCA
+    invoice rule sets).
+- **PLANNED now holds Phase D** (`IT`, `ES`, `PT`) — `init --country`
+  answers `COUNTRY_NOT_SUPPORTED` for them (CH remains parked).
+- **Profile-aware init output** — the `vat: module enabled` line shows the
+  profile's clearing accounts (NL 1500/2500, AT 2500/3500, IE 2110/2100, …)
+  instead of a hardcoded NL pair.
+- **Clearer B-milestone errors** — `FORMAT_NOT_SUPPORTED` now names the
+  country and the milestone ("no invoice compliance rule set for AT yet…",
+  "no VAT-return layout for IE yet…") instead of `'undefined'`.
+- **Phase D: IT Italy + ES Spain + PT Portugal** — three more jurisdiction
+  profiles (sixteen live):
+  - **IT** — commercialisti convention chart (no statutory chart; standard
+    Italian account names), IVA 22/10/5/4, regime forfettario ≤ €85K,
+    Partita IVA (IT + 11 digits) / Peppol 0211, liquidazione IVA quarterly
+    (16th of the second month after the quarter) + Dichiarazione IVA 30 Apr
+    + bilancio ~5 months.
+  - **ES** — official PGC chart (R.D. 1514/2007), IVA 21/10/4, recargo de
+    equivalencia, NIF / Peppol 9920, Modelo 303 quarterly (20th; Q4 30 Jan)
+    + 390 (30 Jan) + 200 (25 Jul) + cuentas anuales (7 months).
+  - **PT** — official SNC chart (DL 158/2009; 2-digit bases zero-padded),
+    IVA 23/13/6, isenção art. 53 CIVA, NIPC / Peppol 9946, Declaração
+    Periódica quarterly (20th of the second month) + IRC (31 May) + IES
+    (15 Jul).
+  - Research briefs at `docs-research/{it,es,pt}-profile.md`; strict
+    dispatch keeps the B-milestones loud (liquidazione/303/DP return
+    engines, bilancio/cuentas/demonstrações financeiras, SAF-T PT,
+    **FatturaPA/SdI (IT)**, Verifactu (ES), ATCUD (PT) — domestic
+    e-invoicing formats; Peppol BIS registered for cross-border).
+- **Fully localised invoice PDFs** — the rendered invoice is now localised
+  in every market language. New full i18n tables **it/es/pt** (88 keys each,
+  key-identical to the pivot — parity guard now covers 11 full tables);
+  the document language follows the company profile (`de-AT` → de, `it` →
+  it, `nl-be` → nl, …) with `--language` accepting any i18n table;
+  migration 025 rebuilds `invoices` to drop the stale `CHECK (language IN
+  ('nl','en'))` that rejected `de`/`it` at INSERT.
+- **EU invoice-compliance baseline** — the harmonized art. 226 VAT Directive
+  party requirements ('eu-invoice-vereisten') are registered for the twelve
+  EU markets without a national rule set (AT/BE/DE/DK/ES/FI/FR/IE/IT/NO/PT/
+  SE), so invoice finalization — and thus the localised PDF — works for
+  every EU market; NL/LU keep their national rule sets; GB/US stay
+  B-milestone (no EU baseline).
+
 ## [0.16.0] — 2026-08-15
 
 ### Added

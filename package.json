@@ -1,6 +1,6 @@
 {
   "name": "bukio-cli",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "Agent-first, local-first double-entry bookkeeping for SMEs across eleven jurisdictions. SQLite backend, VAT-optional, Peppol BIS 3.0 e-invoicing, MCP-native. No cloud, no lock-in.",
   "type": "module",
   "bin": {

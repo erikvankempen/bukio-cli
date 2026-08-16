@@ -18,26 +18,36 @@
 // (no-VAT, state-level sales tax), BE (./be.js) the fifth (PCN-BE minimum
 // plan), DE (./de.js) the sixth (DATEV SKR 03), DK (./dk.js) the seventh
 // (Standardkontoplan-aligned, DKK), FI (./fi.js) the eighth (Liikekirjuri
-// model chart), NO (./no.js) the ninth (NS 4102, NOK) and SE (./se.js) the
-// tenth (BAS 2023, SEK); each registers only formats with existing builders
-// — anything else fails loudly via the strict dispatch.
+// model chart), NO (./no.js) the ninth (NS 4102, NOK), SE (./se.js) the
+// tenth (BAS 2023, SEK), AT (./at.js) the eleventh (EKR, EUR), IE
+// (./ie.js) the twelfth (UK-style chart, EUR), IT (./it.js) the thirteenth
+// (commercialisti convention, EUR), ES (./es.js) the fourteenth (PGC, EUR)
+// and PT (./pt.js) the fifteenth (SNC, EUR); each registers only formats
+// with existing builders — anything else fails loudly via the strict
+// dispatch. PLANNED is empty (all sixteen markets live); CH is parked
+// (CHF base currency, QR-bill, not a Peppol country).
 //
 // Consumers must resolve profiles ONLY through this registry — never read
 // company.country directly (see the profile-sprawl rule in the Phase A plan).
+import at from './at.js';
 import be from './be.js';
+import es from './es.js';
 import de from './de.js';
 import dk from './dk.js';
 import fi from './fi.js';
 import fr from './fr.js';
 import gb from './gb.js';
+import ie from './ie.js';
+import it from './it.js';
 import lu from './lu.js';
 import nl from './nl.js';
 import no from './no.js';
+import pt from './pt.js';
 import se from './se.js';
 import us from './us.js';
 
 /** ISO 3166-1 alpha-2 country codes that are valid but not implemented yet. */
-export const PLANNED = [];
+export const PLANNED = []; // all Phase D markets (IT/ES/PT) landed; CH parked
 
 // every code across ALL registered profiles — the invoice line-spec parser
 // uses this union to RECOGNISE a VAT-code token (validation still happens
@@ -50,7 +60,7 @@ export function allTaxCodes() {
 }
 
 const PROFILES = {
-  NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr), US: deepFreeze(us), BE: deepFreeze(be), DE: deepFreeze(de), DK: deepFreeze(dk), FI: deepFreeze(fi), NO: deepFreeze(no), SE: deepFreeze(se),
+  NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr), US: deepFreeze(us), BE: deepFreeze(be), DE: deepFreeze(de), DK: deepFreeze(dk), FI: deepFreeze(fi), NO: deepFreeze(no), SE: deepFreeze(se), AT: deepFreeze(at), IE: deepFreeze(ie), ES: deepFreeze(es), IT: deepFreeze(it), PT: deepFreeze(pt),
 };
 
 export function jurisdictionError(code, message) {

@@ -88,10 +88,11 @@ function bookSale() {
 }
 const entryDesc = (id) => db.prepare('SELECT description FROM journal_entries WHERE id = ?').get(id).description;
 
-test('all 8 full locale tables carry the identical key set (parity guard)', () => {
-  // nl-be/fr-lu are regional override subsets by design — only the 8 full
-  // tables (en pivot + nl/de/fr/da/fi/nb/sv) must be key-identical.
-  const FULL = ['en', 'nl', 'de', 'fr', 'da', 'fi', 'nb', 'sv'];
+test('all 11 full locale tables carry the identical key set (parity guard)', () => {
+  // nl-be/fr-lu are regional override subsets by design — only the 11
+  // full tables (en pivot + nl/de/fr/da/fi/nb/sv/it/es/pt) must be
+  // key-identical.
+  const FULL = ['en', 'nl', 'de', 'fr', 'da', 'fi', 'nb', 'sv', 'it', 'es', 'pt'];
   const base = new Set(Object.keys(TABLES.en));
   for (const loc of FULL) {
     assert.deepEqual(Object.keys(TABLES[loc]).sort(), Object.keys(TABLES.en).sort(),

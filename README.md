@@ -2,7 +2,7 @@
 
 <a href="https://agentic.bukio.nl"><img src="https://agentic.bukio.nl/assets/logo-light.svg?v=2" alt="Bukio" width="340"></a>
 
-**Agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.**
+**Agent-first double-entry bookkeeping for SMEs across sixteen jurisdictions.**
 
 VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
@@ -10,13 +10,13 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-891%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-915%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
 </div>
 
-bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a VPS, stores everything in one local SQLite file, and is designed so AI agents — not just humans — can operate it safely and auditably. It is built for the EU B2B e-invoicing wave: every invoice ends as a compliant PDF, a Peppol BIS 3.0 UBL document, and a sendable Peppol message — in any of the eleven supported jurisdictions (NL, LU, GB, FR, US, BE, DE, DK, FI, NO, SE).
+bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a VPS, stores everything in one local SQLite file, and is designed so AI agents — not just humans — can operate it safely and auditably. It is built for the EU B2B e-invoicing wave: every invoice ends as a compliant PDF, a Peppol BIS 3.0 UBL document, and a sendable Peppol message — in any of the sixteen supported jurisdictions (NL, LU, GB, FR, US, BE, DE, DK, FI, NO, SE, AT, IE, IT, ES, PT).
 
 **Proven in production:** bukio-cli currently runs a live Dutch company's books, operated end-to-end by [Hermes Agent](https://hermes-agent.nousresearch.com) (Nous Research) running **DeepSeek V4 Flash** via OpenCode Go on a Linux VPS — the same stack every day: bank imports, invoice booking, month-end close checks and statutory reports, every action attributable in the audit log. The full stack disclosure is in [AI Development Cost & Token Usage](#ai-development-cost--token-usage).
 
@@ -34,7 +34,7 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 - **SEPA payment batches** — a payables register (purchase invoices, `transfer` vs `direct_debit`/incasso), batch creation from unpaid invoices or CSV, and **pain.001 export** (`001.03`/`001.09`) for upload in any SEPA bank portal. **Direct debit** adds a direct-debit mandate register (`payments mandate add`, core/b2b) and **pain.008.001.02 export** (one `PmtInf` per scheme, FRST/RCUR auto-assigned). One export per batch (unique `MsgId` — re-uploading would double-pay); the ledger is untouched until the bank statement import books the payments.
 - **One company per database** — a second company is a second SQLite file (`--db` or `BUKIO_DB`).
 - **Local-first** — no cloud, no lock-in. Your 7-year administration stays yours.
-- **Eleven jurisdictions** — `bukio init --country <cc>` seeds the country's chart convention (RGS, PCN 2020, PCG, SKR 03, BAS 2023, NS 4102, …), VAT codes/rates, identifiers and compliance calendar (NL, LU, GB, FR, US, BE, DE, DK, FI, NO, SE — see [Supported jurisdictions](#supported-jurisdictions)). Format dispatch is strict: unbuilt markets fail loudly (`FORMAT_NOT_SUPPORTED`), never silently fall back.
+- **Sixteen jurisdictions** — `bukio init --country <cc>` seeds the country's chart convention (RGS, PCN 2020, PCG, SKR 03, BAS 2023, NS 4102, EKR, PGC, SNC, …), VAT codes/rates, identifiers and compliance calendar (NL, LU, GB, FR, US, BE, DE, DK, FI, NO, SE, AT, IE, IT, ES, PT — see [Supported jurisdictions](#supported-jurisdictions)). Format dispatch is strict: unbuilt markets fail loudly (`FORMAT_NOT_SUPPORTED`), never silently fall back.
 - **Localization (i18n)** — optional and opt-in: `--locale <code>` / `BUKIO_LOCALE` switches human-facing output to Dutch, Belgian Dutch, German, French, Luxembourg French, Danish, Finnish, Norwegian or Swedish; **English is the default** whenever localization is off (see [Localization](#localization-i18n)). JSON, error codes and statutory documents never localize.
 
 ## Quick start
@@ -757,9 +757,10 @@ resolves as `--rate` → stored rate (exact, else latest on/before) → **ECB
 reference rate** (fetched live, stored as source `ECB` for reuse). `--rate`
 always wins; `BUKIO_FX_NO_FETCH=1` keeps bukio fully offline. The description
 should note the currency and the original invoice number. Outgoing invoices
-stay EUR-only in the shipped markets — the NL/LU invoice-compliance and UBL
-paths are EUR-based, and the non-EUR markets (GB/US/…) cannot finalize
-invoices yet.
+stay EUR-only in the shipped markets — the invoice-compliance and UBL paths
+are EUR-based, and the non-EUR markets (GB/US/…) cannot finalize invoices
+yet (no art. 226 EU baseline for them; the twelve EU markets all finalize
+via the harmonized baseline + their localised PDFs).
 
 ### `bukio backup` / `bukio restore` / `bukio attach`
 
@@ -1351,9 +1352,9 @@ context. If your agent is unable to help, shoot me a message at
 
 ## Supported jurisdictions
 
-Eleven jurisdiction profiles (NL plus the ten-market expansion; see AGENTS.md §3.1 for the full table). `bukio init --country <cc>` seeds the country's chart convention (RGS, PCN 2020, PCG, SKR 03, BAS 2023, NS 4102, …), VAT codes/rates, identifiers and compliance calendar. Format dispatch is strict: markets whose engines are B-milestones fail loudly (`FORMAT_NOT_SUPPORTED`) — no market ever silently gets another market's output.
+Thirteen jurisdiction profiles (NL plus the twelve-market expansion; see AGENTS.md §3.1 for the full table). `bukio init --country <cc>` seeds the country's chart convention (RGS, PCN 2020, PCG, SKR 03, BAS 2023, NS 4102, …), VAT codes/rates, identifiers and compliance calendar. Format dispatch is strict: markets whose engines are B-milestones fail loudly (`FORMAT_NOT_SUPPORTED`) — no market ever silently gets another market's output.
 
-**Planned:** **Phase C** — AT Austria (EKR chart, USt 20/10/13, UID, UVA) + IE Ireland (UK-style chart, VAT 23/13.5/9/0, CRO, VAT3 bi-monthly). **Phase D** — IT Italy (Piano dei conti, IVA 22/10/4, Partita IVA, SdI/FatturaPA e-invoicing), ES Spain (PGC, IVA 21/10/4, NIF, Verifactu), PT Portugal (SNC, IVA 23/13/6, NIPC, ATCUD). **Parked** — CH Switzerland (CHF base currency, QR-bill, not a Peppol country).
+**Parked** — CH Switzerland (CHF base currency, QR-bill, not a Peppol country).
 
 | Country | Currency | VAT (2026) | Chart convention | Peppol scheme | Locale |
 |---|---|---|---|---|---|
@@ -1368,6 +1369,11 @@ Eleven jurisdiction profiles (NL plus the ten-market expansion; see AGENTS.md §
 | FI Finland | EUR | 25.5 / 13.5 / 10 / 0 | Liikekirjuri model chart | 0037 (LY-tunnus) | fi |
 | NO Norway | NOK | 25 / 15 / 12 / 0 | NS 4102 standard kontoplan | 0192 (org.nr) | nb |
 | SE Sweden | SEK | 25 / 12 / 6 / 0 | BAS 2023 | 0007 (org.nr) | sv |
+| AT Austria | EUR | 20 / 13 / 10 | Einheitskontenrahmen (EKR) | 9914 (UID) | de |
+| IE Ireland | EUR | 23 / 13.5 / 9 / 4.8 / 0 | UK-style (no statutory chart) | 9935 (VAT number) | en |
+| IT Italy | EUR | 22 / 10 / 5 / 4 | Commercialisti convention (no statutory chart) | 0211 (Partita IVA) | it |
+| ES Spain | EUR | 21 / 10 / 4 | PGC (R.D. 1514/2007) | 9920 (NIF) | es |
+| PT Portugal | EUR | 23 / 13 / 6 | SNC (DL 158/2009) | 9946 (NIPC) | pt |
 
 ---
 
@@ -1389,10 +1395,10 @@ Eleven jurisdiction profiles (NL plus the ten-market expansion; see AGENTS.md §
 | 11 | Items catalog + discounts + invoice languages: `item` CRUD, `invoice create --items/--discount-*/--language`, fractional quantities, per-line + total discounts with per-rate VAT allocation, VAT breakdown per rate on PDF/UBL, company logo on the PDF | Invoice from a reusable catalog with discounts, in Dutch or English, with the company logo — **✅ done (v0.13.0, 433 tests green)** | planned |
 | 12 | Inbound e-invoicing + delivery + cash management: attachments in-DB (`attach`), encrypted/rotated backups, aging/statement/sales reports, `import invoice` (EN 16931/Peppol UBL → payables), `invoice email` (SMTP), SEPA direct debit (`mandate` + pain.008) | The 2027 e-invoice mandate both ways: receive UBL invoices, email the PDF, collect by incasso — **✅ done (v0.14.1, 603 tests green)** | planned |
 | 13 | Actor security layers: **Tier 0** signed actor commands (per-company key registry, enforcement, `audit verify`) + **Tier 0.5 per-actor authorizations** — capability families + roles (`actor authz`, `actor roles`, `actor can`, `actor who-can`), deny-by-default segregation-of-duties gate in the sign gate (CLI + MCP), owner-mediated key revoke | Every command signed and attributable; agents act only within their role — the actor who books is not the one who files or pays — **✅ done (dev branch, 746 tests green)** | done |
-| 14 | Multi-jurisdiction profiles: eleven (NL + the ten-market expansion LU/GB/FR/US/BE/DE/DK/FI/NO/SE) — country chart conventions, VAT codes + rates, identifiers + Peppol schemes, compliance calendars; strict format dispatch (unbuilt formats fail loudly, no silent fallbacks) | One research-verified profile per market (docs-research/*.md); PLANNED empty — **✅ done (dev branch, 891 tests green)** | done |
-| 15 | Localization (i18n): optional `--locale` / `BUKIO_LOCALE` mechanism with English default + locale tables for all 11 markets (en, nl, nl-be, de, fr, fr-lu, da, fi, nb, sv); curated wiring of PDF labels, emails, CLI renders, VAT descriptions | English default, opt-in per market — **✅ done (dev branch, 891 tests green)** | done |
-| 16 | Phase C: AT Austria (EKR chart, USt 20/10/13, Kleinunternehmer ≤ €35K, UID/FN, UVA, Peppol) + IE Ireland (UK-style chart, VAT 23/13.5/9/0, CRO + IE VAT, VAT3 bi-monthly, Peppol) — profiles, i18n (de→AT ok, en→IE ok), contract tests | Two more markets, same recipe as Phase B — research briefs first (docs-research/at-profile.md, ie-profile.md) | planned |
-| 17 | Phase D: IT Italy (Piano dei conti, IVA 22/10/4, Partita IVA, liquidazione IVA + F24, **SdI/FatturaPA domestic e-invoicing**) + ES Spain (PGC, IVA 21/10/4, NIF, Modelo 303/390, **Verifactu**) + PT Portugal (SNC, IVA 23/13/6, NIPC, **ATCUD**) | Three more markets; domestic e-invoicing formats (FatturaPA XML, Verifactu, ATCUD) land with their profiles or as a follow-up — research briefs first (docs-research/it-profile.md, es-profile.md, pt-profile.md) | planned |
+| 14 | Multi-jurisdiction profiles: sixteen (NL + the fifteen-market expansion LU/GB/FR/US/BE/DE/DK/FI/NO/SE/AT/IE/IT/ES/PT) — country chart conventions, VAT codes + rates, identifiers + Peppol schemes, compliance calendars; strict format dispatch (unbuilt formats fail loudly, no silent fallbacks) | One research-verified profile per market (docs-research/*.md); PLANNED empty (CH parked) — **✅ done (dev branch, 915 tests green)** | done |
+| 15 | Localization (i18n): optional `--locale` / `BUKIO_LOCALE` mechanism with English default + locale tables covering all sixteen markets' languages (en, nl, nl-be, de, fr, fr-lu, da, fi, nb, sv — AT resolves to de, IE to en); curated wiring of PDF labels, emails, CLI renders, VAT descriptions | English default, opt-in per market — **✅ done (dev branch, 915 tests green)** | done |
+| 16 | Phase C: AT Austria (EKR chart, USt 20/10/13, Kleinunternehmer ≤ €55K, UID/FN, UVA, Peppol) + IE Ireland (UK-style chart, VAT 23/13.5/9/4.8/0, CRO + IE VAT, VAT3 bi-monthly, Peppol) — profiles, research briefs, contract tests | Thirteen markets live; research briefs at docs-research/{at,ie}-profile.md — **✅ done (dev branch, 915 tests green)** | done |
+| 17 | Phase D: IT Italy (convention chart, IVA 22/10/5/4, Partita IVA, liquidazione IVA quarterly 16th + Dichiarazione 30 Apr, FatturaPA/SdI domestic e-invoicing as B-milestone) + ES Spain (PGC chart, IVA 21/10/4, NIF, Modelo 303/390, Verifactu B-milestone) + PT Portugal (SNC chart, IVA 23/13/6, NIPC, Declaração Periódica, ATCUD B-milestone) — profiles, research briefs, contract tests | Sixteen markets live; research briefs at docs-research/{it,es,pt}-profile.md — **✅ done (dev branch, 915 tests green)** | done |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 
