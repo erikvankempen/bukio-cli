@@ -2,7 +2,7 @@
 
 <a href="https://agentic.bukio.nl"><img src="https://agentic.bukio.nl/assets/logo-light.svg?v=2" alt="Bukio" width="340"></a>
 
-**Agent-first double-entry bookkeeping for SMEs across sixteen jurisdictions.**
+**Agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.**
 
 VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
@@ -16,7 +16,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
 </div>
 
-bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a VPS, stores everything in one local SQLite file, and is designed so AI agents — not just humans — can operate it safely and auditably. It is built for the EU B2B e-invoicing wave: every invoice ends as a compliant PDF, a Peppol BIS 3.0 UBL document, and a sendable Peppol message — in any of the sixteen supported jurisdictions (NL, LU, GB, FR, US, BE, DE, DK, FI, NO, SE, AT, IE, IT, ES, PT).
+bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a VPS, stores everything in one local SQLite file, and is designed so AI agents — not just humans — can operate it safely and auditably. It is built for the EU B2B e-invoicing wave: every invoice ends as a compliant PDF, a Peppol BIS 3.0 UBL document, and a sendable Peppol message — in any of the thirty-one supported jurisdictions (all 27 EU member states + GB/NO/XK/US) — with national-language PDFs and Peppol BIS 3.0 cross-border UBL in each.
 
 **Proven in production:** bukio-cli currently runs a live Dutch company's books, operated end-to-end by [Hermes Agent](https://hermes-agent.nousresearch.com) (Nous Research) running **DeepSeek V4 Flash** via OpenCode Go on a Linux VPS — the same stack every day: bank imports, invoice booking, month-end close checks and statutory reports, every action attributable in the audit log. The full stack disclosure is in [AI Development Cost & Token Usage](#ai-development-cost--token-usage).
 
