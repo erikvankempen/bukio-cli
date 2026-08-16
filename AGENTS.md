@@ -41,7 +41,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 
 | Command | Purpose |
 |---------|---------|
-| `bukio init --name X [--country NL] [--registration-id ..] [--tax-id ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + the country profile's default chart (NL: 29-account RGS-mapped; see §3.1 for all sixteen profiles). Jurisdiction defaults come from the profile: chart, VAT codes/rates, identifiers, fiscal year end, compliance deadlines. Deprecated aliases: `--kvk` = `--registration-id`, `--btw-id` = `--tax-id`. Fails `ALREADY_INITIALISED` if done. |
+| `bukio init --name X [--country NL] [--registration-id ..] [--tax-id ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + the country profile's default chart (NL: 29-account RGS-mapped; see §3.1 for all twenty-four profiles). Jurisdiction defaults come from the profile: chart, VAT codes/rates, identifiers, fiscal year end, compliance deadlines. Deprecated aliases: `--kvk` = `--registration-id`, `--btw-id` = `--tax-id`. Fails `ALREADY_INITIALISED` if done. |
 | `bukio entry add --date YYYY-MM-DD --desc ".." --postings "CODE:AMT,CODE:AMT" [--post] [--dry-run]` | Create (and optionally post) a balanced journal entry. |
 | `bukio entry post --id N [--dry-run]` | Post a draft entry. |
 | `bukio entry reverse --id N [--reason ".."] [--dry-run]` | Post a contra-entry that cancels entry N. |
@@ -171,7 +171,7 @@ the booked amounts.
 
 `init --country <cc>` seeds the profile's default chart and applies its
 defaults (chart convention, VAT codes/rates, identifiers, fiscal year end,
-deadlines). PLANNED is empty (all sixteen markets live). **Parked** — CH
+deadlines). PLANNED is empty (all twenty-four markets live). **Parked** — CH
 Switzerland (CHF base currency, QR-bill, not a Peppol country). Unimplemented
 codes raise `PROFILE_NOT_FOUND`.
 
@@ -193,6 +193,14 @@ codes raise `PROFILE_NOT_FOUND`.
 | IT Italy | Commercialisti convention (no statutory chart) | EUR | 22 / 10 / 5 / 4 | forfettario (≤ €85K) | Partita IVA (IT + 11) / 0211 | peppol-bis-3.0 (cross-border; FatturaPA B-milestone) | it |
 | ES Spain | PGC (R.D. 1514/2007) | EUR | 21 / 10 / 4 | recargo de equivalencia | NIF / 9920 | peppol-bis-3.0 (cross-border; Verifactu B-milestone) | es |
 | PT Portugal | SNC (DL 158/2009) | EUR | 23 / 13 / 6 | isenção art. 53 CIVA (≤ ~€15K) | NIPC (PT + 9) / 9946 | peppol-bis-3.0 (cross-border; ATCUD B-milestone) | pt |
+| BG Bulgaria | NSS (statutory, simplified) | EUR | 20 / 9 | compound scheme (≤ ~€51K) | EIK / 9926 | peppol-bis-3.0 (cross-border) | en |
+| HR Croatia | Računski plan (convention) | EUR | 25 / 13 / 5 | exemption threshold (≤ ~€40K) | OIB / 9934 | peppol-bis-3.0 (cross-border) | en |
+| SI Slovenia | SRS 30 (standardised) | EUR | 22 / 9.5 / 5 | exemption threshold (≤ €60K) | DŠ / 9949 | peppol-bis-3.0 (cross-border) | en |
+| EE Estonia | RMP convention | EUR | 24 / 9 | exemption threshold (≤ €40K) | registrikood / 9931 | peppol-bis-3.0 (cross-border) | en |
+| LV Latvia | Standard kontu plāns | EUR | 21 / 12 / 5 | exemption threshold (≤ €50K) | reģ. nr. / 9939 | peppol-bis-3.0 (cross-border) | en |
+| LT Lithuania | Įmonių sąskaitų planas (MF) | EUR | 21 / 9 / 5 | exemption threshold (≤ €45K) | įm. kodas / 9937 | peppol-bis-3.0 (cross-border; e-Sąskaita B-milestone) | en |
+| MT Malta | Convention (English) | EUR | 18 / 12 / 7 / 5 | small undertaking (≤ €35K) | MBR / 9943 | peppol-bis-3.0 (cross-border) | en |
+| CY Cyprus | Convention (English) | EUR | 19 / 9 / 5 / 3 | small undertakings (≤ €15.6K) | HE / 9928 | peppol-bis-3.0 (cross-border) | en |
 
 Strict dispatch: a profile registers only formats with existing builders —
 `financial-statements`, `vat readout`, `export xaf`, invoice compliance, etc.
@@ -865,7 +873,7 @@ authz off.
 | `INVALID_ROLE` / `ROLE_NOT_GRANTED` / `LAST_OWNER` | Role registry: unknown role, revoking a role the actor does not hold, or revoking the LAST owner (a company needs at least one owner — to turn authz off and to mediate key revokes) | Use one of `owner\|bookkeeper\|payments\|tax\|assets\|readonly`; grant the role first; grant `owner` to another actor before stepping down |
 | `INVALID_DESCRIPTION` / `INVALID_POSTINGS` / `INVALID_AMOUNT_CENTS` | Description empty, posting spec malformed, or a posting amount is 0 | Fix the argument — every entry needs a description, ≥2 non-zero postings |
 | `INVALID_LEGAL_FORM` / `INVALID_VAT_CHOICE` / `INVALID_FISCAL_YEAR_END` | `init` got a bad legal form, `--vat` other than `on`/`off`, or an impossible `--fiscal-year-end` (e.g. `99-99`, `02-30`) | Use the values the flag help shows (calendar dates only) |
-| `INVALID_COUNTRY` / `COUNTRY_NOT_SUPPORTED` / `PROFILE_NOT_FOUND` / `COUNTRY_IMMUTABLE` | `init --country` / jurisdiction-profile resolution: not an ISO 3166-1 alpha-2 code, a valid country with no profile implemented yet (PLANNED is empty — all sixteen profiles NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE/AT/IE/IT/ES/PT are live), no profile for a valid code, or `company update --country` trying to change the country after init (one company = one country) | Use a 2-letter code; supported: NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE/AT/IE/IT/ES/PT; re-init a new DB for another country |
+| `INVALID_COUNTRY` / `COUNTRY_NOT_SUPPORTED` / `PROFILE_NOT_FOUND` / `COUNTRY_IMMUTABLE` | `init --country` / jurisdiction-profile resolution: not an ISO 3166-1 alpha-2 code, a valid country with no profile implemented yet (PLANNED is empty — all twenty-four profiles NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE/AT/IE/IT/ES/PT/BG/HR/SI/EE/LV/LT/MT/CY are live), no profile for a valid code, or `company update --country` trying to change the country after init (one company = one country) | Use a 2-letter code; supported: NL/LU/GB/FR/US/BE/DE/DK/FI/NO/SE/AT/IE/IT/ES/PT/BG/HR/SI/EE/LV/LT/MT/CY; re-init a new DB for another country |
 | `INVALID_IBAN` / `INVALID_NAME` / `INVALID_TYPE` / `NOTHING_TO_UPDATE` | Bad company/contact field on `init`/`company update`/`contact add` (IBAN mod-97 validated) | Fix the value; pass at least one change to `company update` |
 | `COMPANY_REQUIRED` / `COMPANY_INCOMPLETE` / `NOT_INITIALISED` | Company missing or incomplete (e.g. no valid company IBAN for SEPA) | Run `init`, then `company update` to complete the profile |
 | `FORMAT_NOT_SUPPORTED` | A jurisdiction profile declares a document/format with no registered builder (audit file, e-invoicing, OB return layout, financial-statements layout, FX source, invoice compliance rule) | Profile-format dispatch is strict: an unregistered key fails loudly instead of silently falling back to the NL format — register the builder or fix the profile |

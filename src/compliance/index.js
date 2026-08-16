@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across twenty-four jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -289,6 +289,72 @@ const DEADLINE_RULES = {
   },
   'pt-irc': (company, year) => `${Number(year) + 1}-05-31`,
   'pt-ies': (company, year) => `${Number(year) + 1}-07-15`,
+  // Phase E (research briefs docs-research/{bg,hr,si,ee,lv,lt,mt,cy}-profile.md):
+  // BG — monthly ДДС return by the 14th of the following month; annual
+  // accounts + CIT return (form 1010) both due 30 June of the following year
+  'bg-vat-monthly': (period) => dayOfNextMonth(period, 14),
+  'bg-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 6),
+  'bg-cit': (company, year) => monthsAfterFyEnd(company, year, 6), // form 1010
+  // HR — monthly PDV return by the 20th of the following month (quarterly
+  // option for small taxpayers); annual accounts (RGFI) + CIT return both
+  // due 30 April of the following year
+  'hr-vat-monthly': (period) => dayOfNextMonth(period, 20),
+  'hr-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 4),
+  'hr-cit': (company, year) => monthsAfterFyEnd(company, year, 4),
+  // SI — monthly DDV-O by the 20th of the following month (quarterly for
+  // small filers with an annual DDV-O 31 March); annual report to AJPES
+  // within 8 months of FYE (31 August); DDPO (CIT) by 31 March
+  'si-vat-monthly': (period) => dayOfNextMonth(period, 20),
+  'si-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 8),
+  'si-ddpo': (company, year) => `${Number(year) + 1}-03-31`,
+  // EE — monthly KMD by the 20th of the following month; annual report to
+  // the e-Äriregister within 6 months of FYE (30 June); CIT on
+  // distributions only (10th of the month after the distribution) — no
+  // annual CIT return
+  'ee-vat-monthly': (period) => dayOfNextMonth(period, 20),
+  'ee-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 6),
+  // LV — monthly PVN by the 20th of the following month (no quarterly
+  // option); annual report approved within 6 months of FYE and filed
+  // within 1 month of approval (≈ 31 July); CIT on distributions only —
+  // no annual CIT return
+  'lv-vat-monthly': (period) => dayOfNextMonth(period, 20),
+  'lv-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 7),
+  // LT — monthly PVM by the 25th of the following month (i.SAF); annual
+  // accounts approved within 4 months of FYE and filed shortly after
+  // (~30 April); CIT annual return due 1 October of the following year
+  'lt-vat-monthly': (period) => dayOfNextMonth(period, 25),
+  'lt-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 4),
+  'lt-cit': (company, year) => `${Number(year) + 1}-10-01`,
+  // MT (research §5, MTCA/myTax): quarterly VAT return due the 15th of the
+  // SECOND month after the quarter (22nd when filed online — Q1 -> 15/22
+  // May); annual accounts with MBR within 10 months of FYE; CIT form C on
+  // self-assessment 9 months after FYE
+  'mt-vat-quarterly': (period) => {
+    assertQuarter(period);
+    const q = Number(String(period).split('-')[1].replace('Q', ''));
+    const m = q * 3 + 2;
+    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
+    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-15`;
+  },
+  'mt-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 10),
+  'mt-cit': (company, year) => monthsAfterFyEnd(company, year, 9),
+  // CY (research §5, Tax For All portal): quarterly VAT 4 return due the
+  // 10th of the SECOND month after the quarter (Q1 -> 10 May; monthly
+  // above €1M turnover); annual accounts 42 days after the AGM (~10-13
+  // months after FYE in practice); CIT TD4 permanent rule from TY2026:
+  // 31 January of the second year following the tax year (transitional
+  // decree dates for TY2023-25 — e.g. TY2024 -> 30 Nov 2026 — are NOT
+  // modelled: historical-year views render the permanent y+2-01-31 rule,
+  // a documented simplification)
+  'cy-vat-quarterly': (period) => {
+    assertQuarter(period);
+    const q = Number(String(period).split('-')[1].replace('Q', ''));
+    const m = q * 3 + 2;
+    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
+    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-10`;
+  },
+  'cy-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 10),
+  'cy-td4': (company, year) => `${Number(year) + 2}-01-31`,
 };
 
 export function isFiled(db, type, period) {

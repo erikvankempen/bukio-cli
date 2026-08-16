@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-16 05:54:44 UTC — **✅ 915 passing · 0 failing (915 tests)**
+**Latest run:** 2026-08-16 09:11:02 UTC — **✅ 932 passing · 0 failing (932 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -713,7 +713,7 @@
 
 ### jurisdictions.test.js — 
 
-127 passing · 0 failing
+144 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
@@ -748,7 +748,7 @@
     - ✅ M9: bank import resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ review-fix: account add --taxonomy-code works; --rgs-code alias maps and warns
     - ✅ B1: getProfile returns the LU profile (French, PCN 2020 data)
-    - ✅ B1: LU is implemented — PLANNED is empty (all sixteen markets landed)
+    - ✅ B1: LU is implemented — PLANNED is empty (all twenty-four markets landed)
     - ✅ B1: the LU profile is deep-frozen
     - ✅ B1: init --country LU creates a French LU company with the PCN chart
     - ✅ B1: LU strict dispatch — unregistered formats fail loudly (no NL fallback)
@@ -773,59 +773,59 @@
     - ✅ B3: FAIA omits the TaxTable for a TVA-less company (review fix)
     - ✅ B3: NL XAF export is unchanged (byte-identical, xaf-auditfile-4.0)
     - ✅ GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)
-    - ✅ GB: PLANNED is empty (all sixteen markets landed)
+    - ✅ GB: PLANNED is empty (all twenty-four markets landed)
     - ✅ GB: init --country GB creates a GBP company with the UK chart
     - ✅ GB: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ GB: compliance calendar — annual accounts in 9 months, CT600 in 12
     - ✅ FR: getProfile returns the FR profile (EUR, fr, PCG data)
-    - ✅ FR: PLANNED is empty (all sixteen markets landed)
+    - ✅ FR: PLANNED is empty (all twenty-four markets landed)
     - ✅ FR: init --country FR creates a French company with the PCG chart
     - ✅ FR: dotted VAT codes (5.5/2.1) parse in the invoice line spec (review fix)
     - ✅ FR: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ US: getProfile returns the US profile (USD, en-US, no federal VAT)
-    - ✅ US: PLANNED is empty (all sixteen markets landed)
+    - ✅ US: PLANNED is empty (all twenty-four markets landed)
     - ✅ US: init --country US creates a USD company with the US chart
     - ✅ US: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ US: compliance calendar — 1120 on 15 Apr + 941 quarterly (month-end)
     - ✅ BE: getProfile returns the BE profile (EUR, nl-BE, PCN-BE data)
-    - ✅ BE: PLANNED is empty (all sixteen markets landed)
+    - ✅ BE: PLANNED is empty (all twenty-four markets landed)
     - ✅ BE: init --country BE creates a Belgian company with the PCMN chart
     - ✅ BE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ BE: compliance calendar — VAT on the 20th + annual accounts in 7 months
     - ✅ DE: bank add defaults to the profile bank account (1200), not NL 1100 (review fix)
     - ✅ NL: bank add still defaults to 1100 (byte-identity)
     - ✅ DE: getProfile returns the DE profile (EUR, de-DE, SKR 03 data)
-    - ✅ DE: PLANNED is empty (all sixteen markets landed)
+    - ✅ DE: PLANNED is empty (all twenty-four markets landed)
     - ✅ DE: init --country DE creates a German company with the SKR 03 chart
     - ✅ DE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ DE: compliance calendar — UStVA 10th + annual VAT 31 Jul + accounts 12 mo
     - ✅ DK: getProfile returns the DK profile (DKK, da-DK, 25% VAT only)
-    - ✅ DK: PLANNED is empty (all sixteen markets landed)
+    - ✅ DK: PLANNED is empty (all twenty-four markets landed)
     - ✅ DK: init --country DK creates a Danish company with the kontoplan
     - ✅ DK: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ DK: compliance calendar — quarterly VAT 1st of 3rd month + accounts 5 months
     - ✅ FI: getProfile returns the FI profile (EUR, fi-FI, 25.5% VAT)
-    - ✅ FI: PLANNED is empty (all sixteen markets landed)
+    - ✅ FI: PLANNED is empty (all twenty-four markets landed)
     - ✅ FI: init --country FI creates a Finnish company with the model chart
     - ✅ FI: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ FI: compliance calendar — quarterly VAT 12th of 2nd month + accounts in 8 months
     - ✅ NO: getProfile returns the NO profile (NOK, nb-NO, NS 4102)
-    - ✅ NO: PLANNED is empty (all sixteen markets landed)
+    - ✅ NO: PLANNED is empty (all twenty-four markets landed)
     - ✅ NO: init --country NO creates a Norwegian company with the NS 4102 chart
     - ✅ NO: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ NO: compliance calendar — bi-monthly VAT (6/yr) + accounts by 31 July
     - ✅ SE: getProfile returns the SE profile (SEK, sv-SE, BAS 2023)
-    - ✅ SE: PLANNED is empty (all sixteen markets landed)
+    - ✅ SE: PLANNED is empty (all twenty-four markets landed)
     - ✅ SE: init --country SE creates a Swedish company with the BAS chart
     - ✅ SE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ SE: compliance calendar — quarterly VAT 12th of 2nd month (Aug 17th) + accounts 7 months
     - ✅ AT: getProfile returns the AT profile (EUR, de-AT, EKR data)
-    - ✅ AT: PLANNED is empty (all sixteen markets landed)
+    - ✅ AT: PLANNED is empty (all twenty-four markets landed)
     - ✅ AT: init --country AT creates an Austrian company with the EKR chart
     - ✅ AT: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ AT: compliance calendar — UVA 15th of second following month + annual VAT 30 Jun
     - ✅ IE: getProfile returns the IE profile (EUR, en, UK-style chart)
-    - ✅ IE: PLANNED is empty (all sixteen markets landed)
+    - ✅ IE: PLANNED is empty (all twenty-four markets landed)
     - ✅ IE: init --country IE creates an Irish company with the UK-style chart
     - ✅ IE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ IE: compliance calendar — VAT3 bi-monthly 23rd + annual accounts/CT1 9 months
@@ -842,6 +842,23 @@
     - ✅ PT: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ PT: compliance calendar — Declaração Periódica 20th of 2nd month + IRC + IES
     - ✅ EU baseline: a DE company finalizes invoices end-to-end (art. 226 rule + de document language)
+    - ✅ BG: getProfile returns the BG profile (EUR, bg, NSS chart)
+    - ✅ BG: init --country BG creates a Bulgarian company with the NSS chart
+    - ✅ BG: strict dispatch — unregistered formats fail loudly (no fallback)
+    - ✅ HR: getProfile returns the HR profile (EUR, hr, Računski plan)
+    - ✅ HR: init --country HR creates a Croatian company with the Računski plan chart
+    - ✅ SI: getProfile returns the SI profile (EUR, si, SRS 30 kontni načrt)
+    - ✅ SI: init --country SI creates a Slovenian company (language defaults to en)
+    - ✅ EE: getProfile returns the EE profile (EUR, ee, RMP convention chart)
+    - ✅ EE: init --country EE creates an Estonian company (language defaults to en)
+    - ✅ LV: getProfile returns the LV profile (EUR, lv, standard kontu plāns)
+    - ✅ LV: init --country LV creates a Latvian company (language defaults to en)
+    - ✅ LT: getProfile returns the LT profile (EUR, lt, Įmonių sąskaitų planas)
+    - ✅ LT: init --country LT creates a Lithuanian company (language defaults to en)
+    - ✅ MT: getProfile returns the MT profile (EUR, mt, convention chart)
+    - ✅ MT: init --country MT creates a Maltese company (language defaults to en)
+    - ✅ CY: getProfile returns the CY profile (EUR, cy, convention chart)
+    - ✅ CY: init --country CY creates a Cypriot company (language defaults to en)
 
 ### migration-021.test.js — 
 

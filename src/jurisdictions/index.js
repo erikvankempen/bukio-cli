@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across twenty-four jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,33 +21,44 @@
 // model chart), NO (./no.js) the ninth (NS 4102, NOK), SE (./se.js) the
 // tenth (BAS 2023, SEK), AT (./at.js) the eleventh (EKR, EUR), IE
 // (./ie.js) the twelfth (UK-style chart, EUR), IT (./it.js) the thirteenth
-// (commercialisti convention, EUR), ES (./es.js) the fourteenth (PGC, EUR)
-// and PT (./pt.js) the fifteenth (SNC, EUR); each registers only formats
-// with existing builders — anything else fails loudly via the strict
-// dispatch. PLANNED is empty (all sixteen markets live); CH is parked
-// (CHF base currency, QR-bill, not a Peppol country).
+// (commercialisti convention, EUR), ES (./es.js) the fourteenth (PGC, EUR),
+// PT (./pt.js) the fifteenth (SNC, EUR), BG/HR/SI/EE/LV/LT/MT/CY the
+// seventeenth to twenty-fourth (Phase E — eight EUR markets,
+// English-document defaults); each registers only formats with existing
+// builders — anything
+// else fails loudly via the strict dispatch. PLANNED is empty (all twenty-
+// four markets live); CH is parked (CHF base currency, QR-bill, not a
+// Peppol country).
 //
 // Consumers must resolve profiles ONLY through this registry — never read
 // company.country directly (see the profile-sprawl rule in the Phase A plan).
 import at from './at.js';
 import be from './be.js';
+import bg from './bg.js';
+import cy from './cy.js';
+import ee from './ee.js';
 import es from './es.js';
 import de from './de.js';
 import dk from './dk.js';
 import fi from './fi.js';
 import fr from './fr.js';
 import gb from './gb.js';
+import hr from './hr.js';
 import ie from './ie.js';
 import it from './it.js';
+import lt from './lt.js';
 import lu from './lu.js';
+import lv from './lv.js';
+import mt from './mt.js';
 import nl from './nl.js';
 import no from './no.js';
 import pt from './pt.js';
 import se from './se.js';
+import si from './si.js';
 import us from './us.js';
 
 /** ISO 3166-1 alpha-2 country codes that are valid but not implemented yet. */
-export const PLANNED = []; // all Phase D markets (IT/ES/PT) landed; CH parked
+export const PLANNED = []; // all Phase D + Phase E markets landed; CH parked
 
 // every code across ALL registered profiles — the invoice line-spec parser
 // uses this union to RECOGNISE a VAT-code token (validation still happens
@@ -60,7 +71,7 @@ export function allTaxCodes() {
 }
 
 const PROFILES = {
-  NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr), US: deepFreeze(us), BE: deepFreeze(be), DE: deepFreeze(de), DK: deepFreeze(dk), FI: deepFreeze(fi), NO: deepFreeze(no), SE: deepFreeze(se), AT: deepFreeze(at), IE: deepFreeze(ie), ES: deepFreeze(es), IT: deepFreeze(it), PT: deepFreeze(pt),
+  NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr), US: deepFreeze(us), BE: deepFreeze(be), DE: deepFreeze(de), DK: deepFreeze(dk), FI: deepFreeze(fi), NO: deepFreeze(no), SE: deepFreeze(se), AT: deepFreeze(at), IE: deepFreeze(ie), ES: deepFreeze(es), IT: deepFreeze(it), PT: deepFreeze(pt), BG: deepFreeze(bg), HR: deepFreeze(hr), SI: deepFreeze(si), EE: deepFreeze(ee), LV: deepFreeze(lv), LT: deepFreeze(lt), MT: deepFreeze(mt), CY: deepFreeze(cy),
 };
 
 export function jurisdictionError(code, message) {

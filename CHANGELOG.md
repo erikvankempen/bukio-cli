@@ -6,6 +6,26 @@ match `package.json` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
+## [Unreleased]
+
+### Added
+
+- **Phase E: BG Bulgaria + HR Croatia + SI Slovenia + EE Estonia + LV Latvia
+  + LT Lithuania + MT Malta + CY Cyprus** — eight more EUR-market profiles
+  (twenty-four live): research briefs at
+  `docs-research/{bg,hr,si,ee,lv,lt,mt,cy}-profile.md` (EAS codes verified
+  against the official OpenPEPPOL codelist release 8 Dec 2025 — BG 9926,
+  HR 9934, SI 9949, EE 9931, LV 9939, LT 9937, MT 9943, CY 9928);
+  monthly VAT returns (BG 14th, HR/SI/EE/LV 20th, LT 25th; MT/CY
+  quarterly 15th/10th of the second month), annual-accounts + CIT
+  deadlines per market (BG 30 Jun, HR 30 Apr, SI 31 Aug/31 Mar, EE 30 Jun
+  (CIT on distributions), LV 31 Jul (CIT on distributions), LT 30 Apr/1
+  Oct, MT 10/9 months, CY 10 months/31 Jan+2y). New markets keep
+  English-document defaults (no i18n tables yet — same treatment as
+  GB/IE/US) and inherit the art. 226 EU baseline + cross-border Peppol
+  BIS; domestic e-invoicing mandates (e-Sąskaita LT, PVN LV 2025
+  framework) and return layouts stay documented B-milestones.
+
 ## [0.16.1] — 2026-08-16
 
 ### Added
