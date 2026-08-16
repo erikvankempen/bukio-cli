@@ -10,7 +10,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-915%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-944%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -1374,6 +1374,20 @@ Thirteen jurisdiction profiles (NL plus the twelve-market expansion; see AGENTS.
 | IT Italy | EUR | 22 / 10 / 5 / 4 | Commercialisti convention (no statutory chart) | 0211 (Partita IVA) | it |
 | ES Spain | EUR | 21 / 10 / 4 | PGC (R.D. 1514/2007) | 9920 (NIF) | es |
 | PT Portugal | EUR | 23 / 13 / 6 | SNC (DL 158/2009) | 9946 (NIPC) | pt |
+| BG Bulgaria | EUR | 20 / 9 | NSS (statutory, simplified) | 9926 (VAT) bg |
+| HR Croatia | EUR | 25 / 13 / 5 | Računski plan (convention) | 9934 (VAT) hr |
+| SI Slovenia | EUR | 22 / 9.5 / 5 | SRS 30 (standardised) | 9949 (VAT) sl |
+| EE Estonia | EUR | 24 / 9 | RMP convention | 9931 (VAT) et |
+| LV Latvia | EUR | 21 / 12 / 5 | Standard kontu plāns | 9939 (VAT) lv |
+| LT Lithuania | EUR | 21 / 9 / 5 | Įmonių sąskaitų planas (MF) | 9937 (VAT) lt |
+| MT Malta | EUR | 18 / 12 / 7 / 5 | Convention (English) | 9943 (VAT) mt |
+| CY Cyprus | EUR | 19 / 9 / 5 / 3 | Convention (English) | 9928 (VAT) cy |
+| CZ Czechia | CZK | 21 / 12 | Směrná účtová osnova (statutory) | 9929 (VAT) cs |
+| SK Slovakia | EUR | 23 / 19 / 5 | Směrná účtová osnova (statutory) | 9950 (VAT) sk |
+| GR Greece | EUR | 24 / 13 / 6 | ΕΓΛΣ (statutory) | 9933 (VAT) el |
+| PL Poland | PLN | 23 / 8 / 5 | Rozporządzenie MF (statutory) | 9945 (VAT) pl |
+| HU Hungary | HUF | 27 / 18 / 5 | Szt. (statutory) | 9910 (VAT) hu |
+| RO Romania | RON | 18 / 9 | Planul de conturi (statutory) | 9947 (VAT) ro |
 
 ---
 
@@ -1395,10 +1409,12 @@ Thirteen jurisdiction profiles (NL plus the twelve-market expansion; see AGENTS.
 | 11 | Items catalog + discounts + invoice languages: `item` CRUD, `invoice create --items/--discount-*/--language`, fractional quantities, per-line + total discounts with per-rate VAT allocation, VAT breakdown per rate on PDF/UBL, company logo on the PDF | Invoice from a reusable catalog with discounts, in Dutch or English, with the company logo — **✅ done (v0.13.0, 433 tests green)** | planned |
 | 12 | Inbound e-invoicing + delivery + cash management: attachments in-DB (`attach`), encrypted/rotated backups, aging/statement/sales reports, `import invoice` (EN 16931/Peppol UBL → payables), `invoice email` (SMTP), SEPA direct debit (`mandate` + pain.008) | The 2027 e-invoice mandate both ways: receive UBL invoices, email the PDF, collect by incasso — **✅ done (v0.14.1, 603 tests green)** | planned |
 | 13 | Actor security layers: **Tier 0** signed actor commands (per-company key registry, enforcement, `audit verify`) + **Tier 0.5 per-actor authorizations** — capability families + roles (`actor authz`, `actor roles`, `actor can`, `actor who-can`), deny-by-default segregation-of-duties gate in the sign gate (CLI + MCP), owner-mediated key revoke | Every command signed and attributable; agents act only within their role — the actor who books is not the one who files or pays — **✅ done (dev branch, 746 tests green)** | done |
-| 14 | Multi-jurisdiction profiles: sixteen (NL + the fifteen-market expansion LU/GB/FR/US/BE/DE/DK/FI/NO/SE/AT/IE/IT/ES/PT) — country chart conventions, VAT codes + rates, identifiers + Peppol schemes, compliance calendars; strict format dispatch (unbuilt formats fail loudly, no silent fallbacks) | One research-verified profile per market (docs-research/*.md); PLANNED empty (CH parked) — **✅ done (dev branch, 915 tests green)** | done |
-| 15 | Localization (i18n): optional `--locale` / `BUKIO_LOCALE` mechanism with English default + locale tables covering all sixteen markets' languages (en, nl, nl-be, de, fr, fr-lu, da, fi, nb, sv — AT resolves to de, IE to en); curated wiring of PDF labels, emails, CLI renders, VAT descriptions | English default, opt-in per market — **✅ done (dev branch, 915 tests green)** | done |
-| 16 | Phase C: AT Austria (EKR chart, USt 20/10/13, Kleinunternehmer ≤ €55K, UID/FN, UVA, Peppol) + IE Ireland (UK-style chart, VAT 23/13.5/9/4.8/0, CRO + IE VAT, VAT3 bi-monthly, Peppol) — profiles, research briefs, contract tests | Thirteen markets live; research briefs at docs-research/{at,ie}-profile.md — **✅ done (dev branch, 915 tests green)** | done |
-| 17 | Phase D: IT Italy (convention chart, IVA 22/10/5/4, Partita IVA, liquidazione IVA quarterly 16th + Dichiarazione 30 Apr, FatturaPA/SdI domestic e-invoicing as B-milestone) + ES Spain (PGC chart, IVA 21/10/4, NIF, Modelo 303/390, Verifactu B-milestone) + PT Portugal (SNC chart, IVA 23/13/6, NIPC, Declaração Periódica, ATCUD B-milestone) — profiles, research briefs, contract tests | Sixteen markets live; research briefs at docs-research/{it,es,pt}-profile.md — **✅ done (dev branch, 915 tests green)** | done |
+| 14 | Multi-jurisdiction profiles: sixteen (NL + the fifteen-market expansion LU/GB/FR/US/BE/DE/DK/FI/NO/SE/AT/IE/IT/ES/PT) — country chart conventions, VAT codes + rates, identifiers + Peppol schemes, compliance calendars; strict format dispatch (unbuilt formats fail loudly, no silent fallbacks) | One research-verified profile per market (docs-research/*.md); PLANNED empty (CH parked) — **✅ done (dev branch, 932 tests green)** | done |
+| 15 | Localization (i18n): optional `--locale` / `BUKIO_LOCALE` mechanism with English default + locale tables covering all twenty-four markets' languages (en, nl, nl-be, de, fr, fr-lu, da, fi, nb, sv — AT resolves to de, IE to en); curated wiring of PDF labels, emails, CLI renders, VAT descriptions | English default, opt-in per market — **✅ done (dev branch, 932 tests green)** | done |
+| 16 | Phase C: AT Austria (EKR chart, USt 20/10/13, Kleinunternehmer ≤ €55K, UID/FN, UVA, Peppol) + IE Ireland (UK-style chart, VAT 23/13.5/9/4.8/0, CRO + IE VAT, VAT3 bi-monthly, Peppol) — profiles, research briefs, contract tests | Thirteen markets live; research briefs at docs-research/{at,ie}-profile.md — **✅ done (dev branch, 932 tests green)** | done |
+| 17 | Phase D: IT Italy (convention chart, IVA 22/10/5/4, Partita IVA, liquidazione IVA quarterly 16th + Dichiarazione 30 Apr, FatturaPA/SdI domestic e-invoicing as B-milestone) + ES Spain (PGC chart, IVA 21/10/4, NIF, Modelo 303/390, Verifactu B-milestone) + PT Portugal (SNC chart, IVA 23/13/6, NIPC, Declaração Periódica, ATCUD B-milestone) — profiles, research briefs, contract tests | Sixteen markets live; research briefs at docs-research/{it,es,pt}-profile.md — **✅ done (dev branch, 932 tests green)** | done |
+| 18 | Phase E: BG Bulgaria + HR Croatia + SI Slovenia + EE Estonia + LV Latvia + LT Lithuania + MT Malta + CY Cyprus — eight more EUR-market profiles (EAS codes verified against the official OpenPEPPOL codelist; monthly/quarterly VAT deadlines; annual accounts + CIT per market) | Thirty markets live; research briefs at docs-research/{bg,hr,si,ee,lv,lt,mt,cy}-profile.md — **✅ done (dev branch, 932 tests green)** | done |
+| 19 | Phase F: CZ Czechia + SK Slovakia + GR Greece + PL Poland + HU Hungary + RO Romania — the final six EU members (CZK/PLN/HUF/RON base currencies; GR uses the EL prefix; RO non-Peppol/e-Factura) | Thirty markets live — 27/27 EU + GB/NO/US; research briefs at docs-research/{cz,sk,gr,pl,hu,ro}-profile.md — **✅ done (dev branch, 944 tests green)** | done |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 

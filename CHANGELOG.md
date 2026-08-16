@@ -6,6 +6,60 @@ match `package.json` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
+## [0.16.2] — 2026-08-16
+
+### Added
+
+- **Phase E: BG Bulgaria + HR Croatia + SI Slovenia + EE Estonia + LV Latvia
+  + LT Lithuania + MT Malta + CY Cyprus** — eight more EUR-market profiles
+  (twenty-four live): research briefs at
+  `docs-research/{bg,hr,si,ee,lv,lt,mt,cy}-profile.md` (EAS codes verified
+  against the official OpenPEPPOL codelist release 8 Dec 2025 — BG 9926,
+  HR 9934, SI 9949, EE 9931, LV 9939, LT 9937, MT 9943, CY 9928);
+  monthly VAT returns (BG 14th, HR/SI/EE/LV 20th, LT 25th; MT/CY
+  quarterly 15th/10th of the second month), annual-accounts + CIT
+  deadlines per market (BG 30 Jun, HR 30 Apr, SI 31 Aug/31 Mar, EE 30 Jun
+  (CIT on distributions), LV 31 Jul (CIT on distributions), LT 30 Apr/1
+  Oct, MT 10/9 months, CY 10 months/31 Jan+2y). New markets keep
+  English-document defaults (no i18n tables yet — same treatment as
+  GB/IE/US) and inherit the art. 226 EU baseline + cross-border Peppol
+  BIS; domestic e-invoicing mandates (e-Sąskaita LT, PVN LV 2025
+  framework) and return layouts stay documented B-milestones.
+
+- **Phase F: CZ Czechia + SK Slovakia + GR Greece + PL Poland + HU Hungary
+  + RO Romania** — the final six EU members (thirty live markets; 27/27 EU
+  + GB/NO/US): research briefs at
+  `docs-research/{cz,sk,gr,pl,hu,ro}-profile.md` (EAS codes verified
+  against the official OpenPEPPOL codelist release 8 Dec 2025 — CZ 9929,
+  SK 9950, GR 9933, PL 9945, HU 9910, RO 9947); monthly VAT returns
+  (CZ/SK/PL/RO 25th, GR 26th, HU 20th), annual-accounts + CIT deadlines
+  per market (CZ 6mo/31 Mar, SK 6mo/31 Mar, GR 10mo/30 Jun, PL 6mo/31
+  Mar, HU 31 May/31 May, RO ~150d/25 Jun); CZK/PLN/HUF/RON base
+  currencies via per-profile baseCurrency; GR uses the EL VIES prefix;
+  RO is the only non-Peppol market (e-Factura national, cross-border UBL
+  only); domestic mandates (KSeF PL — live 2026, RTIR HU, myDATA GR,
+  e-Factura RO, SK 2027) stay documented B-milestones. English-document
+  defaults; art. 226 EU baseline + cross-border Peppol BIS inherited.
+
+- **i18n refactor: per-language table modules** — `src/i18n/index.js`'s
+  single `TABLES` literal split into `src/i18n/locales/<lang>.js` (one
+  module per language: en/nl/nl-be/de/fr/fr-lu/da/fi/nb/sv/it/es/pt);
+  `index.js` keeps the machinery (`t`/`label`/`unitLabel`/`resolveLocale`,
+  LABELS/UNITS backwards-compat exports) and re-assembles `TABLES` from
+  imports. Public API unchanged; keys/values byte-identical; the parity
+  guard still pins 89 keys across all 11 full tables. Behavior-neutral —
+  944/944 green.
+
+- **i18n: 14 national-language PDF tables** — full 89-key tables for
+  pl/cs/hu/ro/sk/sl/hr/bg/el/et/lv/lt/mt/cy under `src/i18n/locales/`
+  (25 full tables + 2 regional overrides; parity guard extended). The
+  Phase E/F profiles now render documents in their national language by
+  default (PL `pl`, CZ `cs`, SK `sk`, GR `el`, HU `hu`, RO `ro`, BG `bg`,
+  HR `hr`, SI `sl`, EE `et`, LV `lv`, LT `lt`, MT `mt`, CY `cy`) — the
+  invoice PDF/email pipeline is fully localized for all 30 markets;
+  `--language` accepts any of the 27 table codes. `meta.locale` aligned
+  to ISO language codes (si->sl, ee->et, cz->cs, gr->el).
+
 ## [0.16.1] — 2026-08-16
 
 ### Added
