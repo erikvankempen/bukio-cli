@@ -6,7 +6,7 @@ match `package.json` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
-## [Unreleased]
+## [0.16.2] — 2026-08-16
 
 ### Added
 
