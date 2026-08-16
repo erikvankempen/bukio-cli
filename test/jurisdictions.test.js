@@ -74,7 +74,7 @@ test('getProfile throws COUNTRY_NOT_SUPPORTED for valid-but-planned countries', 
 
 test('getProfile throws PROFILE_NOT_FOUND for unknown valid codes', () => {
   assert.throws(() => getProfile('ZZ'), (e) => e.code === 'PROFILE_NOT_FOUND');
-  assert.throws(() => getProfile('PL'), (e) => e.code === 'PROFILE_NOT_FOUND');
+  assert.throws(() => getProfile('IS'), (e) => e.code === 'PROFILE_NOT_FOUND');
 });
 
 test('profiles are deep-frozen (static data — no consumer may mutate)', () => {
@@ -184,7 +184,7 @@ test('resolveProfile defaults to NL when no company row exists yet', () => {
 });
 
 test('resolveProfile throws for unsupported / unknown company countries (decision §9.1.6)', () => {
-  const dbLT = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'PL'] });
+  const dbLT = scratchDbAt(21, { sql: "INSERT INTO company (name, country) VALUES (?, ?)", params: ['Test BV', 'IS'] });
   try {
     assert.throws(() => resolveProfile(dbLT), (e) => e.code === 'PROFILE_NOT_FOUND');
   } finally {
@@ -219,9 +219,9 @@ function tmpDb() {
   return path.join(dir, 'test.db');
 }
 
-test('M3 init: --country PL (valid code, no profile) is rejected with PROFILE_NOT_FOUND', () => {
+test('M3 init: --country IS (valid code, no profile) is rejected with PROFILE_NOT_FOUND', () => {
   const dbPath = tmpDb();
-  const r = cli(dbPath, ['init', '--name', 'Test BV', '--country', 'PL'], { expectFail: true });
+  const r = cli(dbPath, ['init', '--name', 'Test BV', '--country', 'IS'], { expectFail: true });
   assert.equal(r.code, 1);
   assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
 });
@@ -470,7 +470,7 @@ test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('B1: LU is implemented — PLANNED is empty (all twenty-four markets landed)', () => {
+test('B1: LU is implemented — PLANNED is empty (all thirty markets landed)', () => {
   assert.ok(!PLANNED.includes('LU'));
   assert.deepEqual([...PLANNED].sort(), []);
   assert.equal(getProfile('LU').meta.country, 'LU');
@@ -842,13 +842,14 @@ test('B2: cross-border buyer EndpointID uses the BUYER country scheme (review fi
     const xml2 = invoiceToUbl(db, getInvoice(db, inv2.id));
     assert.match(xml2, /<cbc:EndpointID schemeID="0195">B123456<\/cbc:EndpointID>/);
     // unregistered-market buyer (PL is not among the 11 profiles): the
-    // buyerSchemeId catch falls back to the seller's scheme (0195)
-    const pl = createContact(db, {
-      name: 'Sp. z o.o. Test', address: 'Ulica 1', postalCode: '00-001', city: 'Warszawa',
-      country: 'PL', vatId: 'PL1234567890', kvk: '0000123456', actor: 'agent:test',
+    // buyerSchemeId catch falls back to the seller's scheme (0195) for
+    // unregistered markets (IS Iceland: valid code, no profile)
+    const is = createContact(db, {
+      name: 'Island ehf.', address: 'Gata 1', postalCode: '101', city: 'Reykjavik',
+      country: 'IS', vatId: 'IS123456', kvk: '0000123456', actor: 'agent:test',
     });
     const inv3 = createInvoice(db, {
-      contactId: pl.id, date: '2026-07-10', lines: ['1x Prestation @ 100.00 @17'], actor: 'agent:test',
+      contactId: is.id, date: '2026-07-10', lines: ['1x Prestation @ 100.00 @17'], actor: 'agent:test',
     });
     finalizeInvoice(db, { id: inv3.id, actor: 'agent:test' });
     const xml3 = invoiceToUbl(db, getInvoice(db, inv3.id));
@@ -1062,7 +1063,7 @@ test('GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)', () =>
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['gb-9-months', 'gb-ct600']);
 });
 
-test('GB: PLANNED is empty (all twenty-four markets landed)', () => {
+test('GB: PLANNED is empty (all thirty markets landed)', () => {
   assert.ok(!PLANNED.includes('GB'));
   assert.deepEqual([...PLANNED].sort(), []);
   for (const cc of PLANNED) {
@@ -1174,7 +1175,7 @@ test('FR: getProfile returns the FR profile (EUR, fr, PCG data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('FR: PLANNED is empty (all twenty-four markets landed)', () => {
+test('FR: PLANNED is empty (all thirty markets landed)', () => {
   assert.ok(!PLANNED.includes('FR'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -1281,7 +1282,7 @@ test('US: getProfile returns the US profile (USD, en-US, no federal VAT)', () =>
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['us-1120', 'us-941']);
 });
 
-test('US: PLANNED is empty (all twenty-four markets landed)', () => {
+test('US: PLANNED is empty (all thirty markets landed)', () => {
   assert.deepEqual([...PLANNED].sort(), []);
   assert.equal(getProfile('US').meta.country, 'US');
 });
@@ -1392,7 +1393,7 @@ test('BE: getProfile returns the BE profile (EUR, nl-BE, PCN-BE data)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['be-vat-monthly', 'be-7-months']);
 });
 
-test('BE: PLANNED is empty (all twenty-four markets landed)', () => {
+test('BE: PLANNED is empty (all thirty markets landed)', () => {
   assert.ok(!PLANNED.includes('BE'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -1522,7 +1523,7 @@ test('DE: getProfile returns the DE profile (EUR, de-DE, SKR 03 data)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['de-ustva-quarterly', 'de-annual-vat', 'de-12-months']);
 });
 
-test('DE: PLANNED is empty (all twenty-four markets landed)', () => {
+test('DE: PLANNED is empty (all thirty markets landed)', () => {
   assert.ok(!PLANNED.includes('DE'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -1638,7 +1639,7 @@ test('DK: getProfile returns the DK profile (DKK, da-DK, 25% VAT only)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['dk-quarterly', 'dk-5-months']);
 });
 
-test('DK: PLANNED is empty (all twenty-four markets landed)', () => {
+test('DK: PLANNED is empty (all thirty markets landed)', () => {
   assert.ok(!PLANNED.includes('DK'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -1750,7 +1751,7 @@ test('FI: getProfile returns the FI profile (EUR, fi-FI, 25.5% VAT)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['fi-quarterly', 'fi-8-months']);
 });
 
-test('FI: PLANNED is empty (all twenty-four markets landed)', () => {
+test('FI: PLANNED is empty (all thirty markets landed)', () => {
   assert.ok(!PLANNED.includes('FI'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -1863,7 +1864,7 @@ test('NO: getProfile returns the NO profile (NOK, nb-NO, NS 4102)', () => {
   assert.equal(p.compliance.filingTypes[0].periodShape, 'YYYY-Pn'); // bi-monthly shape
 });
 
-test('NO: PLANNED is empty (all twenty-four markets landed)', () => {
+test('NO: PLANNED is empty (all thirty markets landed)', () => {
   assert.ok(!PLANNED.includes('NO'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -1978,7 +1979,7 @@ test('SE: getProfile returns the SE profile (SEK, sv-SE, BAS 2023)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['se-quarterly', 'se-7-months']);
 });
 
-test('SE: PLANNED is empty (all twenty-four markets landed)', () => {
+test('SE: PLANNED is empty (all thirty markets landed)', () => {
   assert.ok(!PLANNED.includes('SE'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -2095,7 +2096,7 @@ test('AT: getProfile returns the AT profile (EUR, de-AT, EKR data)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['at-uva-quarterly', 'at-annual-vat']);
 });
 
-test('AT: PLANNED is empty (all twenty-four markets landed)', () => {
+test('AT: PLANNED is empty (all thirty markets landed)', () => {
   assert.ok(!PLANNED.includes('AT'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -2218,7 +2219,7 @@ test('IE: getProfile returns the IE profile (EUR, en, UK-style chart)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['ie-bimonthly', 'ie-9-months', 'ie-9-months']);
 });
 
-test('IE: PLANNED is empty (all twenty-four markets landed)', () => {
+test('IE: PLANNED is empty (all thirty markets landed)', () => {
   assert.ok(!PLANNED.includes('IE'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -2976,6 +2977,226 @@ test('CY: init --country CY creates a Cypriot company (language defaults to en)'
     assert.ok(accounts.some((a) => a.code === '2420' && a.name === 'VAT output (on sales)'));
     const c = createContact(db, { name: 'Client Ltd' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Service @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
+    assert.equal(inv.language, 'en');
+  } finally {
+    db.close();
+  }
+});
+
+test('CZ: getProfile returns the CZ profile (CZK, cz, směrná účtová osnova)', () => {
+  const p = getProfile('CZ');
+  assert.equal(p.meta.country, 'CZ');
+  assert.equal(p.meta.baseCurrency, 'CZK'); // koruna — per-profile baseCurrency
+  assert.ok(p.meta.legalForms.includes('sro'));
+  assert.equal(p.identifiers.peppolSchemeId, '9929'); // CZ VAT EAS
+  assert.ok(p.identifiers.vatIdFormat.test('CZ12345678'));
+  assert.equal(p.tax.standardRateBp, 2100);
+  assert.deepEqual(p.tax.codes.map((c) => c.code), ['21', '12', '0', 'V', 'R', 'RE']);
+  assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['3431', '3432']);
+  assert.equal(p.tax.accounts.fileDefault, '3433');
+  assert.equal(p.reporting.debtorsAccount, '3110');
+  assert.equal(p.closing.resultAccount, '4310');
+  assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
+  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['cz-vat-monthly', 'cz-annual-accounts', 'cz-cit']);
+});
+
+test('CZ: init --country CZ creates a Czech company (language defaults to en)', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Test s.r.o.', '--country', 'CZ', '--legal-form', 'sro', '--vat', 'on']);
+  assert.equal(r.out.data.company.country, 'CZ');
+  assert.equal(r.out.data.company.base_currency, 'CZK');
+  const db = openDb(dbPath);
+  try {
+    const accounts = db.prepare('SELECT code, name FROM accounts WHERE active = 1').all();
+    assert.ok(accounts.some((a) => a.code === '2210' && a.name === 'Bankovní účty'));
+    assert.ok(accounts.some((a) => a.code === '3431' && a.name === 'DPH na vstupu'));
+    assert.ok(accounts.some((a) => a.code === '3432' && a.name === 'DPH na výstupu'));
+    const c = createContact(db, { name: 'Odběratel s.r.o.' });
+    const inv = createInvoice(db, { contactId: c.id, lines: ['Služba @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
+    assert.equal(inv.language, 'en');
+  } finally {
+    db.close();
+  }
+});
+
+test('SK: getProfile returns the SK profile (EUR, sk, směrná účtová osnova)', () => {
+  const p = getProfile('SK');
+  assert.equal(p.meta.country, 'SK');
+  assert.equal(p.meta.baseCurrency, 'EUR');
+  assert.ok(p.meta.legalForms.includes('sro'));
+  assert.equal(p.identifiers.peppolSchemeId, '9950'); // SK VAT EAS
+  assert.ok(p.identifiers.vatIdFormat.test('SK1234567890'));
+  assert.equal(p.tax.standardRateBp, 2300);
+  assert.deepEqual(p.tax.codes.map((c) => c.code), ['23', '19', '5', '0', 'V', 'R', 'RE']);
+  assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['3431', '3432']);
+  assert.equal(p.reporting.debtorsAccount, '3110');
+  assert.equal(p.closing.resultAccount, '4310');
+  assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
+  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['sk-vat-monthly', 'sk-annual-accounts', 'sk-cit']);
+});
+
+test('SK: init --country SK creates a Slovak company (language defaults to en)', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Test s.r.o.', '--country', 'SK', '--legal-form', 'sro', '--vat', 'on']);
+  assert.equal(r.out.data.company.country, 'SK');
+  const db = openDb(dbPath);
+  try {
+    const accounts = db.prepare('SELECT code, name FROM accounts WHERE active = 1').all();
+    assert.ok(accounts.some((a) => a.code === '2210' && a.name === 'Bankové účty'));
+    assert.ok(accounts.some((a) => a.code === '3431' && a.name === 'DPH na vstupe'));
+    const c = createContact(db, { name: 'Odberateľ s.r.o.' });
+    const inv = createInvoice(db, { contactId: c.id, lines: ['Služba @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
+    assert.equal(inv.language, 'en');
+  } finally {
+    db.close();
+  }
+});
+
+test('GR: getProfile returns the GR profile (EUR, gr, ΕΓΛΣ chart; EL prefix)', () => {
+  const p = getProfile('GR');
+  assert.equal(p.meta.country, 'GR');
+  assert.equal(p.meta.baseCurrency, 'EUR');
+  assert.ok(p.meta.legalForms.includes('ike'));
+  assert.equal(p.identifiers.peppolSchemeId, '9933'); // GR VAT EAS
+  assert.ok(p.identifiers.vatIdFormat.test('EL123456789')); // EL, not GR
+  assert.ok(!p.identifiers.vatIdFormat.test('GR123456789'));
+  assert.equal(p.tax.standardRateBp, 2400);
+  assert.deepEqual(p.tax.codes.map((c) => c.code), ['24', '13', '6', '0', 'V', 'R', 'RE']);
+  assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['5400', '5450']);
+  assert.equal(p.reporting.debtorsAccount, '3000');
+  assert.equal(p.closing.resultAccount, '4300');
+  assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
+  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['gr-vat-monthly', 'gr-annual-accounts', 'gr-cit']);
+});
+
+test('GR: init --country GR creates a Greek company (language defaults to en)', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Test IKE', '--country', 'GR', '--legal-form', 'ike', '--vat', 'on']);
+  assert.equal(r.out.data.company.country, 'GR');
+  const db = openDb(dbPath);
+  try {
+    const accounts = db.prepare('SELECT code, name FROM accounts WHERE active = 1').all();
+    assert.ok(accounts.some((a) => a.code === '3802' && a.name === 'Τράπεζες'));
+    assert.ok(accounts.some((a) => a.code === '5400' && a.name === 'ΦΠΑ εισροών'));
+    assert.ok(accounts.some((a) => a.code === '5450' && a.name === 'ΦΠΑ εκροών'));
+    const c = createContact(db, { name: 'Πελάτης IKE' });
+    const inv = createInvoice(db, { contactId: c.id, lines: ['Υπηρεσία @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
+    assert.equal(inv.language, 'en');
+  } finally {
+    db.close();
+  }
+});
+
+test('PL: getProfile returns the PL profile (PLN, pl, Rozporządzenie MF chart)', () => {
+  const p = getProfile('PL');
+  assert.equal(p.meta.country, 'PL');
+  assert.equal(p.meta.baseCurrency, 'PLN'); // złoty — per-profile baseCurrency
+  assert.ok(p.meta.legalForms.includes('sp-zoo'));
+  assert.equal(p.identifiers.peppolSchemeId, '9945'); // PL VAT EAS
+  assert.ok(p.identifiers.vatIdFormat.test('PL1234567890'));
+  assert.equal(p.tax.standardRateBp, 2300);
+  assert.deepEqual(p.tax.codes.map((c) => c.code), ['23', '8', '5', '0', 'V', 'R', 'RE']);
+  assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['2210', '2220']);
+  assert.equal(p.tax.accounts.fileDefault, '2230');
+  assert.equal(p.reporting.debtorsAccount, '2010');
+  assert.equal(p.closing.resultAccount, '4030');
+  assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
+  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['pl-vat-monthly', 'pl-annual-accounts', 'pl-cit']);
+});
+
+test('PL: init --country PL creates a Polish company (language defaults to en)', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Test sp. z o.o.', '--country', 'PL', '--legal-form', 'sp-zoo', '--vat', 'on']);
+  assert.equal(r.out.data.company.country, 'PL');
+  assert.equal(r.out.data.company.base_currency, 'PLN');
+  const db = openDb(dbPath);
+  try {
+    const accounts = db.prepare('SELECT code, name FROM accounts WHERE active = 1').all();
+    assert.ok(accounts.some((a) => a.code === '1310' && a.name === 'Rachunek bankowy'));
+    assert.ok(accounts.some((a) => a.code === '2210' && a.name === 'VAT naliczony'));
+    assert.ok(accounts.some((a) => a.code === '2220' && a.name === 'VAT należny'));
+    const c = createContact(db, { name: 'Odbiorca sp. z o.o.' });
+    const inv = createInvoice(db, { contactId: c.id, lines: ['Usługa @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
+    assert.equal(inv.language, 'en');
+  } finally {
+    db.close();
+  }
+});
+
+test('HU: getProfile returns the HU profile (HUF, hu, Szt. chart)', () => {
+  const p = getProfile('HU');
+  assert.equal(p.meta.country, 'HU');
+  assert.equal(p.meta.baseCurrency, 'HUF'); // forint — per-profile baseCurrency
+  assert.ok(p.meta.legalForms.includes('kft'));
+  assert.equal(p.identifiers.peppolSchemeId, '9910'); // HU VAT EAS
+  assert.ok(p.identifiers.vatIdFormat.test('HU12345678'));
+  assert.equal(p.tax.standardRateBp, 2700); // the EU's highest
+  assert.deepEqual(p.tax.codes.map((c) => c.code), ['27', '18', '5', '0', 'V', 'R', 'RE']);
+  assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['4660', '4670']);
+  assert.equal(p.tax.accounts.fileDefault, '4680');
+  assert.equal(p.reporting.debtorsAccount, '3110');
+  assert.equal(p.closing.resultAccount, '4190');
+  assert.equal(p.closing.equityAccount, '4130');
+  assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
+  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['hu-vat-monthly', 'hu-annual-accounts', 'hu-cit']);
+});
+
+test('HU: init --country HU creates a Hungarian company (language defaults to en)', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Test Kft.', '--country', 'HU', '--legal-form', 'kft', '--vat', 'on']);
+  assert.equal(r.out.data.company.country, 'HU');
+  assert.equal(r.out.data.company.base_currency, 'HUF');
+  const db = openDb(dbPath);
+  try {
+    const accounts = db.prepare('SELECT code, name FROM accounts WHERE active = 1').all();
+    assert.ok(accounts.some((a) => a.code === '3810' && a.name === 'Bank'));
+    assert.ok(accounts.some((a) => a.code === '4660' && a.name === 'Előzetesen felszámított áfa'));
+    assert.ok(accounts.some((a) => a.code === '4670' && a.name === 'Fizetendő áfa'));
+    const c = createContact(db, { name: 'Vevő Kft.' });
+    const inv = createInvoice(db, { contactId: c.id, lines: ['Szolgáltatás @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
+    assert.equal(inv.language, 'en');
+  } finally {
+    db.close();
+  }
+});
+
+test('RO: getProfile returns the RO profile (RON, ro, Planul de conturi)', () => {
+  const p = getProfile('RO');
+  assert.equal(p.meta.country, 'RO');
+  assert.equal(p.meta.baseCurrency, 'RON'); // leu — per-profile baseCurrency
+  assert.ok(p.meta.legalForms.includes('srl'));
+  assert.equal(p.identifiers.peppolSchemeId, '9947'); // RO VAT EAS (cross-border ref; RO is not a Peppol participant)
+  assert.ok(p.identifiers.vatIdFormat.test('RO12345678'));
+  assert.equal(p.tax.standardRateBp, 1800); // cut from 19% on 1 Jan 2026
+  assert.deepEqual(p.tax.codes.map((c) => c.code), ['18', '9', '0', 'V', 'R', 'RE']);
+  assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['4424', '4423']);
+  assert.equal(p.tax.accounts.fileDefault, '4426');
+  assert.equal(p.reporting.debtorsAccount, '4111');
+  assert.equal(p.closing.resultAccount, '1211');
+  assert.equal(p.closing.equityAccount, '1171');
+  assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
+  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['ro-vat-monthly', 'ro-annual-accounts', 'ro-cit']);
+});
+
+test('RO: init --country RO creates a Romanian company (language defaults to en)', () => {
+  const dbPath = tmpDb();
+  const r = cli(dbPath, ['init', '--name', 'Test SRL', '--country', 'RO', '--legal-form', 'srl', '--vat', 'on']);
+  assert.equal(r.out.data.company.country, 'RO');
+  assert.equal(r.out.data.company.base_currency, 'RON');
+  const db = openDb(dbPath);
+  try {
+    const accounts = db.prepare('SELECT code, name FROM accounts WHERE active = 1').all();
+    assert.ok(accounts.some((a) => a.code === '5121' && a.name === 'Conturi la bănci'));
+    assert.ok(accounts.some((a) => a.code === '4424' && a.name === 'TVA de recuperat'));
+    assert.ok(accounts.some((a) => a.code === '4423' && a.name === 'TVA de plată'));
+    const c = createContact(db, { name: 'Client SRL' });
+    const inv = createInvoice(db, { contactId: c.id, lines: ['Serviciu @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
     assert.equal(inv.language, 'en');
   } finally {
     db.close();

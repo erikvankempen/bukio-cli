@@ -355,6 +355,42 @@ const DEADLINE_RULES = {
   },
   'cy-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 10),
   'cy-td4': (company, year) => `${Number(year) + 2}-01-31`,
+  // Phase F (research briefs docs-research/{cz,sk,gr,pl,hu,ro}-profile.md):
+  // CZ — DPH monthly/quarterly by the 25th of the following month; annual
+  // accounts approved within 6 months of FYE (+30 days filing); CIT within
+  // 3 months of FYE (31 March; 1 July for audited companies)
+  'cz-vat-monthly': (period) => dayOfNextMonth(period, 25),
+  'cz-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 6),
+  'cz-cit': (company, year) => monthsAfterFyEnd(company, year, 3),
+  // SK — DPH monthly/quarterly by the 25th; annual accounts within 6
+  // months of FYE; CIT 31 March (6-month extension with fee)
+  'sk-vat-monthly': (period) => dayOfNextMonth(period, 25),
+  'sk-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 6),
+  'sk-cit': (company, year) => `${Number(year) + 1}-03-31`,
+  // GR — ΦΠΑ monthly by the 26th of the following month (quarterly filers:
+  // 30th of the month after the quarter); annual accounts published/filed
+  // (GEMI) within 10 months of FYE; CIT return (ΝΠΟ) 30 June
+  'gr-vat-monthly': (period) => dayOfNextMonth(period, 26),
+  'gr-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 10),
+  'gr-cit': (company, year) => `${Number(year) + 1}-06-30`,
+  // PL — JPK_V7M monthly by the 25th (quarterly JPK_V7K for small);
+  // annual accounts approved within 6 months + filed with KRS within 15
+  // days of approval; CIT-8 by 31 March
+  'pl-vat-monthly': (period) => dayOfNextMonth(period, 25),
+  'pl-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 6),
+  'pl-cit': (company, year) => `${Number(year) + 1}-03-31`,
+  // HU — ÁFA monthly by the 20th (quarterly/annual options by turnover);
+  // annual report (beszámoló) within 5 months of FYE (31 May); TAO (CIT)
+  // by 31 May
+  'hu-vat-monthly': (period) => dayOfNextMonth(period, 20),
+  'hu-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 5),
+  'hu-cit': (company, year) => `${Number(year) + 1}-05-31`,
+  // RO — D300 monthly by the 25th (quarterly for small); annual accounts
+  // filed within 150 days of FYE (~30 May); D101 annual CIT return +
+  // payment 25 June of the following year
+  'ro-vat-monthly': (period) => dayOfNextMonth(period, 25),
+  'ro-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 5),
+  'ro-cit': (company, year) => `${Number(year) + 1}-06-25`,
 };
 
 export function isFiled(db, type, period) {

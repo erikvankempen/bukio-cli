@@ -26,6 +26,21 @@ merged to `main` and released.
   BIS; domestic e-invoicing mandates (e-Sąskaita LT, PVN LV 2025
   framework) and return layouts stay documented B-milestones.
 
+- **Phase F: CZ Czechia + SK Slovakia + GR Greece + PL Poland + HU Hungary
+  + RO Romania** — the final six EU members (thirty live markets; 27/27 EU
+  + GB/NO/US): research briefs at
+  `docs-research/{cz,sk,gr,pl,hu,ro}-profile.md` (EAS codes verified
+  against the official OpenPEPPOL codelist release 8 Dec 2025 — CZ 9929,
+  SK 9950, GR 9933, PL 9945, HU 9910, RO 9947); monthly VAT returns
+  (CZ/SK/PL/RO 25th, GR 26th, HU 20th), annual-accounts + CIT deadlines
+  per market (CZ 6mo/31 Mar, SK 6mo/31 Mar, GR 10mo/30 Jun, PL 6mo/31
+  Mar, HU 31 May/31 May, RO ~150d/25 Jun); CZK/PLN/HUF/RON base
+  currencies via per-profile baseCurrency; GR uses the EL VIES prefix;
+  RO is the only non-Peppol market (e-Factura national, cross-border UBL
+  only); domestic mandates (KSeF PL — live 2026, RTIR HU, myDATA GR,
+  e-Factura RO, SK 2027) stay documented B-milestones. English-document
+  defaults; art. 226 EU baseline + cross-border Peppol BIS inherited.
+
 ## [0.16.1] — 2026-08-16
 
 ### Added

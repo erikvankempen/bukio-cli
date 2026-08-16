@@ -1382,6 +1382,12 @@ Thirteen jurisdiction profiles (NL plus the twelve-market expansion; see AGENTS.
 | LT Lithuania | EUR | 21 / 9 / 5 | Įmonių sąskaitų planas (MF) | 9937 (VAT) | en |
 | MT Malta | EUR | 18 / 12 / 7 / 5 | Convention (English) | 9943 (VAT) | en |
 | CY Cyprus | EUR | 19 / 9 / 5 / 3 | Convention (English) | 9928 (VAT) | en |
+| CZ Czechia | CZK | 21 / 12 | Směrná účtová osnova (statutory) | 9929 (VAT) | en |
+| SK Slovakia | EUR | 23 / 19 / 5 | Směrná účtová osnova (statutory) | 9950 (VAT) | en |
+| GR Greece | EUR | 24 / 13 / 6 | ΕΓΛΣ (statutory) | 9933 (VAT) | en |
+| PL Poland | PLN | 23 / 8 / 5 | Rozporządzenie MF (statutory) | 9945 (VAT) | en |
+| HU Hungary | HUF | 27 / 18 / 5 | Szt. (statutory) | 9910 (VAT) | en |
+| RO Romania | RON | 18 / 9 | Planul de conturi (statutory) | 9947 (VAT) | en |
 
 ---
 
@@ -1407,7 +1413,8 @@ Thirteen jurisdiction profiles (NL plus the twelve-market expansion; see AGENTS.
 | 15 | Localization (i18n): optional `--locale` / `BUKIO_LOCALE` mechanism with English default + locale tables covering all twenty-four markets' languages (en, nl, nl-be, de, fr, fr-lu, da, fi, nb, sv — AT resolves to de, IE to en); curated wiring of PDF labels, emails, CLI renders, VAT descriptions | English default, opt-in per market — **✅ done (dev branch, 932 tests green)** | done |
 | 16 | Phase C: AT Austria (EKR chart, USt 20/10/13, Kleinunternehmer ≤ €55K, UID/FN, UVA, Peppol) + IE Ireland (UK-style chart, VAT 23/13.5/9/4.8/0, CRO + IE VAT, VAT3 bi-monthly, Peppol) — profiles, research briefs, contract tests | Thirteen markets live; research briefs at docs-research/{at,ie}-profile.md — **✅ done (dev branch, 932 tests green)** | done |
 | 17 | Phase D: IT Italy (convention chart, IVA 22/10/5/4, Partita IVA, liquidazione IVA quarterly 16th + Dichiarazione 30 Apr, FatturaPA/SdI domestic e-invoicing as B-milestone) + ES Spain (PGC chart, IVA 21/10/4, NIF, Modelo 303/390, Verifactu B-milestone) + PT Portugal (SNC chart, IVA 23/13/6, NIPC, Declaração Periódica, ATCUD B-milestone) — profiles, research briefs, contract tests | Sixteen markets live; research briefs at docs-research/{it,es,pt}-profile.md — **✅ done (dev branch, 932 tests green)** | done |
-| 18 | Phase E: BG Bulgaria + HR Croatia + SI Slovenia + EE Estonia + LV Latvia + LT Lithuania + MT Malta + CY Cyprus — eight more EUR-market profiles (EAS codes verified against the official OpenPEPPOL codelist; monthly/quarterly VAT deadlines; annual accounts + CIT per market) | Twenty-four markets live; research briefs at docs-research/{bg,hr,si,ee,lv,lt,mt,cy}-profile.md — **✅ done (dev branch, 932 tests green)** | done |
+| 18 | Phase E: BG Bulgaria + HR Croatia + SI Slovenia + EE Estonia + LV Latvia + LT Lithuania + MT Malta + CY Cyprus — eight more EUR-market profiles (EAS codes verified against the official OpenPEPPOL codelist; monthly/quarterly VAT deadlines; annual accounts + CIT per market) | Thirty markets live; research briefs at docs-research/{bg,hr,si,ee,lv,lt,mt,cy}-profile.md — **✅ done (dev branch, 932 tests green)** | done |
+| 19 | Phase F: CZ Czechia + SK Slovakia + GR Greece + PL Poland + HU Hungary + RO Romania — the final six EU members (CZK/PLN/HUF/RON base currencies; GR uses the EL prefix; RO non-Peppol/e-Factura) | Thirty markets live — 27/27 EU + GB/NO/US; research briefs at docs-research/{cz,sk,gr,pl,hu,ro}-profile.md — **✅ done (dev branch, 944 tests green)** | done |
 
 Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
 
