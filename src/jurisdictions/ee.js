@@ -29,14 +29,14 @@
 //                            for cross-border (EE is a Peppol participant,
 //                            EAS 9931)
 // Registered: SEPA, CAMT.053, ECB, closing 2200 -> 2100.
-// New market: NO i18n table yet — documents render in English (languages
-// ['en'], defaultLanguage 'en'), same treatment as GB/IE/US.
+// Documents render in Estonian (languages ['et'], defaultLanguage
+// 'et') — full i18n table since 16 Aug 2026.
 
 export default {
   meta: {
     country: 'EE',
     baseCurrency: 'EUR',
-    locale: 'ee',
+    locale: 'et',
     legalForms: ['ou', 'as', 'fie', 'tu'],
     defaultFiscalYearEnd: '12-31',
   },
@@ -140,8 +140,8 @@ export default {
     // e-arve ecosystem is convention-led — a domestic mandate engine is a
     // B-milestone
     // auditFile omitted — no Estonian SAF-T
-    languages: ['en'],
-    defaultLanguage: 'en',
+    languages: ['et'],
+    defaultLanguage: 'et',
   },
 
   closing: { resultAccount: '2200', equityAccount: '2100' },

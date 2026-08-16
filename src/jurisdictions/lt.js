@@ -29,8 +29,8 @@
 //                            cross-border (LT is a Peppol participant,
 //                            EAS 9937)
 // Registered: SEPA, CAMT.053, ECB, closing 2200 -> 2100.
-// New market: NO i18n table yet — documents render in English (languages
-// ['en'], defaultLanguage 'en'), same treatment as GB/IE/US.
+// Documents render in Lithuanian (languages ['lt'], defaultLanguage
+// 'lt') — full i18n table since 16 Aug 2026.
 
 export default {
   meta: {
@@ -141,8 +141,8 @@ export default {
     eInvoicing: 'peppol-bis-3.0', // cross-border Peppol (EAS 9937); the
     // e-Sąskaita B2B mandate (2025 framework) is a B-milestone
     // auditFile omitted — no Lithuanian SAF-T
-    languages: ['en'],
-    defaultLanguage: 'en',
+    languages: ['lt'],
+    defaultLanguage: 'lt',
   },
 
   closing: { resultAccount: '2200', equityAccount: '2100' },

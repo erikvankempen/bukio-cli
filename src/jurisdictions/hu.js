@@ -29,8 +29,8 @@
 //                            registered for cross-border (HU is a Peppol
 //                            participant, EAS 9910)
 // Registered: SEPA, CAMT.053, ECB (HUF base currency), closing 4190 -> 4130.
-// New market: NO i18n table yet — documents render in English (languages
-// ['en'], defaultLanguage 'en'), same treatment as GB/IE/US.
+// Documents render in Hungarian (languages ['hu'], defaultLanguage
+// 'hu') — full i18n table since 16 Aug 2026.
 
 export default {
   meta: {
@@ -141,8 +141,8 @@ export default {
     eInvoicing: 'peppol-bis-3.0', // cross-border Peppol (EAS 9910); RTIR
     // real-time reporting (NAV) is a B-milestone
     // auditFile omitted — no Hungarian SAF-T
-    languages: ['en'],
-    defaultLanguage: 'en',
+    languages: ['hu'],
+    defaultLanguage: 'hu',
   },
 
   closing: { resultAccount: '4190', equityAccount: '4130' },

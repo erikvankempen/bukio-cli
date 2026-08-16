@@ -29,8 +29,8 @@
 //                            'peppol-bis-3.0' registered for cross-border
 //                            (SK is a Peppol participant, EAS 9950)
 // Registered: SEPA, CAMT.053, ECB, closing 4310 -> 4210.
-// New market: NO i18n table yet — documents render in English (languages
-// ['en'], defaultLanguage 'en'), same treatment as GB/IE/US.
+// Documents render in Slovak (languages ['sk'], defaultLanguage
+// 'sk') — full i18n table since 16 Aug 2026.
 
 export default {
   meta: {
@@ -139,8 +139,8 @@ export default {
     eInvoicing: 'peppol-bis-3.0', // cross-border Peppol (EAS 9950); the
     // 2027 domestic B2B mandate is a B-milestone
     // auditFile omitted — no Slovak SAF-T
-    languages: ['en'],
-    defaultLanguage: 'en',
+    languages: ['sk'],
+    defaultLanguage: 'sk',
   },
 
   closing: { resultAccount: '4310', equityAccount: '4210' },

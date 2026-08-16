@@ -31,8 +31,8 @@
 //                            for cross-border (PL is a Peppol participant,
 //                            EAS 9945)
 // Registered: SEPA, CAMT.053, ECB (PLN base currency), closing 4030 -> 4020.
-// New market: NO i18n table yet — documents render in English (languages
-// ['en'], defaultLanguage 'en'), same treatment as GB/IE/US.
+// Documents render in Polish (languages ['pl'], defaultLanguage
+// 'pl') — full i18n table since 16 Aug 2026.
 
 export default {
   meta: {
@@ -144,8 +144,8 @@ export default {
     eInvoicing: 'peppol-bis-3.0', // cross-border Peppol (EAS 9945); KSeF
     // is a separate XML schema — B-milestone
     // auditFile omitted — JPK is a different schema (B-milestone)
-    languages: ['en'],
-    defaultLanguage: 'en',
+    languages: ['pl'],
+    defaultLanguage: 'pl',
   },
 
   closing: { resultAccount: '4030', equityAccount: '4020' },

@@ -16,7 +16,10 @@
 //   - Supported tables (one module per language under ./locales/): en
 //     (default; also serves en-GB/en-US), nl (NL), nl-be (BE Dutch),
 //     de (DE), fr (FR; base for fr-lu), fr-lu (LU), da (DK), fi (FI),
-//     nb (NO), sv (SE), it (IT), es (ES), pt (PT).
+//     nb (NO), sv (SE), it (IT), es (ES), pt (PT), bg (BG), hr (HR),
+//     sl (SI), et (EE), lv (LV), lt (LT), mt (MT), cy (CY), cs (CZ),
+//     sk (SK), el (GR), pl (PL), hu (HU), ro (RO) — 25 full tables +
+//     2 regional overrides.
 //   - Statutory artifacts (XAF/FAIA, jaarrekening models, OB readout),
 //     JSON output keys, error codes and MCP descriptions never localize
 //     (per the Aug 14 decision: documents localize, UI/JSON stay English).
@@ -24,21 +27,35 @@
 
 export const UNIT_CODES = ['h', 'day', 'month', 'unit', 'session', 'km', 'kg', 'project'];
 
-import en from './locales/en.js';
-import nl from './locales/nl.js';
-import nlBe from './locales/nl-be.js';
+import bg from './locales/bg.js';
+import cs from './locales/cs.js';
+import cy from './locales/cy.js';
+import da from './locales/da.js';
 import de from './locales/de.js';
+import el from './locales/el.js';
+import en from './locales/en.js';
+import es from './locales/es.js';
+import et from './locales/et.js';
+import fi from './locales/fi.js';
 import fr from './locales/fr.js';
 import frLu from './locales/fr-lu.js';
-import da from './locales/da.js';
-import fi from './locales/fi.js';
-import nb from './locales/nb.js';
-import sv from './locales/sv.js';
+import hr from './locales/hr.js';
+import hu from './locales/hu.js';
 import it from './locales/it.js';
-import es from './locales/es.js';
+import lt from './locales/lt.js';
+import lv from './locales/lv.js';
+import mt from './locales/mt.js';
+import nb from './locales/nb.js';
+import nl from './locales/nl.js';
+import nlBe from './locales/nl-be.js';
+import pl from './locales/pl.js';
 import pt from './locales/pt.js';
+import ro from './locales/ro.js';
+import sk from './locales/sk.js';
+import sl from './locales/sl.js';
+import sv from './locales/sv.js';
 
-export const TABLES = { en, nl, 'nl-be': nlBe, de, fr, 'fr-lu': frLu, da, fi, nb, sv, it, es, pt };
+export const TABLES = { en, nl, 'nl-be': nlBe, de, fr, 'fr-lu': frLu, da, fi, nb, sv, it, es, pt, bg, hr, sl, et, lv, lt, mt, cy, cs, sk, el, pl, hu, ro };
 
 
 /** Resolve the active UI locale: --locale flag > BUKIO_LOCALE env > 'en'.

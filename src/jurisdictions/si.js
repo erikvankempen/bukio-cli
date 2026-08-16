@@ -28,14 +28,14 @@
 //                            registered for cross-border (SI is a Peppol
 //                            participant, EAS 9949)
 // Registered: SEPA, CAMT.053, ECB, closing 2200 -> 2100.
-// New market: NO i18n table yet — documents render in English (languages
-// ['en'], defaultLanguage 'en'), same treatment as GB/IE/US.
+// Documents render in Slovenian (languages ['sl'], defaultLanguage
+// 'sl') — full i18n table since 16 Aug 2026.
 
 export default {
   meta: {
     country: 'SI',
     baseCurrency: 'EUR',
-    locale: 'si',
+    locale: 'sl',
     legalForms: ['doo', 'dd', 'sp', 'kd'],
     defaultFiscalYearEnd: '12-31',
   },
@@ -139,8 +139,8 @@ export default {
     eInvoicing: 'peppol-bis-3.0', // cross-border Peppol (EAS 9949); no
     // domestic XML mandate yet — national e-invoicing is a B-milestone
     // auditFile omitted — no Slovenian SAF-T
-    languages: ['en'],
-    defaultLanguage: 'en',
+    languages: ['sl'],
+    defaultLanguage: 'sl',
   },
 
   closing: { resultAccount: '2200', equityAccount: '2100' },

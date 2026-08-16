@@ -29,14 +29,14 @@
 //                            registered for cross-border (CZ is a Peppol
 //                            participant, EAS 9929)
 // Registered: SEPA, CAMT.053, ECB (CZK base currency), closing 4310 -> 4210.
-// New market: NO i18n table yet — documents render in English (languages
-// ['en'], defaultLanguage 'en'), same treatment as GB/IE/US.
+// Documents render in Czech (languages ['cs'], defaultLanguage
+// 'cs') — full i18n table since 16 Aug 2026.
 
 export default {
   meta: {
     country: 'CZ',
     baseCurrency: 'CZK',
-    locale: 'cz',
+    locale: 'cs',
     legalForms: ['sro', 'as', 'osvc', 'ks'],
     defaultFiscalYearEnd: '12-31',
   },
@@ -139,8 +139,8 @@ export default {
     eInvoicing: 'peppol-bis-3.0', // cross-border Peppol (EAS 9929); no
     // domestic XML mandate yet — national e-invoicing is a B-milestone
     // auditFile omitted — no Czech SAF-T
-    languages: ['en'],
-    defaultLanguage: 'en',
+    languages: ['cs'],
+    defaultLanguage: 'cs',
   },
 
   closing: { resultAccount: '4310', equityAccount: '4210' },

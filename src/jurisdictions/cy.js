@@ -30,8 +30,8 @@
 //                            registered for cross-border (CY is a Peppol
 //                            participant, EAS 9928)
 // Registered: SEPA, CAMT.053, ECB, closing 3300 -> 3200.
-// New market: NO i18n table yet — documents render in English (languages
-// ['en'], defaultLanguage 'en'), natural fit for CY (English-language books).
+// Documents render in Greek (CY) (languages ['cy'], defaultLanguage
+// 'cy') — full i18n table since 16 Aug 2026.
 
 export default {
   meta: {
@@ -153,8 +153,8 @@ export default {
     eInvoicing: 'peppol-bis-3.0', // cross-border Peppol (EAS 9928); no
     // domestic mandate yet — national e-invoicing is a B-milestone
     // auditFile omitted — no Cypriot SAF-T
-    languages: ['en'],
-    defaultLanguage: 'en',
+    languages: ['cy'],
+    defaultLanguage: 'cy',
   },
 
   closing: { resultAccount: '3300', equityAccount: '3200' },

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-16 15:14:07 UTC — **✅ 944 passing · 0 failing (944 tests)**
+**Latest run:** 2026-08-16 15:52:51 UTC — **✅ 944 passing · 0 failing (944 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -562,7 +562,7 @@
     - ✅ t: {param} interpolation
     - ✅ resolveLocale: flag > env > en (UI stays English unless opted in)
     - ✅ legacy shims: label/unitLabel/LABELS/UNITS keep the old API and values
-    - ✅ all 11 full locale tables carry the identical key set (parity guard)
+    - ✅ all 25 full locale tables carry the identical key set (parity guard)
     - ✅ company show + balance-sheet labels localize (round-10 review keys)
     - ✅ reminders table labels localize fully (nl)
     - ✅ vat file description: English by default
@@ -848,29 +848,29 @@
     - ✅ HR: getProfile returns the HR profile (EUR, hr, Računski plan)
     - ✅ HR: init --country HR creates a Croatian company with the Računski plan chart
     - ✅ SI: getProfile returns the SI profile (EUR, si, SRS 30 kontni načrt)
-    - ✅ SI: init --country SI creates a Slovenian company (language defaults to en)
+    - ✅ SI: init --country SI creates a Slovenian company (language defaults to sl)
     - ✅ EE: getProfile returns the EE profile (EUR, ee, RMP convention chart)
-    - ✅ EE: init --country EE creates an Estonian company (language defaults to en)
+    - ✅ EE: init --country EE creates an Estonian company (language defaults to et)
     - ✅ LV: getProfile returns the LV profile (EUR, lv, standard kontu plāns)
-    - ✅ LV: init --country LV creates a Latvian company (language defaults to en)
+    - ✅ LV: init --country LV creates a Latvian company (language defaults to lv)
     - ✅ LT: getProfile returns the LT profile (EUR, lt, Įmonių sąskaitų planas)
-    - ✅ LT: init --country LT creates a Lithuanian company (language defaults to en)
+    - ✅ LT: init --country LT creates a Lithuanian company (language defaults to lt)
     - ✅ MT: getProfile returns the MT profile (EUR, mt, convention chart)
-    - ✅ MT: init --country MT creates a Maltese company (language defaults to en)
+    - ✅ MT: init --country MT creates a Maltese company (language defaults to mt)
     - ✅ CY: getProfile returns the CY profile (EUR, cy, convention chart)
-    - ✅ CY: init --country CY creates a Cypriot company (language defaults to en)
+    - ✅ CY: init --country CY creates a Cypriot company (language defaults to cy)
     - ✅ CZ: getProfile returns the CZ profile (CZK, cz, směrná účtová osnova)
-    - ✅ CZ: init --country CZ creates a Czech company (language defaults to en)
+    - ✅ CZ: init --country CZ creates a Czech company (language defaults to cs)
     - ✅ SK: getProfile returns the SK profile (EUR, sk, směrná účtová osnova)
-    - ✅ SK: init --country SK creates a Slovak company (language defaults to en)
+    - ✅ SK: init --country SK creates a Slovak company (language defaults to sk)
     - ✅ GR: getProfile returns the GR profile (EUR, gr, ΕΓΛΣ chart; EL prefix)
-    - ✅ GR: init --country GR creates a Greek company (language defaults to en)
+    - ✅ GR: init --country GR creates a Greek company (language defaults to el)
     - ✅ PL: getProfile returns the PL profile (PLN, pl, Rozporządzenie MF chart)
-    - ✅ PL: init --country PL creates a Polish company (language defaults to en)
+    - ✅ PL: init --country PL creates a Polish company (language defaults to pl)
     - ✅ HU: getProfile returns the HU profile (HUF, hu, Szt. chart)
-    - ✅ HU: init --country HU creates a Hungarian company (language defaults to en)
+    - ✅ HU: init --country HU creates a Hungarian company (language defaults to hu)
     - ✅ RO: getProfile returns the RO profile (RON, ro, Planul de conturi)
-    - ✅ RO: init --country RO creates a Romanian company (language defaults to en)
+    - ✅ RO: init --country RO creates a Romanian company (language defaults to ro)
 
 ### migration-021.test.js — 
 

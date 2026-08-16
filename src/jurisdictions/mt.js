@@ -30,8 +30,8 @@
 //                            registered for cross-border (MT is a Peppol
 //                            participant, EAS 9943)
 // Registered: SEPA, CAMT.053, ECB, closing 3300 -> 3200.
-// New market: NO i18n table yet — documents render in English (languages
-// ['en'], defaultLanguage 'en'), natural fit for MT (English-language books).
+// Documents render in Maltese (languages ['mt'], defaultLanguage
+// 'mt') — full i18n table since 16 Aug 2026.
 
 export default {
   meta: {
@@ -153,8 +153,8 @@ export default {
     eInvoicing: 'peppol-bis-3.0', // cross-border Peppol (EAS 9943); no
     // domestic B2B mandate yet — national e-invoicing is a B-milestone
     // auditFile omitted — no Maltese SAF-T
-    languages: ['en'],
-    defaultLanguage: 'en',
+    languages: ['mt'],
+    defaultLanguage: 'mt',
   },
 
   closing: { resultAccount: '3300', equityAccount: '3200' },

@@ -33,8 +33,8 @@
 //                            participant), so the Peppol SEND path does not
 //                            apply domestically
 // Registered: SEPA, CAMT.053, ECB (RON base currency), closing 1211 -> 1171.
-// New market: NO i18n table yet — documents render in English (languages
-// ['en'], defaultLanguage 'en'), same treatment as GB/IE/US.
+// Documents render in Romanian (languages ['ro'], defaultLanguage
+// 'ro') — full i18n table since 16 Aug 2026.
 
 export default {
   meta: {
@@ -144,8 +144,8 @@ export default {
     eInvoicing: 'peppol-bis-3.0', // cross-border only (EAS 9947 reference);
     // e-Factura domestic e-invoicing is a B-milestone
     // auditFile omitted — e-SAF is a different schema (B-milestone)
-    languages: ['en'],
-    defaultLanguage: 'en',
+    languages: ['ro'],
+    defaultLanguage: 'ro',
   },
 
   closing: { resultAccount: '1211', equityAccount: '1171' },

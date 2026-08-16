@@ -29,14 +29,14 @@
 //                            cross-border (GR is a Peppol participant,
 //                            EAS 9933)
 // Registered: SEPA, CAMT.053, ECB, closing 4300 -> 4200.
-// New market: NO i18n table yet — documents render in English (languages
-// ['en'], defaultLanguage 'en'), same treatment as GB/IE/US.
+// Documents render in Greek (languages ['el'], defaultLanguage
+// 'el') — full i18n table since 16 Aug 2026.
 
 export default {
   meta: {
     country: 'GR',
     baseCurrency: 'EUR',
-    locale: 'gr',
+    locale: 'el',
     legalForms: ['ike', 'epe', 'ae', 'oe', 'atomi'],
     defaultFiscalYearEnd: '12-31',
   },
@@ -142,8 +142,8 @@ export default {
     eInvoicing: 'peppol-bis-3.0', // cross-border Peppol (EAS 9933); myDATA
     // digital reporting is a B-milestone
     // auditFile omitted — no Greek SAF-T
-    languages: ['en'],
-    defaultLanguage: 'en',
+    languages: ['el'],
+    defaultLanguage: 'el',
   },
 
   closing: { resultAccount: '4300', equityAccount: '4200' },

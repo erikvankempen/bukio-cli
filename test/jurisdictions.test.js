@@ -2685,7 +2685,7 @@ test('BG: getProfile returns the BG profile (EUR, bg, NSS chart)', () => {
   assert.equal(p.closing.equityAccount, '2100');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten'); // art. 226 baseline
   assert.equal(p.documents.eInvoicing, 'peppol-bis-3.0'); // cross-border Peppol
-  assert.equal(p.documents.defaultLanguage, 'en'); // no i18n table yet — English docs
+  assert.equal(p.documents.defaultLanguage, 'bg'); // BG documents (full i18n table)
   assert.equal(p.tax.returnLayout, undefined);
   assert.equal(p.reporting.format, undefined);
   assert.equal(p.documents.auditFile, undefined);
@@ -2705,7 +2705,7 @@ test('BG: init --country BG creates a Bulgarian company with the NSS chart', () 
     assert.ok(accounts.some((a) => a.code === '1510' && a.name === 'ДДС за внасяне'));
     const c = createContact(db, { name: 'Kunde EOOD' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Usluga @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en'); // English documents (no bg i18n table yet)
+    assert.equal(inv.language, 'bg'); // BG documents (full i18n table)
   } finally {
     db.close();
   }
@@ -2747,7 +2747,7 @@ test('HR: getProfile returns the HR profile (EUR, hr, Računski plan)', () => {
   assert.equal(p.reporting.bankAccountDefault, '1000');
   assert.equal(p.closing.resultAccount, '2200');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'hr');
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['hr-vat-monthly', 'hr-annual-accounts', 'hr-cit']);
 });
 
@@ -2763,7 +2763,7 @@ test('HR: init --country HR creates a Croatian company with the Računski plan c
     assert.ok(accounts.some((a) => a.code === '1510' && a.name === 'Obveze za PDV'));
     const c = createContact(db, { name: 'Kupac d.o.o.' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Usluga @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'hr'); // HR documents (full i18n table)
   } finally {
     db.close();
   }
@@ -2782,11 +2782,11 @@ test('SI: getProfile returns the SI profile (EUR, si, SRS 30 kontni načrt)', ()
   assert.equal(p.reporting.debtorsAccount, '1200');
   assert.equal(p.closing.resultAccount, '2200');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'sl');
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['si-vat-monthly', 'si-annual-accounts', 'si-ddpo']);
 });
 
-test('SI: init --country SI creates a Slovenian company (language defaults to en)', () => {
+test('SI: init --country SI creates a Slovenian company (language defaults to sl)', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test d.o.o.', '--country', 'SI', '--legal-form', 'doo', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'SI');
@@ -2798,7 +2798,7 @@ test('SI: init --country SI creates a Slovenian company (language defaults to en
     assert.ok(accounts.some((a) => a.code === '1510' && a.name === 'Izstopni DDV'));
     const c = createContact(db, { name: 'Kupac d.o.o.' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Storitev @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'sl'); // SI documents (full i18n table)
   } finally {
     db.close();
   }
@@ -2817,12 +2817,12 @@ test('EE: getProfile returns the EE profile (EUR, ee, RMP convention chart)', ()
   assert.equal(p.reporting.debtorsAccount, '1200');
   assert.equal(p.closing.resultAccount, '2200');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'et');
   // CIT is on distributions only — no annual CIT return
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['ee-vat-monthly', 'ee-annual-accounts']);
 });
 
-test('EE: init --country EE creates an Estonian company (language defaults to en)', () => {
+test('EE: init --country EE creates an Estonian company (language defaults to et)', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test OÜ', '--country', 'EE', '--legal-form', 'ou', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'EE');
@@ -2834,7 +2834,7 @@ test('EE: init --country EE creates an Estonian company (language defaults to en
     assert.ok(accounts.some((a) => a.code === '1520' && a.name === 'Väljundkäibemaks'));
     const c = createContact(db, { name: 'Ostja OÜ' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Teenus @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'et'); // EE documents (full i18n table)
   } finally {
     db.close();
   }
@@ -2853,12 +2853,12 @@ test('LV: getProfile returns the LV profile (EUR, lv, standard kontu plāns)', (
   assert.equal(p.reporting.debtorsAccount, '1200');
   assert.equal(p.closing.resultAccount, '2200');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'lv');
   // CIT on distributions only — no annual CIT return
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['lv-vat-monthly', 'lv-annual-accounts']);
 });
 
-test('LV: init --country LV creates a Latvian company (language defaults to en)', () => {
+test('LV: init --country LV creates a Latvian company (language defaults to lv)', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test SIA', '--country', 'LV', '--legal-form', 'sia', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'LV');
@@ -2870,7 +2870,7 @@ test('LV: init --country LV creates a Latvian company (language defaults to en)'
     assert.ok(accounts.some((a) => a.code === '1520' && a.name === 'PVN budžetā'));
     const c = createContact(db, { name: 'Pircējs SIA' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Pakalpojums @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'lv'); // LV documents (full i18n table)
   } finally {
     db.close();
   }
@@ -2889,11 +2889,11 @@ test('LT: getProfile returns the LT profile (EUR, lt, Įmonių sąskaitų planas
   assert.equal(p.reporting.debtorsAccount, '1200');
   assert.equal(p.closing.resultAccount, '2200');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'lt');
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['lt-vat-monthly', 'lt-annual-accounts', 'lt-cit']);
 });
 
-test('LT: init --country LT creates a Lithuanian company (language defaults to en)', () => {
+test('LT: init --country LT creates a Lithuanian company (language defaults to lt)', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test UAB', '--country', 'LT', '--legal-form', 'uab', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'LT');
@@ -2905,7 +2905,7 @@ test('LT: init --country LT creates a Lithuanian company (language defaults to e
     assert.ok(accounts.some((a) => a.code === '1510' && a.name === 'Pardavimo PVM'));
     const c = createContact(db, { name: 'Pirkėjas UAB' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Paslauga @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'lt'); // LT documents (full i18n table)
   } finally {
     db.close();
   }
@@ -2925,11 +2925,11 @@ test('MT: getProfile returns the MT profile (EUR, mt, convention chart)', () => 
   assert.equal(p.closing.resultAccount, '3300');
   assert.equal(p.closing.equityAccount, '3200');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'mt');
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['mt-vat-quarterly', 'mt-annual-accounts', 'mt-cit']);
 });
 
-test('MT: init --country MT creates a Maltese company (language defaults to en)', () => {
+test('MT: init --country MT creates a Maltese company (language defaults to mt)', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test Ltd', '--country', 'MT', '--legal-form', 'ltd', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'MT');
@@ -2941,7 +2941,7 @@ test('MT: init --country MT creates a Maltese company (language defaults to en)'
     assert.ok(accounts.some((a) => a.code === '2420' && a.name === 'VAT output (on sales)'));
     const c = createContact(db, { name: 'Client Ltd' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Service @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'mt'); // MT documents (full i18n table)
   } finally {
     db.close();
   }
@@ -2961,11 +2961,11 @@ test('CY: getProfile returns the CY profile (EUR, cy, convention chart)', () => 
   assert.equal(p.closing.resultAccount, '3300');
   assert.equal(p.closing.equityAccount, '3200');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'cy');
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['cy-vat-quarterly', 'cy-annual-accounts', 'cy-td4']);
 });
 
-test('CY: init --country CY creates a Cypriot company (language defaults to en)', () => {
+test('CY: init --country CY creates a Cypriot company (language defaults to cy)', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test Ltd', '--country', 'CY', '--legal-form', 'ltd', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'CY');
@@ -2977,7 +2977,7 @@ test('CY: init --country CY creates a Cypriot company (language defaults to en)'
     assert.ok(accounts.some((a) => a.code === '2420' && a.name === 'VAT output (on sales)'));
     const c = createContact(db, { name: 'Client Ltd' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Service @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'cy'); // CY documents (full i18n table)
   } finally {
     db.close();
   }
@@ -2997,11 +2997,11 @@ test('CZ: getProfile returns the CZ profile (CZK, cz, směrná účtová osnova)
   assert.equal(p.reporting.debtorsAccount, '3110');
   assert.equal(p.closing.resultAccount, '4310');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'cs');
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['cz-vat-monthly', 'cz-annual-accounts', 'cz-cit']);
 });
 
-test('CZ: init --country CZ creates a Czech company (language defaults to en)', () => {
+test('CZ: init --country CZ creates a Czech company (language defaults to cs)', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test s.r.o.', '--country', 'CZ', '--legal-form', 'sro', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'CZ');
@@ -3014,7 +3014,7 @@ test('CZ: init --country CZ creates a Czech company (language defaults to en)', 
     assert.ok(accounts.some((a) => a.code === '3432' && a.name === 'DPH na výstupu'));
     const c = createContact(db, { name: 'Odběratel s.r.o.' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Služba @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'cs'); // CZ documents (full i18n table)
   } finally {
     db.close();
   }
@@ -3033,11 +3033,11 @@ test('SK: getProfile returns the SK profile (EUR, sk, směrná účtová osnova)
   assert.equal(p.reporting.debtorsAccount, '3110');
   assert.equal(p.closing.resultAccount, '4310');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'sk');
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['sk-vat-monthly', 'sk-annual-accounts', 'sk-cit']);
 });
 
-test('SK: init --country SK creates a Slovak company (language defaults to en)', () => {
+test('SK: init --country SK creates a Slovak company (language defaults to sk)', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test s.r.o.', '--country', 'SK', '--legal-form', 'sro', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'SK');
@@ -3048,7 +3048,7 @@ test('SK: init --country SK creates a Slovak company (language defaults to en)',
     assert.ok(accounts.some((a) => a.code === '3431' && a.name === 'DPH na vstupe'));
     const c = createContact(db, { name: 'Odberateľ s.r.o.' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Služba @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'sk'); // SK documents (full i18n table)
   } finally {
     db.close();
   }
@@ -3068,11 +3068,11 @@ test('GR: getProfile returns the GR profile (EUR, gr, ΕΓΛΣ chart; EL prefix)
   assert.equal(p.reporting.debtorsAccount, '3000');
   assert.equal(p.closing.resultAccount, '4300');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'el');
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['gr-vat-monthly', 'gr-annual-accounts', 'gr-cit']);
 });
 
-test('GR: init --country GR creates a Greek company (language defaults to en)', () => {
+test('GR: init --country GR creates a Greek company (language defaults to el)', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test IKE', '--country', 'GR', '--legal-form', 'ike', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'GR');
@@ -3084,7 +3084,7 @@ test('GR: init --country GR creates a Greek company (language defaults to en)', 
     assert.ok(accounts.some((a) => a.code === '5450' && a.name === 'ΦΠΑ εκροών'));
     const c = createContact(db, { name: 'Πελάτης IKE' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Υπηρεσία @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'el'); // GR documents (full i18n table)
   } finally {
     db.close();
   }
@@ -3104,11 +3104,11 @@ test('PL: getProfile returns the PL profile (PLN, pl, Rozporządzenie MF chart)'
   assert.equal(p.reporting.debtorsAccount, '2010');
   assert.equal(p.closing.resultAccount, '4030');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'pl');
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['pl-vat-monthly', 'pl-annual-accounts', 'pl-cit']);
 });
 
-test('PL: init --country PL creates a Polish company (language defaults to en)', () => {
+test('PL: init --country PL creates a Polish company (language defaults to pl)', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test sp. z o.o.', '--country', 'PL', '--legal-form', 'sp-zoo', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'PL');
@@ -3121,7 +3121,7 @@ test('PL: init --country PL creates a Polish company (language defaults to en)',
     assert.ok(accounts.some((a) => a.code === '2220' && a.name === 'VAT należny'));
     const c = createContact(db, { name: 'Odbiorca sp. z o.o.' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Usługa @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'pl'); // PL documents (full i18n table)
   } finally {
     db.close();
   }
@@ -3142,11 +3142,11 @@ test('HU: getProfile returns the HU profile (HUF, hu, Szt. chart)', () => {
   assert.equal(p.closing.resultAccount, '4190');
   assert.equal(p.closing.equityAccount, '4130');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'hu');
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['hu-vat-monthly', 'hu-annual-accounts', 'hu-cit']);
 });
 
-test('HU: init --country HU creates a Hungarian company (language defaults to en)', () => {
+test('HU: init --country HU creates a Hungarian company (language defaults to hu)', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test Kft.', '--country', 'HU', '--legal-form', 'kft', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'HU');
@@ -3159,7 +3159,7 @@ test('HU: init --country HU creates a Hungarian company (language defaults to en
     assert.ok(accounts.some((a) => a.code === '4670' && a.name === 'Fizetendő áfa'));
     const c = createContact(db, { name: 'Vevő Kft.' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Szolgáltatás @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'hu'); // HU documents (full i18n table)
   } finally {
     db.close();
   }
@@ -3180,11 +3180,11 @@ test('RO: getProfile returns the RO profile (RON, ro, Planul de conturi)', () =>
   assert.equal(p.closing.resultAccount, '1211');
   assert.equal(p.closing.equityAccount, '1171');
   assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten');
-  assert.equal(p.documents.defaultLanguage, 'en');
+  assert.equal(p.documents.defaultLanguage, 'ro');
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['ro-vat-monthly', 'ro-annual-accounts', 'ro-cit']);
 });
 
-test('RO: init --country RO creates a Romanian company (language defaults to en)', () => {
+test('RO: init --country RO creates a Romanian company (language defaults to ro)', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test SRL', '--country', 'RO', '--legal-form', 'srl', '--vat', 'on']);
   assert.equal(r.out.data.company.country, 'RO');
@@ -3197,7 +3197,7 @@ test('RO: init --country RO creates a Romanian company (language defaults to en)
     assert.ok(accounts.some((a) => a.code === '4423' && a.name === 'TVA de plată'));
     const c = createContact(db, { name: 'Client SRL' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Serviciu @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
-    assert.equal(inv.language, 'en');
+    assert.equal(inv.language, 'ro'); // RO documents (full i18n table)
   } finally {
     db.close();
   }

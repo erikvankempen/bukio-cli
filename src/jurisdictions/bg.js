@@ -27,8 +27,8 @@
 //                            registered for cross-border (BG is a Peppol
 //                            participant, EAS 9926)
 // Registered: SEPA, CAMT.053, ECB, closing 2200 -> 2100.
-// New market: NO i18n table yet — documents render in English (languages
-// ['en'], defaultLanguage 'en'), same treatment as GB/IE/US.
+// Documents render in Bulgarian (languages ['bg'], defaultLanguage
+// 'bg') — full i18n table since 16 Aug 2026.
 
 export default {
   meta: {
@@ -138,8 +138,8 @@ export default {
     eInvoicing: 'peppol-bis-3.0', // cross-border Peppol (EAS 9926); no
     // domestic XML mandate yet — national e-invoicing is a B-milestone
     // auditFile omitted — no Bulgarian SAF-T
-    languages: ['en'],
-    defaultLanguage: 'en',
+    languages: ['bg'],
+    defaultLanguage: 'bg',
   },
 
   closing: { resultAccount: '2200', equityAccount: '2100' },

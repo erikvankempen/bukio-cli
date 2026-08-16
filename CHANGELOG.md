@@ -50,6 +50,16 @@ merged to `main` and released.
   guard still pins 89 keys across all 11 full tables. Behavior-neutral —
   944/944 green.
 
+- **i18n: 14 national-language PDF tables** — full 89-key tables for
+  pl/cs/hu/ro/sk/sl/hr/bg/el/et/lv/lt/mt/cy under `src/i18n/locales/`
+  (25 full tables + 2 regional overrides; parity guard extended). The
+  Phase E/F profiles now render documents in their national language by
+  default (PL `pl`, CZ `cs`, SK `sk`, GR `el`, HU `hu`, RO `ro`, BG `bg`,
+  HR `hr`, SI `sl`, EE `et`, LV `lv`, LT `lt`, MT `mt`, CY `cy`) — the
+  invoice PDF/email pipeline is fully localized for all 30 markets;
+  `--language` accepts any of the 27 table codes. `meta.locale` aligned
+  to ISO language codes (si->sl, ee->et, cz->cs, gr->el).
+
 ## [0.16.1] — 2026-08-16
 
 ### Added
