@@ -1374,20 +1374,21 @@ Thirteen jurisdiction profiles (NL plus the twelve-market expansion; see AGENTS.
 | IT Italy | EUR | 22 / 10 / 5 / 4 | Commercialisti convention (no statutory chart) | 0211 (Partita IVA) | it |
 | ES Spain | EUR | 21 / 10 / 4 | PGC (R.D. 1514/2007) | 9920 (NIF) | es |
 | PT Portugal | EUR | 23 / 13 / 6 | SNC (DL 158/2009) | 9946 (NIPC) | pt |
-| BG Bulgaria | EUR | 20 / 9 | NSS (statutory, simplified) | 9926 (VAT) bg |
-| HR Croatia | EUR | 25 / 13 / 5 | Računski plan (convention) | 9934 (VAT) hr |
-| SI Slovenia | EUR | 22 / 9.5 / 5 | SRS 30 (standardised) | 9949 (VAT) sl |
-| EE Estonia | EUR | 24 / 9 | RMP convention | 9931 (VAT) et |
-| LV Latvia | EUR | 21 / 12 / 5 | Standard kontu plāns | 9939 (VAT) lv |
-| LT Lithuania | EUR | 21 / 9 / 5 | Įmonių sąskaitų planas (MF) | 9937 (VAT) lt |
-| MT Malta | EUR | 18 / 12 / 7 / 5 | Convention (English) | 9943 (VAT) mt |
-| CY Cyprus | EUR | 19 / 9 / 5 / 3 | Convention (English) | 9928 (VAT) cy |
-| CZ Czechia | CZK | 21 / 12 | Směrná účtová osnova (statutory) | 9929 (VAT) cs |
-| SK Slovakia | EUR | 23 / 19 / 5 | Směrná účtová osnova (statutory) | 9950 (VAT) sk |
-| GR Greece | EUR | 24 / 13 / 6 | ΕΓΛΣ (statutory) | 9933 (VAT) el |
-| PL Poland | PLN | 23 / 8 / 5 | Rozporządzenie MF (statutory) | 9945 (VAT) pl |
-| HU Hungary | HUF | 27 / 18 / 5 | Szt. (statutory) | 9910 (VAT) hu |
-| RO Romania | RON | 18 / 9 | Planul de conturi (statutory) | 9947 (VAT) ro |
+| BG Bulgaria | EUR | 20 / 9 | NSS (statutory, simplified) | 9926 (VAT) | bg |
+| HR Croatia | EUR | 25 / 13 / 5 | Računski plan (convention) | 9934 (VAT) | hr |
+| SI Slovenia | EUR | 22 / 9.5 / 5 | SRS 30 (standardised) | 9949 (VAT) | sl |
+| EE Estonia | EUR | 24 / 9 | RMP convention | 9931 (VAT) | et |
+| LV Latvia | EUR | 21 / 12 / 5 | Standard kontu plāns | 9939 (VAT) | lv |
+| LT Lithuania | EUR | 21 / 9 / 5 | Įmonių sąskaitų planas (MF) | 9937 (VAT) | lt |
+| MT Malta | EUR | 18 / 12 / 7 / 5 | Convention (English) | 9943 (VAT) | mt |
+| CY Cyprus | EUR | 19 / 9 / 5 / 3 | Convention (English) | 9928 (VAT) | cy |
+| CZ Czechia | CZK | 21 / 12 | Směrná účtová osnova (statutory) | 9929 (VAT) | cs |
+| SK Slovakia | EUR | 23 / 19 / 5 | Směrná účtová osnova (statutory) | 9950 (VAT) | sk |
+| GR Greece | EUR | 24 / 13 / 6 | ΕΓΛΣ (statutory) | 9933 (VAT) | el |
+| PL Poland | PLN | 23 / 8 / 5 | Rozporządzenie MF (statutory) | 9945 (VAT) | pl |
+| HU Hungary | HUF | 27 / 18 / 5 | Szt. (statutory) | 9910 (VAT) | hu |
+| RO Romania | RON | 18 / 9 | Planul de conturi (statutory) | 9947 (VAT) | ro |
+| XK Kosovo | EUR | 18 / 8 | Convention (Albanian) | — (no Peppol) | sq |
 
 ---
 

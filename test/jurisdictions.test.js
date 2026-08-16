@@ -470,7 +470,7 @@ test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('B1: LU is implemented — PLANNED is empty (all thirty markets landed)', () => {
+test('B1: LU is implemented — PLANNED is empty (all thirty-one markets landed)', () => {
   assert.ok(!PLANNED.includes('LU'));
   assert.deepEqual([...PLANNED].sort(), []);
   assert.equal(getProfile('LU').meta.country, 'LU');
@@ -1063,7 +1063,7 @@ test('GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)', () =>
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['gb-9-months', 'gb-ct600']);
 });
 
-test('GB: PLANNED is empty (all thirty markets landed)', () => {
+test('GB: PLANNED is empty (all thirty-one markets landed)', () => {
   assert.ok(!PLANNED.includes('GB'));
   assert.deepEqual([...PLANNED].sort(), []);
   for (const cc of PLANNED) {
@@ -1175,7 +1175,7 @@ test('FR: getProfile returns the FR profile (EUR, fr, PCG data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('FR: PLANNED is empty (all thirty markets landed)', () => {
+test('FR: PLANNED is empty (all thirty-one markets landed)', () => {
   assert.ok(!PLANNED.includes('FR'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -1282,7 +1282,7 @@ test('US: getProfile returns the US profile (USD, en-US, no federal VAT)', () =>
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['us-1120', 'us-941']);
 });
 
-test('US: PLANNED is empty (all thirty markets landed)', () => {
+test('US: PLANNED is empty (all thirty-one markets landed)', () => {
   assert.deepEqual([...PLANNED].sort(), []);
   assert.equal(getProfile('US').meta.country, 'US');
 });
@@ -1393,7 +1393,7 @@ test('BE: getProfile returns the BE profile (EUR, nl-BE, PCN-BE data)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['be-vat-monthly', 'be-7-months']);
 });
 
-test('BE: PLANNED is empty (all thirty markets landed)', () => {
+test('BE: PLANNED is empty (all thirty-one markets landed)', () => {
   assert.ok(!PLANNED.includes('BE'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -1523,7 +1523,7 @@ test('DE: getProfile returns the DE profile (EUR, de-DE, SKR 03 data)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['de-ustva-quarterly', 'de-annual-vat', 'de-12-months']);
 });
 
-test('DE: PLANNED is empty (all thirty markets landed)', () => {
+test('DE: PLANNED is empty (all thirty-one markets landed)', () => {
   assert.ok(!PLANNED.includes('DE'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -1639,7 +1639,7 @@ test('DK: getProfile returns the DK profile (DKK, da-DK, 25% VAT only)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['dk-quarterly', 'dk-5-months']);
 });
 
-test('DK: PLANNED is empty (all thirty markets landed)', () => {
+test('DK: PLANNED is empty (all thirty-one markets landed)', () => {
   assert.ok(!PLANNED.includes('DK'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -1751,7 +1751,7 @@ test('FI: getProfile returns the FI profile (EUR, fi-FI, 25.5% VAT)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['fi-quarterly', 'fi-8-months']);
 });
 
-test('FI: PLANNED is empty (all thirty markets landed)', () => {
+test('FI: PLANNED is empty (all thirty-one markets landed)', () => {
   assert.ok(!PLANNED.includes('FI'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -1864,7 +1864,7 @@ test('NO: getProfile returns the NO profile (NOK, nb-NO, NS 4102)', () => {
   assert.equal(p.compliance.filingTypes[0].periodShape, 'YYYY-Pn'); // bi-monthly shape
 });
 
-test('NO: PLANNED is empty (all thirty markets landed)', () => {
+test('NO: PLANNED is empty (all thirty-one markets landed)', () => {
   assert.ok(!PLANNED.includes('NO'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -1979,7 +1979,7 @@ test('SE: getProfile returns the SE profile (SEK, sv-SE, BAS 2023)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['se-quarterly', 'se-7-months']);
 });
 
-test('SE: PLANNED is empty (all thirty markets landed)', () => {
+test('SE: PLANNED is empty (all thirty-one markets landed)', () => {
   assert.ok(!PLANNED.includes('SE'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -2096,7 +2096,7 @@ test('AT: getProfile returns the AT profile (EUR, de-AT, EKR data)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['at-uva-quarterly', 'at-annual-vat']);
 });
 
-test('AT: PLANNED is empty (all thirty markets landed)', () => {
+test('AT: PLANNED is empty (all thirty-one markets landed)', () => {
   assert.ok(!PLANNED.includes('AT'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -2219,7 +2219,7 @@ test('IE: getProfile returns the IE profile (EUR, en, UK-style chart)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['ie-bimonthly', 'ie-9-months', 'ie-9-months']);
 });
 
-test('IE: PLANNED is empty (all thirty markets landed)', () => {
+test('IE: PLANNED is empty (all thirty-one markets landed)', () => {
   assert.ok(!PLANNED.includes('IE'));
   assert.deepEqual([...PLANNED].sort(), []);
 });
@@ -3198,6 +3198,43 @@ test('RO: init --country RO creates a Romanian company (language defaults to ro)
     const c = createContact(db, { name: 'Client SRL' });
     const inv = createInvoice(db, { contactId: c.id, lines: ['Serviciu @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
     assert.equal(inv.language, 'ro'); // RO documents (full i18n table)
+  } finally {
+    db.close();
+  }
+});
+
+test('XK: getProfile returns the XK profile (EUR, sq, SKRFI convention chart)', () => {
+  const p = getProfile('XK');
+  assert.equal(p.meta.country, 'XK');
+  assert.equal(p.meta.baseCurrency, 'EUR'); // unilateral euro adoption
+  assert.equal(p.meta.locale, 'sq');
+  assert.deepEqual(p.meta.legalForms, ['shpk', 'sha', 'op', 'kp', 'bi']);
+  assert.equal(p.identifiers.vatIdLabel, 'Numri i TVSH-së');
+  assert.match('K12345678', p.identifiers.vatIdFormat); // 'K'-prefixed VAT number
+  assert.equal(p.identifiers.peppolSchemeId, null); // not a Peppol participant
+  assert.deepEqual(p.tax.codes.map((c) => c.code), ['18', '8', '0', 'V', 'R', 'RE']);
+  assert.equal(p.tax.codes[0].rateBp, 1800); // 18% standard
+  assert.deepEqual(p.tax.accounts.ledger.map((a) => a.code), ['2210', '2220']);
+  assert.equal(p.tax.accounts.fileDefault, '2230');
+  assert.equal(p.documents.invoiceCompliance, 'eu-invoice-vereisten'); // non-EU baseline
+  assert.equal(p.documents.eInvoicing, 'peppol-bis-3.0'); // cross-border EN 16931 only
+  assert.deepEqual(p.documents.languages, ['sq']);
+  assert.equal(p.documents.defaultLanguage, 'sq'); // Albanian documents (full i18n table)
+  assert.deepEqual(p.compliance.filingTypes.map((f) => f.deadlineRule),
+    ['xk-vat-monthly', 'xk-annual-accounts', 'xk-cit']);
+});
+
+test('XK: init --country XK creates a Kosovar company (language defaults to sq)', () => {
+  const dbPath = tmpDb();
+  cli(dbPath, ['init', '--name', 'Test Shpk', '--country', 'XK', '--legal-form', 'shpk', '--vat', 'on',
+    '--registration-id', '81234567', '--tax-id', 'K12345678', '--address', 'Rr. 1', '--postal-code', '10000', '--city', 'Prishtina']);
+  const db = openDb(dbPath);
+  try {
+    const c = createContact(db, { name: 'Blerësi Test' });
+    const inv = createInvoice(db, { contactId: c.id, lines: ['Shërbim @ 10.00'], date: '2026-08-10', actor: 'agent:test' });
+    assert.equal(inv.language, 'sq'); // Albanian documents (full i18n table)
+    const p = getProfile('XK');
+    assert.ok(p.reporting.defaultChart.some((a) => a.code === '4010' && a.name === 'Të hyrat nga shitjet'));
   } finally {
     db.close();
   }

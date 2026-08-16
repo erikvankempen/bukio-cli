@@ -88,12 +88,12 @@ function bookSale() {
 }
 const entryDesc = (id) => db.prepare('SELECT description FROM journal_entries WHERE id = ?').get(id).description;
 
-test('all 25 full locale tables carry the identical key set (parity guard)', () => {
-  // nl-be/fr-lu are regional override subsets by design — only the 25
-  // full tables (en pivot + nl/de/fr/da/fi/nb/sv/it/es/pt + Phase E/F
-  // bg/hr/sl/et/lv/lt/mt/cy/cs/sk/el/pl/hu/ro) must be key-identical.
+test('all 26 full locale tables carry the identical key set (parity guard)', () => {
+  // nl-be/fr-lu are regional override subsets by design — only the 26
+  // full tables (en pivot + nl/de/fr/da/fi/nb/sv/it/es/pt + Phase E/F/G
+  // bg/hr/sl/et/lv/lt/mt/cy/cs/sk/el/pl/hu/ro/sq) must be key-identical.
   const FULL = ['en', 'nl', 'de', 'fr', 'da', 'fi', 'nb', 'sv', 'it', 'es', 'pt',
-    'bg', 'hr', 'sl', 'et', 'lv', 'lt', 'mt', 'cy', 'cs', 'sk', 'el', 'pl', 'hu', 'ro'];
+    'bg', 'hr', 'sl', 'et', 'lv', 'lt', 'mt', 'cy', 'cs', 'sk', 'el', 'pl', 'hu', 'ro', 'sq'];
   const base = new Set(Object.keys(TABLES.en));
   for (const loc of FULL) {
     assert.deepEqual(Object.keys(TABLES[loc]).sort(), Object.keys(TABLES.en).sort(),

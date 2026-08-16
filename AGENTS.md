@@ -193,20 +193,21 @@ codes raise `PROFILE_NOT_FOUND`.
 | IT Italy | Commercialisti convention (no statutory chart) | EUR | 22 / 10 / 5 / 4 | forfettario (≤ €85K) | Partita IVA (IT + 11) / 0211 | peppol-bis-3.0 (cross-border; FatturaPA B-milestone) | it |
 | ES Spain | PGC (R.D. 1514/2007) | EUR | 21 / 10 / 4 | recargo de equivalencia | NIF / 9920 | peppol-bis-3.0 (cross-border; Verifactu B-milestone) | es |
 | PT Portugal | SNC (DL 158/2009) | EUR | 23 / 13 / 6 | isenção art. 53 CIVA (≤ ~€15K) | NIPC (PT + 9) / 9946 | peppol-bis-3.0 (cross-border; ATCUD B-milestone) | pt |
-| BG Bulgaria | NSS (statutory, simplified) | EUR | 20 / 9 | compound scheme (≤ ~€51K) | EIK / 9926 | peppol-bis-3.0 (cross-border) bg |
-| HR Croatia | Računski plan (convention) | EUR | 25 / 13 / 5 | exemption threshold (≤ ~€40K) | OIB / 9934 | peppol-bis-3.0 (cross-border) hr |
-| SI Slovenia | SRS 30 (standardised) | EUR | 22 / 9.5 / 5 | exemption threshold (≤ €60K) | DŠ / 9949 | peppol-bis-3.0 (cross-border) sl |
-| EE Estonia | RMP convention | EUR | 24 / 9 | exemption threshold (≤ €40K) | registrikood / 9931 | peppol-bis-3.0 (cross-border) et |
-| LV Latvia | Standard kontu plāns | EUR | 21 / 12 / 5 | exemption threshold (≤ €50K) | reģ. nr. / 9939 | peppol-bis-3.0 (cross-border) lv |
-| LT Lithuania | Įmonių sąskaitų planas (MF) | EUR | 21 / 9 / 5 | exemption threshold (≤ €45K) | įm. kodas / 9937 | peppol-bis-3.0 (cross-border; e-Sąskaita B-milestone) lt |
-| MT Malta | Convention (English) | EUR | 18 / 12 / 7 / 5 | small undertaking (≤ €35K) | MBR / 9943 | peppol-bis-3.0 (cross-border) mt |
-| CY Cyprus | Convention (English) | EUR | 19 / 9 / 5 / 3 | small undertakings (≤ €15.6K) | HE / 9928 | peppol-bis-3.0 (cross-border) cy |
-| CZ Czechia | Směrná účtová osnova (statutory) | CZK | 21 / 12 | exemption threshold (≤ ~€80K) | IČO / 9929 | peppol-bis-3.0 (cross-border) cs |
-| SK Slovakia | Směrná účtová osnova (statutory) | EUR | 23 / 19 / 5 | exemption threshold (≤ €49.8K) | IČO / 9950 | peppol-bis-3.0 (cross-border; 2027 mandate B-milestone) sk |
-| GR Greece | ΕΓΛΣ (statutory) | EUR | 24 / 13 / 6 | small-scale exemption (≤ €10K) | AFM / 9933 | peppol-bis-3.0 (cross-border; myDATA B-milestone) el |
-| PL Poland | Rozporządzenie MF (statutory) | PLN | 23 / 8 / 5 | exemption threshold (≤ ~€47K) | NIP / 9945 | peppol-bis-3.0 (cross-border; KSeF B-milestone) pl |
-| HU Hungary | Szt. (statutory) | HUF | 27 / 18 / 5 | exemption threshold (≤ ~€30K) | adószám / 9910 | peppol-bis-3.0 (cross-border; RTIR B-milestone) hu |
-| RO Romania | Planul de conturi (statutory) | RON | 18 / 9 | exemption threshold (≤ ~€60K) | CUI / 9947 | peppol-bis-3.0 (cross-border only; e-Factura B-milestone) ro |
+| BG Bulgaria | NSS (statutory, simplified) | EUR | 20 / 9 | compound scheme (≤ ~€51K) | EIK / 9926 | peppol-bis-3.0 (cross-border) | bg |
+| HR Croatia | Računski plan (convention) | EUR | 25 / 13 / 5 | exemption threshold (≤ ~€40K) | OIB / 9934 | peppol-bis-3.0 (cross-border) | hr |
+| SI Slovenia | SRS 30 (standardised) | EUR | 22 / 9.5 / 5 | exemption threshold (≤ €60K) | DŠ / 9949 | peppol-bis-3.0 (cross-border) | sl |
+| EE Estonia | RMP convention | EUR | 24 / 9 | exemption threshold (≤ €40K) | registrikood / 9931 | peppol-bis-3.0 (cross-border) | et |
+| LV Latvia | Standard kontu plāns | EUR | 21 / 12 / 5 | exemption threshold (≤ €50K) | reģ. nr. / 9939 | peppol-bis-3.0 (cross-border) | lv |
+| LT Lithuania | Įmonių sąskaitų planas (MF) | EUR | 21 / 9 / 5 | exemption threshold (≤ €45K) | įm. kodas / 9937 | peppol-bis-3.0 (cross-border; e-Sąskaita B-milestone) | lt |
+| MT Malta | Convention (English) | EUR | 18 / 12 / 7 / 5 | small undertaking (≤ €35K) | MBR / 9943 | peppol-bis-3.0 (cross-border) | mt |
+| CY Cyprus | Convention (English) | EUR | 19 / 9 / 5 / 3 | small undertakings (≤ €15.6K) | HE / 9928 | peppol-bis-3.0 (cross-border) | cy |
+| CZ Czechia | Směrná účtová osnova (statutory) | CZK | 21 / 12 | exemption threshold (≤ ~€80K) | IČO / 9929 | peppol-bis-3.0 (cross-border) | cs |
+| SK Slovakia | Směrná účtová osnova (statutory) | EUR | 23 / 19 / 5 | exemption threshold (≤ €49.8K) | IČO / 9950 | peppol-bis-3.0 (cross-border; 2027 mandate B-milestone) | sk |
+| GR Greece | ΕΓΛΣ (statutory) | EUR | 24 / 13 / 6 | small-scale exemption (≤ €10K) | AFM / 9933 | peppol-bis-3.0 (cross-border; myDATA B-milestone) | el |
+| PL Poland | Rozporządzenie MF (statutory) | PLN | 23 / 8 / 5 | exemption threshold (≤ ~€47K) | NIP / 9945 | peppol-bis-3.0 (cross-border; KSeF B-milestone) | pl |
+| HU Hungary | Szt. (statutory) | HUF | 27 / 18 / 5 | exemption threshold (≤ ~€30K) | adószám / 9910 | peppol-bis-3.0 (cross-border; RTIR B-milestone) | hu |
+| RO Romania | Planul de conturi (statutory) | RON | 18 / 9 | exemption threshold (≤ ~€60K) | CUI / 9947 | peppol-bis-3.0 (cross-border only; e-Factura B-milestone) | ro |
+| XK Kosovo | Convention (Albanian) | EUR | 18 / 8 | €30,000 VAT threshold | NBR / K-prefixed VAT | peppol-bis-3.0 (cross-border only; no national mandate) | sq |
 
 Strict dispatch: a profile registers only formats with existing builders —
 `financial-statements`, `vat readout`, `export xaf`, invoice compliance, etc.

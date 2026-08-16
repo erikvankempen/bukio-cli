@@ -18,8 +18,8 @@
 //     de (DE), fr (FR; base for fr-lu), fr-lu (LU), da (DK), fi (FI),
 //     nb (NO), sv (SE), it (IT), es (ES), pt (PT), bg (BG), hr (HR),
 //     sl (SI), et (EE), lv (LV), lt (LT), mt (MT), cy (CY), cs (CZ),
-//     sk (SK), el (GR), pl (PL), hu (HU), ro (RO) — 25 full tables +
-//     2 regional overrides.
+//     sk (SK), el (GR), pl (PL), hu (HU), ro (RO), sq (XK) — 26 full
+//     tables + 2 regional overrides.
 //   - Statutory artifacts (XAF/FAIA, jaarrekening models, OB readout),
 //     JSON output keys, error codes and MCP descriptions never localize
 //     (per the Aug 14 decision: documents localize, UI/JSON stay English).
@@ -51,11 +51,12 @@ import nlBe from './locales/nl-be.js';
 import pl from './locales/pl.js';
 import pt from './locales/pt.js';
 import ro from './locales/ro.js';
+import sq from './locales/sq.js';
 import sk from './locales/sk.js';
 import sl from './locales/sl.js';
 import sv from './locales/sv.js';
 
-export const TABLES = { en, nl, 'nl-be': nlBe, de, fr, 'fr-lu': frLu, da, fi, nb, sv, it, es, pt, bg, hr, sl, et, lv, lt, mt, cy, cs, sk, el, pl, hu, ro };
+export const TABLES = { en, nl, 'nl-be': nlBe, de, fr, 'fr-lu': frLu, da, fi, nb, sv, it, es, pt, bg, hr, sl, et, lv, lt, mt, cy, cs, sk, el, pl, hu, ro, sq };
 
 
 /** Resolve the active UI locale: --locale flag > BUKIO_LOCALE env > 'en'.

@@ -60,6 +60,14 @@ merged to `main` and released.
   `--language` accepts any of the 27 table codes. `meta.locale` aligned
   to ISO language codes (si->sl, ee->et, cz->cs, gr->el).
 
+- **Phase G: Kosovo (XK) — 31st market.** Non-EU EUR jurisdiction
+  (unilateral euro adoption), SKRFI convention chart in Albanian, VAT
+  18%/8% (monthly returns by the 20th), CIT + annual accounts by 31 March
+  (10% flat CIT), Sh.p.k./Sh.a./O.P./K.P./B.I. legal forms, NBR
+  (8-digit) + K-prefixed VAT identifiers. Not a Peppol participant —
+  cross-border EN 16931 UBL emission only. Full Albanian (sq) i18n table
+  (26 full + 2 regional overrides); documents render in Albanian by default.
+
 ## [0.16.1] — 2026-08-16
 
 ### Added

@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across twenty-four jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -391,6 +391,12 @@ const DEADLINE_RULES = {
   'ro-vat-monthly': (period) => dayOfNextMonth(period, 25),
   'ro-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 5),
   'ro-cit': (company, year) => `${Number(year) + 1}-06-25`,
+  // Phase G — Kosovo (docs-research/xk-profile.md): monthly VAT by the 20th,
+  // annual CIT + financial statements by 31 March (10% flat CIT; ATK/Fryti
+  // 2026 calendars). Non-EU: eu-invoice-vereisten baseline applies.
+  'xk-vat-monthly': (period) => dayOfNextMonth(period, 20),
+  'xk-annual-accounts': (company, year) => `${Number(year) + 1}-03-31`,
+  'xk-cit': (company, year) => `${Number(year) + 1}-03-31`,
 };
 
 export function isFiled(db, type, period) {

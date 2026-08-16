@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -28,7 +28,7 @@
 // thirtieth (Phase F — the final six EU members, English-document
 // defaults); each registers only formats with existing builders —
 // anything else fails loudly via the strict dispatch. PLANNED is empty
-// (all thirty markets live — 27/27 EU members + GB/NO/US); CH is parked
+// (all thirty-one markets live — 27/27 EU members + GB/NO/XK/US); CH is parked
 // (CHF base currency, QR-bill, not a Peppol country).
 //
 // Consumers must resolve profiles ONLY through this registry — never read
@@ -63,9 +63,10 @@ import se from './se.js';
 import si from './si.js';
 import sk from './sk.js';
 import us from './us.js';
+import xk from './xk.js';
 
 /** ISO 3166-1 alpha-2 country codes that are valid but not implemented yet. */
-export const PLANNED = []; // all 27 EU members landed (Phases B-F); CH parked
+export const PLANNED = []; // all 27 EU members landed (Phases B-F); XK live (Phase G); CH parked
 
 // every code across ALL registered profiles — the invoice line-spec parser
 // uses this union to RECOGNISE a VAT-code token (validation still happens
@@ -78,7 +79,7 @@ export function allTaxCodes() {
 }
 
 const PROFILES = {
-  NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr), US: deepFreeze(us), BE: deepFreeze(be), DE: deepFreeze(de), DK: deepFreeze(dk), FI: deepFreeze(fi), NO: deepFreeze(no), SE: deepFreeze(se), AT: deepFreeze(at), IE: deepFreeze(ie), ES: deepFreeze(es), IT: deepFreeze(it), PT: deepFreeze(pt), BG: deepFreeze(bg), HR: deepFreeze(hr), SI: deepFreeze(si), EE: deepFreeze(ee), LV: deepFreeze(lv), LT: deepFreeze(lt), MT: deepFreeze(mt), CY: deepFreeze(cy), CZ: deepFreeze(cz), SK: deepFreeze(sk), GR: deepFreeze(gr), PL: deepFreeze(pl), HU: deepFreeze(hu), RO: deepFreeze(ro),
+  NL: deepFreeze(nl), LU: deepFreeze(lu), GB: deepFreeze(gb), FR: deepFreeze(fr), US: deepFreeze(us), BE: deepFreeze(be), DE: deepFreeze(de), DK: deepFreeze(dk), FI: deepFreeze(fi), NO: deepFreeze(no), SE: deepFreeze(se), AT: deepFreeze(at), IE: deepFreeze(ie), ES: deepFreeze(es), IT: deepFreeze(it), PT: deepFreeze(pt), BG: deepFreeze(bg), HR: deepFreeze(hr), SI: deepFreeze(si), EE: deepFreeze(ee), LV: deepFreeze(lv), LT: deepFreeze(lt), MT: deepFreeze(mt), CY: deepFreeze(cy), CZ: deepFreeze(cz), SK: deepFreeze(sk), GR: deepFreeze(gr), PL: deepFreeze(pl), HU: deepFreeze(hu), RO: deepFreeze(ro), XK: deepFreeze(xk),
 };
 
 export function jurisdictionError(code, message) {
