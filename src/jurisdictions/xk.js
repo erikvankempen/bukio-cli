@@ -18,6 +18,7 @@ export default {
     defaultFiscalYearEnd: '12-31',
   },
   identifiers: {
+    accountNumber: { kind: 'iban' }, // Kosovo uses IBAN (XKxx format)
     companyIdLabel: 'NBR',
     companyIdFormat: /^\d{8}$/,
     vatIdLabel: 'Numri i TVSH-së',

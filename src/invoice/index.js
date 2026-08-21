@@ -378,11 +378,6 @@ export function listContacts(db) {
 
 // --- invoice helpers ------------------------------------------------------
 
-function vatCodeRate(db, code) {
-  if (!code) return 0;
-  const row = db.prepare('SELECT rate_bp FROM vat_codes WHERE code = ?').get(code);
-  return row ? row.rate_bp : 0;
-}
 
 export function getInvoice(db, id) {
   const inv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id);

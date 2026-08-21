@@ -101,13 +101,6 @@ export const LABELS = {
   nl: Object.fromEntries(Object.entries(TABLES.nl).filter(([k]) => k.startsWith('pdf.')).map(([k, v]) => [k.slice(4), v])),
   en: Object.fromEntries(Object.entries(TABLES.en).filter(([k]) => k.startsWith('pdf.')).map(([k, v]) => [k.slice(4), v])),
 };
-export const UNITS = {
-  h: { nl: TABLES.nl['unit.h'], en: TABLES.en['unit.h'] },
-  day: { nl: TABLES.nl['unit.day'], en: TABLES.en['unit.day'] },
-  month: { nl: TABLES.nl['unit.month'], en: TABLES.en['unit.month'] },
-  unit: { nl: TABLES.nl['unit.unit'], en: TABLES.en['unit.unit'] },
-  session: { nl: TABLES.nl['unit.session'], en: TABLES.en['unit.session'] },
-  km: { nl: TABLES.nl['unit.km'], en: TABLES.en['unit.km'] },
-  kg: { nl: TABLES.nl['unit.kg'], en: TABLES.en['unit.kg'] },
-  project: { nl: TABLES.nl['unit.project'], en: TABLES.en['unit.project'] },
-};
+export const UNITS = Object.fromEntries(
+  UNIT_CODES.map((c) => [c, { nl: TABLES.nl[`unit.${c}`], en: TABLES.en[`unit.${c}`] }]),
+);

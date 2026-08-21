@@ -92,8 +92,7 @@ test('all 26 full locale tables carry the identical key set (parity guard)', () 
   // nl-be/fr-lu are regional override subsets by design — only the 26
   // full tables (en pivot + nl/de/fr/da/fi/nb/sv/it/es/pt + Phase E/F/G
   // bg/hr/sl/et/lv/lt/mt/cy/cs/sk/el/pl/hu/ro/sq) must be key-identical.
-  const FULL = ['en', 'nl', 'de', 'fr', 'da', 'fi', 'nb', 'sv', 'it', 'es', 'pt',
-    'bg', 'hr', 'sl', 'et', 'lv', 'lt', 'mt', 'cy', 'cs', 'sk', 'el', 'pl', 'hu', 'ro', 'sq'];
+  const FULL = Object.keys(TABLES).filter((k) => !k.includes('-')); // derived: every non-regional table must be full
   const base = new Set(Object.keys(TABLES.en));
   for (const loc of FULL) {
     assert.deepEqual(Object.keys(TABLES[loc]).sort(), Object.keys(TABLES.en).sort(),
