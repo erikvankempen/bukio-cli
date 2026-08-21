@@ -1,22 +1,17 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
 
-
-import { validateLabeledDate } from '../core/dates.js';
 // Journal export — every posting in a date range, with account info.
 // One row per posting (entries without postings appear as a single row).
 // `limit` is optional: when set, the query is capped (used by the MCP journal
 // tool so a bounded response is actually bounded — the CLI never truncates).
+import { validateLabeledDate } from '../core/dates.js';
+
 export function journal(db, { from, to, limit = null }) {
-  // garbage years build ranges like 'abc-01-01' — reject before the query
-  // Journal export — every posting in a date range, with account info.
-  // One row per posting (entries without postings appear as a single row).
-  // `limit` is optional: when set, the query is capped (used by the MCP journal
-  // tool so a bounded response is actually bounded — the CLI never truncates).
-    // garbage years build ranges like 'abc-01-01' — reject before the query
+  // garbage dates build ranges like 'abc-01-01' — reject before the query
   for (const [label, v] of [['from', from], ['to', to]]) validateLabeledDate(v, label);
   return db.prepare(`
     SELECT e.id AS entry_id, e.date, e.description, e.source, e.state, e.created_by,
