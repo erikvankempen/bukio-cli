@@ -6,6 +6,36 @@ match `package.json` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
+## [0.17.0] — 2026-08-21
+
+### Changed
+
+- **Code-simplification pass** — net −876 lines of source with zero
+  capability changes; the full public CLI surface, MCP schemas, document
+  outputs, and error-code contract are unchanged:
+  - new shared `src/core/dates.js` (date validation/today/month math) and
+    `src/core/errors.js` (`makeError`) replace per-module copies across
+    ~15 modules;
+  - CLI: command registry loop, `withDb` action-shell wrapper (67 handlers),
+    `cliError` typed-error factory (46 throw sites), one stale program
+    description fixed;
+  - compliance: `quarterDeadlineOnOffset` collapses nine quarterly deadline
+    rules to one-liners; FYE deadline helpers delegate to `monthsAfterFyEnd`;
+    the byte-identical `isBooksClosed` clone is gone (uses year-end's
+    `isYearClosed`);
+  - invoice: NL/EU/LU party-field validators share one
+    `validateVereistenCore` with per-locale config; UBL VAT-category logic
+    unified in an exported `vatCategory(code)`; `invoice create` makes a
+    single engine call for dry-run and real paths (JSON shapes unchanged);
+  - reports: duplicated date-validation and `todayIso` copies replaced by
+    the core dates module;
+  - i18n: parity-guard FULL list derived from the table registry; UNITS
+    built from UNIT_CODES (drift-proof);
+  - housekeeping: thirty stale jurisdiction header comments corrected,
+    XK profile shape anomalies fixed (redundant `allTaxCodes`/`meta.name`
+    removed, missing `accountNumber` added), dead `vatCodeRate` helper
+    deleted.
+
 ## [0.16.2] — 2026-08-16
 
 ### Added
