@@ -720,34 +720,18 @@ export function validateCompliance(db, invoice) {
 }
 
 function validateNl12Vereisten(db, invoice) {
-  const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
-  const contact = invoice.contact;
-
-  const missingSupplier = [];
-  // The supplier btw-id is a factuurvereiste only when the supplier HAS one
-  // (art. 35a Wet OB) — a VAT-exempt business (vat module off, no btw-id)
-  // must still be able to invoice.
-  const supplierHasVat = company.vat_module === 1 || Boolean(company.tax_id);
-  if (!company.name) missingSupplier.push('company name');
-  if (supplierHasVat && !company.tax_id) missingSupplier.push('btw-id');
-  if (!company.registration_id) missingSupplier.push('registration number');
-  if (!company.address) missingSupplier.push('address');
-  if (!company.postal_code) missingSupplier.push('postal code');
-  if (!company.city) missingSupplier.push('city');
-  if (missingSupplier.length) {
-    throw invoiceError('SUPPLIER_INCOMPLETE', `supplier details missing (requirements 1-3): ${missingSupplier.join(', ')} — set them with init/company update`);
-  }
-
-  if (!contact.name || !contact.address || !contact.city) {
-    throw invoiceError('CUSTOMER_INCOMPLETE', 'customer details missing (requirement 6): name, address and city are required');
-  }
-
-  const hasReverse = invoice.lines.some((l) => l.vat_code === 'R' || l.vat_code === 'RE');
-  if (hasReverse && !contact.vat_id) {
-    throw invoiceError('CUSTOMER_VAT_REQUIRED', 'reverse-charge invoice: the customer VAT id is required (requirement 7)');
-  }
-
-  return { ok: true, vereisten: 12 };
+  return validateVereistenCore(db, invoice, {
+    checkLegalForm: false,
+    labels: {
+      companyName: 'company name', taxId: 'btw-id', registrationId: 'registration number',
+      address: 'address', postalCode: 'postal code', city: 'city',
+    },
+    supplierMsg: 'supplier details missing (requirements 1-3)',
+    fixHint: 'set them with init/company update',
+    customerMsg: 'customer details missing (requirement 6): name, address and city are required',
+    reverseChargeMsg: 'reverse-charge invoice: the customer VAT id is required (requirement 7)',
+    vereisten: 12,
+  });
 }
 
 /**
@@ -762,35 +746,57 @@ function validateNl12Vereisten(db, invoice) {
  * the EU markets without a national rule set (AT/BE/DE/DK/ES/FI/FR/IE/IT/
  * NO/PT/SE); NL and LU keep their national rules.
  */
-function validateEuVereisten(db, invoice) {
+/**
+ * Shared party-field validator behind the NL/EU/LU rule sets: same checks and
+ * error-code contract, with per-locale field labels, messages, and the
+ * reported vereisten count supplied by each rule set's config.
+ */
+function validateVereistenCore(db, invoice, cfg) {
   const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
   const contact = invoice.contact;
 
   const missingSupplier = [];
   // the supplier tax id is a requirement only when the supplier HAS one
-  // (art. 226(b)) — a VAT-exempt business (vat module off, no tax id)
-  // must still be able to invoice
+  // (NL art. 35a Wet OB / EU art. 226(b) / LU franchise en base) — a
+  // VAT-exempt business (vat module off, no tax id) must still be able to
+  // invoice
   const supplierHasVat = company.vat_module === 1 || Boolean(company.tax_id);
-  if (!company.name) missingSupplier.push('company name');
-  if (supplierHasVat && !company.tax_id) missingSupplier.push('tax id');
-  if (!company.registration_id) missingSupplier.push('registration number');
-  if (!company.address) missingSupplier.push('address');
-  if (!company.postal_code) missingSupplier.push('postal code');
-  if (!company.city) missingSupplier.push('city');
+  if (!company.name) missingSupplier.push(cfg.labels.companyName);
+  if (cfg.checkLegalForm && !company.legal_form) missingSupplier.push(cfg.labels.legalForm);
+  if (supplierHasVat && !company.tax_id) missingSupplier.push(cfg.labels.taxId);
+  if (!company.registration_id) missingSupplier.push(cfg.labels.registrationId);
+  if (!company.address) missingSupplier.push(cfg.labels.address);
+  if (!company.postal_code) missingSupplier.push(cfg.labels.postalCode);
+  if (!company.city) missingSupplier.push(cfg.labels.city);
   if (missingSupplier.length) {
-    throw invoiceError('SUPPLIER_INCOMPLETE', `supplier details missing (art. 226(a)-(c) EU VAT Directive): ${missingSupplier.join(', ')} — set them with init/company update`);
+    throw invoiceError('SUPPLIER_INCOMPLETE', `${cfg.supplierMsg}: ${missingSupplier.join(', ')} — ${cfg.fixHint}`);
   }
 
   if (!contact.name || !contact.address || !contact.city) {
-    throw invoiceError('CUSTOMER_INCOMPLETE', 'customer details missing (art. 226(5) EU VAT Directive): name, address and city are required');
+    throw invoiceError('CUSTOMER_INCOMPLETE', cfg.customerMsg);
   }
 
   const hasReverse = invoice.lines.some((l) => l.vat_code === 'R' || l.vat_code === 'RE');
   if (hasReverse && !contact.vat_id) {
-    throw invoiceError('CUSTOMER_VAT_REQUIRED', 'reverse-charge invoice: the customer VAT id is required (art. 226(14) EU VAT Directive)');
+    throw invoiceError('CUSTOMER_VAT_REQUIRED', cfg.reverseChargeMsg);
   }
 
-  return { ok: true, vereisten: 8 };
+  return { ok: true, vereisten: cfg.vereisten };
+}
+
+function validateEuVereisten(db, invoice) {
+  return validateVereistenCore(db, invoice, {
+    checkLegalForm: false,
+    labels: {
+      companyName: 'company name', taxId: 'tax id', registrationId: 'registration number',
+      address: 'address', postalCode: 'postal code', city: 'city',
+    },
+    supplierMsg: 'supplier details missing (art. 226(a)-(c) EU VAT Directive)',
+    fixHint: 'set them with init/company update',
+    customerMsg: 'customer details missing (art. 226(5) EU VAT Directive): name, address and city are required',
+    reverseChargeMsg: 'reverse-charge invoice: the customer VAT id is required (art. 226(14) EU VAT Directive)',
+    vereisten: 8,
+  });
 }
 
 /**
@@ -805,34 +811,18 @@ function validateEuVereisten(db, invoice) {
  * no schema field yet (documented, not validated).
  */
 function validateLuVereisten(db, invoice) {
-  const company = db.prepare('SELECT * FROM company WHERE id = 1').get();
-  const contact = invoice.contact;
-
-  const missingSupplier = [];
-  // the supplier TVA number is a requirement only when the supplier is
-  // registered (franchise en base: below €50K no TVA number exists)
-  const supplierHasVat = company.vat_module === 1 || Boolean(company.tax_id);
-  if (!company.name) missingSupplier.push('dénomination');
-  if (!company.legal_form) missingSupplier.push('forme juridique');
-  if (supplierHasVat && !company.tax_id) missingSupplier.push('numéro de TVA');
-  if (!company.registration_id) missingSupplier.push('numéro RCS');
-  if (!company.address) missingSupplier.push('adresse');
-  if (!company.postal_code) missingSupplier.push('code postal');
-  if (!company.city) missingSupplier.push('ville');
-  if (missingSupplier.length) {
-    throw invoiceError('SUPPLIER_INCOMPLETE', `données du fournisseur manquantes: ${missingSupplier.join(', ')} — définissez-les avec init/company update`);
-  }
-
-  if (!contact.name || !contact.address || !contact.city) {
-    throw invoiceError('CUSTOMER_INCOMPLETE', 'données du client manquantes: nom, adresse et ville sont obligatoires');
-  }
-
-  const hasReverse = invoice.lines.some((l) => l.vat_code === 'R' || l.vat_code === 'RE');
-  if (hasReverse && !contact.vat_id) {
-    throw invoiceError('CUSTOMER_VAT_REQUIRED', 'auto-liquidation sur la facture: le numéro de TVA du client est obligatoire');
-  }
-
-  return { ok: true, vereisten: 12 };
+  return validateVereistenCore(db, invoice, {
+    checkLegalForm: true, // LU alone requires the legal form (forme juridique)
+    labels: {
+      companyName: 'dénomination', legalForm: 'forme juridique', taxId: 'numéro de TVA',
+      registrationId: 'numéro RCS', address: 'adresse', postalCode: 'code postal', city: 'ville',
+    },
+    supplierMsg: 'données du fournisseur manquantes',
+    fixHint: 'définissez-les avec init/company update',
+    customerMsg: 'données du client manquantes: nom, adresse et ville sont obligatoires',
+    reverseChargeMsg: 'auto-liquidation sur la facture: le numéro de TVA du client est obligatoire',
+    vereisten: 12,
+  });
 }
 
 // --- numbering + finalize -------------------------------------------------
