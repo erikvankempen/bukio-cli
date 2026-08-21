@@ -26,6 +26,19 @@ export function quarterDeadline(period) {
   return { period, deadline };
 }
 
+// Last day of the month N months after the fiscal-year-end month of the
+// fiscal year ENDING in `year` (Companies House / HMRC style deadlines).
+function monthsAfterFyEnd(company, year, n) {
+  const fy = company.fiscal_year_end || '12-31';
+  const parts = String(fy).split('-');
+  const mm = Number(parts[parts.length - 2]);
+  const total = mm + n;
+  const y = Number(year) + Math.floor((total - 1) / 12);
+  const m = ((total - 1) % 12) + 1;
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+}
+
 export function jaarrekeningDeadline(company, year) {
   // last day of the month that is 13 months after the fiscal-year-end month
   // (art. 2:394 BW: deposit within 13 months after the balance sheet date).
@@ -33,17 +46,7 @@ export function jaarrekeningDeadline(company, year) {
   // practice, and the calendar-friendly reading) — not the exact
   // calendar-13-months date, which for a 06-30 FY would be 07-30, one day
   // earlier than the 07-31 used here.
-  const fy = company.fiscal_year_end || '12-31';
-  // tolerant parse like fiscalYearWindow: take the SECOND-TO-LAST part so a
-  // full 'YYYY-MM-DD' value works too (first-part would read 2026 as the
-  // month and compute a deadline ~170 years out)
-  const parts = String(fy).split('-');
-  const mm = Number(parts[parts.length - 2]);
-  const total = mm + 13;
-  const y = Number(year) + Math.floor((total - 1) / 12);
-  const m = ((total - 1) % 12) + 1;
-  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return monthsAfterFyEnd(company, year, 13);
 }
 
 // Deadline rules keyed by profile.compliance.filingTypes[].deadlineRule.
@@ -76,6 +79,17 @@ function assertQuarter(period) {
   }
 }
 
+// Nth month (offset from the quarter's end month: q*3+offset) at a fixed day —
+// the shared shape of every "quarterly return due on day D of month M after
+// the quarter" rule (BE/DE/DK/FI/SE/IT/PT/MT/CY...).
+function quarterDeadlineOnOffset(period, offset, day) {
+  assertQuarter(period);
+  const [year, qn] = String(period).split('-');
+  const m = Number(qn.replace('Q', '')) * 3 + offset;
+  const y = Number(year) + (m > 12 ? 1 : 0);
+  return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
 // day D of the month following YYYY-MM
 function dayOfNextMonth(period, day) {
   if (!/^\d{4}-\d{2}$/.test(String(period)) || Number(String(period).slice(5, 7)) < 1 || Number(String(period).slice(5, 7)) > 12) {
@@ -90,26 +104,7 @@ function luAnnualAccountsDeadline(company, year) {
   // LSC (loi 19.12.2002): accounts approved within 6 months of the FY end,
   // deposited with the RCS within 1 month of approval (~7 months). Last day
   // of the month 7 months after the FY-end month.
-  const fy = company.fiscal_year_end || '12-31';
-  const parts = String(fy).split('-');
-  const mm = Number(parts[parts.length - 2]);
-  const total = mm + 7;
-  const y = Number(year) + Math.floor((total - 1) / 12);
-  const m = ((total - 1) % 12) + 1;
-  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-}
-// Last day of the month N months after the fiscal-year-end month of the
-// fiscal year ENDING in `year` (Companies House / HMRC style deadlines).
-function monthsAfterFyEnd(company, year, n) {
-  const fy = company.fiscal_year_end || '12-31';
-  const parts = String(fy).split('-');
-  const mm = Number(parts[parts.length - 2]);
-  const total = mm + n;
-  const y = Number(year) + Math.floor((total - 1) / 12);
-  const m = ((total - 1) % 12) + 1;
-  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
-  return `${y}-${String(m).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return monthsAfterFyEnd(company, year, 7);
 }
 const DEADLINE_RULES = {
   'nl-quarterly': (period) => quarterDeadline(period).deadline,
@@ -139,48 +134,24 @@ const DEADLINE_RULES = {
   // quarterly option (25th of the month after the quarter); annual
   // accounts with the NBB within 7 months of FYE
   'be-vat-monthly': (period) => dayOfNextMonth(period, 20),
-  'be-quarterly': (period) => {
-    assertQuarter(period);
-    const q = Number(String(period).split('-')[1].replace('Q', ''));
-    const m = q * 3 + 1;
-    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
-    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-25`;
-  },
+  'be-quarterly': (period) => quarterDeadlineOnOffset(period, 1, 25),
   'be-7-months': (company, year) => monthsAfterFyEnd(company, year, 7),
   // DE (research §10): UStVA due the 10th of the month after the quarter;
   // annual VAT return 31 July of the following year (§ 149 AO); annual
   // accounts filed (Offenlegung) 12 months after the balance-sheet date
   // (§ 325 HGB)
-  'de-ustva-quarterly': (period) => {
-    assertQuarter(period);
-    const q = Number(String(period).split('-')[1].replace('Q', ''));
-    const m = q * 3 + 1;
-    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
-    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-10`;
-  },
+  'de-ustva-quarterly': (period) => quarterDeadlineOnOffset(period, 1, 10),
   'de-annual-vat': (company, year) => `${Number(year) + 1}-07-31`,
   'de-12-months': (company, year) => monthsAfterFyEnd(company, year, 12),
   // DK (research §10, SKAT): quarterly VAT due the 1st day of the 3rd
   // following month (Q2 -> 1 Sep); annual report (class B) within 5 months
   // of FYE
-  'dk-quarterly': (period) => {
-    assertQuarter(period);
-    const q = Number(String(period).split('-')[1].replace('Q', ''));
-    const m = q * 3 + 3;
-    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
-    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-01`;
-  },
+  'dk-quarterly': (period) => quarterDeadlineOnOffset(period, 3, 1),
   'dk-5-months': (company, year) => monthsAfterFyEnd(company, year, 5),
   // FI (research §10): quarterly VAT due the 12th of the second month
   // after the quarter (Q1 -> 12 May); annual accounts FILED within 8
   // months of FYE (PRH; prepared within 4)
-  'fi-quarterly': (period) => {
-    assertQuarter(period);
-    const q = Number(String(period).split('-')[1].replace('Q', ''));
-    const m = q * 3 + 2;
-    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
-    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-12`;
-  },
+  'fi-quarterly': (period) => quarterDeadlineOnOffset(period, 2, 12),
   'fi-8-months': (company, year) => monthsAfterFyEnd(company, year, 8),
   // NO (research §10, Altinn): bi-monthly mva-meldingen — 6 periods per
   // year, due 1 month + 10 days after the period end (P3 May/Jun is the
@@ -213,13 +184,7 @@ const DEADLINE_RULES = {
   // following month — quarterly when prior-year turnover ≤ €100,000, monthly
   // above (§ 21 UStG); the annual USt-Erklärung is due 30 June of the
   // following year (mandatory electronic filing)
-  'at-uva-quarterly': (period) => {
-    assertQuarter(period);
-    const q = Number(String(period).split('-')[1].replace('Q', ''));
-    const m = q * 3 + 2;
-    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
-    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-15`;
-  },
+  'at-uva-quarterly': (period) => quarterDeadlineOnOffset(period, 2, 15),
   'at-annual-vat': (company, year) => `${Number(year) + 1}-06-30`,
   // IE (research §8, Revenue): VAT3 bi-monthly returns — six two-month
   // periods per year, due the 23rd of the month after the period end
@@ -240,13 +205,7 @@ const DEADLINE_RULES = {
   // following month — the quarterly rule is the SME default); Dichiarazione
   // IVA 30 April of the following year; bilancio approved within 120 days
   // and deposited within 30 days of approval (~5 months after FYE)
-  'it-liquidazione-quarterly': (period) => {
-    assertQuarter(period);
-    const q = Number(String(period).split('-')[1].replace('Q', ''));
-    const m = q * 3 + 2;
-    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
-    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-16`;
-  },
+  'it-liquidazione-quarterly': (period) => quarterDeadlineOnOffset(period, 2, 16),
   'it-dichiarazione-iva': (company, year) => `${Number(year) + 1}-04-30`,
   'it-bilancio': (company, year) => monthsAfterFyEnd(company, year, 5),
   // ES (research §8, AEAT): Modelo 303 quarterly within the first 20 days
@@ -279,13 +238,7 @@ const DEADLINE_RULES = {
   // SECOND month after the period (quarterly for SMEs: Q1 20 May, Q2 20
   // Aug, Q3 20 Nov, Q4 20 Feb next year; monthly above €650K / intra-EC);
   // Modelo 22 (IRC, 21%) 31 May; annual accounts via IES 15 July
-  'pt-dp-quarterly': (period) => {
-    assertQuarter(period);
-    const q = Number(String(period).split('-')[1].replace('Q', ''));
-    const m = q * 3 + 2;
-    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
-    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-20`;
-  },
+  'pt-dp-quarterly': (period) => quarterDeadlineOnOffset(period, 2, 20),
   'pt-irc': (company, year) => `${Number(year) + 1}-05-31`,
   'pt-ies': (company, year) => `${Number(year) + 1}-07-15`,
   // Phase E (research briefs docs-research/{bg,hr,si,ee,lv,lt,mt,cy}-profile.md):
@@ -328,13 +281,7 @@ const DEADLINE_RULES = {
   // SECOND month after the quarter (22nd when filed online — Q1 -> 15/22
   // May); annual accounts with MBR within 10 months of FYE; CIT form C on
   // self-assessment 9 months after FYE
-  'mt-vat-quarterly': (period) => {
-    assertQuarter(period);
-    const q = Number(String(period).split('-')[1].replace('Q', ''));
-    const m = q * 3 + 2;
-    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
-    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-15`;
-  },
+  'mt-vat-quarterly': (period) => quarterDeadlineOnOffset(period, 2, 15),
   'mt-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 10),
   'mt-cit': (company, year) => monthsAfterFyEnd(company, year, 9),
   // CY (research §5, Tax For All portal): quarterly VAT 4 return due the
@@ -345,13 +292,7 @@ const DEADLINE_RULES = {
   // decree dates for TY2023-25 — e.g. TY2024 -> 30 Nov 2026 — are NOT
   // modelled: historical-year views render the permanent y+2-01-31 rule,
   // a documented simplification)
-  'cy-vat-quarterly': (period) => {
-    assertQuarter(period);
-    const q = Number(String(period).split('-')[1].replace('Q', ''));
-    const m = q * 3 + 2;
-    const y = Number(String(period).split('-')[0]) + (m > 12 ? 1 : 0);
-    return `${y}-${String(((m - 1) % 12) + 1).padStart(2, '0')}-10`;
-  },
+  'cy-vat-quarterly': (period) => quarterDeadlineOnOffset(period, 2, 10),
   'cy-annual-accounts': (company, year) => monthsAfterFyEnd(company, year, 10),
   'cy-td4': (company, year) => `${Number(year) + 2}-01-31`,
   // Phase F (research briefs docs-research/{cz,sk,gr,pl,hu,ro}-profile.md):
