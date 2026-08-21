@@ -206,34 +206,27 @@ export function make(program) {
         const discountValue = discountType === 'pct'
           ? Math.round(Number(opts.discountPct) * 100)
           : discountType === 'amount' ? parseAmount(opts.discountAmount) : null;
-        if (ctx.dryRun) {
-          // same validation as the real run (createInvoice dryRun): the old
-          // branch only parsed lines and echoed garbage dates/contacts as ok
-          const plan = createInvoice(db, {
-            contactId: Number(opts.contact), lines: opts.lines?.length ? opts.lines : null,
-            items: opts.items?.length ? opts.items : null, date: opts.date,
-            dueDays: Number(opts.dueDays), deliveryDate: opts.deliveryDate ?? null,
-            description: opts.description ?? null, reference: opts.reference ?? null,
-            notes: opts.notes ?? null, discountType, discountValue,
-            language: opts.language, actor: ctx.actor, dryRun: true,
-          });
-          output(ctx, plan, (d) => {
-            console.log(`plan: draft invoice for contact #${d.contact_id} on ${d.date} — net ${formatAmount(d.net_cents)}${d.vat_cents ? ` + ${formatAmount(d.vat_cents)} VAT` : ''} = ${formatAmount(d.gross_cents)}${d.discount_cents ? ` (discount ${formatAmount(d.discount_cents)})` : ''} [${d.language}]`);
-            for (const l of d.lines) console.log(`  ${l.qty}x ${l.description} @ ${formatAmount(l.priceCents)}${l.vatCode ? ` @${l.vatCode}` : ''}${l.discountType ? ` @-${l.discountType === 'pct' ? `${l.discountValue / 100}%` : formatAmount(l.discountValue)}` : ''}`);
-            console.log('(dry run — nothing written)');
-          });
-          return;
-        }
+        // one engine call for both paths — createInvoice's dryRun contract
+        // returns the same shape with dryRun: true
         const inv = createInvoice(db, {
           contactId: Number(opts.contact), lines: opts.lines?.length ? opts.lines : null,
           items: opts.items?.length ? opts.items : null, date: opts.date,
           dueDays: Number(opts.dueDays), deliveryDate: opts.deliveryDate ?? null,
           description: opts.description ?? null, reference: opts.reference ?? null,
           notes: opts.notes ?? null, discountType, discountValue,
-          language: opts.language, actor: ctx.actor,
+          language: opts.language, actor: ctx.actor, dryRun: ctx.dryRun,
         });
-        output(ctx, { invoice: fmtInvoice(inv), dryRun: false }, (d) => {
-          console.log(`invoice #${d.invoice.id} [draft] ${d.invoice.date} — ${d.invoice.contact_name}: ${d.invoice.gross} (VAT ${d.invoice.vat})${d.invoice.discount_cents ? ` (discount ${formatAmount(d.invoice.discount_cents)})` : ''} [${d.invoice.language}]`);
+        // dry-run plan keeps the raw engine shape; the real path wraps in
+        // { invoice: fmtInvoice(...) } exactly as before (JSON contract)
+        output(ctx, ctx.dryRun ? inv : { invoice: fmtInvoice(inv), dryRun: false }, (d) => {
+          if (ctx.dryRun) {
+            console.log(`plan: draft invoice for contact #${d.contact_id} on ${d.date} — net ${formatAmount(d.net_cents)}${d.vat_cents ? ` + ${formatAmount(d.vat_cents)} VAT` : ''} = ${formatAmount(d.gross_cents)}${d.discount_cents ? ` (discount ${formatAmount(d.discount_cents)})` : ''} [${d.language}]`);
+            for (const l of d.lines) console.log(`  ${l.qty}x ${l.description} @ ${formatAmount(l.priceCents)}${l.vatCode ? ` @${l.vatCode}` : ''}${l.discountType ? ` @-${l.discountType === 'pct' ? `${l.discountValue / 100}%` : formatAmount(l.discountValue)}` : ''}`);
+            console.log('(dry run — nothing written)');
+            return;
+          }
+          const f = d.invoice;
+          console.log(`invoice #${f.id} [draft] ${f.date} — ${f.contact_name}: ${f.gross} (VAT ${f.vat})${f.discount_cents ? ` (discount ${formatAmount(f.discount_cents)})` : ''} [${f.language}]`);
         });
     }));
 
