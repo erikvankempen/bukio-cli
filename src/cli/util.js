@@ -16,11 +16,10 @@ import {
 } from '../core/sign.js';
 import { getActorKey, getAnyActorKey, getEnforce } from '../core/actor-registry.js';
 import { checkAuthz } from '../core/authz.js';
+import { makeError } from '../core/errors.js';
 
 export function dbError(code, message) {
-  const e = new Error(message);
-  e.code = code;
-  return e;
+  return makeError(code, message);
 }
 
 // --- actor key/session paths (shared by the actor CLI and the sign gate) ---
@@ -116,6 +115,37 @@ export function ensureDb(ctx, { create = false, mustExist = true } = {}) {
   return openDb(ctx.dbPath);
 }
 
+/** Typed CLI error (code-carrying Error) — one canonical shape for --json consumers. */
+export function cliError(code, message, details = null) {
+  return makeError(code, message, details);
+}
+
+/** Throw NOT_FOUND-style error when row is falsy; returns the row otherwise. */
+export function requireRow(row, entityLabel, id, code = 'NOT_FOUND') {
+  if (!row) throw cliError(code, `${entityLabel} ${id} does not exist`);
+  return row;
+}
+
+/**
+ * Standard action shell: makeCtx -> ensureDb -> fn(ctx, db) -> db.close,
+ * with fail(ctx, err) on any throw. Replaces the ~120 copy-pasted
+ * try/ensureDb/finally-close/catch-fail sandwiches in the command modules.
+ * Long-lived commands (server/mcp) keep their own lifecycle.
+ */
+export async function withDb(command, fn, { create = false } = {}) {
+  const ctx = makeCtx(command);
+  try {
+    const db = ensureDb(ctx, { create });
+    try {
+      return await fn(ctx, db);
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    fail(ctx, err);
+  }
+}
+
 /** Simple aligned text table for human output. cols: [{ key, label }] */
 export function table(rows, cols) {
   const widths = cols.map((c) => Math.max(
@@ -183,9 +213,7 @@ const SIGNATURE_WINDOW_MS = 5 * 60_000; // ±5 minutes
 const NONCE_RETENTION_MS = 24 * 3600_000; // nonces remembered 24 h
 
 export function signGateError(code, message) {
-  const e = new Error(message);
-  e.code = code;
-  return e;
+  return makeError(code, message);
 }
 
 function noncesPath() {

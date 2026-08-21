@@ -42,7 +42,7 @@ export async function runCli(argv) {
   const program = new Command();
   program
     .name('bukio')
-    .description('Agent-first bookkeeping for SMEs across eleven jurisdictions — SQLite, VAT-optional')
+    .description('Agent-first bookkeeping for SMEs across thirty-one jurisdictions — SQLite, VAT-optional')
     .version('0.16.2')
     .option('--json', 'machine-readable JSON output')
     .option('--db <path>', 'database file', process.env.BUKIO_DB || path.join(os.homedir(), '.bukio', 'bukio.db'))
@@ -52,31 +52,14 @@ export async function runCli(argv) {
     .option('--locale <code>', 'output language for human-facing text (or BUKIO_LOCALE env; default: English — explicit opt-in; tables: en, nl, nl-be, de, fr, fr-lu, da, fi, nb, sv)', undefined)
     .showHelpAfterError();
 
-  initCmd(program);
-  entryCmd(program);
-  accountCmd(program);
-  reportCmd(program);
-  auditCmd(program);
-  backupCmd(program);
-  bankCmd(program);
-  vatCmd(program);
-  recurringCmd(program);
-  invoiceCmd(program);
-  yearEndCmd(program);
-  fxCmd(program);
-  mcpCmd(program);
-  complianceCmd(program);
-  importCmd(program);
-  exportCmd(program);
-  monthEndCmd(program);
-  companyCmd(program);
-  assetsCmd(program);
-  paymentsCmd(program);
-  itemCmd(program);
-  attachCmd(program);
-  updateCmd(program);
-  actorCmd(program);
-  serverCmd(program);
+  // command registry: every module exports make(program) — one list, one loop
+  const commands = [
+    initCmd, entryCmd, accountCmd, reportCmd, auditCmd, backupCmd, bankCmd,
+    vatCmd, recurringCmd, invoiceCmd, yearEndCmd, fxCmd, mcpCmd,
+    complianceCmd, importCmd, exportCmd, monthEndCmd, companyCmd, assetsCmd,
+    paymentsCmd, itemCmd, attachCmd, updateCmd, actorCmd, serverCmd,
+  ];
+  for (const cmd of commands) cmd(program);
 
   // Named-actor enforcement: every action must identify as '<role>:<name>'
   // (agent:bartholomeus, human:erik) so the audit trail always names who acted.
