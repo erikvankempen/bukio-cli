@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -13,7 +13,7 @@ import {
   importJournalCsv, importOpeningBalances, importXaf, importContacts, readImportFile,
 } from '../import/index.js';
 import { importUblInvoice } from '../import/ubl-invoice.js';
-import { ensureDb, makeCtx, output, fail } from './util.js';
+import { ensureDb, makeCtx, output, fail, withDb } from './util.js';
 
 export function make(program) {
   const imp = program.command('import').description('import data: opening balances, journal CSV, XAF 4.0 audit file');
@@ -24,33 +24,23 @@ export function make(program) {
     .requiredOption('--file <path>', 'CSV file')
     .option('--date <yyyy-mm-dd>', 'entry date (default: today)')
     .option('--dry-run', 'validate the whole file and show the plan without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const csvText = readImportFile(opts.file);
-          const result = importOpeningBalances(db, {
-            csvText, date: opts.date ?? null, actor: ctx.actor, dryRun: ctx.dryRun,
-          });
-          if (ctx.dryRun) {
-            output(ctx, result, (d) => {
-              console.log(`plan: import opening balances on ${d.date} — ${d.accounts} accounts`);
-              console.log(`  debet ${formatAmount(d.total_debit_cents)}  =  credit ${formatAmount(d.total_credit_cents)}`);
-              console.log('(dry run — nothing written)');
-            });
-            return;
-          }
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const csvText = readImportFile(opts.file);
+        const result = importOpeningBalances(db, {
+          csvText, date: opts.date ?? null, actor: ctx.actor, dryRun: ctx.dryRun,
+        });
+        if (ctx.dryRun) {
           output(ctx, result, (d) => {
-            console.log(`imported opening balances (${d.accounts} accounts) as entry #${d.entry.id} [${d.entry.state}] on ${d.entry.date}`);
+            console.log(`plan: import opening balances on ${d.date} — ${d.accounts} accounts`);
+            console.log(`  debet ${formatAmount(d.total_debit_cents)}  =  credit ${formatAmount(d.total_credit_cents)}`);
+            console.log('(dry run — nothing written)');
           });
-        } finally {
-          db.close();
+          return;
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        output(ctx, result, (d) => {
+          console.log(`imported opening balances (${d.accounts} accounts) as entry #${d.entry.id} [${d.entry.state}] on ${d.entry.date}`);
+        });
+    }));
 
   imp
     .command('journal')
@@ -58,128 +48,98 @@ export function make(program) {
     .requiredOption('--file <path>', 'CSV file')
     .option('--create-missing', 'create unknown accounts (type inferred from the net movement)')
     .option('--dry-run', 'validate the whole file and show the plan without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const csvText = readImportFile(opts.file);
-          const result = importJournalCsv(db, {
-            csvText, createMissing: Boolean(opts.createMissing), actor: ctx.actor, dryRun: ctx.dryRun,
-          });
-          if (ctx.dryRun) {
-            output(ctx, result, (d) => {
-              console.log(`plan: import journal — ${d.boekstukken} records / ${d.lines} lines${d.create_missing ? ' (create missing accounts)' : ''}`);
-              for (const e of d.entries.slice(0, 10)) {
-                console.log(`  ${e.date}  ${e.boekstuk}  (${e.lines} line${e.lines === 1 ? '' : 's'})`);
-              }
-              if (d.duplicates) console.log(`  (${d.duplicates} already imported — will skip)`);
-              if (d.ignored_btw_codes.length) console.log(`  note: VAT codes ${d.ignored_btw_codes.join(', ')} ignored (net amounts imported)`);
-              console.log('(dry run — nothing written)');
-            });
-            return;
-          }
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const csvText = readImportFile(opts.file);
+        const result = importJournalCsv(db, {
+          csvText, createMissing: Boolean(opts.createMissing), actor: ctx.actor, dryRun: ctx.dryRun,
+        });
+        if (ctx.dryRun) {
           output(ctx, result, (d) => {
-            console.log(`imported ${d.imported} records${d.duplicates ? ` (${d.duplicates} duplicates skipped)` : ''}`);
-            if (d.accounts_created.length) {
-              console.log(`created accounts: ${d.accounts_created.map((a) => `${a.code} (${a.type})`).join(', ')}`);
+            console.log(`plan: import journal — ${d.boekstukken} records / ${d.lines} lines${d.create_missing ? ' (create missing accounts)' : ''}`);
+            for (const e of d.entries.slice(0, 10)) {
+              console.log(`  ${e.date}  ${e.boekstuk}  (${e.lines} line${e.lines === 1 ? '' : 's'})`);
             }
-            if (d.ignored_btw_codes.length) {
-              console.log(`note: VAT codes ${d.ignored_btw_codes.join(', ')} ignored — verify the booked amounts`);
-            }
+            if (d.duplicates) console.log(`  (${d.duplicates} already imported — will skip)`);
+            if (d.ignored_btw_codes.length) console.log(`  note: VAT codes ${d.ignored_btw_codes.join(', ')} ignored (net amounts imported)`);
+            console.log('(dry run — nothing written)');
           });
-        } finally {
-          db.close();
+          return;
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        output(ctx, result, (d) => {
+          console.log(`imported ${d.imported} records${d.duplicates ? ` (${d.duplicates} duplicates skipped)` : ''}`);
+          if (d.accounts_created.length) {
+            console.log(`created accounts: ${d.accounts_created.map((a) => `${a.code} (${a.type})`).join(', ')}`);
+          }
+          if (d.ignored_btw_codes.length) {
+            console.log(`note: VAT codes ${d.ignored_btw_codes.join(', ')} ignored — verify the booked amounts`);
+          }
+        });
+    }));
 
   imp
     .command('contacts')
     .description('import suppliers/customers from an audit file (XAF 4.0) as contacts')
     .requiredOption('--file <path>', 'XAF 4.0 XML file')
     .option('--dry-run', 'validate the whole file and show the plan without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const xmlText = readImportFile(opts.file);
-          const result = importContacts(db, { xmlText, actor: ctx.actor, dryRun: ctx.dryRun });
-          if (ctx.dryRun) {
-            output(ctx, result, (d) => {
-              console.log(`plan: import contacts — ${d.suppliers} suppliers / ${d.customers} customers`);
-              console.log(`  ${d.contacts_to_create} contacts will be created`);
-              if (d.duplicates) console.log(`  (${d.duplicates} already known — will skip)`);
-              console.log('(dry run — nothing written)');
-            });
-            return;
-          }
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const xmlText = readImportFile(opts.file);
+        const result = importContacts(db, { xmlText, actor: ctx.actor, dryRun: ctx.dryRun });
+        if (ctx.dryRun) {
           output(ctx, result, (d) => {
-            console.log(`imported contacts: ${d.imported}${d.duplicates ? ` (${d.duplicates} duplicates skipped)` : ''}`);
-            for (const c of d.contacts) console.log(`  ${c.kind.padEnd(8)} ${c.name}`);
+            console.log(`plan: import contacts — ${d.suppliers} suppliers / ${d.customers} customers`);
+            console.log(`  ${d.contacts_to_create} contacts will be created`);
+            if (d.duplicates) console.log(`  (${d.duplicates} already known — will skip)`);
+            console.log('(dry run — nothing written)');
           });
-        } finally {
-          db.close();
+          return;
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        output(ctx, result, (d) => {
+          console.log(`imported contacts: ${d.imported}${d.duplicates ? ` (${d.duplicates} duplicates skipped)` : ''}`);
+          for (const c of d.contacts) console.log(`  ${c.kind.padEnd(8)} ${c.name}`);
+        });
+    }));
 
   imp
     .command('xaf')
     .description('import an XML Auditfile Financieel 4.0 (Belastingdienst audit format)')
     .requiredOption('--file <path>', 'XAF 4.0 XML file')
     .option('--dry-run', 'validate the whole file and show the plan without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const xmlText = readImportFile(opts.file);
-          const result = importXaf(db, { xmlText, actor: ctx.actor, dryRun: ctx.dryRun });
-          if (ctx.dryRun) {
-            output(ctx, result, (d) => {
-              console.log(`plan: import XAF 4.0 — ${d.company.name ?? 'unknown company'} (${d.company.registration_id ?? 'no kvk'}) ${d.company.fiscal_year ?? ''}`);
-              console.log(`  ${d.rekeningen} accounts / ${d.mutaties} mutations`);
-              if (d.accounts_to_create) console.log(`  ${d.accounts_to_create} accounts will be created`);
-              if (d.accounts_to_rename?.length) {
-                console.log(`  ${d.accounts_to_rename.length} accounts will be renamed to the file's chart:`);
-                for (const r of d.accounts_to_rename) console.log(`    ${r.code} -> ${r.name}`);
-              }
-              if (d.duplicates) console.log(`  (${d.duplicates} already imported — will skip)`);
-              if (d.ignored_btw_codes.length) console.log(`  note: VAT codes ${d.ignored_btw_codes.join(', ')} ignored (net amounts imported)`);
-              for (const w of d.company_mismatch) console.log(`  warning: ${w}`);
-              console.log('(dry run — nothing written)');
-            });
-            return;
-          }
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const xmlText = readImportFile(opts.file);
+        const result = importXaf(db, { xmlText, actor: ctx.actor, dryRun: ctx.dryRun });
+        if (ctx.dryRun) {
           output(ctx, result, (d) => {
-            console.log(`imported XAF: ${d.imported} mutations${d.duplicates ? ` (${d.duplicates} duplicates skipped)` : ''}`);
-            if (d.accounts_created.length) {
-              console.log(`created accounts: ${d.accounts_created.map((a) => `${a.code} (${a.type})`).join(', ')}`);
+            console.log(`plan: import XAF 4.0 — ${d.company.name ?? 'unknown company'} (${d.company.registration_id ?? 'no kvk'}) ${d.company.fiscal_year ?? ''}`);
+            console.log(`  ${d.rekeningen} accounts / ${d.mutaties} mutations`);
+            if (d.accounts_to_create) console.log(`  ${d.accounts_to_create} accounts will be created`);
+            if (d.accounts_to_rename?.length) {
+              console.log(`  ${d.accounts_to_rename.length} accounts will be renamed to the file's chart:`);
+              for (const r of d.accounts_to_rename) console.log(`    ${r.code} -> ${r.name}`);
             }
-            if (d.accounts_updated?.length) {
-              console.log(`renamed accounts: ${d.accounts_updated.map((a) => `${a.code} '${a.from}' -> '${a.to}'`).join(', ')}`);
-            }
-            if (d.accounts_rgs_backfilled?.length) {
-              console.log(`RGS backfilled: ${d.accounts_rgs_backfilled.map((a) => `${a.code} ${a.name} -> ${a.taxonomy_code}`).join(', ')}`);
-            }
-            for (const w of d.chart_warnings ?? []) console.log(`  warning: ${w}`);
-            if (d.ignored_btw_codes.length) {
-              console.log(`note: VAT codes ${d.ignored_btw_codes.join(', ')} ignored — verify the booked amounts`);
-            }
+            if (d.duplicates) console.log(`  (${d.duplicates} already imported — will skip)`);
+            if (d.ignored_btw_codes.length) console.log(`  note: VAT codes ${d.ignored_btw_codes.join(', ')} ignored (net amounts imported)`);
+            for (const w of d.company_mismatch) console.log(`  warning: ${w}`);
+            console.log('(dry run — nothing written)');
           });
-        } finally {
-          db.close();
+          return;
         }
-      } catch (err) {
-        fail(ctx, err); // fail() already prints per-line details in human mode
-      }
-    });
+        output(ctx, result, (d) => {
+          console.log(`imported XAF: ${d.imported} mutations${d.duplicates ? ` (${d.duplicates} duplicates skipped)` : ''}`);
+          if (d.accounts_created.length) {
+            console.log(`created accounts: ${d.accounts_created.map((a) => `${a.code} (${a.type})`).join(', ')}`);
+          }
+          if (d.accounts_updated?.length) {
+            console.log(`renamed accounts: ${d.accounts_updated.map((a) => `${a.code} '${a.from}' -> '${a.to}'`).join(', ')}`);
+          }
+          if (d.accounts_rgs_backfilled?.length) {
+            console.log(`RGS backfilled: ${d.accounts_rgs_backfilled.map((a) => `${a.code} ${a.name} -> ${a.taxonomy_code}`).join(', ')}`);
+          }
+          for (const w of d.chart_warnings ?? []) console.log(`  warning: ${w}`);
+          if (d.ignored_btw_codes.length) {
+            console.log(`note: VAT codes ${d.ignored_btw_codes.join(', ')} ignored — verify the booked amounts`);
+          }
+        });
+    }))
 
   imp
     .command('invoice')
@@ -188,39 +148,29 @@ export function make(program) {
     .option('--contact <id>', 'explicit contact id (otherwise matched by tax id / name)')
     .option('--create-missing', 'create the supplier contact from the file when no match exists')
     .option('--dry-run', 'validate the whole file and show the plan without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const xmlText = readImportFile(opts.file);
-          const result = importUblInvoice(db, {
-            xmlText, contact: opts.contact != null ? Number(opts.contact) : null,
-            createMissing: Boolean(opts.createMissing), actor: ctx.actor, dryRun: ctx.dryRun,
-          });
-          if (ctx.dryRun) {
-            output(ctx, result, (d) => {
-              console.log(`plan: import invoice ${d.invoice_ref} from ${d.supplier} (${formatAmount(d.amount_cents)} incl. VAT)`);
-              console.log(`  date ${d.date} — due ${d.due_date}`);
-              if (Object.keys(d.vat_by_rate).length) {
-                console.log(`  VAT: ${Object.entries(d.vat_by_rate).map(([r, c]) => `${r}% = ${formatAmount(c)}`).join(', ')}`);
-              }
-              console.log(`  contact: ${d.contact.name}${d.contact.created ? ' (will be created)' : ''}`);
-              console.log('(dry run — nothing written — no journal entry is created; book it via the normal workflow)');
-            });
-            return;
-          }
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const xmlText = readImportFile(opts.file);
+        const result = importUblInvoice(db, {
+          xmlText, contact: opts.contact != null ? Number(opts.contact) : null,
+          createMissing: Boolean(opts.createMissing), actor: ctx.actor, dryRun: ctx.dryRun,
+        });
+        if (ctx.dryRun) {
           output(ctx, result, (d) => {
-            console.log(`imported invoice ${d.invoice_ref} from ${d.supplier} as payable (${formatAmount(d.amount_cents)} incl. VAT, due ${d.due_date})`);
-            if (d.duplicates) console.log(`(${d.duplicates} duplicate skipped)`);
-            if (d.contacts_created) console.log(`created contact #${d.contact.id} ${d.contact.name}`);
-            console.log('note: no journal entry was created — book the invoice via the normal workflow');
+            console.log(`plan: import invoice ${d.invoice_ref} from ${d.supplier} (${formatAmount(d.amount_cents)} incl. VAT)`);
+            console.log(`  date ${d.date} — due ${d.due_date}`);
+            if (Object.keys(d.vat_by_rate).length) {
+              console.log(`  VAT: ${Object.entries(d.vat_by_rate).map(([r, c]) => `${r}% = ${formatAmount(c)}`).join(', ')}`);
+            }
+            console.log(`  contact: ${d.contact.name}${d.contact.created ? ' (will be created)' : ''}`);
+            console.log('(dry run — nothing written — no journal entry is created; book it via the normal workflow)');
           });
-        } finally {
-          db.close();
+          return;
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        output(ctx, result, (d) => {
+          console.log(`imported invoice ${d.invoice_ref} from ${d.supplier} as payable (${formatAmount(d.amount_cents)} incl. VAT, due ${d.due_date})`);
+          if (d.duplicates) console.log(`(${d.duplicates} duplicate skipped)`);
+          if (d.contacts_created) console.log(`created contact #${d.contact.id} ${d.contact.name}`);
+          console.log('note: no journal entry was created — book the invoice via the normal workflow');
+        });
+    }));
 }

@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -12,14 +12,14 @@ import {
   createEntry, getEntry, listEntries, parsePostingSpecs, postEntry,
   resolvePostings, reverseEntry, validateDate,
 } from '../core/entries.js';
-import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, withDb, cliError } from './util.js';
 import { resolveRate, toEurPostings } from '../fx/index.js';
 
 /** Convert posting specs to EUR when --currency given; auto rate lookup + ECB fallback. */
 async function applyFx(db, postings, { currency, rate, date, actor, dryRun = false }) {
   if (!currency) return postings;
   if (!db && rate == null) {
-    throw Object.assign(new Error(`no database yet — pass --rate or create the company database first`), { code: 'FX_RATE_NOT_FOUND' });
+    throw cliError('FX_RATE_NOT_FOUND', `no database yet — pass --rate or create the company database first`);
   }
   const rateX10000 = await resolveRate(db, { currency, rate, date, actor, dryRun });
   return toEurPostings(postings, { currency, rateX10000 });
@@ -82,14 +82,7 @@ export function make(program) {
     .description('post a draft entry')
     .requiredOption('--id <id>', 'entry id')
     .option('--dry-run', 'show the plan without writing anything')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        postAction(ctx, opts);
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx) => postAction(ctx, opts)));
 
   entry
     .command('reverse')
@@ -97,14 +90,7 @@ export function make(program) {
     .requiredOption('--id <id>', 'entry id')
     .option('--reason <text>', 'reason for the reversal')
     .option('--dry-run', 'show the plan without writing anything')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        reverseAction(ctx, opts);
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx) => reverseAction(ctx, opts)));
 
   entry
     .command('list')
@@ -113,27 +99,13 @@ export function make(program) {
     .option('--date-from <yyyy-mm-dd>', 'earliest date (inclusive)')
     .option('--date-to <yyyy-mm-dd>', 'latest date (inclusive)')
     .option('--limit <n>', 'max rows', '100')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        listAction(ctx, opts);
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx) => listAction(ctx, opts)));
 
   entry
     .command('show')
     .description('show one entry with its postings')
     .requiredOption('--id <id>', 'entry id')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        showAction(ctx, opts);
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx) => showAction(ctx, opts)));
 }
 
 function collect(value, previous) {
@@ -149,10 +121,10 @@ async function addAction(ctx, opts) {
     // branch echoed garbage dates/unbalanced postings as ok:true
     validateDate(opts.date);
     if (!opts.desc || !String(opts.desc).trim()) {
-      throw Object.assign(new Error('description is required'), { code: 'INVALID_DESCRIPTION' });
+      throw cliError('INVALID_DESCRIPTION', 'description is required');
     }
     if (postings.length < 2) {
-      throw Object.assign(new Error('an entry needs at least 2 postings'), { code: 'TOO_FEW_POSTINGS' });
+      throw cliError('TOO_FEW_POSTINGS', 'an entry needs at least 2 postings');
     }
     const db = existsSync(ctx.dbPath) ? openDb(ctx.dbPath) : null;
     let converted = postings;
@@ -174,7 +146,7 @@ async function addAction(ctx, opts) {
     // entries the raw specs sum in the foreign currency
     const sum = converted.reduce((s, p) => s + p.amountCents, 0);
     if (sum !== 0) {
-      throw Object.assign(new Error(`postings do not sum to zero (sum = ${sum} cents)`), { code: 'UNBALANCED' });
+      throw cliError('UNBALANCED', `postings do not sum to zero (sum = ${sum} cents)`);
     }
     output(ctx, {
       action: 'create journal entry',
@@ -225,7 +197,7 @@ function postAction(ctx, opts) {
   const db = ensureDb(ctx);
   try {
     const entry = getEntry(db, opts.id);
-    if (!entry) throw Object.assign(new Error(`entry ${opts.id} does not exist`), { code: 'NOT_FOUND' });
+    if (!entry) throw cliError('NOT_FOUND', `entry ${opts.id} does not exist`);
     // state validation BEFORE the dry-run branch — a green plan for an
     // already-posted/reversed entry made agents execute into an error
     if (entry.state !== 'draft') {
@@ -258,7 +230,7 @@ function reverseAction(ctx, opts) {
   const db = ensureDb(ctx);
   try {
     const entry = getEntry(db, opts.id);
-    if (!entry) throw Object.assign(new Error(`entry ${opts.id} does not exist`), { code: 'NOT_FOUND' });
+    if (!entry) throw cliError('NOT_FOUND', `entry ${opts.id} does not exist`);
     // state validation BEFORE the dry-run branch — the reversal plan was
     // shown even for drafts (NOT_POSTED) and already-reversed entries
     if (entry.state !== 'posted') {
@@ -274,7 +246,7 @@ function reverseAction(ctx, opts) {
       "SELECT COUNT(*) AS c FROM journal_entries WHERE reversed_from_id = ? AND state = 'posted'",
     ).get(Number(opts.id));
     if (existingReversal.c > 0) {
-      throw Object.assign(new Error(`entry ${opts.id} is already reversed`), { code: 'ALREADY_REVERSED' });
+      throw cliError('ALREADY_REVERSED', `entry ${opts.id} is already reversed`);
     }
     if (ctx.dryRun) {
       output(ctx, {
@@ -333,7 +305,7 @@ function showAction(ctx, opts) {
   const db = ensureDb(ctx);
   try {
     const entry = getEntry(db, opts.id);
-    if (!entry) throw Object.assign(new Error(`entry ${opts.id} does not exist`), { code: 'NOT_FOUND' });
+    if (!entry) throw cliError('NOT_FOUND', `entry ${opts.id} does not exist`);
     output(ctx, serializeEntry(entry), renderEntry);
   } finally {
     db.close();

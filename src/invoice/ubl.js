@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -31,6 +31,16 @@ function moneyAmount(cents, currency = 'EUR') {
 }
 
 // UN/ECE Rec 20 unit codes for the quantity units we support (C62 = unit/one)
+// EN 16931 VAT category for a bukio VAT code: AE reverse charge (R/RE),
+// Z zero-rated (@0), E exempt (@V vrijgesteld / @M margin / no code),
+// S standard (any other code).
+export function vatCategory(code) {
+  return (code === 'R' || code === 'RE') ? 'AE'
+    : code === '0' ? 'Z'
+      : (code === 'V' || code === 'M') ? 'E'
+        : (code ? 'S' : 'E');
+}
+
 const UNIT_CODE_MAP = {
   h: 'HUR', day: 'DAY', month: 'MON', unit: 'C62',
   session: 'C62', km: 'KMT', kg: 'KGM', project: 'C62',
@@ -126,16 +136,13 @@ function buildPeppolBis30(db, invoice, profile) {
   const { groups, net_cents, vat_cents, gross_cents, discount_cents, net_before_cents } =
     computeInvoiceTotals(invoice.lines, invoice.discount_type, invoice.discount_value);
 
-  const categoryOf = (code) => (code === 'R' || code === 'RE') ? 'AE'
-    : code === '0' ? 'Z'
-      : (code === 'V' || code === 'M') ? 'E'
-        : (code ? 'S' : 'E');
+  // vatCategory(code) is the module-level helper below
 
   // one TaxSubtotal per (category, rate) — merge groups that share both
   const subtotalMap = new Map();
   for (const g of groups) {
     if (g.discountedNet === 0) continue;
-    const cat = categoryOf(g.code);
+    const cat = vatCategory(g.code);
     const key = `${cat}|${g.rateBp}`;
     if (!subtotalMap.has(key)) subtotalMap.set(key, { cat, rateBp: g.rateBp, baseCents: 0, vatCents: 0 });
     const s = subtotalMap.get(key);
@@ -197,14 +204,13 @@ function buildPeppolBis30(db, invoice, profile) {
   const linesXml = invoice.lines.map((l, i) => {
     // EN 16931 category: AE reverse charge, S standard, Z zero-rated (@0),
     // E exempt (@V vrijgesteld / @M margin / no code)
-    const category = (l.vat_code === 'R' || l.vat_code === 'RE') ? 'AE'
-      : l.vat_code === '0' ? 'Z'
-        : (l.vat_code === 'V' || l.vat_code === 'M') ? 'E'
-          : (l.vat_code ? 'S' : 'E');
+    const category = vatCategory(l.vat_code);
     // line-level percent must match the TaxSubtotal: AE falls back to the
     // PROFILE standard rate (a hardcoded 21.00 broke reverse-charge lines in
     // every non-NL market — EN 16931 BR-S-09-type inconsistency)
-    const percent = (l.vat_code === 'R' || l.vat_code === 'RE') ? (l.vat_rate_bp > 0 ? (l.vat_rate_bp / 100).toFixed(2) : (profile.tax.standardRateBp / 100).toFixed(2)) : (l.vat_rate_bp / 100).toFixed(2);
+    const percent = vatCategory(l.vat_code) === 'AE' && l.vat_rate_bp <= 0
+      ? (profile.tax.standardRateBp / 100).toFixed(2)
+      : (l.vat_rate_bp / 100).toFixed(2);
     const unitCode = UNIT_CODE_MAP[l.unit] ?? 'C62';
     // Peppol BIS 3.0: credit notes use cac:CreditNoteLine +
     // cbc:CreditNoteLineQuantity, invoices use cac:InvoiceLine +

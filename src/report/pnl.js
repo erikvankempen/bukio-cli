@@ -1,10 +1,11 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
 
 // Winst- en verliesrekening (profit & loss) for a period, grouped by RGS hoofdgroep.
+import { validateLabeledDate } from '../core/dates.js';
 import { rgsLabel } from '../core/chart.js';
 
 // Display order: revenue first, then costs.
@@ -18,19 +19,9 @@ const PNL_GROUPS = ['WOMZ.80', 'WOVB.82', 'WKPR.70', 'WPER.40', 'WAFS.41', 'WBED
 export function pnl(db, { from, to }) {
   // a garbage year builds ranges like 'abc-01-01' — reject before the query
   // (same class as the exportXaf/jaarrekening year fix)
-  for (const [label, v] of [['from', from], ['to', to]]) {
-    if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
-      const e = new Error(`'${label}' '${v}' must be YYYY-MM-DD`);
-      e.code = 'INVALID_DATE';
-      throw e;
-    }
-    const d = new Date(`${v}T00:00:00Z`);
-    if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== v) {
-      const e = new Error(`'${label}' '${v}' is not a valid calendar date`);
-      e.code = 'INVALID_DATE';
-      throw e;
-    }
-  }
+    // a garbage year builds ranges like 'abc-01-01' — reject before the query
+    // (same class as the exportXaf/jaarrekening year fix)
+  for (const [label, v] of [['from', from], ['to', to]]) validateLabeledDate(v, label);
   const rows = db.prepare(`
     SELECT a.id, a.code, a.name, a.type, a.taxonomy_code,
       COALESCE(SUM(p.amount_cents), 0) AS net_cents

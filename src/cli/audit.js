@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -10,7 +10,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { list, verifyTrail } from '../audit/index.js';
 import { toCsv, writeXlsx } from '../report/export.js';
-import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
 
 function auditColumns() {
   return [
@@ -44,106 +44,86 @@ export function make(program) {
     .option('--format <format>', 'json|csv|xlsx|human (default: json with --json, else human)')
     .option('--out <path>', 'output file (csv/xlsx)');
   audit
-    .action(async (opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const rows = list(db, {
-            since: opts.since || null,
-            actor: opts.by || null,
-            limit: Number(opts.limit),
-          });
-          const format = opts.format || (ctx.json ? 'json' : 'human');
-          if (format === 'json') {
-            // --format json must print JSON even without the global --json
-            // (output() with an empty render would print nothing)
-            console.log(JSON.stringify({ ok: true, data: { entries: rows } }, null, 2));
-            return;
-          }
-          if (format === 'csv') {
-            const csv = toCsv(rows.map(auditRow), auditColumns());
-            if (opts.out) {
-              mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
-              writeFileSync(opts.out, csv);
-              console.log(`wrote ${opts.out}`);
-            } else {
-              process.stdout.write(csv);
-            }
-            return;
-          }
-          if (format === 'xlsx') {
-            if (!opts.out) {
-              const e = new Error('--out <path> is required for xlsx output');
-              e.code = 'OUT_REQUIRED';
-              throw e;
-            }
-            mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
-            await writeXlsx(opts.out, [{
-              name: 'Audit log',
-              columns: auditColumns().map((c) => ({ header: c.label, key: c.key })),
-              rows: rows.map(auditRow),
-            }]);
-            console.log(`wrote ${opts.out}`);
-            return;
-          }
-          output(ctx, { entries: rows }, (d) => {
-            table(d.entries, [
-              { key: 'id', label: '#' },
-              { key: 'ts', label: 'timestamp' },
-              { key: 'actor', label: 'actor' },
-              { key: 'action', label: 'action' },
-              { key: 'command', label: 'command' },
-              { key: 'outcome', label: 'outcome' },
-            ]);
-          });
-        } finally {
-          db.close();
+    .action((opts, command) => withDb(command, async (ctx, db) => {
+        const rows = list(db, {
+          since: opts.since || null,
+          actor: opts.by || null,
+          limit: Number(opts.limit),
+        });
+        const format = opts.format || (ctx.json ? 'json' : 'human');
+        if (format === 'json') {
+          // --format json must print JSON even without the global --json
+          // (output() with an empty render would print nothing)
+          console.log(JSON.stringify({ ok: true, data: { entries: rows } }, null, 2));
+          return;
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        if (format === 'csv') {
+          const csv = toCsv(rows.map(auditRow), auditColumns());
+          if (opts.out) {
+            mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
+            writeFileSync(opts.out, csv);
+            console.log(`wrote ${opts.out}`);
+          } else {
+            process.stdout.write(csv);
+          }
+          return;
+        }
+        if (format === 'xlsx') {
+          if (!opts.out) {
+            const e = new Error('--out <path> is required for xlsx output');
+            e.code = 'OUT_REQUIRED';
+            throw e;
+          }
+          mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
+          await writeXlsx(opts.out, [{
+            name: 'Audit log',
+            columns: auditColumns().map((c) => ({ header: c.label, key: c.key })),
+            rows: rows.map(auditRow),
+          }]);
+          console.log(`wrote ${opts.out}`);
+          return;
+        }
+        output(ctx, { entries: rows }, (d) => {
+          table(d.entries, [
+            { key: 'id', label: '#' },
+            { key: 'ts', label: 'timestamp' },
+            { key: 'actor', label: 'actor' },
+            { key: 'action', label: 'action' },
+            { key: 'command', label: 'command' },
+            { key: 'outcome', label: 'outcome' },
+          ]);
+        });
+    }));
 
   audit
     .command('verify')
     .description('re-verify the signed audit trail against the company registry (exit 1 when tampered/invalid/unknown-key rows exist)')
     .option('--since <iso-ts>', 'only rows at or after this timestamp')
     .option('--limit <n>', 'check only the newest N rows')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const { rows, summary } = verifyTrail(db, {
-            since: opts.since || null,
-            limit: opts.limit ? Number(opts.limit) : null,
-          });
-          output(ctx, { summary, rows }, (d) => {
-            console.log(
-              `audit verify: ${d.summary.total} rows — ${d.summary.ok} ok, ${d.summary.unsigned} unsigned, `
-              + `${d.summary.revoked} revoked, ${d.summary.tampered} tampered, `
-              + `${d.summary.invalid_signature} invalid signature, ${d.summary.unknown_key} unknown key`,
-            );
-            const problems = d.rows.filter((r) => !['ok', 'unsigned'].includes(r.status));
-            if (problems.length) {
-              console.log('problem rows:');
-              table(problems, [
-                { key: 'id', label: '#' },
-                { key: 'ts', label: 'timestamp' },
-                { key: 'actor', label: 'actor' },
-                { key: 'action', label: 'action' },
-                { key: 'status', label: 'status' },
-              ]);
-            }
-          });
-          const bad = summary.tampered + summary.invalid_signature + summary.unknown_key;
-          if (bad > 0) process.exitCode = 1;
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const { rows, summary } = verifyTrail(db, {
+          since: opts.since || null,
+          limit: opts.limit ? Number(opts.limit) : null,
+        });
+        output(ctx, { summary, rows }, (d) => {
+          console.log(
+            `audit verify: ${d.summary.total} rows — ${d.summary.ok} ok, ${d.summary.unsigned} unsigned, `
+            + `${d.summary.revoked} revoked, ${d.summary.tampered} tampered, `
+            + `${d.summary.invalid_signature} invalid signature, ${d.summary.unknown_key} unknown key`,
+          );
+          const problems = d.rows.filter((r) => !['ok', 'unsigned'].includes(r.status));
+          if (problems.length) {
+            console.log('problem rows:');
+            table(problems, [
+              { key: 'id', label: '#' },
+              { key: 'ts', label: 'timestamp' },
+              { key: 'actor', label: 'actor' },
+              { key: 'action', label: 'action' },
+              { key: 'status', label: 'status' },
+            ]);
+          }
+        });
+        const bad = summary.tampered + summary.invalid_signature + summary.unknown_key;
+        if (bad > 0) process.exitCode = 1;
+    }));
 }

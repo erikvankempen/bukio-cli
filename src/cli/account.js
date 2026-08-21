@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -10,7 +10,7 @@ import {
   createAccount, deactivateAccount, getAccountByCode, importChartCsv,
   listAccounts, reactivateAccount, readChartCsvFile, validateAccount,
 } from '../core/accounts.js';
-import { makeCtx, output, fail, ensureDb, table } from './util.js';
+import { makeCtx, output, fail, ensureDb, table, withDb, cliError } from './util.js';
 import { record } from '../audit/index.js';
 
 function serializeAccount(a) {
@@ -85,119 +85,79 @@ export function make(program) {
     .description('list accounts')
     .option('--type <type>', 'filter by type')
     .option('--include-inactive', 'include inactive accounts')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const rows = listAccounts(db, { type: opts.type || null, includeInactive: Boolean(opts.includeInactive) });
-          const data = { accounts: rows.map(serializeAccount) };
-          output(ctx, data, (d) => {
-            table(d.accounts, [
-              { key: 'code', label: 'code' },
-              { key: 'name', label: 'name' },
-              { key: 'type', label: 'type' },
-              { key: 'normal_balance', label: 'bal' },
-              { key: 'taxonomy_code', label: 'rgs' },
-              { key: 'active', label: 'active' },
-            ]);
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const rows = listAccounts(db, { type: opts.type || null, includeInactive: Boolean(opts.includeInactive) });
+        const data = { accounts: rows.map(serializeAccount) };
+        output(ctx, data, (d) => {
+          table(d.accounts, [
+            { key: 'code', label: 'code' },
+            { key: 'name', label: 'name' },
+            { key: 'type', label: 'type' },
+            { key: 'normal_balance', label: 'bal' },
+            { key: 'taxonomy_code', label: 'rgs' },
+            { key: 'active', label: 'active' },
+          ]);
+        });
+    }));
 
   account
     .command('show')
     .description('show one account')
     .requiredOption('--code <code>', 'account code')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const a = getAccountByCode(db, opts.code);
-          if (!a) throw Object.assign(new Error(`account ${opts.code} does not exist`), { code: 'ACCOUNT_NOT_FOUND' });
-          output(ctx, serializeAccount(a), (row) => {
-            console.log(`${row.code}  ${row.name}`);
-            console.log(`type: ${row.type}  normal balance: ${row.normal_balance}  rgs: ${row.taxonomy_code ?? '-'}  active: ${row.active}`);
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const a = getAccountByCode(db, opts.code);
+        if (!a) throw cliError('ACCOUNT_NOT_FOUND', `account ${opts.code} does not exist`);
+        output(ctx, serializeAccount(a), (row) => {
+          console.log(`${row.code}  ${row.name}`);
+          console.log(`type: ${row.type}  normal balance: ${row.normal_balance}  rgs: ${row.taxonomy_code ?? '-'}  active: ${row.active}`);
+        });
+    }));
 
   account
     .command('deactivate')
     .description('deactivate an account (blocks new postings; history stays)')
     .requiredOption('--code <code>', 'account code')
     .option('--dry-run', 'show the plan without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const a = getAccountByCode(db, opts.code);
-          if (!a) throw Object.assign(new Error(`account ${opts.code} does not exist`), { code: 'ACCOUNT_NOT_FOUND' });
-          if (ctx.dryRun) {
-            output(ctx, { action: 'deactivate account', code: opts.code, current: a.active ? 'active' : 'inactive', dryRun: true }, (d) => {
-              console.log(`plan: deactivate account ${d.code} (${d.current} -> inactive)`);
-              console.log('(dry run — nothing written)');
-            });
-            return;
-          }
-          const updated = deactivateAccount(db, opts.code);
-          record(db, {
-            actor: ctx.actor, action: 'account.deactivate', command: 'account deactivate',
-            args: { code: opts.code }, outcome: 'ok',
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const a = getAccountByCode(db, opts.code);
+        if (!a) throw cliError('ACCOUNT_NOT_FOUND', `account ${opts.code} does not exist`);
+        if (ctx.dryRun) {
+          output(ctx, { action: 'deactivate account', code: opts.code, current: a.active ? 'active' : 'inactive', dryRun: true }, (d) => {
+            console.log(`plan: deactivate account ${d.code} (${d.current} -> inactive)`);
+            console.log('(dry run — nothing written)');
           });
-          output(ctx, serializeAccount(updated), (d) => console.log(`deactivated account ${d.code} ${d.name}`));
-        } finally {
-          db.close();
+          return;
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        const updated = deactivateAccount(db, opts.code);
+        record(db, {
+          actor: ctx.actor, action: 'account.deactivate', command: 'account deactivate',
+          args: { code: opts.code }, outcome: 'ok',
+        });
+        output(ctx, serializeAccount(updated), (d) => console.log(`deactivated account ${d.code} ${d.name}`));
+    }));
 
   account
     .command('reactivate')
     .description('reactivate an account')
     .requiredOption('--code <code>', 'account code')
     .option('--dry-run', 'show the plan without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const updated = reactivateAccount(db, opts.code, { dryRun: ctx.dryRun });
-          if (!ctx.dryRun) {
-            record(db, {
-              actor: ctx.actor, action: 'account.reactivate', command: 'account reactivate',
-              args: { code: opts.code }, outcome: 'ok',
-            });
-          }
-          output(ctx, { account: updated }, (d) => {
-            if (d.account.dryRun) {
-              console.log(`plan: reactivate account ${d.account.code} (${d.account.from} -> ${d.account.to})`);
-              console.log('(dry run — nothing written)');
-              return;
-            }
-            console.log(`reactivated account ${d.account.code} ${d.account.name}`);
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const updated = reactivateAccount(db, opts.code, { dryRun: ctx.dryRun });
+        if (!ctx.dryRun) {
+          record(db, {
+            actor: ctx.actor, action: 'account.reactivate', command: 'account reactivate',
+            args: { code: opts.code }, outcome: 'ok',
           });
-        } finally {
-          db.close();
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        output(ctx, { account: updated }, (d) => {
+          if (d.account.dryRun) {
+            console.log(`plan: reactivate account ${d.account.code} (${d.account.from} -> ${d.account.to})`);
+            console.log('(dry run — nothing written)');
+            return;
+          }
+          console.log(`reactivated account ${d.account.code} ${d.account.name}`);
+        });
+    }));
 
   account
     .command('import')

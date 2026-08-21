@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -949,7 +949,7 @@ function dispatch(db, ctx, msg) {
       return Promise.resolve(rpcResponse(id, {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: 'bukio-cli', version: '0.16.2' },
+        serverInfo: { name: 'bukio-cli', version: '0.16.3' },
       }));
     case 'notifications/initialized':
     case 'initialized':

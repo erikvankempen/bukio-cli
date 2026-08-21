@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -22,11 +22,10 @@
 import { createEntry, postEntry } from '../core/entries.js';
 import { getAccountByCode } from '../core/accounts.js';
 import { record } from '../audit/index.js';
+import { makeError } from '../core/errors.js';
 
 export function assetsError(code, message) {
-  const err = new Error(message);
-  err.code = code;
-  return err;
+  return makeError(code, message);
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;

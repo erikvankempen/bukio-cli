@@ -1,5 +1,5 @@
 /**
- * bukio-cli — agent-first double-entry bookkeeping for SMEs across eleven jurisdictions.
+ * bukio-cli — agent-first double-entry bookkeeping for SMEs across thirty-one jurisdictions.
  * Copyright (c) 2026 Erik van Kempen.
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -12,7 +12,7 @@ import { listAccounts, seedDefaultChart } from '../core/accounts.js';
 import { record } from '../audit/index.js';
 import { enableVatModule } from '../vat/index.js';
 import { isValidIban } from '../core/iban.js';
-import { dbError, ensureDb, makeCtx, output, fail } from './util.js';
+import { dbError, ensureDb, makeCtx, output, fail, withDb } from './util.js';
 import { getProfile } from '../jurisdictions/index.js';
 
 const LEGAL_FORMS = ['eenmanszaak', 'vof', 'bv', 'nv', 'stichting', 'vereniging'];
@@ -37,6 +37,8 @@ export function make(program) {
     .option('--kor', 'small business scheme (KOR) — implies --vat off')
     .option('--fiscal-year-end <mm-dd>', "fiscal year end (default: the country profile's)")
     .option('--dry-run', 'show the plan without writing anything')
+    // NB: not withDb — init manages its own database lifecycle inside initAction
+    // (--dry-run must not create or open anything on disk)
     .action((opts, command) => {
       const ctx = makeCtx(command);
       try {
