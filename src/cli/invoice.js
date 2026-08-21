@@ -16,7 +16,7 @@ import { invoiceToPdf } from '../invoice/pdf.js';
 import { invoiceToUbl } from '../invoice/ubl.js';
 import { sendPeppolInvoice } from '../invoice/peppol.js';
 import { emailInvoice } from '../invoice/email.js';
-import { ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, withDb, cliError } from './util.js';
 import { emitReport } from './report.js';
 
 function fmtLine(l) {
@@ -199,7 +199,7 @@ export function make(program) {
     .option('--dry-run', 'validate without writing')
     .action((opts, command) => withDb(command, (ctx, db) => {
         if (opts.discountPct !== undefined && opts.discountAmount !== undefined) {
-          throw Object.assign(new Error('pass either --discount-pct or --discount-amount, not both'), { code: 'INVALID_DISCOUNT' });
+          throw cliError('INVALID_DISCOUNT', 'pass either --discount-pct or --discount-amount, not both');
         }
         const discountType = opts.discountPct !== undefined ? 'pct'
           : opts.discountAmount !== undefined ? 'amount' : null;
@@ -301,7 +301,7 @@ export function make(program) {
         const locale = resolveLocale(ctx, db);
         try {
           const inv = getInvoice(db, opts.id);
-          if (!inv) throw Object.assign(new Error(`invoice ${opts.id} does not exist`), { code: 'NOT_FOUND' });
+          if (!inv) throw cliError('NOT_FOUND', `invoice ${opts.id} does not exist`);
           output(ctx, { invoice: fmtInvoice(inv) }, (d) => {
             const i = d.invoice;
             console.log(`${i.invoice_number ?? t('status.draft', {}, locale)} [${i.status}] ${i.date} — ${i.contact_name}`);
@@ -325,8 +325,8 @@ export function make(program) {
     .option('--out <path>', 'output path (default <number>.pdf in cwd)')
     .action((opts, command) => withDb(command, async (ctx, db) => {
         const inv = getInvoice(db, opts.id);
-        if (!inv) throw Object.assign(new Error(`invoice ${opts.id} does not exist`), { code: 'NOT_FOUND' });
-        if (!inv.invoice_number) throw Object.assign(new Error('finalize the invoice first — a draft has no number yet'), { code: 'NOT_FINALIZED' });
+        if (!inv) throw cliError('NOT_FOUND', `invoice ${opts.id} does not exist`);
+        if (!inv.invoice_number) throw cliError('NOT_FINALIZED', 'finalize the invoice first — a draft has no number yet');
         const outPath = opts.out ?? `${inv.invoice_number}.pdf`;
         const result = await invoiceToPdf(db, inv, { outPath });
         output(ctx, { path: result.path, bytes: result.bytes }, (d) => console.log(`wrote ${d.path} (${d.bytes} bytes)`));
@@ -339,8 +339,8 @@ export function make(program) {
     .option('--out <path>', 'output path (default <number>.xml in cwd)')
     .action((opts, command) => withDb(command, (ctx, db) => {
         const inv = getInvoice(db, opts.id);
-        if (!inv) throw Object.assign(new Error(`invoice ${opts.id} does not exist`), { code: 'NOT_FOUND' });
-        if (!inv.invoice_number) throw Object.assign(new Error('finalize the invoice first'), { code: 'NOT_FINALIZED' });
+        if (!inv) throw cliError('NOT_FOUND', `invoice ${opts.id} does not exist`);
+        if (!inv.invoice_number) throw cliError('NOT_FINALIZED', 'finalize the invoice first');
         const xml = invoiceToUbl(db, inv);
         const outPath = opts.out ?? `${inv.invoice_number}.xml`;
         writeFileSync(outPath, xml);
@@ -383,8 +383,8 @@ export function make(program) {
     .option('--dry-run', 'validate config + payload without sending')
     .action((opts, command) => withDb(command, async (ctx, db) => {
         const inv = getInvoice(db, opts.id);
-        if (!inv) throw Object.assign(new Error(`invoice ${opts.id} does not exist`), { code: 'NOT_FOUND' });
-        if (!inv.invoice_number) throw Object.assign(new Error('finalize the invoice first'), { code: 'NOT_FINALIZED' });
+        if (!inv) throw cliError('NOT_FOUND', `invoice ${opts.id} does not exist`);
+        if (!inv.invoice_number) throw cliError('NOT_FINALIZED', 'finalize the invoice first');
         const result = await sendPeppolInvoice(db, inv, { endpoint: opts.endpoint ?? null, dryRun: ctx.dryRun });
         output(ctx, result, (d) => {
           if (d.dryRun) {
@@ -406,7 +406,7 @@ export function make(program) {
     .option('--dry-run', 'validate the payment without recording it')
     .action((opts, command) => withDb(command, (ctx, db) => {
         const inv = getInvoice(db, opts.id);
-        if (!inv) throw Object.assign(new Error(`invoice ${opts.id} does not exist`), { code: 'NOT_FOUND' });
+        if (!inv) throw cliError('NOT_FOUND', `invoice ${opts.id} does not exist`);
         // money is integer cents — parseAmount rejects '12,34' (Dutch comma
         // would silently parse as 12.00 via parseFloat), '1e3' and garbage
         const amountCents = opts.amount

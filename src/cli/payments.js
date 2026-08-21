@@ -15,7 +15,7 @@ import {
   exportPaymentBatch, deletePaymentBatch, listPaymentBatches, getPaymentBatch,
   addMandate, listMandates, removeMandate,
 } from '../payments/index.js';
-import { ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, withDb, cliError } from './util.js';
 
 const parseLinesSpec = (spec) => String(spec ?? '').split(';').map((s) => s.trim()).filter(Boolean).map((s) => {
   const parts = s.split(':');
@@ -156,7 +156,7 @@ export function make(program) {
           const ids = payableIds.length ? payableIds : eligible.map((p) => p.id);
           for (const id of ids) {
             if (!eligible.some((x) => x.id === id)) {
-              throw Object.assign(new Error(`payable ${id} is not unpaid+${method.replace('_', '-')} (already batched or wrong payment term)`), { code: 'PAYABLE_NOT_ELIGIBLE' });
+              throw cliError('PAYABLE_NOT_ELIGIBLE', `payable ${id} is not unpaid+${method.replace('_', '-')} (already batched or wrong payment term)`);
             }
           }
           res = createPaymentBatch(db, { date: opts.date, debitIban: opts.fromIban, lines, payableIds: ids, kind, actor: ctx.actor, dryRun: opts.dryRun });
@@ -194,7 +194,7 @@ export function make(program) {
     .requiredOption('--id <id>', 'batch id')
     .action((opts, command) => withDb(command, (ctx, db) => {
         const b = getPaymentBatch(db, Number(opts.id));
-        if (!b) throw Object.assign(new Error(`batch ${opts.id} does not exist`), { code: 'BATCH_NOT_FOUND' });
+        if (!b) throw cliError('BATCH_NOT_FOUND', `batch ${opts.id} does not exist`);
         output(ctx, { batch: b }, (d) => {
           const x = d.batch;
           console.log(`batch #${x.id} — ${x.batch_date}, status ${x.status}, debit ${x.debit_iban}`);

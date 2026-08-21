@@ -7,7 +7,7 @@
 // bukio fx — foreign currency rates (Phase 5, FR5.X)
 import { setFxRate, listFxRates } from '../fx/index.js';
 import { fetchEcbRate } from '../fx/ecb.js';
-import { ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, withDb, cliError } from './util.js';
 
 export function make(program) {
   const fx = program.command('fx').description('foreign exchange rates');
@@ -21,7 +21,7 @@ export function make(program) {
         const date = opts.date ?? new Date().toISOString().slice(0, 10);
         const r = await fetchEcbRate({ currency: opts.currency, date });
         if (!r) {
-          throw Object.assign(new Error(`no ECB reference rate for ${opts.currency} on/before ${date} (not in the ECB set, or before 1999)`), { code: 'ECB_RATE_NOT_AVAILABLE' });
+          throw cliError('ECB_RATE_NOT_AVAILABLE', `no ECB reference rate for ${opts.currency} on/before ${date} (not in the ECB set, or before 1999)`);
         }
         if (ctx.dryRun) {
           output(ctx, { rate: { currency: opts.currency, date: r.date, rate: (r.rateX10000 / 10000).toFixed(4), source: 'ECB' }, fetched_for: date, dryRun: true }, (d) => {

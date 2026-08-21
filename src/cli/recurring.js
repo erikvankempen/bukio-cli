@@ -11,7 +11,7 @@ import {
   buildDepreciationTemplate, createTemplate, listTemplates, getTemplate,
   previewDue, runDue, setTemplateStatus,
 } from '../recurring/index.js';
-import { ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, withDb, cliError } from './util.js';
 
 const FREQUENCIES = ['monthly', 'quarterly', 'yearly'];
 
@@ -134,7 +134,7 @@ export function make(program) {
     .requiredOption('--id <id>', 'template id')
     .action((opts, command) => withDb(command, (ctx, db) => {
         const tpl = getTemplate(db, opts.id);
-        if (!tpl) throw Object.assign(new Error(`recurring template ${opts.id} does not exist`), { code: 'NOT_FOUND' });
+        if (!tpl) throw cliError('NOT_FOUND', `recurring template ${opts.id} does not exist`);
         output(ctx, { template: fmtTemplate(tpl) }, (d) => {
           console.log(`#${d.template.id} ${d.template.name} [${d.template.status}] — ${d.template.frequency}, day ${d.template.day_of_period}`);
           console.log(`  start ${d.template.start_date}  next ${d.template.next_run_date}  runs ${d.template.runs_done}/${d.template.runs ?? '∞'}`);

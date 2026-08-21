@@ -6,7 +6,7 @@
 
 // bukio item — items catalog: reusable products/services with a quantity
 // unit, unit price, default VAT code and optional revenue account.
-import { ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, withDb, cliError } from './util.js';
 import { parseAmount } from '../core/money.js';
 import { createItem, getItem, listItems, updateItem } from '../items/index.js';
 import { UNIT_CODES } from '../invoice/i18n.js';
@@ -76,7 +76,7 @@ export function make(program) {
     .requiredOption('--id <id>', 'item id')
     .action((opts, command) => withDb(command, (ctx, db) => {
         const row = getItem(db, opts.id);
-        if (!row) throw Object.assign(new Error(`item ${opts.id} does not exist`), { code: 'ITEM_NOT_FOUND' });
+        if (!row) throw cliError('ITEM_NOT_FOUND', `item ${opts.id} does not exist`);
         output(ctx, { item: fmtItem(row) }, (d) => {
           table([d.item], [
             { key: 'id', label: '#' },

@@ -10,7 +10,7 @@ import {
   createAccount, deactivateAccount, getAccountByCode, importChartCsv,
   listAccounts, reactivateAccount, readChartCsvFile, validateAccount,
 } from '../core/accounts.js';
-import { makeCtx, output, fail, ensureDb, table, withDb } from './util.js';
+import { makeCtx, output, fail, ensureDb, table, withDb, cliError } from './util.js';
 import { record } from '../audit/index.js';
 
 function serializeAccount(a) {
@@ -106,7 +106,7 @@ export function make(program) {
     .requiredOption('--code <code>', 'account code')
     .action((opts, command) => withDb(command, (ctx, db) => {
         const a = getAccountByCode(db, opts.code);
-        if (!a) throw Object.assign(new Error(`account ${opts.code} does not exist`), { code: 'ACCOUNT_NOT_FOUND' });
+        if (!a) throw cliError('ACCOUNT_NOT_FOUND', `account ${opts.code} does not exist`);
         output(ctx, serializeAccount(a), (row) => {
           console.log(`${row.code}  ${row.name}`);
           console.log(`type: ${row.type}  normal balance: ${row.normal_balance}  rgs: ${row.taxonomy_code ?? '-'}  active: ${row.active}`);
@@ -120,7 +120,7 @@ export function make(program) {
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => withDb(command, (ctx, db) => {
         const a = getAccountByCode(db, opts.code);
-        if (!a) throw Object.assign(new Error(`account ${opts.code} does not exist`), { code: 'ACCOUNT_NOT_FOUND' });
+        if (!a) throw cliError('ACCOUNT_NOT_FOUND', `account ${opts.code} does not exist`);
         if (ctx.dryRun) {
           output(ctx, { action: 'deactivate account', code: opts.code, current: a.active ? 'active' : 'inactive', dryRun: true }, (d) => {
             console.log(`plan: deactivate account ${d.code} (${d.current} -> inactive)`);

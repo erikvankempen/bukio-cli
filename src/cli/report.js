@@ -16,7 +16,7 @@ import { aging } from '../report/aging.js';
 import { sales } from '../report/sales.js';
 import { toCsv, writeXlsx } from '../report/export.js';
 import { fiscalYearWindow } from '../year-end/index.js';
-import { ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
+import { cliError, ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
 import { t, resolveLocale } from '../i18n/index.js';
 
 function todayIso() {
@@ -45,7 +45,7 @@ export async function emitReport(ctx, opts, data, { csvColumns, csvRows, sheets,
     return;
   }
   if (format === 'xlsx') {
-    if (!opts.out) throw Object.assign(new Error('--out <path> is required for xlsx output'), { code: 'OUT_REQUIRED' });
+    if (!opts.out) throw cliError('OUT_REQUIRED', '--out <path> is required for xlsx output');
     mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
     await writeXlsx(opts.out, sheets(data));
     console.log(`wrote ${opts.out}`);

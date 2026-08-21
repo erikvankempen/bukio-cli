@@ -12,7 +12,7 @@ import {
   vatFile, vatSettle, VAT_FILE_ACCOUNT_DEFAULT, VAT_DIFFERENCE_ACCOUNT_DEFAULT,
 } from '../vat/index.js';
 import { getTransaction, linkTransaction } from '../bank/index.js';
-import { ensureDb, makeCtx, output, fail, table, dbError, withDb } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, dbError, withDb, cliError } from './util.js';
 import { t, resolveLocale } from '../i18n/index.js';
 import { validateDate } from '../core/entries.js';
 
@@ -119,7 +119,7 @@ export function make(program) {
           // precede a failing execute, so check the balance here too
           const sum = expanded.reduce((s, p) => s + p.amountCents, 0);
           if (sum !== 0) {
-            throw Object.assign(new Error(`postings do not sum to zero (sum = ${sum})`), { code: 'UNBALANCED' });
+            throw cliError('UNBALANCED', `postings do not sum to zero (sum = ${sum})`);
           }
           // parity with entry add: createEntry also rejects zero-amount
           // postings (INVALID_AMOUNT_CENTS) — validate them in dry-run

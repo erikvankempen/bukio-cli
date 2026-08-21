@@ -7,7 +7,7 @@
 // bukio company — show the company record, update company details.
 import { t, resolveLocale } from '../i18n/index.js';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { ensureDb, makeCtx, output, fail, table, dbError, withDb } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, dbError, withDb, cliError } from './util.js';
 import { isValidIban } from '../core/iban.js';
 import { record } from '../audit/index.js';
 
@@ -53,12 +53,12 @@ function readLogo(file) {
     bytes = readFileSync(file);
   } catch (err) {
     if (err.code === 'ENOENT') {
-      throw Object.assign(new Error(`logo file '${file}' not found`), { code: 'LOGO_FILE_NOT_FOUND' });
+      throw cliError('LOGO_FILE_NOT_FOUND', `logo file '${file}' not found`);
     }
     throw err;
   }
   if (bytes.length > LOGO_MAX_BYTES) {
-    throw Object.assign(new Error(`logo file is ${bytes.length} bytes — the maximum is ${LOGO_MAX_BYTES}`), { code: 'LOGO_TOO_LARGE' });
+    throw cliError('LOGO_TOO_LARGE', `logo file is ${bytes.length} bytes — the maximum is ${LOGO_MAX_BYTES}`);
   }
   let mime = null;
   if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
@@ -72,7 +72,7 @@ function readLogo(file) {
     if (svgish) mime = 'image/svg+xml';
   }
   if (!mime) {
-    throw Object.assign(new Error('unsupported logo format — use PNG, JPEG or SVG'), { code: 'LOGO_UNSUPPORTED_FORMAT' });
+    throw cliError('LOGO_UNSUPPORTED_FORMAT', 'unsupported logo format — use PNG, JPEG or SVG');
   }
   const dims = logoDimensions(mime, bytes);
   if (dims && (dims.width > LOGO_MAX_DIMENSION || dims.height > LOGO_MAX_DIMENSION)) {
@@ -185,7 +185,7 @@ export function make(program) {
         if (opts.country !== undefined) {
           const want = String(opts.country).trim().toUpperCase();
           if (want !== (row.country ?? 'NL')) {
-            throw Object.assign(new Error(`country is immutable after init — company stays ${row.country ?? 'NL'} (re-init a new DB for another country)`), { code: 'COUNTRY_IMMUTABLE' });
+            throw cliError('COUNTRY_IMMUTABLE', `country is immutable after init — company stays ${row.country ?? 'NL'} (re-init a new DB for another country)`);
           }
         }
         const changes = {};
@@ -196,15 +196,15 @@ export function make(program) {
         if (opts.logo !== undefined) logo = readLogo(opts.logo);
         if (opts.removeLogo) logo = { mime: null, bytes: null };
         if (Object.keys(changes).length === 0 && logo === null) {
-          throw Object.assign(new Error('nothing to update — pass at least one of --name/--registration-id/--tax-id/--iban/--address/--postal-code/--city/--logo/--remove-logo'), { code: 'NOTHING_TO_UPDATE' });
+          throw cliError('NOTHING_TO_UPDATE', 'nothing to update — pass at least one of --name/--registration-id/--tax-id/--iban/--address/--postal-code/--city/--logo/--remove-logo');
         }
         for (const [opt, col, label] of COMPANY_FIELDS) {
           if (changes[col] === '' && col !== 'tax_id') {
-            throw Object.assign(new Error(`${label} cannot be empty`), { code: 'INVALID_VALUE' });
+            throw cliError('INVALID_VALUE', `${label} cannot be empty`);
           }
         }
         if (changes.iban && !isValidIban(changes.iban)) {
-          throw Object.assign(new Error(`invalid IBAN '${changes.iban}'`), { code: 'INVALID_IBAN' });
+          throw cliError('INVALID_IBAN', `invalid IBAN '${changes.iban}'`);
         }
 
         const plan = {
@@ -261,7 +261,7 @@ export function make(program) {
     .requiredOption('--out <file>', 'output file path')
     .action((opts, command) => withDb(command, (ctx, db) => {
         const row = getCompany(db);
-        if (!row?.logo) throw Object.assign(new Error('no logo stored — set one with company update --logo'), { code: 'LOGO_NOT_SET' });
+        if (!row?.logo) throw cliError('LOGO_NOT_SET', 'no logo stored — set one with company update --logo');
         writeFileSync(opts.out, row.logo);
         output(ctx, { out: opts.out, mime: row.logo_mime, bytes: row.logo.length }, (d) => {
           console.log(`logo written: ${d.out} (${d.mime}, ${d.bytes} bytes)`);

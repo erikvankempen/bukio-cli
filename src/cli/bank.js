@@ -15,7 +15,7 @@ import {
 } from '../bank/index.js';
 import { formatAmount } from '../core/money.js';
 import { getAccountByCode } from '../core/accounts.js';
-import { ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, withDb, cliError } from './util.js';
 import { resolveProfile } from '../jurisdictions/index.js';
 
 function parseBankFile(filePath, format, iban, db) {
@@ -30,7 +30,7 @@ function parseBankFile(filePath, format, iban, db) {
     const formatIds = { camt: 'camt.053', csv: 'csv' };
     const formatId = formatIds[fmt] ?? fmt;
     if (!exchange.bankStatementFormats.includes(formatId)) {
-      throw Object.assign(new Error(`bank statement format '${formatId}' is not supported by the jurisdiction profile (exchange.bankStatementFormats: ${exchange.bankStatementFormats.join(', ')})`), { code: 'INVALID_FORMAT' });
+      throw cliError('INVALID_FORMAT', `bank statement format '${formatId}' is not supported by the jurisdiction profile (exchange.bankStatementFormats: ${exchange.bankStatementFormats.join(', ')})`);
     }
   }
   if (fmt === 'camt') {
@@ -39,7 +39,7 @@ function parseBankFile(filePath, format, iban, db) {
   if (fmt === 'csv') {
     return parseBankCsv(content, { defaultIban: iban });
   }
-  throw Object.assign(new Error(`unknown format '${fmt}' (use camt|csv|auto)`), { code: 'INVALID_FORMAT' });
+  throw cliError('INVALID_FORMAT', `unknown format '${fmt}' (use camt|csv|auto)`);
 }
 
 function fmtTx(t) {
@@ -250,14 +250,14 @@ export function make(program) {
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => withDb(command, (ctx, db) => {
         const txRow = getTransaction(db, opts.tx);
-        if (!txRow) throw Object.assign(new Error(`bank transaction ${opts.tx} does not exist`), { code: 'NOT_FOUND' });
+        if (!txRow) throw cliError('NOT_FOUND', `bank transaction ${opts.tx} does not exist`);
         // validate like the execute path BEFORE the dry-run branch — a plan
         // must not look green for an already-matched tx or a bad account
         if (txRow.state !== 'unmatched') {
-          throw Object.assign(new Error(`bank transaction ${opts.tx} is already ${txRow.state}`), { code: 'ALREADY_MATCHED' });
+          throw cliError('ALREADY_MATCHED', `bank transaction ${opts.tx} is already ${txRow.state}`);
         }
         if (getAccountByCode(db, opts.account) == null) {
-          throw Object.assign(new Error(`account ${opts.account} does not exist`), { code: 'ACCOUNT_NOT_FOUND' });
+          throw cliError('ACCOUNT_NOT_FOUND', `account ${opts.account} does not exist`);
         }
         if (ctx.dryRun) {
           output(ctx, {

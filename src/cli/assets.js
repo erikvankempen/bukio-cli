@@ -14,7 +14,7 @@ import {
 } from '../assets/index.js';
 import { formatAmount } from '../core/money.js';
 import { parseImportAmount } from '../import/index.js';
-import { ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, withDb, cliError } from './util.js';
 import { toCsv, writeXlsx } from '../report/export.js';
 import { record } from '../audit/index.js';
 
@@ -177,7 +177,7 @@ export function make(program) {
     .requiredOption('--id <n>', 'asset id')
     .action((opts, command) => withDb(command, (ctx, db) => {
         const asset = getAsset(db, Number(opts.id));
-        if (!asset) throw Object.assign(new Error(`asset ${opts.id} does not exist`), { code: 'ASSET_NOT_FOUND' });
+        if (!asset) throw cliError('ASSET_NOT_FOUND', `asset ${opts.id} does not exist`);
         const runs = db.prepare('SELECT period, amount_cents, entry_id FROM asset_depreciation_runs WHERE asset_id = ? ORDER BY period').all(asset.id);
         const data = { asset, runs };
         output(ctx, data, (d) => {
@@ -244,7 +244,7 @@ export function make(program) {
           return;
         }
         if (format === 'xlsx') {
-          if (!opts.out) throw Object.assign(new Error('--out <path> is required for xlsx output'), { code: 'OUT_REQUIRED' });
+          if (!opts.out) throw cliError('OUT_REQUIRED', '--out <path> is required for xlsx output');
           mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
           await writeXlsx(opts.out, sheets(data));
           console.log(`wrote ${opts.out}`);
@@ -301,8 +301,8 @@ export function make(program) {
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => withDb(command, (ctx, db) => {
         const asset = getAsset(db, Number(opts.id));
-        if (!asset) throw Object.assign(new Error(`asset ${opts.id} does not exist`), { code: 'ASSET_NOT_FOUND' });
-        if (asset.status !== 'active') throw Object.assign(new Error(`asset ${opts.id} is ${asset.status}, only active assets can be paused`), { code: 'INVALID_STATUS' });
+        if (!asset) throw cliError('ASSET_NOT_FOUND', `asset ${opts.id} does not exist`);
+        if (asset.status !== 'active') throw cliError('INVALID_STATUS', `asset ${opts.id} is ${asset.status}, only active assets can be paused`);
         if (ctx.dryRun) {
           output(ctx, { action: 'assets.pause', asset_id: asset.id, name: asset.name, from: asset.status, to: 'paused', dryRun: true }, (d) => {
             console.log(`plan: pause asset #${d.asset_id} '${d.name}' (${d.from} -> ${d.to})`);
@@ -322,8 +322,8 @@ export function make(program) {
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => withDb(command, (ctx, db) => {
         const asset = getAsset(db, Number(opts.id));
-        if (!asset) throw Object.assign(new Error(`asset ${opts.id} does not exist`), { code: 'ASSET_NOT_FOUND' });
-        if (asset.status !== 'paused') throw Object.assign(new Error(`asset ${opts.id} is ${asset.status}, only paused assets can be resumed`), { code: 'INVALID_STATUS' });
+        if (!asset) throw cliError('ASSET_NOT_FOUND', `asset ${opts.id} does not exist`);
+        if (asset.status !== 'paused') throw cliError('INVALID_STATUS', `asset ${opts.id} is ${asset.status}, only paused assets can be resumed`);
         if (ctx.dryRun) {
           output(ctx, { action: 'assets.resume', asset_id: asset.id, name: asset.name, from: asset.status, to: 'active', dryRun: true }, (d) => {
             console.log(`plan: resume asset #${d.asset_id} '${d.name}' (${d.from} -> ${d.to})`);

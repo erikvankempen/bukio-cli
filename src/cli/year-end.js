@@ -10,7 +10,7 @@ import { yearEndClose, yearEndStatus } from '../year-end/index.js';
 import { jaarrekening } from '../report/jaarrekening.js';
 import { jaarrekeningToPdf } from '../report/jaarrekening-pdf.js';
 import { icpReadout } from '../icp/index.js';
-import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, cliError } from './util.js';
 import { t, resolveLocale } from '../i18n/index.js';
 
 export function make(program) {
@@ -111,7 +111,7 @@ export function make(program) {
             });
           return;
         }
-        throw Object.assign(new Error(`unknown format '${opts.format}' (use json|pdf|xlsx)`), { code: 'INVALID_FORMAT' });
+        throw cliError('INVALID_FORMAT', `unknown format '${opts.format}' (use json|pdf|xlsx)`);
       } finally {
         db.close();
       }
