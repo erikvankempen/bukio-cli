@@ -11,11 +11,10 @@
 import { parsePeriod } from '../vat/index.js';
 import { formatAmount } from '../core/money.js';
 import { getInvoice, computeInvoiceTotals } from '../invoice/index.js';
+import { makeError } from '../core/errors.js';
 
 export function icpError(code, message) {
-  const e = new Error(message);
-  e.code = code;
-  return e;
+  return makeError(code, message);
 }
 
 export function icpReadout(db, { period }) {

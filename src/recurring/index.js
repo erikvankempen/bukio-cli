@@ -14,11 +14,10 @@ import { record } from '../audit/index.js';
 import { expandVatPostings, parseVatPostingSpecs } from '../vat/index.js';
 import { createInvoice, getContact, parseItemSpec, validateInvoiceLines } from '../invoice/index.js';
 import { getItem } from '../items/index.js';
+import { makeError } from '../core/errors.js';
 
 export function recurringError(code, message) {
-  const e = new Error(message);
-  e.code = code;
-  return e;
+  return makeError(code, message);
 }
 
 export const FREQUENCIES = ['monthly', 'quarterly', 'yearly'];

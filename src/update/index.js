@@ -15,6 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { record } from '../audit/index.js';
+import { makeError } from '../core/errors.js';
 
 // Anchored: the official remote is github.com/erikvankempen/bukio-cli with an
 // optional scheme (https://) or scp-like user@ prefix (git@github.com:...).
@@ -24,9 +25,7 @@ import { record } from '../audit/index.js';
 export const OFFICIAL_REMOTE = /^(?:[a-z][a-z0-9+.-]*:\/\/)?(?:[^@\s/]+@)?github\.com[:/]erikvankempen\/bukio-cli(?:\.git)?$/i;
 
 function updateError(code, message) {
-  const e = new Error(message);
-  e.code = code;
-  return e;
+  return makeError(code, message);
 }
 
 function git(repoPath, args) {

@@ -11,11 +11,10 @@
 //   and the filings registry (ICP, JAARREKENING).
 import { record } from '../audit/index.js';
 import { resolveProfile } from '../jurisdictions/index.js';
+import { makeError } from '../core/errors.js';
 
 export function complianceError(code, message) {
-  const e = new Error(message);
-  e.code = code;
-  return e;
+  return makeError(code, message);
 }
 
 export function quarterDeadline(period) {

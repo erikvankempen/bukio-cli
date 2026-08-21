@@ -16,11 +16,10 @@ import { createAccount, getAccountByCode } from '../core/accounts.js';
 import { resolveProfile } from '../jurisdictions/index.js';
 import { createEntry, postEntry } from '../core/entries.js';
 import { record } from '../audit/index.js';
+import { makeError } from '../core/errors.js';
 
 export function yearEndError(code, message) {
-  const e = new Error(message);
-  e.code = code;
-  return e;
+  return makeError(code, message);
 }
 
 /** Net per income/expense account in the year (posted, excluding closing). */
