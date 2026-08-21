@@ -7,7 +7,7 @@
 // bukio company — show the company record, update company details.
 import { t, resolveLocale } from '../i18n/index.js';
 import { readFileSync, writeFileSync } from 'node:fs';
-import {ensureDb, makeCtx, output, fail, table, dbError} from './util.js';
+import { ensureDb, makeCtx, output, fail, table, dbError, withDb } from './util.js';
 import { isValidIban } from '../core/iban.js';
 import { record } from '../audit/index.js';
 
@@ -164,127 +164,107 @@ export function make(program) {
     .option('--logo <file>', 'set the invoice logo (PNG/JPEG/SVG, max 1 MB, stored in the database)')
     .option('--remove-logo', 'remove the logo')
     .option('--dry-run', 'show the plan without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const row = getCompany(db);
-          if (!row) throw dbError('NO_COMPANY', 'no company — run bukio init first');
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const row = getCompany(db);
+        if (!row) throw dbError('NO_COMPANY', 'no company — run bukio init first');
 
-          // deprecated aliases: --kvk -> --registration-id, --btw-id -> --tax-id
-          if (opts.kvk !== undefined && opts.registrationId !== undefined) {
-            opts._warnings = [...(opts._warnings ?? []), '--kvk ignored because --registration-id was also given'];
-          } else if (opts.kvk !== undefined) {
-            opts.registrationId = opts.kvk;
-            opts._warnings = [...(opts._warnings ?? []), '--kvk is deprecated — use --registration-id'];
-          }
-          if (opts.btwId !== undefined && opts.taxId !== undefined) {
-            opts._warnings = [...(opts._warnings ?? []), '--btw-id ignored because --tax-id was also given'];
-          } else if (opts.btwId !== undefined) {
-            opts.taxId = opts.btwId;
-            opts._warnings = [...(opts._warnings ?? []), '--btw-id is deprecated — use --tax-id'];
-          }
-          // country is immutable after init (decision §9.1.5)
-          if (opts.country !== undefined) {
-            const want = String(opts.country).trim().toUpperCase();
-            if (want !== (row.country ?? 'NL')) {
-              throw Object.assign(new Error(`country is immutable after init — company stays ${row.country ?? 'NL'} (re-init a new DB for another country)`), { code: 'COUNTRY_IMMUTABLE' });
-            }
-          }
-          const changes = {};
-          for (const [opt, col, label] of COMPANY_FIELDS) {
-            if (opts[opt] !== undefined) changes[col] = String(opts[opt]).trim();
-          }
-          let logo = null;
-          if (opts.logo !== undefined) logo = readLogo(opts.logo);
-          if (opts.removeLogo) logo = { mime: null, bytes: null };
-          if (Object.keys(changes).length === 0 && logo === null) {
-            throw Object.assign(new Error('nothing to update — pass at least one of --name/--registration-id/--tax-id/--iban/--address/--postal-code/--city/--logo/--remove-logo'), { code: 'NOTHING_TO_UPDATE' });
-          }
-          for (const [opt, col, label] of COMPANY_FIELDS) {
-            if (changes[col] === '' && col !== 'tax_id') {
-              throw Object.assign(new Error(`${label} cannot be empty`), { code: 'INVALID_VALUE' });
-            }
-          }
-          if (changes.iban && !isValidIban(changes.iban)) {
-            throw Object.assign(new Error(`invalid IBAN '${changes.iban}'`), { code: 'INVALID_IBAN' });
-          }
-
-          const plan = {
-            company: { ...serializeCompany(row), ...changes },
-            changes,
-            logo: logo === null ? null
-              : { mime: logo.mime, bytes: logo.bytes ? logo.bytes.length : 0, width: logo.width, height: logo.height },
-            ...(opts._warnings?.length ? { warnings: opts._warnings } : {}),
-            dryRun: true,
-          };
-          if (ctx.dryRun) {
-            output(ctx, plan, (d) => {
-              console.log('plan: company update');
-              for (const [k, v] of Object.entries(d.changes)) console.log(`  ${k}: '${row[k]}' -> '${v}'`);
-              if (d.logo) console.log(`  logo: ${d.logo.mime} (${d.logo.bytes} bytes${d.logo.width ? `, ${d.logo.width}×${d.logo.height} px` : ''})${d.logo.bytes === 0 ? ' — removed' : ''}`);
-              for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
-              console.log('(dry run — nothing written)');
-            });
-            return;
-          }
-
-          const sets = Object.keys(changes).map((c) => `${c} = ?`).join(', ');
-          if (sets) {
-            db.prepare(`UPDATE company SET ${sets} WHERE id = 1`).run(...Object.values(changes));
-          }
-          if (logo !== null) {
-            db.prepare('UPDATE company SET logo = ?, logo_mime = ? WHERE id = 1')
-              .run(logo.bytes, logo.mime);
-          }
-          const updated = getCompany(db);
-          record(db, {
-            actor: ctx.actor, action: 'company.update', command: 'company update',
-            args: {
-              ...changes,
-              ...(logo !== null ? { logo: logo.mime ? `${logo.mime} (${logo.bytes.length} bytes)` : 'removed' } : {}),
-            },
-            outcome: 'ok',
-          });
-          output(ctx, {
-            company: serializeCompany(updated), changes,
-            ...(opts._warnings?.length ? { warnings: opts._warnings } : {}),
-          }, (d) => {
-            console.log('company updated:');
-            for (const [k, v] of Object.entries(d.changes)) console.log(`  ${k}: '${row[k]}' -> '${v}'`);
-            if (logo !== null && logo.mime) console.log(`  logo: ${logo.mime} (${logo.bytes.length} bytes)`);
-            if (logo !== null && !logo.mime) console.log('  logo: removed');
-            for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
-          });
-        } finally {
-          db.close();
+        // deprecated aliases: --kvk -> --registration-id, --btw-id -> --tax-id
+        if (opts.kvk !== undefined && opts.registrationId !== undefined) {
+          opts._warnings = [...(opts._warnings ?? []), '--kvk ignored because --registration-id was also given'];
+        } else if (opts.kvk !== undefined) {
+          opts.registrationId = opts.kvk;
+          opts._warnings = [...(opts._warnings ?? []), '--kvk is deprecated — use --registration-id'];
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        if (opts.btwId !== undefined && opts.taxId !== undefined) {
+          opts._warnings = [...(opts._warnings ?? []), '--btw-id ignored because --tax-id was also given'];
+        } else if (opts.btwId !== undefined) {
+          opts.taxId = opts.btwId;
+          opts._warnings = [...(opts._warnings ?? []), '--btw-id is deprecated — use --tax-id'];
+        }
+        // country is immutable after init (decision §9.1.5)
+        if (opts.country !== undefined) {
+          const want = String(opts.country).trim().toUpperCase();
+          if (want !== (row.country ?? 'NL')) {
+            throw Object.assign(new Error(`country is immutable after init — company stays ${row.country ?? 'NL'} (re-init a new DB for another country)`), { code: 'COUNTRY_IMMUTABLE' });
+          }
+        }
+        const changes = {};
+        for (const [opt, col, label] of COMPANY_FIELDS) {
+          if (opts[opt] !== undefined) changes[col] = String(opts[opt]).trim();
+        }
+        let logo = null;
+        if (opts.logo !== undefined) logo = readLogo(opts.logo);
+        if (opts.removeLogo) logo = { mime: null, bytes: null };
+        if (Object.keys(changes).length === 0 && logo === null) {
+          throw Object.assign(new Error('nothing to update — pass at least one of --name/--registration-id/--tax-id/--iban/--address/--postal-code/--city/--logo/--remove-logo'), { code: 'NOTHING_TO_UPDATE' });
+        }
+        for (const [opt, col, label] of COMPANY_FIELDS) {
+          if (changes[col] === '' && col !== 'tax_id') {
+            throw Object.assign(new Error(`${label} cannot be empty`), { code: 'INVALID_VALUE' });
+          }
+        }
+        if (changes.iban && !isValidIban(changes.iban)) {
+          throw Object.assign(new Error(`invalid IBAN '${changes.iban}'`), { code: 'INVALID_IBAN' });
+        }
+
+        const plan = {
+          company: { ...serializeCompany(row), ...changes },
+          changes,
+          logo: logo === null ? null
+            : { mime: logo.mime, bytes: logo.bytes ? logo.bytes.length : 0, width: logo.width, height: logo.height },
+          ...(opts._warnings?.length ? { warnings: opts._warnings } : {}),
+          dryRun: true,
+        };
+        if (ctx.dryRun) {
+          output(ctx, plan, (d) => {
+            console.log('plan: company update');
+            for (const [k, v] of Object.entries(d.changes)) console.log(`  ${k}: '${row[k]}' -> '${v}'`);
+            if (d.logo) console.log(`  logo: ${d.logo.mime} (${d.logo.bytes} bytes${d.logo.width ? `, ${d.logo.width}×${d.logo.height} px` : ''})${d.logo.bytes === 0 ? ' — removed' : ''}`);
+            for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
+            console.log('(dry run — nothing written)');
+          });
+          return;
+        }
+
+        const sets = Object.keys(changes).map((c) => `${c} = ?`).join(', ');
+        if (sets) {
+          db.prepare(`UPDATE company SET ${sets} WHERE id = 1`).run(...Object.values(changes));
+        }
+        if (logo !== null) {
+          db.prepare('UPDATE company SET logo = ?, logo_mime = ? WHERE id = 1')
+            .run(logo.bytes, logo.mime);
+        }
+        const updated = getCompany(db);
+        record(db, {
+          actor: ctx.actor, action: 'company.update', command: 'company update',
+          args: {
+            ...changes,
+            ...(logo !== null ? { logo: logo.mime ? `${logo.mime} (${logo.bytes.length} bytes)` : 'removed' } : {}),
+          },
+          outcome: 'ok',
+        });
+        output(ctx, {
+          company: serializeCompany(updated), changes,
+          ...(opts._warnings?.length ? { warnings: opts._warnings } : {}),
+        }, (d) => {
+          console.log('company updated:');
+          for (const [k, v] of Object.entries(d.changes)) console.log(`  ${k}: '${row[k]}' -> '${v}'`);
+          if (logo !== null && logo.mime) console.log(`  logo: ${logo.mime} (${logo.bytes.length} bytes)`);
+          if (logo !== null && !logo.mime) console.log('  logo: removed');
+          for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
+        });
+    }));
 
   company
     .command('logo')
     .description('extract the stored logo to a file')
     .requiredOption('--out <file>', 'output file path')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const row = getCompany(db);
-          if (!row?.logo) throw Object.assign(new Error('no logo stored — set one with company update --logo'), { code: 'LOGO_NOT_SET' });
-          writeFileSync(opts.out, row.logo);
-          output(ctx, { out: opts.out, mime: row.logo_mime, bytes: row.logo.length }, (d) => {
-            console.log(`logo written: ${d.out} (${d.mime}, ${d.bytes} bytes)`);
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const row = getCompany(db);
+        if (!row?.logo) throw Object.assign(new Error('no logo stored — set one with company update --logo'), { code: 'LOGO_NOT_SET' });
+        writeFileSync(opts.out, row.logo);
+        output(ctx, { out: opts.out, mime: row.logo_mime, bytes: row.logo.length }, (d) => {
+          console.log(`logo written: ${d.out} (${d.mime}, ${d.bytes} bytes)`);
+        });
+    }));
 }

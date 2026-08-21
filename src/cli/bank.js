@@ -15,7 +15,7 @@ import {
 } from '../bank/index.js';
 import { formatAmount } from '../core/money.js';
 import { getAccountByCode } from '../core/accounts.js';
-import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
 import { resolveProfile } from '../jurisdictions/index.js';
 
 function parseBankFile(filePath, format, iban, db) {
@@ -91,33 +91,23 @@ export function make(program) {
   bank
     .command('list')
     .description('list bank accounts with balances and state counts')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const accounts = listBankAccounts(db).map((a) => ({
-            iban: a.iban, name: a.name, account_code: a.account_code,
-            transaction_count: a.transaction_count, unmatched_count: a.unmatched_count,
-            balance_cents: a.balance_cents, balance: formatAmount(a.balance_cents),
-          }));
-          output(ctx, { accounts }, (d) => {
-            table(d.accounts, [
-              { key: 'iban', label: 'iban' },
-              { key: 'name', label: 'name' },
-              { key: 'account_code', label: 'ledger' },
-              { key: 'transaction_count', label: 'tx' },
-              { key: 'unmatched_count', label: 'unmatched' },
-              { key: 'balance', label: 'balance' },
-            ]);
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const accounts = listBankAccounts(db).map((a) => ({
+          iban: a.iban, name: a.name, account_code: a.account_code,
+          transaction_count: a.transaction_count, unmatched_count: a.unmatched_count,
+          balance_cents: a.balance_cents, balance: formatAmount(a.balance_cents),
+        }));
+        output(ctx, { accounts }, (d) => {
+          table(d.accounts, [
+            { key: 'iban', label: 'iban' },
+            { key: 'name', label: 'name' },
+            { key: 'account_code', label: 'ledger' },
+            { key: 'transaction_count', label: 'tx' },
+            { key: 'unmatched_count', label: 'unmatched' },
+            { key: 'balance', label: 'balance' },
+          ]);
+        });
+    }));
 
   bank
     .command('import')
@@ -128,45 +118,35 @@ export function make(program) {
     .option('--name <name>', 'bank account name (if created)')
     .option('--account-code <code>', 'linked ledger account (default: the country profile\'s bank account)')
     .option('--dry-run', 'show what would be imported without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const transactions = parseBankFile(opts.file, opts.format, opts.iban, db);
-          if (ctx.dryRun) {
-            const preview = previewImport(db, { iban: opts.iban, transactions });
-            output(ctx, {
-              action: 'import bank transactions', file: opts.file,
-              transactions: transactions.slice(0, 10).map((t) => ({ ...t, amount: formatAmount(t.amount_cents) })),
-              ...preview, dryRun: true,
-            }, (d) => {
-              console.log(`plan: import ${d.total} transactions to ${d.iban} — ${d.imported} new, ${d.duplicates} duplicate`);
-              for (const t of d.transactions) console.log(`  ${t.date}  ${t.amount.padStart(12)}  ${t.counterparty ?? ''}  ${t.description ?? ''}`);
-              console.log('(dry run — nothing written)');
-            });
-            return;
-          }
-          const result = importTransactions(db, {
-            iban: opts.iban, transactions, name: opts.name ?? null,
-            accountCode: opts.accountCode ?? resolveProfile(db).reporting.bankAccountDefault ?? '1100', actor: ctx.actor,
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const transactions = parseBankFile(opts.file, opts.format, opts.iban, db);
+        if (ctx.dryRun) {
+          const preview = previewImport(db, { iban: opts.iban, transactions });
+          output(ctx, {
+            action: 'import bank transactions', file: opts.file,
+            transactions: transactions.slice(0, 10).map((t) => ({ ...t, amount: formatAmount(t.amount_cents) })),
+            ...preview, dryRun: true,
+          }, (d) => {
+            console.log(`plan: import ${d.total} transactions to ${d.iban} — ${d.imported} new, ${d.duplicates} duplicate`);
+            for (const t of d.transactions) console.log(`  ${t.date}  ${t.amount.padStart(12)}  ${t.counterparty ?? ''}  ${t.description ?? ''}`);
+            console.log('(dry run — nothing written)');
           });
-          // rows the CSV parser could not read (bad amount/date) — never
-          // silently dropped; the user must fix the file and re-import
-          if (transactions.skipped?.length) result.skipped = transactions.skipped;
-          output(ctx, { ...result, dryRun: false }, (d) => {
-            console.log(`imported ${d.imported} of ${d.total} transactions to ${d.iban} (${d.duplicates} duplicates skipped)`);
-            for (const s of d.skipped ?? []) {
-              console.log(`  ⚠ line ${s.line} skipped: ${s.reason} — fix the file and re-import`);
-            }
-          });
-        } finally {
-          db.close();
+          return;
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        const result = importTransactions(db, {
+          iban: opts.iban, transactions, name: opts.name ?? null,
+          accountCode: opts.accountCode ?? resolveProfile(db).reporting.bankAccountDefault ?? '1100', actor: ctx.actor,
+        });
+        // rows the CSV parser could not read (bad amount/date) — never
+        // silently dropped; the user must fix the file and re-import
+        if (transactions.skipped?.length) result.skipped = transactions.skipped;
+        output(ctx, { ...result, dryRun: false }, (d) => {
+          console.log(`imported ${d.imported} of ${d.total} transactions to ${d.iban} (${d.duplicates} duplicates skipped)`);
+          for (const s of d.skipped ?? []) {
+            console.log(`  ⚠ line ${s.line} skipped: ${s.reason} — fix the file and re-import`);
+          }
+        });
+    }));
 
   bank
     .command('transactions')
@@ -174,34 +154,24 @@ export function make(program) {
     .option('--iban <iban>', 'filter by account')
     .option('--state <state>', 'unmatched|matched|ignored')
     .option('--limit <n>', 'max rows', '200')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const rows = listTransactions(db, {
-            state: opts.state || null,
-            iban: opts.iban || null,
-            limit: Number(opts.limit),
-          });
-          const data = { transactions: rows.map(fmtTx) };
-          output(ctx, data, (d) => {
-            table(d.transactions, [
-              { key: 'id', label: '#' },
-              { key: 'date', label: 'date' },
-              { key: 'amount', label: 'amount' },
-              { key: 'state', label: 'state' },
-              { key: 'counterparty', label: 'counterparty' },
-              { key: 'description', label: 'description' },
-            ]);
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const rows = listTransactions(db, {
+          state: opts.state || null,
+          iban: opts.iban || null,
+          limit: Number(opts.limit),
+        });
+        const data = { transactions: rows.map(fmtTx) };
+        output(ctx, data, (d) => {
+          table(d.transactions, [
+            { key: 'id', label: '#' },
+            { key: 'date', label: 'date' },
+            { key: 'amount', label: 'amount' },
+            { key: 'state', label: 'state' },
+            { key: 'counterparty', label: 'counterparty' },
+            { key: 'description', label: 'description' },
+          ]);
+        });
+    }));
 
   const match = bank.command('match').description('match transactions to entries');
 
@@ -210,66 +180,46 @@ export function make(program) {
     .description('auto-match unmatched transactions to posted entries')
     .option('--window-days <n>', 'max |date difference| in days', '5')
     .option('--dry-run', 'show would-be matches without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const result = autoMatch(db, {
-            windowDays: Number(opts.windowDays),
-            actor: ctx.actor,
-            dryRun: ctx.dryRun,
-          });
-          const data = {
-            matched: result.matched.map((m) => ({ ...m, amount: formatAmount(m.amount_cents) })),
-            unmatched_remaining: result.unmatched_remaining,
-            dryRun: ctx.dryRun,
-          };
-          output(ctx, data, (d) => {
-            console.log(`auto-match: ${d.matched.length} matched, ${d.unmatched_remaining} unmatched remaining${d.dryRun ? ' (dry run)' : ''}`);
-            for (const m of d.matched) {
-              if (m.kind === 'invoice') {
-                const fx = m.fx_delta_cents ? ` (fx ${formatAmount(m.fx_delta_cents)})` : '';
-                console.log(`  tx #${m.tx_id} ${m.tx_date} ${m.amount.padStart(12)} -> invoice ${m.invoice_number} (${m.contact_name ?? ''})${fx}`);
-              } else {
-                console.log(`  tx #${m.tx_id} ${m.tx_date} ${m.amount.padStart(12)} -> entry #${m.entry_id} (${m.method}, ${m.day_diff}d)`);
-              }
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const result = autoMatch(db, {
+          windowDays: Number(opts.windowDays),
+          actor: ctx.actor,
+          dryRun: ctx.dryRun,
+        });
+        const data = {
+          matched: result.matched.map((m) => ({ ...m, amount: formatAmount(m.amount_cents) })),
+          unmatched_remaining: result.unmatched_remaining,
+          dryRun: ctx.dryRun,
+        };
+        output(ctx, data, (d) => {
+          console.log(`auto-match: ${d.matched.length} matched, ${d.unmatched_remaining} unmatched remaining${d.dryRun ? ' (dry run)' : ''}`);
+          for (const m of d.matched) {
+            if (m.kind === 'invoice') {
+              const fx = m.fx_delta_cents ? ` (fx ${formatAmount(m.fx_delta_cents)})` : '';
+              console.log(`  tx #${m.tx_id} ${m.tx_date} ${m.amount.padStart(12)} -> invoice ${m.invoice_number} (${m.contact_name ?? ''})${fx}`);
+            } else {
+              console.log(`  tx #${m.tx_id} ${m.tx_date} ${m.amount.padStart(12)} -> entry #${m.entry_id} (${m.method}, ${m.day_diff}d)`);
             }
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+          }
+        });
+    }));
 
   match
     .command('suggest')
     .description('list unmatched transactions with a proposed posting')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const rows = suggestUnmatched(db);
-          const data = { suggestions: rows.map((t) => ({ ...fmtTx(t), suggested_account: t.suggested_account })) };
-          output(ctx, data, (d) => {
-            table(d.suggestions, [
-              { key: 'id', label: '#' },
-              { key: 'date', label: 'date' },
-              { key: 'amount', label: 'amount' },
-              { key: 'counterparty', label: 'counterparty' },
-              { key: 'suggested_account', label: 'suggest' },
-            ]);
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const rows = suggestUnmatched(db);
+        const data = { suggestions: rows.map((t) => ({ ...fmtTx(t), suggested_account: t.suggested_account })) };
+        output(ctx, data, (d) => {
+          table(d.suggestions, [
+            { key: 'id', label: '#' },
+            { key: 'date', label: 'date' },
+            { key: 'amount', label: 'amount' },
+            { key: 'counterparty', label: 'counterparty' },
+            { key: 'suggested_account', label: 'suggest' },
+          ]);
+        });
+    }));
 
   match
     .command('link')
@@ -278,29 +228,19 @@ export function make(program) {
     .requiredOption('--entry <id>', 'entry id')
     .option('--method <method>', 'exact|fuzzy|rule|manual|agent', 'manual')
     .option('--dry-run', 'show the plan without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const txRow = linkTransaction(db, { txId: opts.tx, entryId: opts.entry, method: opts.method, actor: ctx.actor, dryRun: ctx.dryRun });
-          if (txRow.dryRun) {
-            output(ctx, { plan: txRow }, (d) => {
-              console.log(`plan: link tx #${d.plan.tx_id} (${formatAmount(d.plan.amount_cents)} on ${d.plan.entry_date}) -> entry #${d.plan.entry_id}`);
-              console.log('(dry run — nothing written)');
-            });
-            return;
-          }
-          output(ctx, { transaction: fmtTx(txRow), entry_id: Number(opts.entry) }, (d) => {
-            console.log(`linked tx #${d.transaction.id} -> entry #${d.entry_id}`);
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const txRow = linkTransaction(db, { txId: opts.tx, entryId: opts.entry, method: opts.method, actor: ctx.actor, dryRun: ctx.dryRun });
+        if (txRow.dryRun) {
+          output(ctx, { plan: txRow }, (d) => {
+            console.log(`plan: link tx #${d.plan.tx_id} (${formatAmount(d.plan.amount_cents)} on ${d.plan.entry_date}) -> entry #${d.plan.entry_id}`);
+            console.log('(dry run — nothing written)');
           });
-        } finally {
-          db.close();
+          return;
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        output(ctx, { transaction: fmtTx(txRow), entry_id: Number(opts.entry) }, (d) => {
+          console.log(`linked tx #${d.transaction.id} -> entry #${d.entry_id}`);
+        });
+    }));
 
   match
     .command('post')
@@ -308,100 +248,70 @@ export function make(program) {
     .requiredOption('--tx <id>', 'bank transaction id')
     .requiredOption('--account <code>', 'counter account for the posting')
     .option('--dry-run', 'show the plan without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const txRow = getTransaction(db, opts.tx);
-          if (!txRow) throw Object.assign(new Error(`bank transaction ${opts.tx} does not exist`), { code: 'NOT_FOUND' });
-          // validate like the execute path BEFORE the dry-run branch — a plan
-          // must not look green for an already-matched tx or a bad account
-          if (txRow.state !== 'unmatched') {
-            throw Object.assign(new Error(`bank transaction ${opts.tx} is already ${txRow.state}`), { code: 'ALREADY_MATCHED' });
-          }
-          if (getAccountByCode(db, opts.account) == null) {
-            throw Object.assign(new Error(`account ${opts.account} does not exist`), { code: 'ACCOUNT_NOT_FOUND' });
-          }
-          if (ctx.dryRun) {
-            output(ctx, {
-              action: 'post entry from bank transaction',
-              tx: fmtTx(txRow),
-              postings: [
-                { code: txRow.account_code, amount_cents: txRow.amount_cents, amount: formatAmount(txRow.amount_cents) },
-                { code: opts.account, amount_cents: -txRow.amount_cents, amount: formatAmount(-txRow.amount_cents) },
-              ],
-              dryRun: true,
-            }, (d) => {
-              console.log(`plan: post entry from tx #${d.tx.id} (${d.tx.date})`);
-              for (const p of d.postings) console.log(`  ${p.code}  ${p.amount}`);
-              console.log('(dry run — nothing written)');
-            });
-            return;
-          }
-          const { entry } = postFromTransaction(db, { txId: opts.tx, accountCode: opts.account, actor: ctx.actor });
-          output(ctx, { entry_id: entry.id, state: entry.state }, (d) => {
-            console.log(`posted entry #${d.entry_id} from tx #${opts.tx} (${d.state})`);
-          });
-        } finally {
-          db.close();
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const txRow = getTransaction(db, opts.tx);
+        if (!txRow) throw Object.assign(new Error(`bank transaction ${opts.tx} does not exist`), { code: 'NOT_FOUND' });
+        // validate like the execute path BEFORE the dry-run branch — a plan
+        // must not look green for an already-matched tx or a bad account
+        if (txRow.state !== 'unmatched') {
+          throw Object.assign(new Error(`bank transaction ${opts.tx} is already ${txRow.state}`), { code: 'ALREADY_MATCHED' });
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        if (getAccountByCode(db, opts.account) == null) {
+          throw Object.assign(new Error(`account ${opts.account} does not exist`), { code: 'ACCOUNT_NOT_FOUND' });
+        }
+        if (ctx.dryRun) {
+          output(ctx, {
+            action: 'post entry from bank transaction',
+            tx: fmtTx(txRow),
+            postings: [
+              { code: txRow.account_code, amount_cents: txRow.amount_cents, amount: formatAmount(txRow.amount_cents) },
+              { code: opts.account, amount_cents: -txRow.amount_cents, amount: formatAmount(-txRow.amount_cents) },
+            ],
+            dryRun: true,
+          }, (d) => {
+            console.log(`plan: post entry from tx #${d.tx.id} (${d.tx.date})`);
+            for (const p of d.postings) console.log(`  ${p.code}  ${p.amount}`);
+            console.log('(dry run — nothing written)');
+          });
+          return;
+        }
+        const { entry } = postFromTransaction(db, { txId: opts.tx, accountCode: opts.account, actor: ctx.actor });
+        output(ctx, { entry_id: entry.id, state: entry.state }, (d) => {
+          console.log(`posted entry #${d.entry_id} from tx #${opts.tx} (${d.state})`);
+        });
+    }));
 
   bank
     .command('ignore')
     .description('mark a transaction as ignored (e.g. transfer between own accounts)')
     .requiredOption('--tx <id>', 'bank transaction id')
     .option('--dry-run', 'show the plan without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const txRow = setTransactionState(db, { id: opts.tx, state: 'ignored', actor: ctx.actor, dryRun: ctx.dryRun });
-          if (txRow.dryRun) {
-            output(ctx, { plan: txRow }, (d) => {
-              console.log(`plan: ignore tx #${d.plan.id} (${d.plan.from} -> ${d.plan.to})`);
-              console.log('(dry run — nothing written)');
-            });
-            return;
-          }
-          output(ctx, { transaction: fmtTx(txRow) }, (d) => console.log(`ignored tx #${d.transaction.id}`));
-        } finally {
-          db.close();
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const txRow = setTransactionState(db, { id: opts.tx, state: 'ignored', actor: ctx.actor, dryRun: ctx.dryRun });
+        if (txRow.dryRun) {
+          output(ctx, { plan: txRow }, (d) => {
+            console.log(`plan: ignore tx #${d.plan.id} (${d.plan.from} -> ${d.plan.to})`);
+            console.log('(dry run — nothing written)');
+          });
+          return;
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        output(ctx, { transaction: fmtTx(txRow) }, (d) => console.log(`ignored tx #${d.transaction.id}`));
+    }));
 
   bank
     .command('unignore')
     .description('re-open an ignored transaction')
     .requiredOption('--tx <id>', 'bank transaction id')
     .option('--dry-run', 'show the plan without writing')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const txRow = setTransactionState(db, { id: opts.tx, state: 'unmatched', actor: ctx.actor, dryRun: ctx.dryRun });
-          if (txRow.dryRun) {
-            output(ctx, { plan: txRow }, (d) => {
-              console.log(`plan: re-open tx #${d.plan.id} (${d.plan.from} -> ${d.plan.to})`);
-              console.log('(dry run — nothing written)');
-            });
-            return;
-          }
-          output(ctx, { transaction: fmtTx(txRow) }, (d) => console.log(`re-opened tx #${d.transaction.id}`));
-        } finally {
-          db.close();
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const txRow = setTransactionState(db, { id: opts.tx, state: 'unmatched', actor: ctx.actor, dryRun: ctx.dryRun });
+        if (txRow.dryRun) {
+          output(ctx, { plan: txRow }, (d) => {
+            console.log(`plan: re-open tx #${d.plan.id} (${d.plan.from} -> ${d.plan.to})`);
+            console.log('(dry run — nothing written)');
+          });
+          return;
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        output(ctx, { transaction: fmtTx(txRow) }, (d) => console.log(`re-opened tx #${d.transaction.id}`));
+    }));
 }

@@ -12,7 +12,7 @@ import {
   createEntry, getEntry, listEntries, parsePostingSpecs, postEntry,
   resolvePostings, reverseEntry, validateDate,
 } from '../core/entries.js';
-import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
 import { resolveRate, toEurPostings } from '../fx/index.js';
 
 /** Convert posting specs to EUR when --currency given; auto rate lookup + ECB fallback. */
@@ -82,14 +82,7 @@ export function make(program) {
     .description('post a draft entry')
     .requiredOption('--id <id>', 'entry id')
     .option('--dry-run', 'show the plan without writing anything')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        postAction(ctx, opts);
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx) => postAction(ctx, opts)));
 
   entry
     .command('reverse')
@@ -97,14 +90,7 @@ export function make(program) {
     .requiredOption('--id <id>', 'entry id')
     .option('--reason <text>', 'reason for the reversal')
     .option('--dry-run', 'show the plan without writing anything')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        reverseAction(ctx, opts);
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx) => reverseAction(ctx, opts)));
 
   entry
     .command('list')
@@ -113,27 +99,13 @@ export function make(program) {
     .option('--date-from <yyyy-mm-dd>', 'earliest date (inclusive)')
     .option('--date-to <yyyy-mm-dd>', 'latest date (inclusive)')
     .option('--limit <n>', 'max rows', '100')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        listAction(ctx, opts);
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx) => listAction(ctx, opts)));
 
   entry
     .command('show')
     .description('show one entry with its postings')
     .requiredOption('--id <id>', 'entry id')
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        showAction(ctx, opts);
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx) => showAction(ctx, opts)));
 }
 
 function collect(value, previous) {

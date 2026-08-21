@@ -13,7 +13,7 @@ import path from 'node:path';
 import {
   addAttachment, listAttachments, getAttachment, removeAttachment,
 } from '../core/attachments.js';
-import { ensureDb, makeCtx, output, fail, dbError, table } from './util.js';
+import { ensureDb, makeCtx, output, fail, dbError, table, withDb } from './util.js';
 
 function fmtBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
@@ -43,69 +43,49 @@ export function make(program) {
     .option('--store <mode>', "storage mode: 'db' (default — travels with backups) or 'file' (path in DB, copy in <db>-attachments/)", 'db')
     .option('--note <text>', 'optional note')
     .option('--dry-run', 'show the plan without writing')
-    .action(async (opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const ref = resolveRef(opts);
-          const result = addAttachment(db, {
-            kind: ref.kind, refId: ref.id, filePath: opts.file, note: opts.note,
-            store: opts.store, actor: ctx.actor, dryRun: ctx.dryRun,
-          });
-          output(ctx, result, (d) => {
-            if (d.dryRun) {
-              console.log(`plan: attach '${d.file_name}' (${fmtBytes(d.size)}, sha256 ${d.sha256.slice(0, 12)}…) to ${d.kind} ${d.ref_id} [${d.mode}]`);
-              console.log('(dry run — nothing written)');
-              return;
-            }
-            console.log(`attached ${d.file_name} (${fmtBytes(d.size)}) to ${d.kind} ${d.ref_id} as attachment ${d.id} [${d.mode}]`);
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, async (ctx, db) => {
+        const ref = resolveRef(opts);
+        const result = addAttachment(db, {
+          kind: ref.kind, refId: ref.id, filePath: opts.file, note: opts.note,
+          store: opts.store, actor: ctx.actor, dryRun: ctx.dryRun,
+        });
+        output(ctx, result, (d) => {
+          if (d.dryRun) {
+            console.log(`plan: attach '${d.file_name}' (${fmtBytes(d.size)}, sha256 ${d.sha256.slice(0, 12)}…) to ${d.kind} ${d.ref_id} [${d.mode}]`);
+            console.log('(dry run — nothing written)');
+            return;
+          }
+          console.log(`attached ${d.file_name} (${fmtBytes(d.size)}) to ${d.kind} ${d.ref_id} as attachment ${d.id} [${d.mode}]`);
+        });
+    }));
 
   attach
     .command('list')
     .description('list attachments for an invoice or entry (metadata only)')
     .option('--invoice <id>', 'invoice id')
     .option('--entry <id>', 'journal entry id')
-    .action(async (opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const ref = resolveRef(opts);
-          const rows = listAttachments(db, { kind: ref.kind, refId: ref.id });
-          output(ctx, { kind: ref.kind, ref_id: ref.id, attachments: rows }, (d) => {
-            if (!d.attachments.length) {
-              console.log(`no attachments for ${d.kind} ${d.ref_id}`);
-              return;
-            }
-            table(d.attachments.map((a) => ({
-              id: a.id, mode: a.mode, file: a.file_name, size: fmtBytes(a.size),
-              sha: a.sha256.slice(0, 12), date: a.created_at.slice(0, 10), note: a.note ?? '',
-            })), [
-              { key: 'id', label: 'ID' },
-              { key: 'mode', label: 'Mode' },
-              { key: 'file', label: 'File' },
-              { key: 'size', label: 'Size' },
-              { key: 'sha', label: 'SHA256' },
-              { key: 'date', label: 'Date' },
-              { key: 'note', label: 'Note' },
-            ]);
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, async (ctx, db) => {
+        const ref = resolveRef(opts);
+        const rows = listAttachments(db, { kind: ref.kind, refId: ref.id });
+        output(ctx, { kind: ref.kind, ref_id: ref.id, attachments: rows }, (d) => {
+          if (!d.attachments.length) {
+            console.log(`no attachments for ${d.kind} ${d.ref_id}`);
+            return;
+          }
+          table(d.attachments.map((a) => ({
+            id: a.id, mode: a.mode, file: a.file_name, size: fmtBytes(a.size),
+            sha: a.sha256.slice(0, 12), date: a.created_at.slice(0, 10), note: a.note ?? '',
+          })), [
+            { key: 'id', label: 'ID' },
+            { key: 'mode', label: 'Mode' },
+            { key: 'file', label: 'File' },
+            { key: 'size', label: 'Size' },
+            { key: 'sha', label: 'SHA256' },
+            { key: 'date', label: 'Date' },
+            { key: 'note', label: 'Note' },
+          ]);
+        });
+    }));
 
   attach
     .command('show')
@@ -113,68 +93,48 @@ export function make(program) {
     .requiredOption('--id <id>', 'attachment id')
     .option('--out <path>', 'write the file to this path')
     .option('--force', 'overwrite an existing --out file')
-    .action(async (opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const id = Number(opts.id);
-          const row = getAttachment(db, id);
-          if (opts.out) {
-            if (existsSync(opts.out) && !opts.force) {
-              throw dbError('FILE_EXISTS', `'${opts.out}' already exists — pass --force to overwrite`);
-            }
-            mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
-            writeFileSync(opts.out, row.data);
-            output(ctx, { id, file_name: row.file_name, out: opts.out, size: row.size, mode: row.mode }, (d) => {
-              console.log(`wrote ${d.file_name} (${fmtBytes(d.size)}) to ${d.out}`);
-            });
-            return;
+    .action((opts, command) => withDb(command, async (ctx, db) => {
+        const id = Number(opts.id);
+        const row = getAttachment(db, id);
+        if (opts.out) {
+          if (existsSync(opts.out) && !opts.force) {
+            throw dbError('FILE_EXISTS', `'${opts.out}' already exists — pass --force to overwrite`);
           }
-          output(ctx, {
-            id: row.id, kind: row.kind, ref_id: row.ref_id, file_name: row.file_name,
-            mime: row.mime, size: row.size, sha256: row.sha256, mode: row.mode,
-            path: row.path ?? null, note: row.note ?? null, created_by: row.created_by, created_at: row.created_at,
-          }, (d) => {
-            console.log(`attachment ${d.id}: ${d.file_name} (${fmtBytes(d.size)}, ${d.mime})`);
-            console.log(`  kind: ${d.kind} ${d.ref_id}   mode: ${d.mode}   sha256: ${d.sha256}`);
-            console.log(`  by ${d.created_by} on ${d.created_at.slice(0, 10)}`);
-            if (d.note) console.log(`  note: ${d.note}`);
-            if (d.mode === 'file') console.log(`  path: ${d.path}`);
-            console.log('  (pass --out <path> to extract the file)');
+          mkdirSync(path.dirname(path.resolve(opts.out)), { recursive: true });
+          writeFileSync(opts.out, row.data);
+          output(ctx, { id, file_name: row.file_name, out: opts.out, size: row.size, mode: row.mode }, (d) => {
+            console.log(`wrote ${d.file_name} (${fmtBytes(d.size)}) to ${d.out}`);
           });
-        } finally {
-          db.close();
+          return;
         }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+        output(ctx, {
+          id: row.id, kind: row.kind, ref_id: row.ref_id, file_name: row.file_name,
+          mime: row.mime, size: row.size, sha256: row.sha256, mode: row.mode,
+          path: row.path ?? null, note: row.note ?? null, created_by: row.created_by, created_at: row.created_at,
+        }, (d) => {
+          console.log(`attachment ${d.id}: ${d.file_name} (${fmtBytes(d.size)}, ${d.mime})`);
+          console.log(`  kind: ${d.kind} ${d.ref_id}   mode: ${d.mode}   sha256: ${d.sha256}`);
+          console.log(`  by ${d.created_by} on ${d.created_at.slice(0, 10)}`);
+          if (d.note) console.log(`  note: ${d.note}`);
+          if (d.mode === 'file') console.log(`  path: ${d.path}`);
+          console.log('  (pass --out <path> to extract the file)');
+        });
+    }));
 
   attach
     .command('remove')
     .description('remove an attachment')
     .requiredOption('--id <id>', 'attachment id')
     .option('--dry-run', 'show the plan without writing')
-    .action(async (opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const result = removeAttachment(db, { id: Number(opts.id), actor: ctx.actor, dryRun: ctx.dryRun });
-          output(ctx, result, (d) => {
-            if (d.dryRun) {
-              console.log(`plan: remove attachment ${d.id} (${d.file_name}, ${d.kind} ${d.ref_id}${d.mode === 'file' ? ', file mode' : ''})`);
-              console.log('(dry run — nothing written)');
-              return;
-            }
-            console.log(`removed attachment ${d.id} (${d.file_name})`);
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, async (ctx, db) => {
+        const result = removeAttachment(db, { id: Number(opts.id), actor: ctx.actor, dryRun: ctx.dryRun });
+        output(ctx, result, (d) => {
+          if (d.dryRun) {
+            console.log(`plan: remove attachment ${d.id} (${d.file_name}, ${d.kind} ${d.ref_id}${d.mode === 'file' ? ', file mode' : ''})`);
+            console.log('(dry run — nothing written)');
+            return;
+          }
+          console.log(`removed attachment ${d.id} (${d.file_name})`);
+        });
+    }));
 }

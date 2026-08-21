@@ -16,7 +16,7 @@ import { aging } from '../report/aging.js';
 import { sales } from '../report/sales.js';
 import { toCsv, writeXlsx } from '../report/export.js';
 import { fiscalYearWindow } from '../year-end/index.js';
-import { ensureDb, makeCtx, output, fail, table } from './util.js';
+import { ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
 import { t, resolveLocale } from '../i18n/index.js';
 
 function todayIso() {
@@ -63,60 +63,50 @@ export function make(program) {
     .option('--year <yyyy>', 'filter by year')
     .option('--format <format>', 'json|csv|xlsx|human')
     .option('--out <path>', 'output file (csv/xlsx)')
-    .action(async (opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const tb = trialBalance(db, { year: opts.year || null });
-          const data = {
-            year: opts.year || null,
-            accounts: tb.accounts.map((a) => ({
-              code: a.code, name: a.name, type: a.type,
-              debit_cents: a.debit_cents, credit_cents: a.credit_cents, net_cents: a.net_cents,
-              debit: formatAmount(a.debit_cents), credit: formatAmount(a.credit_cents), net: formatAmount(a.net_cents),
-            })),
-            total_debit_cents: tb.total_debit_cents,
-            total_credit_cents: tb.total_credit_cents,
-            total_debit: formatAmount(tb.total_debit_cents),
-            total_credit: formatAmount(tb.total_credit_cents),
-            balanced: tb.balanced,
-          };
-          await emitReport(ctx, opts, data, {
-            csvColumns: [
+    .action((opts, command) => withDb(command, async (ctx, db) => {
+        const tb = trialBalance(db, { year: opts.year || null });
+        const data = {
+          year: opts.year || null,
+          accounts: tb.accounts.map((a) => ({
+            code: a.code, name: a.name, type: a.type,
+            debit_cents: a.debit_cents, credit_cents: a.credit_cents, net_cents: a.net_cents,
+            debit: formatAmount(a.debit_cents), credit: formatAmount(a.credit_cents), net: formatAmount(a.net_cents),
+          })),
+          total_debit_cents: tb.total_debit_cents,
+          total_credit_cents: tb.total_credit_cents,
+          total_debit: formatAmount(tb.total_debit_cents),
+          total_credit: formatAmount(tb.total_credit_cents),
+          balanced: tb.balanced,
+        };
+        await emitReport(ctx, opts, data, {
+          csvColumns: [
+            { key: 'code', label: 'code' }, { key: 'name', label: 'account' },
+            { key: 'type', label: 'type' }, { key: 'debit', label: 'debit' },
+            { key: 'credit', label: 'credit' }, { key: 'net', label: 'net' },
+          ],
+          csvRows: (d) => [
+            ...d.accounts.map((a) => ({ ...a })),
+            { code: '', name: 'TOTAAL', type: '', debit: d.total_debit, credit: d.total_credit, net: formatAmount(d.total_debit_cents - d.total_credit_cents) },
+          ],
+          sheets: (d) => [{
+            name: 'Trial balance',
+            columns: [
+              { header: 'code', key: 'code' }, { header: 'account', key: 'name' },
+              { header: 'type', key: 'type' }, { header: 'debit', key: 'debit' },
+              { header: 'credit', key: 'credit' }, { header: 'net', key: 'net' },
+            ],
+            rows: d.accounts,
+          }],
+          render: (d) => {
+            table(d.accounts, [
               { key: 'code', label: 'code' }, { key: 'name', label: 'account' },
               { key: 'type', label: 'type' }, { key: 'debit', label: 'debit' },
               { key: 'credit', label: 'credit' }, { key: 'net', label: 'net' },
-            ],
-            csvRows: (d) => [
-              ...d.accounts.map((a) => ({ ...a })),
-              { code: '', name: 'TOTAAL', type: '', debit: d.total_debit, credit: d.total_credit, net: formatAmount(d.total_debit_cents - d.total_credit_cents) },
-            ],
-            sheets: (d) => [{
-              name: 'Trial balance',
-              columns: [
-                { header: 'code', key: 'code' }, { header: 'account', key: 'name' },
-                { header: 'type', key: 'type' }, { header: 'debit', key: 'debit' },
-                { header: 'credit', key: 'credit' }, { header: 'net', key: 'net' },
-              ],
-              rows: d.accounts,
-            }],
-            render: (d) => {
-              table(d.accounts, [
-                { key: 'code', label: 'code' }, { key: 'name', label: 'account' },
-                { key: 'type', label: 'type' }, { key: 'debit', label: 'debit' },
-                { key: 'credit', label: 'credit' }, { key: 'net', label: 'net' },
-              ]);
-              console.log(`totals:  debit ${d.total_debit}  credit ${d.total_credit}  -> ${d.balanced ? 'BALANCED' : 'UNBALANCED!'}`);
-            },
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+            ]);
+            console.log(`totals:  debit ${d.total_debit}  credit ${d.total_credit}  -> ${d.balanced ? 'BALANCED' : 'UNBALANCED!'}`);
+          },
+        });
+    }));
 
   report
     .command('balance-sheet')
@@ -332,82 +322,72 @@ export function make(program) {
     .option('--kind <kind>', 'debtors | creditors | both (default: both)')
     .option('--format <format>', 'json|csv|xlsx|human')
     .option('--out <path>', 'output file (csv/xlsx)')
-    .action(async (opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const data = aging(db, { asOf: opts.asOf || null, kind: opts.kind || 'both' });
-          const flat = (d) => {
-            const rows = [];
+    .action((opts, command) => withDb(command, async (ctx, db) => {
+        const data = aging(db, { asOf: opts.asOf || null, kind: opts.kind || 'both' });
+        const flat = (d) => {
+          const rows = [];
+          for (const side of ['debtors', 'creditors']) {
+            if (!d[side]) continue;
+            for (const c of d[side].contacts) {
+              rows.push({
+                side,
+                contact_id: c.contact_id,
+                name: c.name ?? '',
+                current: formatAmount(c.buckets.current),
+                d30: formatAmount(c.buckets.d30),
+                d60: formatAmount(c.buckets.d60),
+                d90: formatAmount(c.buckets.d90),
+                d90plus: formatAmount(c.buckets.d90plus),
+                in_batch: formatAmount(c.in_batch_cents),
+                total: formatAmount(c.total_cents),
+              });
+            }
+          }
+          return rows;
+        };
+        const csvColumns = [
+          { key: 'side', label: 'side' }, { key: 'contact_id', label: 'contact_id' },
+          { key: 'name', label: 'name' }, { key: 'current', label: 'current' },
+          { key: 'd30', label: '30d' }, { key: 'd60', label: '60d' },
+          { key: 'd90', label: '90d' }, { key: 'd90plus', label: '90d+' },
+          { key: 'in_batch', label: 'in_batch' }, { key: 'total', label: 'total' },
+        ];
+        await emitReport(ctx, opts, data, {
+          csvColumns,
+          csvRows: flat,
+          sheets: (d) => [{ name: 'Aging', columns: csvColumns.map((c) => ({ header: c.label, key: c.key })), rows: flat(d) }],
+          render: (d) => {
             for (const side of ['debtors', 'creditors']) {
               if (!d[side]) continue;
-              for (const c of d[side].contacts) {
-                rows.push({
-                  side,
-                  contact_id: c.contact_id,
-                  name: c.name ?? '',
-                  current: formatAmount(c.buckets.current),
-                  d30: formatAmount(c.buckets.d30),
-                  d60: formatAmount(c.buckets.d60),
-                  d90: formatAmount(c.buckets.d90),
-                  d90plus: formatAmount(c.buckets.d90plus),
-                  in_batch: formatAmount(c.in_batch_cents),
-                  total: formatAmount(c.total_cents),
-                });
+              console.log(`--- ${side} (as of ${d.as_of}) ---`);
+              if (!d[side].contacts.length) {
+                console.log('(none)');
+                continue;
               }
+              table(d[side].contacts.map((c) => ({
+                contact: `${c.contact_id} ${c.name ?? ''}`.trim(),
+                current: formatAmount(c.buckets.current),
+                d30: formatAmount(c.buckets.d30),
+                d60: formatAmount(c.buckets.d60),
+                d90: formatAmount(c.buckets.d90),
+                d90plus: formatAmount(c.buckets.d90plus),
+                in_batch: formatAmount(c.in_batch_cents),
+                total: formatAmount(c.total_cents),
+              })), [
+                { key: 'contact', label: 'Contact' },
+                { key: 'current', label: 'Current' },
+                { key: 'd30', label: '30d' },
+                { key: 'd60', label: '60d' },
+                { key: 'd90', label: '90d' },
+                { key: 'd90plus', label: '90d+' },
+                { key: 'in_batch', label: 'In batch' },
+                { key: 'total', label: 'Total' },
+              ]);
+              console.log(`total ${side}: ${formatAmount(d[side].totals.total_cents)}`);
             }
-            return rows;
-          };
-          const csvColumns = [
-            { key: 'side', label: 'side' }, { key: 'contact_id', label: 'contact_id' },
-            { key: 'name', label: 'name' }, { key: 'current', label: 'current' },
-            { key: 'd30', label: '30d' }, { key: 'd60', label: '60d' },
-            { key: 'd90', label: '90d' }, { key: 'd90plus', label: '90d+' },
-            { key: 'in_batch', label: 'in_batch' }, { key: 'total', label: 'total' },
-          ];
-          await emitReport(ctx, opts, data, {
-            csvColumns,
-            csvRows: flat,
-            sheets: (d) => [{ name: 'Aging', columns: csvColumns.map((c) => ({ header: c.label, key: c.key })), rows: flat(d) }],
-            render: (d) => {
-              for (const side of ['debtors', 'creditors']) {
-                if (!d[side]) continue;
-                console.log(`--- ${side} (as of ${d.as_of}) ---`);
-                if (!d[side].contacts.length) {
-                  console.log('(none)');
-                  continue;
-                }
-                table(d[side].contacts.map((c) => ({
-                  contact: `${c.contact_id} ${c.name ?? ''}`.trim(),
-                  current: formatAmount(c.buckets.current),
-                  d30: formatAmount(c.buckets.d30),
-                  d60: formatAmount(c.buckets.d60),
-                  d90: formatAmount(c.buckets.d90),
-                  d90plus: formatAmount(c.buckets.d90plus),
-                  in_batch: formatAmount(c.in_batch_cents),
-                  total: formatAmount(c.total_cents),
-                })), [
-                  { key: 'contact', label: 'Contact' },
-                  { key: 'current', label: 'Current' },
-                  { key: 'd30', label: '30d' },
-                  { key: 'd60', label: '60d' },
-                  { key: 'd90', label: '90d' },
-                  { key: 'd90plus', label: '90d+' },
-                  { key: 'in_batch', label: 'In batch' },
-                  { key: 'total', label: 'Total' },
-                ]);
-                console.log(`total ${side}: ${formatAmount(d[side].totals.total_cents)}`);
-              }
-            },
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+          },
+        });
+    }));
 
   report
     .command('sales')

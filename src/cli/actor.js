@@ -14,6 +14,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import {
   ensureDb, makeCtx, output, fail, table, configDir, keyFilePath, sessionFilePath, readSessionKey,
+  withDb,
 } from './util.js';
 import {
   generateKeyPair, keyidOf, isEncrypted, publicKeyFromPrivate, decryptPrivateKey,
@@ -211,35 +212,25 @@ export function make(program) {
   actor
     .command('list')
     .description("list enrolled actors in the current company's DB")
-    .action((opts, command) => {
-      const ctx = makeCtx(command);
-      try {
-        const db = ensureDb(ctx);
-        try {
-          const rows = db.prepare(
-            'SELECT actor, keyid, enrolled_at, revoked_at, revoked_reason FROM actor_keys ORDER BY actor',
-          ).all();
-          const actors = rows.map((r) => ({ ...r, active: r.revoked_at === null }));
-          output(ctx, { actors }, (d) => {
-            if (d.actors.length === 0) {
-              console.log('no enrolled actors — run `bukio actor keygen` + `bukio actor register`');
-              return;
-            }
-            table(d.actors, [
-              { key: 'actor', label: 'actor' },
-              { key: 'keyid', label: 'keyid' },
-              { key: 'enrolled_at', label: 'enrolled' },
-              { key: 'active', label: 'active' },
-              { key: 'revoked_reason', label: 'revoked reason' },
-            ]);
-          });
-        } finally {
-          db.close();
-        }
-      } catch (err) {
-        fail(ctx, err);
-      }
-    });
+    .action((opts, command) => withDb(command, (ctx, db) => {
+        const rows = db.prepare(
+          'SELECT actor, keyid, enrolled_at, revoked_at, revoked_reason FROM actor_keys ORDER BY actor',
+        ).all();
+        const actors = rows.map((r) => ({ ...r, active: r.revoked_at === null }));
+        output(ctx, { actors }, (d) => {
+          if (d.actors.length === 0) {
+            console.log('no enrolled actors — run `bukio actor keygen` + `bukio actor register`');
+            return;
+          }
+          table(d.actors, [
+            { key: 'actor', label: 'actor' },
+            { key: 'keyid', label: 'keyid' },
+            { key: 'enrolled_at', label: 'enrolled' },
+            { key: 'active', label: 'active' },
+            { key: 'revoked_reason', label: 'revoked reason' },
+          ]);
+        });
+    }));
 
   actor
     .command('revoke')
