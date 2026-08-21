@@ -12,6 +12,7 @@
 import { record } from '../audit/index.js';
 import { resolveProfile } from '../jurisdictions/index.js';
 import { makeError } from '../core/errors.js';
+import { isYearClosed } from '../year-end/index.js';
 
 export function complianceError(code, message) {
   return makeError(code, message);
@@ -437,10 +438,10 @@ export function complianceStatus(db, { year }) {
       if (prevP6 >= `${year}-01-01`) push(ft.type, `${Number(year) - 1}-P6`, prevP6);
     } else if (ft.periodShape === 'YYYY') {
       const deadline = rule(company, year);
-      push(ft.type, String(year), deadline, { books_closed: isBooksClosed(db, year) });
+      push(ft.type, String(year), deadline, { books_closed: isYearClosed(db, year) });
       const prevDeadline = rule(company, Number(year) - 1);
       if (!isFiled(db, ft.type, String(Number(year) - 1)) && prevDeadline < deadline) {
-        push(ft.type, String(Number(year) - 1), prevDeadline, { books_closed: isBooksClosed(db, Number(year) - 1) });
+        push(ft.type, String(Number(year) - 1), prevDeadline, { books_closed: isYearClosed(db, Number(year) - 1) });
       }
     } else {
       throw complianceError('INVALID_PERIOD_SHAPE', `period shape '${ft.periodShape}' is not supported (registered: YYYY-Qn, YYYY-MM, YYYY-Pn, YYYY)`);
@@ -461,16 +462,3 @@ export function complianceStatus(db, { year }) {
   };
 }
 
-function isBooksClosed(db, year) {
-  // same semantics as isYearClosed: reversed closing entries do not keep the
-  // year closed (the documented undo is entry reverse on the closing entries)
-  return Boolean(db.prepare(`
-    SELECT 1 FROM journal_entries e
-    WHERE e.source = 'closing' AND e.source_ref = ?
-      AND NOT EXISTS (
-        SELECT 1 FROM journal_entries r
-        WHERE r.reversed_from_id = e.id
-      )
-    LIMIT 1
-  `).get(`fy:${year}`));
-}

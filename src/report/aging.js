@@ -8,6 +8,7 @@
 // contact, bucketed by days past due (current / 30 / 60 / 90 / 90+).
 // Read-only. `report aging` is the dunning and jaarrekening-notes tool.
 import { listInvoices } from '../invoice/index.js';
+import { validateLabeledDate, todayIso } from '../core/dates.js';
 
 export function reportError(code, message) {
   const e = new Error(message);
@@ -15,19 +16,6 @@ export function reportError(code, message) {
   return e;
 }
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function validateDate(date, label) {
-  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    throw reportError('INVALID_DATE', `${label} '${date}' must be YYYY-MM-DD`);
-  }
-  const d = new Date(`${date}T00:00:00Z`);
-  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) {
-    throw reportError('INVALID_DATE', `${label} '${date}' is not a valid calendar date`);
-  }
-}
 
 function bucketFor(daysPastDue) {
   if (daysPastDue <= 0) return 'current';
@@ -186,7 +174,7 @@ function creditorsAging(db, asOf) {
  */
 export function aging(db, { asOf = null, kind = 'both' } = {}) {
   const asOfDate = asOf ?? todayIso();
-  validateDate(asOfDate, 'as-of');
+  validateLabeledDate(asOfDate, 'as-of');
   if (!['debtors', 'creditors', 'both'].includes(kind)) {
     throw reportError('INVALID_KIND', `kind must be 'debtors', 'creditors' or 'both', got '${kind}'`);
   }

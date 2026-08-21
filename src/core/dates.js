@@ -52,3 +52,18 @@ export function addMonths(dateStr, n) {
   const last = new Date(Date.UTC(yy, mm, 0)).getUTCDate();
   return `${String(yy).padStart(4, '0')}-${String(mm).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
 }
+
+/** validateDate with a field label: `${label} '${v}' must be YYYY-MM-DD`. */
+export function validateLabeledDate(value, label) {
+  if (typeof value !== 'string' || !DATE_RE.test(value)) {
+    const e = new Error(`${label} '${value}' must be YYYY-MM-DD`);
+    e.code = 'INVALID_DATE';
+    throw e;
+  }
+  const d = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) {
+    const e = new Error(`${label} '${value}' is not a valid calendar date`);
+    e.code = 'INVALID_DATE';
+    throw e;
+  }
+}
