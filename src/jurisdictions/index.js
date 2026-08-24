@@ -26,10 +26,10 @@
 // seventeenth to twenty-fourth (Phase E — eight EUR markets,
 // English-document defaults), CZ/SK/GR/PL/HU/RO the twenty-fifth to
 // thirtieth (Phase F — the final six EU members, English-document
-// defaults); each registers only formats with existing builders —
-// anything else fails loudly via the strict dispatch. PLANNED is empty
-// (all thirty-one markets live — 27/27 EU members + GB/NO/XK/US); CH is parked
-// (CHF base currency, QR-bill, not a Peppol country).
+// English-document defaults); each registers only formats with existing builders —
+// anything else fails loudly via the strict dispatch. All thirty-one markets live
+// (27/27 EU members + GB/NO/XK/US); CH is parked (CHF base currency, QR-bill,
+// not a Peppol country).
 //
 // Consumers must resolve profiles ONLY through this registry — never read
 // company.country directly (see the profile-sprawl rule in the Phase A plan).
@@ -64,9 +64,6 @@ import si from './si.js';
 import sk from './sk.js';
 import us from './us.js';
 import xk from './xk.js';
-
-/** ISO 3166-1 alpha-2 country codes that are valid but not implemented yet. */
-export const PLANNED = []; // all 27 EU members landed (Phases B-F); XK live (Phase G); CH parked
 
 // every code across ALL registered profiles — the invoice line-spec parser
 // uses this union to RECOGNISE a VAT-code token (validation still happens
@@ -107,7 +104,6 @@ function deepFreeze(obj) {
  * Get a profile by country code (pure — no DB).
  * - malformed input (not a 2-letter code) → INVALID_COUNTRY
  * - valid code with no profile → PROFILE_NOT_FOUND
- * - valid code in PLANNED (implemented later) → COUNTRY_NOT_SUPPORTED
  * Returns the deep-frozen profile module.
  */
 export function getProfile(country) {
@@ -117,9 +113,6 @@ export function getProfile(country) {
   }
   const profile = PROFILES[cc];
   if (!profile) {
-    if (PLANNED.includes(cc)) {
-      throw jurisdictionError('COUNTRY_NOT_SUPPORTED', `country ${cc} is not supported yet — supported: ${Object.keys(PROFILES).join(', ')}`);
-    }
     throw jurisdictionError('PROFILE_NOT_FOUND', `no jurisdiction profile for country ${cc}`);
   }
   return profile;
@@ -129,8 +122,7 @@ export function getProfile(country) {
  * Resolve the profile for a company DB (reads company.country).
  * - no company row yet (pre-init) or no country column (pre-migration-021)
  *   → 'NL' default
- * - company.country set → getProfile(country) (throws PROFILE_NOT_FOUND /
- *   COUNTRY_NOT_SUPPORTED per decision §9.1.6 — never a silent fallback)
+ *   → getProfile(country) (throws PROFILE_NOT_FOUND — never a silent fallback)
  * Consumers must use THIS resolver — never read company.country directly.
  */
 export function resolveProfile(db) {

@@ -26,9 +26,7 @@ export function make(program) {
     .option('--country <CC>', 'country (ISO 3166-1 alpha-2)', 'NL')
     .option('--registration-id <id>', 'company registration number (KVK for NL)')
     .option('--tax-id <id>', 'tax identification number (btw-id for NL)')
-    .option('--kvk <kvk>', '[deprecated] alias for --registration-id')
     .option('--legal-form <form>', `legal form (${LEGAL_FORMS.join('|')})`, 'eenmanszaak')
-    .option('--btw-id <id>', '[deprecated] alias for --tax-id')
     .option('--iban <iban>', 'bank account (IBAN)')
     .option('--address <address>', 'street address (for compliant invoices)')
     .option('--postal-code <code>', 'postal code')
@@ -51,7 +49,7 @@ export function make(program) {
 
 function buildCompany(opts) {
   // jurisdiction profile: validates country (INVALID_COUNTRY /
-  // COUNTRY_NOT_SUPPORTED) and drives legal forms, the KOR gate, and the
+  // PROFILE_NOT_FOUND) and drives legal forms, the KOR gate, and the
   // stored country/base_currency/locale/profile_version
   const profile = getProfile(opts.country ?? 'NL');
   // fiscal year end defaults from the country profile (NL 12-31, GB 03-31)
@@ -79,20 +77,8 @@ function buildCompany(opts) {
   if (opts.iban && !isValidIban(opts.iban)) {
     throw dbError('INVALID_IBAN', `'${opts.iban}' is not a valid IBAN`);
   }
-  // deprecated aliases: --kvk -> --registration-id, --btw-id -> --tax-id
-  const warnings = [];
-  if (opts.registrationId != null && opts.kvk != null) {
-    warnings.push('--kvk ignored because --registration-id was also given');
-  }
-  if (opts.taxId != null && opts.btwId != null) {
-    warnings.push('--btw-id ignored because --tax-id was also given');
-  }
-  const registrationId = opts.registrationId != null
-    ? opts.registrationId
-    : (opts.kvk != null ? (warnings.push('--kvk is deprecated — use --registration-id'), opts.kvk) : null);
-  const taxId = opts.taxId != null
-    ? opts.taxId
-    : (opts.btwId != null ? (warnings.push('--btw-id is deprecated — use --tax-id'), opts.btwId) : null);
+  const registrationId = opts.registrationId ?? null;
+  const taxId = opts.taxId ?? null;
   const company = {
     name: opts.name,
     registration_id: registrationId,
@@ -110,7 +96,7 @@ function buildCompany(opts) {
     locale: profile.meta.locale,
     profile_version: 1,
   };
-  return { company, warnings };
+  return { company };
 }
 
 function renderInit(data) {
@@ -133,12 +119,11 @@ function renderInit(data) {
       console.log('vat:      module enabled');
     }
   }
-  for (const w of data.warnings ?? []) console.error(`warning: ${w}`);
   console.log(data.dryRun ? '(dry run — nothing written)' : 'initialised.');
 }
 
 function initAction(ctx, opts) {
-  const { company, warnings } = buildCompany(opts);
+  const { company } = buildCompany(opts);
 
   if (ctx.dryRun) {
     output(ctx, {
@@ -147,7 +132,6 @@ function initAction(ctx, opts) {
       db: ctx.dbPath,
       db_exists: existsSync(ctx.dbPath),
       chart: { accounts: DEFAULT_CHART.length + (company.vat_module ? 2 : 0) },
-      ...(warnings.length ? { warnings } : {}),
       dryRun: true,
     }, renderInit);
     return;
@@ -184,7 +168,6 @@ function initAction(ctx, opts) {
       company,
       db: ctx.dbPath,
       chart: { accounts: listAccounts(db).length, created: created + vatCreated },
-      ...(warnings.length ? { warnings } : {}),
       dryRun: false,
     }, renderInit);
   } finally {

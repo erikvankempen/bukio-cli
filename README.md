@@ -260,9 +260,9 @@ Initialise a company database: creates the file, the company row, and seeds the 
 |--------|---------|-------------|
 | `--name <name>` | *(required)* | Company name |
 | `--country <cc>` | `NL` | Country profile: `NL`, `LU`, `GB`, `FR`, `US`, `BE`, `DE`, `DK`, `FI`, `NO`, `SE` |
-| `--registration-id <id>` | — | Company registration number (identifier type follows the profile: KVK, KBO, CRN, SIREN, RCS, CVR, Y-tunnus, Org.nr.; deprecated alias `--kvk`) |
+| `--registration-id <id>` | — | Company registration number (identifier type follows the profile: KVK, KBO, CRN, SIREN, RCS, CVR, Y-tunnus, Org.nr.) |
 | `--legal-form <form>` | profile default | Legal forms follow the profile (NL: `eenmanszaak` \| `vof` \| `bv` \| `nv` \| `stichting` \| `vereniging`; DE: `gmbh` \| `ug` \| `ag` \| ...; US: `llc` \| `c-corp` \| `s-corp` \| ...) |
-| `--tax-id <id>` | — | Tax/VAT identification number (deprecated alias `--btw-id`) |
+| `--tax-id <id>` | — | Tax/VAT identification number |
 | `--iban <iban>` | — | Bank account (IBAN) |
 | `--vat <on\|off>` | `off` | Enable the VAT module (Phase 2) |
 | `--kor` | off | Small business scheme — implies `--vat off` |
@@ -284,11 +284,11 @@ Company record — the supplier gegevens on your invoices (12-vereisten 1–3 mu
 | Command | Purpose |
 |---------|---------|
 | `company show` | Current company record (name, registration id, tax id, iban, address) |
-| `company update --name --registration-id --tax-id --iban --address --postal-code --city [--dry-run]` | Update supplier data (audited; IBAN mod-97 validated; deprecated `--kvk`/`--btw-id` aliases) |
+| `company update --name --registration-id --tax-id --iban --address --postal-code --city [--dry-run]` | Update supplier data (audited; IBAN mod-97 validated) |
 | `company update --logo FILE` / `--remove-logo` / `company logo --out FILE` | Store/extract the invoice logo (PNG/JPEG/SVG ≤ 1 MB, ≤ 2048×2048 px, stored as a BLOB in the DB — travels with backups) |
 
 ```bash
-bukio company update --address "Industrieweg 12" --postal-code "2712 CD" --city "Zoetermeer" --btw-id NL123456789B01
+bukio company update --address "Industrieweg 12" --postal-code "2712 CD" --city "Zoetermeer" --tax-id NL123456789B01
 bukio company update --logo ~/logo.svg
 bukio company show
 ```
@@ -382,7 +382,7 @@ Per-account debit/credit/net totals from **posted** entries, with a final BALANC
 
 ### `bukio report balance-sheet`
 
-Balance sheet as of a date, grouped by the profile's taxonomy (NL example — RGS hoofdgroep: Materiële vaste activa, Voorraden, Vorderingen, Liquide middelen / Eigen vermogen, Kortlopende schulden, …). Includes the computed **undistributed result** (net result of income/expense accounts). Invariant: **total assets = total liabilities + equity + result** — the report says `BALANCED` or `UNBALANCED!`. (`balans` is a deprecated alias.)
+Balance sheet as of a date, grouped by the profile's taxonomy (NL example — RGS hoofdgroep: Materiële vaste activa, Voorraden, Vorderingen, Liquide middelen / Eigen vermogen, Kortlopende schulden, …). Includes the computed **undistributed result** (net result of income/expense accounts). Invariant: **total assets = total liabilities + equity + result** — the report says `BALANCED` or `UNBALANCED!`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -442,7 +442,7 @@ Chart of accounts management.
 
 | Command | Purpose |
 |---------|---------|
-| `account add --code <c> --name <n> --type <t> --normal-balance <d\|c> [--taxonomy-code <r>] [--dry-run]` | Add an account (deprecated alias `--rgs-code`) |
+| `account add --code <c> --name <n> --type <t> --normal-balance <d\|c> [--taxonomy-code <r>] [--dry-run]` | Add an account |
 | `account list [--type <t>] [--include-inactive]` | List accounts |
 | `account show --code <c>` | Show one account |
 | `account deactivate --code <c>` | Deactivate (blocks new postings; history stays) |
@@ -580,7 +580,7 @@ bukio bank import --file stmt.xml --iban NL91ABNA0417164300
 bukio bank match auto                        # tx -> invoice 2026-0001 (paid)
 ```
 
-### `bukio year-end` / `bukio jaarrekening` / `bukio icp`
+### `bukio year-end` / `bukio icp`
 
 Annual close and statutory reporting (Phase 4).
 
@@ -588,7 +588,7 @@ Annual close and statutory reporting (Phase 4).
 |---------|---------|
 | `year-end status --year YYYY` | Open/closed, the year's result, per-account nets |
 | `year-end close --year YYYY [--dry-run]` | **Close the fiscal year**: reverse income/expense into 9900 (created on demand), then resultaatbestemming into 3000. Both entries `source='closing'`, `source_ref='fy:YYYY'`. Guards: draft entries in the year (`INCOMPLETE_YEAR`), double close (`ALREADY_CLOSED`), no activity (`EMPTY_YEAR`). **The P&L report excludes closing entries** — the year's flow stays visible after closing; the balance sheet then shows equity including the result |
-| `financial-statements report --year YYYY --model <model> [--format json\|pdf\|xlsx] [--out]` | Statutory annual accounts — models per the country profile (NL: `micro`\|`klein`, Dutch layout, Titel 9 Boek 2 BW — balans + W&V, `--format pdf` = the **KVK deposit package**; xlsx for the accountant; deprecated alias `jaarrekening report`) |
+| `financial-statements report --year YYYY --model <model> [--format json\|pdf\|xlsx] [--out]` | Statutory annual accounts — models per the country profile (NL: `micro`\|`klein`, Dutch layout, Titel 9 Boek 2 BW — balans + W&V, `--format pdf` = the **KVK deposit package**; xlsx for the accountant) |
 | `icp readout --period YYYY-Qn` | **ICP listing**: EU reverse-charge (verlegde) supplies per customer (from RE invoice lines), with their VAT ids. Fails `ICP_VAT_ID_MISSING` if a customer lacks one. Credit notes reduce the customer total |
 
 ```bash
@@ -1140,7 +1140,7 @@ The version history is recorded in [CHANGELOG.md](CHANGELOG.md); the agent manua
 
 **Open a company's books**
 ```bash
-bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on
+bukio init --name "Demo BV" --registration-id 12345678 --legal-form bv --vat on
 bukio entry add --desc "Startkapitaal" --postings "1100:10000.00,3000:-10000.00" --post
 ```
 
@@ -1201,7 +1201,7 @@ bukio restore --from ~/.bukio/backups/bukio-....db --to ~/.bukio/test-restore.db
 
 **Extend the chart of accounts**
 ```bash
-bukio account add --code 4350 --name "Reiskosten" --type expense --normal-balance debit --rgs-code WBED.42
+bukio account add --code 4350 --name "Reiskosten" --type expense --normal-balance debit --taxonomy-code WBED.42
 bukio account import --file assets/chart-nl.csv --dry-run
 ```
 

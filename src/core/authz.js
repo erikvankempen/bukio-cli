@@ -210,7 +210,6 @@ const CLI_CAPABILITIES = {
   'year-end close': 'close.year',
   'year-end report': 'close.year',
   'financial-statements report': 'close.year',
-  'jaarrekening report': 'close.year',
   // export / fx
   'export xaf': 'export.manage',
   'fx set': 'fx.manage',
@@ -218,7 +217,6 @@ const CLI_CAPABILITIES = {
   // report.read — all reads
   'report trial-balance': 'report.read',
   'report balance-sheet': 'report.read',
-  'report balans': 'report.read',
   'report pnl': 'report.read',
   'report journal': 'report.read',
   'report aging': 'report.read',

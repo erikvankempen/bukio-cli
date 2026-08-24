@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-21 18:02:15 UTC — **✅ 946 passing · 0 failing (946 tests)**
+**Latest run:** 2026-08-24 19:04:28 UTC — **❌ 930 passing · 2 failing (932 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -296,7 +296,7 @@
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
-32 passing · 0 failing
+31 passing · 0 failing
 
     - ✅ init --dry-run: shows plan, creates nothing
     - ✅ init: creates company + 30-account chart with VAT on
@@ -312,7 +312,6 @@
     - ✅ account import: dry-run validates, real import creates
     - ✅ report balance-sheet/pnl/journal: JSON + CSV + XLSX export
     - ✅ report balance-sheet --as-of is respected
-    - ✅ report balans stays available as a deprecated alias
     - ✅ backup + restore roundtrip
     - ✅ bank import (CAMT + CSV), idempotency, match --post, ignore
     - ✅ bank match --auto links posted entries (exact)
@@ -668,7 +667,7 @@
     - ✅ PDF: Dutch labels, unit column, VAT breakdown, discount row
     - ✅ PDF: English labels + reverse-charge wording
     - ✅ PDF: company logo renders as a data URI in the header
-    - ✅ PDF: renders through Chromium (skipped when no browser installed)
+    - ✅ PDF: renders through Chromium (skipped when no browser installed) # SKIP Chromium not available: could not render the invoice PDF (Playwright/Chromium): browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1228/chrome-headless-shell-linux64/chrome-headless-shell\\n╔════════════════════════════════════════════════════════════╗\\n║ Looks like Playwright was just installed or updated.       ║\\n║ Please run the following command to download new browsers: ║\\n║                                                            ║\\n║     npx playwright install                                 ║\\n║                                                            ║\\n║ <3 Playwright Team                                         ║\\n╚════════════════════════════════════════════════════════════╝
     - ✅ recurring invoice template with items snapshots catalog prices per run
     - ✅ MCP: item_add/item_list/item_update + invoice_create with items/discount/language
     - ✅ bank autoMatch: incoming payment matches a DISCOUNTED invoice at its discounted gross
@@ -713,11 +712,10 @@
 
 ### jurisdictions.test.js — 
 
-158 passing · 0 failing
+145 passing · 0 failing
 
     - ✅ getProfile returns the NL profile for NL (any case)
     - ✅ getProfile rejects malformed country input with INVALID_COUNTRY
-    - ✅ getProfile throws COUNTRY_NOT_SUPPORTED for valid-but-planned countries
     - ✅ getProfile throws PROFILE_NOT_FOUND for unknown valid codes
     - ✅ profiles are deep-frozen (static data — no consumer may mutate)
     - ✅ NL profile integrity — tax section matches the legacy VAT module
@@ -732,23 +730,22 @@
     - ✅ M3 init: --country ZZ (valid code, no profile) is rejected with PROFILE_NOT_FOUND
     - ✅ M3 init: --country nl (lowercase) normalizes to NL and stores profile fields
     - ✅ M3 init: generic --registration-id/--tax-id are stored; no deprecation warning
-    - ✅ M3 init: legacy --kvk/--btw-id aliases map to the generic fields and warn
+    - ✅ M3 init: --registration-id/--tax-id set the company identifiers
     - ✅ M3 company update: changing country is rejected with COUNTRY_IMMUTABLE
     - ✅ M3 company update: --country with the SAME value passes the immutability gate
-    - ✅ M3 company update: --kvk alias warns and updates registration_id
+    - ✅ M3 company update: --registration-id updates registration_id
     - ✅ M3 company update: generic --registration-id/--tax-id work without warnings
     - ✅ M4: obReadout resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ M4: validateCompliance resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ M5: jaarrekening resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
-    - ✅ M5: deprecated alias `jaarrekening report` still works and warns
     - ✅ M6: compliance status resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ M7: invoiceToUbl resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ M8: year-end close resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ M9: exportXaf resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
     - ✅ M9: bank import resolves the profile (unknown company country -> PROFILE_NOT_FOUND)
-    - ✅ review-fix: account add --taxonomy-code works; --rgs-code alias maps and warns
+    - ✅ review-fix: account add --taxonomy-code works
     - ✅ B1: getProfile returns the LU profile (French, PCN 2020 data)
-    - ✅ B1: LU is implemented — PLANNED is empty (all thirty-one markets landed)
+    - ✅ B1: LU is implemented (all thirty-one markets landed)
     - ✅ B1: the LU profile is deep-frozen
     - ✅ B1: init --country LU creates a French LU company with the PCN chart
     - ✅ B1: LU strict dispatch — unregistered formats fail loudly (no NL fallback)
@@ -773,59 +770,48 @@
     - ✅ B3: FAIA omits the TaxTable for a TVA-less company (review fix)
     - ✅ B3: NL XAF export is unchanged (byte-identical, xaf-auditfile-4.0)
     - ✅ GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)
-    - ✅ GB: PLANNED is empty (all thirty-one markets landed)
     - ✅ GB: init --country GB creates a GBP company with the UK chart
     - ✅ GB: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ GB: compliance calendar — annual accounts in 9 months, CT600 in 12
     - ✅ FR: getProfile returns the FR profile (EUR, fr, PCG data)
-    - ✅ FR: PLANNED is empty (all thirty-one markets landed)
     - ✅ FR: init --country FR creates a French company with the PCG chart
     - ✅ FR: dotted VAT codes (5.5/2.1) parse in the invoice line spec (review fix)
     - ✅ FR: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ US: getProfile returns the US profile (USD, en-US, no federal VAT)
-    - ✅ US: PLANNED is empty (all thirty-one markets landed)
     - ✅ US: init --country US creates a USD company with the US chart
     - ✅ US: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ US: compliance calendar — 1120 on 15 Apr + 941 quarterly (month-end)
     - ✅ BE: getProfile returns the BE profile (EUR, nl-BE, PCN-BE data)
-    - ✅ BE: PLANNED is empty (all thirty-one markets landed)
     - ✅ BE: init --country BE creates a Belgian company with the PCMN chart
     - ✅ BE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ BE: compliance calendar — VAT on the 20th + annual accounts in 7 months
     - ✅ DE: bank add defaults to the profile bank account (1200), not NL 1100 (review fix)
     - ✅ NL: bank add still defaults to 1100 (byte-identity)
     - ✅ DE: getProfile returns the DE profile (EUR, de-DE, SKR 03 data)
-    - ✅ DE: PLANNED is empty (all thirty-one markets landed)
     - ✅ DE: init --country DE creates a German company with the SKR 03 chart
     - ✅ DE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ DE: compliance calendar — UStVA 10th + annual VAT 31 Jul + accounts 12 mo
     - ✅ DK: getProfile returns the DK profile (DKK, da-DK, 25% VAT only)
-    - ✅ DK: PLANNED is empty (all thirty-one markets landed)
     - ✅ DK: init --country DK creates a Danish company with the kontoplan
     - ✅ DK: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ DK: compliance calendar — quarterly VAT 1st of 3rd month + accounts 5 months
     - ✅ FI: getProfile returns the FI profile (EUR, fi-FI, 25.5% VAT)
-    - ✅ FI: PLANNED is empty (all thirty-one markets landed)
     - ✅ FI: init --country FI creates a Finnish company with the model chart
     - ✅ FI: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ FI: compliance calendar — quarterly VAT 12th of 2nd month + accounts in 8 months
     - ✅ NO: getProfile returns the NO profile (NOK, nb-NO, NS 4102)
-    - ✅ NO: PLANNED is empty (all thirty-one markets landed)
     - ✅ NO: init --country NO creates a Norwegian company with the NS 4102 chart
     - ✅ NO: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ NO: compliance calendar — bi-monthly VAT (6/yr) + accounts by 31 July
     - ✅ SE: getProfile returns the SE profile (SEK, sv-SE, BAS 2023)
-    - ✅ SE: PLANNED is empty (all thirty-one markets landed)
     - ✅ SE: init --country SE creates a Swedish company with the BAS chart
     - ✅ SE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ SE: compliance calendar — quarterly VAT 12th of 2nd month (Aug 17th) + accounts 7 months
     - ✅ AT: getProfile returns the AT profile (EUR, de-AT, EKR data)
-    - ✅ AT: PLANNED is empty (all thirty-one markets landed)
     - ✅ AT: init --country AT creates an Austrian company with the EKR chart
     - ✅ AT: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ AT: compliance calendar — UVA 15th of second following month + annual VAT 30 Jun
     - ✅ IE: getProfile returns the IE profile (EUR, en, UK-style chart)
-    - ✅ IE: PLANNED is empty (all thirty-one markets landed)
     - ✅ IE: init --country IE creates an Irish company with the UK-style chart
     - ✅ IE: strict dispatch — unregistered formats fail loudly (no fallback)
     - ✅ IE: compliance calendar — VAT3 bi-monthly 23rd + annual accounts/CT1 9 months
@@ -1062,7 +1048,7 @@
 
 ### smtp.test.js — zero-dependency SMTP client + invoice email: auth, STARTTLS, MIME/PDF attachment, dry-run, audit
 
-15 passing · 0 failing
+14 passing · 1 failing
 
     - ✅ sendMail: happy path delivers, captures the MIME with the PDF attachment
     - ✅ sendMail: auth failure → SMTP_AUTH_FAILED
@@ -1076,7 +1062,7 @@
     - ✅ emailInvoice: delivers to the contact email and audits
     - ✅ emailInvoice: guards — draft, missing email, unconfigured SMTP
     - ✅ emailInvoice: dry-run renders the plan, makes no connection, audits nothing
-    - ✅ emailInvoice: PDF attachment is rendered and decodes to %PDF
+    - ❌ emailInvoice: PDF attachment is rendered and decodes to %PDF
     - ✅ cli: invoice email e2e with SMTP env + audit row
     - ✅ mcp: invoice_email dry-run parity (no connection) + execute
 
@@ -1147,7 +1133,7 @@
 
 ### year-end.test.js — annual close, jaarrekening micro/klein, ICP
 
-21 passing · 0 failing
+20 passing · 1 failing
 
     - ✅ year-end close: posts closing + appropriation, balanced, source closing
     - ✅ year-end close: reversing the closing entries re-opens the year (documented undo)
@@ -1163,7 +1149,7 @@
     - ✅ jaarrekening: account-level amounts are numbers, never NaN
     - ✅ jaarrekening: PDF html renders account detail without NaN
     - ✅ jaarrekening: pnl includes the Afschrijvingen line for WAFS.41
-    - ✅ jaarrekening PDF: renders (playwright)
+    - ❌ jaarrekening PDF: renders (playwright)
     - ✅ jaarrekening PDF: esc() escapes double quotes (attribute-injection regression)
     - ✅ OB readout: R purchase -> 3a/4a, RE purchase -> 3b/4b, RE sale -> 2a
     - ✅ OB readout: verlegde EU sale (RE invoice) reports 2a

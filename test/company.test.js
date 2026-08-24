@@ -34,7 +34,7 @@ function tmpDb() {
 let t;
 test.beforeEach(() => {
   t = tmpDb();
-  cli(t.file, ['init', '--name', 'Test Coaching', '--kvk', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
+  cli(t.file, ['init', '--name', 'Test Coaching', '--registration-id', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
 });
 test.afterEach(() => {
   rmSync(t.dir, { recursive: true, force: true });

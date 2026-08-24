@@ -41,7 +41,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 
 | Command | Purpose |
 |---------|---------|
-| `bukio init --name X [--country NL] [--registration-id ..] [--tax-id ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + the country profile's default chart (NL: 29-account RGS-mapped; see §3.1 for all thirty-one profiles). Jurisdiction defaults come from the profile: chart, VAT codes/rates, identifiers, fiscal year end, compliance deadlines. Deprecated aliases: `--kvk` = `--registration-id`, `--btw-id` = `--tax-id`. Fails `ALREADY_INITIALISED` if done. |
+| `bukio init --name X [--country NL] [--registration-id ..] [--tax-id ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + the country profile's default chart (NL: 29-account RGS-mapped; see §3.1 for all thirty-one profiles). Jurisdiction defaults come from the profile: chart, VAT codes/rates, identifiers, fiscal year end, compliance deadlines. Fails `ALREADY_INITIALISED` if done. |
 | `bukio entry add --date YYYY-MM-DD --desc ".." --postings "CODE:AMT,CODE:AMT" [--post] [--dry-run]` | Create (and optionally post) a balanced journal entry. |
 | `bukio entry post --id N [--dry-run]` | Post a draft entry. |
 | `bukio entry reverse --id N [--reason ".."] [--dry-run]` | Post a contra-entry that cancels entry N. |
@@ -50,7 +50,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio account add/list/show/deactivate/reactivate` | Chart of accounts management. |
 | `bukio account import --file chart.csv [--dry-run]` | Import a chart: `code,name,type,normal_balance[,taxonomy_code]` (legacy header `rgs_code` still accepted). |
 | `bukio report trial-balance [--year YYYY]` | Per-account totals; `data.balanced` tells you the books reconcile. |
-| `bukio report balance-sheet [--as-of YYYY-MM-DD]` (alias: `balans`, deprecated) | Balance sheet; `data.balanced` must be true. |
+| `bukio report balance-sheet [--as-of YYYY-MM-DD]` | Balance sheet; `data.balanced` must be true. |
 | `bukio report pnl [--year YYYY]` | P&L: revenue, costs, result. |
 | `bukio report journal [--year YYYY]` | Journal export (one row per posting). |
 | `bukio report aging [--as-of D] [--kind debtors\|creditors\|both]` | Open items per contact, bucketed by days past due (current/30/60/90+); creditors show `in_batch` separately. |
@@ -87,7 +87,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio invoice email --id N [--to X] [--subject] [--body] [--no-pdf] [--dry-run]` | Email the finalized invoice PDF via SMTP (`BUKIO_SMTP_*` env — host/port/user/pass/from). Delivery is audited; status is `sent` from finalize onward. |
 | `bukio invoice peppol-send --id N [--endpoint URL] [--dry-run]` | POST the UBL to a Peppol access-point provider (env `BUKIO_PEPPOL_ENDPOINT` + `BUKIO_PEPPOL_TOKEN`). |
 | `bukio year-end status --year YYYY` / `close --year YYYY [--dry-run]` | Annual close: result -> 9900 -> 3000 (source 'closing'; P&L stays visible). |
-| `bukio financial-statements report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx]` | Statutory annual accounts (NL: KVK deposit package as PDF; deprecated alias `jaarrekening report`). |
+| `bukio financial-statements report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx]` | Statutory annual accounts (NL: KVK deposit package as PDF). |
 | `bukio icp readout --period 2026-Q3` | ICP listing: EU btw-verlegde supplies per customer (manual filing aid). |
 | `bukio fx set --currency USD --date D --rate 1.0875` | FX rate store (upsert, audited). |
 | `bukio fx fetch --currency USD [--date D]` | ECB reference rate (free, no key) on/before a date, stored as source=ECB. |
@@ -361,8 +361,8 @@ There are **no VAT accounts** in the core chart — VAT is an optional module. W
 ### 6.1 Open the month / company start
 
 ```bash
-BUKIO_DB=$HOME/.bukio/demo.db bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on --dry-run
-BUKIO_DB=$HOME/.bukio/demo.db bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on
+BUKIO_DB=$HOME/.bukio/demo.db bukio init --name "Demo BV" --registration-id 12345678 --legal-form bv --vat on --dry-run
+BUKIO_DB=$HOME/.bukio/demo.db bukio init --name "Demo BV" --registration-id 12345678 --legal-form bv --vat on
 BUKIO_DB=$HOME/.bukio/demo.db bukio entry add --desc "Startkapitaal" \
   --postings "1100:10000.00,3000:-10000.00" --post --actor agent:bartholomeus --json
 ```
@@ -444,7 +444,7 @@ bukio vat book --date 2026-06-06 --desc "Inkoop verlegd" \
 ### 6.8 Extend the chart
 
 ```bash
-bukio account add --code 4350 --name "Reiskosten" --type expense --normal-balance debit --rgs-code WBED.42 --dry-run
+bukio account add --code 4350 --name "Reiskosten" --type expense --normal-balance debit --taxonomy-code WBED.42 --dry-run
 bukio account import --file assets/chart-nl.csv --dry-run   # validate; then import without --dry-run
 ```
 

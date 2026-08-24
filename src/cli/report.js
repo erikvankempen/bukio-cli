@@ -110,7 +110,6 @@ export function make(program) {
 
   report
     .command('balance-sheet')
-    .alias('balans') // deprecated alias, kept for compatibility
     .description('balance sheet as of a date (assets = liabilities + equity + result)')
     .option('--as-of <yyyy-mm-dd>', 'balance date')
     .option('--format <format>', 'json|csv|xlsx|human')
