@@ -97,17 +97,17 @@ export function make(program) {
     .requiredOption('--code <code>', 'cost center code')
     .option('--dry-run', 'show the plan without writing')
     .action((opts, command) => withDb(command, (ctx, db) => {
-      const updated = reactivateCostCenter(db, opts.code);
-      if (!ctx.dryRun) {
-        record(db, { actor: ctx.actor, action: 'cost-center.reactivate', command: 'cost-center reactivate', args: { code: opts.code }, outcome: 'ok' });
-      }
-      output(ctx, { cost_center: updated }, (d) => {
-        if (d.cost_center.dryRun) {
-          console.log(`plan: reactivate cost center ${d.cost_center.code}`);
+      const row = getCostCenterByCode(db, opts.code);
+      if (!row) throw cliError('COST_CENTER_NOT_FOUND', `cost center '${opts.code}' does not exist`);
+      if (ctx.dryRun) {
+        output(ctx, { action: 'reactivate cost center', code: opts.code, dryRun: true }, (d) => {
+          console.log(`plan: reactivate cost center ${d.code}`);
           console.log('(dry run — nothing written)');
-          return;
-        }
-        console.log(`reactivated cost center ${d.cost_center.code}`);
-      });
+        });
+        return;
+      }
+      const updated = reactivateCostCenter(db, opts.code);
+      record(db, { actor: ctx.actor, action: 'cost-center.reactivate', command: 'cost-center reactivate', args: { code: opts.code }, outcome: 'ok' });
+      output(ctx, { cost_center: updated }, (d) => console.log(`reactivated cost center ${d.cost_center.code}`));
     }));
 }
