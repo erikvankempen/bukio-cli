@@ -1297,13 +1297,13 @@ against this same codebase.
 
 | Model | Sessions | API calls | Input | Cached input | Output | Reasoning | Est. cost |
 |---|---|---|---|---|---|---|---|
-| DeepSeek V4 Flash | 116 | 10,867 | 34.50M | 1,973.60M | 9.24M | 5.19M | $14.40 |
-| MiMo-V2.5-Pro (review subagents) | 37 | 680 | 7.12M | 46.41M | 1.09M | — | $4.22 |
-| Other models (ox-alpha, kimi, hy3, minimax, mimo-v2.5) | 42 | 928 | 3.87M | 64.44M | 0.20M | 0.08M | $1.21 |
-| **Total** | **195** | **12,475** | **45.49M** | **2,084.45M** | **10.53M** | **5.27M** | **$19.83** |
+| DeepSeek V4 Flash | 116 | 10,867 | 38.80M | 2,012.76M | 10.75M | 6.26M | $17.21 |
+| MiMo-V2.5-Pro (review subagents) | 37 | 680 | 7.12M | 46.41M | 1.09M | — | $4.05 |
+| Other models (ox-alpha, hy3, mimo-v2.5, minimax) | 22 | 461 | 3.87M | 64.44M | 0.20M | 0.08M | $0.79 |
+| **Total** | **149** | **12,008** | **49.75M** | **2,123.61M** | **12.00M** | **6.33M** | **$22.05** |
 
-**$19.83 total** at official list prices for the entire project (12,475
-API calls across 195 sessions, ≈ 2.15B tokens).
+**$22.05 total** at official list prices for the entire project (12,008
+API calls across 149 sessions, ≈ 2.19B tokens).
 
 ### Developer Time (contributed, unpaid)
 
@@ -1331,7 +1331,7 @@ Stated plainly, so nothing is hidden:
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
 - **It was free:** the ≈ €1,490 is an imputed opportunity cost, not money paid.
-  My out-of-pocket spend remains **$19.83** in API costs.
+  My out-of-pocket spend remains **$22.05** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
   conventional code review of a 34.2 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
@@ -1353,7 +1353,7 @@ across 193 files (21,322 in `src/`, 15,813 in `test/`, 115 in `bin/` +
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
 **Comparison:** a conventional team building this would estimate **≈ 106–270
-person-months (≈ €954K–€2,430K)**; the AI-assisted build consumed **$19.83 in
+person-months (≈ €954K–€2,430K)**; the AI-assisted build consumed **$22.05 in
 API costs plus ≈ €1,490 of my review-and-direction time (contributed, unpaid
 — see above)** over 25 working sessions in eleven days — still a tiny fraction of
 the conventional estimate.
