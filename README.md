@@ -1283,7 +1283,7 @@ is the measured token consumption and its cost at **official list prices**
 output. Reasoning tokens are billed at the output rate; other models
 (minimax-m2.5) are priced at the OpenCode Go list rate. Data is captured by
 the `bukio-token-track` tool from the agent's session telemetry — including
-delegation subagent sessions, bukio-cli sessions only (snapshot 2026-08-15).
+delegation subagent sessions, bukio-cli only (snapshot 2026-09-01).
 
 **Proven stack:** bukio-cli is developed and operated end-to-end with
 **Hermes Agent** (Nous Research) via OpenCode Go. The main development
@@ -1295,15 +1295,15 @@ against this same codebase.
 
 ### Token usage — per model
 
-| Model | API calls | Input | Cached input | Output | Reasoning | Est. cost |
-|---|---|---|---|---|---|---|
-| DeepSeek V4 Flash | 11,215 | 33.86M | 2,294.04M | 9.71M | 5.70M | $15.48 |
-| MiMo-V2.5-Pro (review subagents) | 574 | 6.82M | 42.12M | 1.06M | — | $4.05 |
-| Other models (minimax-m2.5, mimo-v2.5) | 29 | 0.19M | 0.80M | 0.02M | 0.01M | $0.04 |
-| **Total** | **11,818** | **40.87M** | **2,336.96M** | **10.79M** | **5.71M** | **$19.56** |
+| Model | Sessions | API calls | Input | Cached input | Output | Reasoning | Est. cost |
+|---|---|---|---|---|---|---|---|
+| DeepSeek V4 Flash | 116 | 10,867 | 34.50M | 1,973.60M | 9.24M | 5.19M | $14.40 |
+| MiMo-V2.5-Pro (review subagents) | 37 | 680 | 7.12M | 46.41M | 1.09M | — | $4.22 |
+| Other models (ox-alpha, kimi, hy3, minimax, mimo-v2.5) | 42 | 928 | 3.87M | 64.44M | 0.20M | 0.08M | $1.21 |
+| **Total** | **195** | **12,475** | **45.49M** | **2,084.45M** | **10.53M** | **5.27M** | **$19.83** |
 
-**$19.56 total** at official list prices for the entire project (11,818
-API calls across all development sessions, ≈ 2.39B tokens).
+**$19.83 total** at official list prices for the entire project (12,475
+API calls across 195 sessions, ≈ 2.15B tokens).
 
 ### Developer Time (contributed, unpaid)
 
@@ -1331,7 +1331,7 @@ Stated plainly, so nothing is hidden:
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
 - **It was free:** the ≈ €1,490 is an imputed opportunity cost, not money paid.
-  My out-of-pocket spend remains **$19.56** in API costs.
+  My out-of-pocket spend remains **$19.83** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
   conventional code review of a 34.2 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
@@ -1339,23 +1339,23 @@ Stated plainly, so nothing is hidden:
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **34,223 non-blank, non-comment lines of JavaScript**
-across 138 files (19,139 in `src/`, 14,928 in `test/`, 156 in `bin/` +
-`scripts/`), i.e. **34.22 KLOC**
+model (Boehm, 1981): **37,250 non-blank, non-comment lines of JavaScript**
+across 193 files (21,322 in `src/`, 15,813 in `test/`, 115 in `bin/` +
+`scripts/`), i.e. **37.25 KLOC**
 (measured with `scc` v3.7.0).
 
-| COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
+| COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\\* |
 |---|---|---|---|---|
-| Organic | 98.0 PM | 14.3 months | ~7 developers | ≈ €882K |
-| Semi-detached | 156.9 PM | 14.7 months | ~11 developers | ≈ €1,412K |
-| Embedded | 249.7 PM | 14.6 months | ~17 developers | ≈ €2,247K |
+| Organic | 95.9 PM | 14.1 months | ~7 developers | ≈ €864K |
+| Semi-detached | 165.9 PM | 14.9 months | ~11 developers | ≈ €1,494K |
+| Embedded | 304.2 PM | 15.2 months | ~20 developers | ≈ €2,736K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 98–250
-person-months (≈ €882K–€2,247K)**; the AI-assisted build consumed **$19.56 in
+**Comparison:** a conventional team building this would estimate **≈ 106–270
+person-months (≈ €954K–€2,430K)**; the AI-assisted build consumed **$19.83 in
 API costs plus ≈ €1,490 of my review-and-direction time (contributed, unpaid
-— see above)** over 24 working sessions in eleven days — still a tiny fraction of
+— see above)** over 25 working sessions in eleven days — still a tiny fraction of
 the conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.
