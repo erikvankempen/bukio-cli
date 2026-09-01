@@ -388,7 +388,7 @@ test('invoice language: nl default, any i18n table accepted, unknown rejected', 
 test('CLI: --discount-pct and --discount-amount together are rejected', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'bukio-disc-'));
   const dbPath = path.join(dir, 'test.db');
-  runCli(['init', '--name', 'Demo BV', '--kvk', '12345678', '--vat', 'on'], dbPath);
+  runCli(['init', '--name', 'Demo BV', '--registration-id', '12345678', '--vat', 'on'], dbPath);
   runCli(['contact', 'add', '--name', 'ACME B.V.', '--address', 'Straat 1', '--city', 'Amsterdam'], dbPath);
   assertCliError(
     ['invoice', 'create', '--contact', '1', '--lines', '1x Ding @ 10.00', '--date', '2026-08-10',
@@ -677,7 +677,7 @@ function mcpSession(dbPath) {
 test('MCP: item_add/item_list/item_update + invoice_create with items/discount/language', async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'bukio-mcp-features-'));
   const dbPath = path.join(dir, 'test.db');
-  runCli(['init', '--name', 'Demo BV', '--kvk', '12345678', '--vat', 'on'], dbPath);
+  runCli(['init', '--name', 'Demo BV', '--registration-id', '12345678', '--vat', 'on'], dbPath);
   runCli(['contact', 'add', '--name', 'ACME B.V.', '--address', 'Straat 1', '--city', 'Amsterdam'], dbPath);
   const mcp = mcpSession(dbPath);
   try {
@@ -827,7 +827,7 @@ test('company logo: set (PNG), extract round-trip, remove; audits', () => {
   writeFileSync(logo, pngBytes(200, 80));
   const dbPath = path.join(dir, 'test.db');
 
-  runCli(['init', '--name', 'Demo BV', '--kvk', '12345678', '--vat', 'on'], dbPath);
+  runCli(['init', '--name', 'Demo BV', '--registration-id', '12345678', '--vat', 'on'], dbPath);
   const set = runCli(['company', 'update', '--logo', logo], dbPath);
   assert.equal(set.data.company.logo_mime, 'image/png');
   assert.equal(set.data.company.logo_bytes, 33);
@@ -845,7 +845,7 @@ test('company logo: set (PNG), extract round-trip, remove; audits', () => {
 test('company logo: format, size and dimension guards', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'bukio-logo-'));
   const dbPath = path.join(dir, 'test.db');
-  runCli(['init', '--name', 'Demo BV', '--kvk', '12345678', '--vat', 'on'], dbPath);
+  runCli(['init', '--name', 'Demo BV', '--registration-id', '12345678', '--vat', 'on'], dbPath);
 
   const bad = path.join(dir, 'logo.txt');
   writeFileSync(bad, 'not an image at all');

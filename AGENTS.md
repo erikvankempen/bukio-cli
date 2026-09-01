@@ -41,7 +41,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 
 | Command | Purpose |
 |---------|---------|
-| `bukio init --name X [--country NL] [--registration-id ..] [--tax-id ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + the country profile's default chart (NL: 29-account RGS-mapped; see §3.1 for all thirty-one profiles). Jurisdiction defaults come from the profile: chart, VAT codes/rates, identifiers, fiscal year end, compliance deadlines. Deprecated aliases: `--kvk` = `--registration-id`, `--btw-id` = `--tax-id`. Fails `ALREADY_INITIALISED` if done. |
+| `bukio init --name X [--country NL] [--registration-id ..] [--tax-id ..] [--legal-form bv] [--vat on] [--kor] [--dry-run]` | Create the company database + the country profile's default chart (NL: 29-account RGS-mapped; see §3.1 for all thirty-one profiles). Jurisdiction defaults come from the profile: chart, VAT codes/rates, identifiers, fiscal year end, compliance deadlines. Fails `ALREADY_INITIALISED` if done. |
 | `bukio entry add --date YYYY-MM-DD --desc ".." --postings "CODE:AMT,CODE:AMT" [--post] [--dry-run]` | Create (and optionally post) a balanced journal entry. |
 | `bukio entry post --id N [--dry-run]` | Post a draft entry. |
 | `bukio entry reverse --id N [--reason ".."] [--dry-run]` | Post a contra-entry that cancels entry N. |
@@ -49,8 +49,10 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio entry show --id N` | One entry + postings. |
 | `bukio account add/list/show/deactivate/reactivate` | Chart of accounts management. |
 | `bukio account import --file chart.csv [--dry-run]` | Import a chart: `code,name,type,normal_balance[,taxonomy_code]` (legacy header `rgs_code` still accepted). |
+| `bukio cost-center add --code C --name N` / `list` / `show --code C` / `deactivate` / `reactivate` | Cost-center registry (analytical dimension for management reporting). `admin.chart` role. |
+| `bukio report cost-center [--year YYYY] [--period YYYY-Qn\|YYYY-MM] [--from D --to D] [--cost-center CODE]` | Cost-center analysis: revenue/costs/result per center for any period. `report.read` role. |
 | `bukio report trial-balance [--year YYYY]` | Per-account totals; `data.balanced` tells you the books reconcile. |
-| `bukio report balance-sheet [--as-of YYYY-MM-DD]` (alias: `balans`, deprecated) | Balance sheet; `data.balanced` must be true. |
+| `bukio report balance-sheet [--as-of YYYY-MM-DD]` | Balance sheet; `data.balanced` must be true. |
 | `bukio report pnl [--year YYYY]` | P&L: revenue, costs, result. |
 | `bukio report journal [--year YYYY]` | Journal export (one row per posting). |
 | `bukio report aging [--as-of D] [--kind debtors\|creditors\|both]` | Open items per contact, bucketed by days past due (current/30/60/90+); creditors show `in_batch` separately. |
@@ -87,7 +89,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio invoice email --id N [--to X] [--subject] [--body] [--no-pdf] [--dry-run]` | Email the finalized invoice PDF via SMTP (`BUKIO_SMTP_*` env — host/port/user/pass/from). Delivery is audited; status is `sent` from finalize onward. |
 | `bukio invoice peppol-send --id N [--endpoint URL] [--dry-run]` | POST the UBL to a Peppol access-point provider (env `BUKIO_PEPPOL_ENDPOINT` + `BUKIO_PEPPOL_TOKEN`). |
 | `bukio year-end status --year YYYY` / `close --year YYYY [--dry-run]` | Annual close: result -> 9900 -> 3000 (source 'closing'; P&L stays visible). |
-| `bukio financial-statements report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx]` | Statutory annual accounts (NL: KVK deposit package as PDF; deprecated alias `jaarrekening report`). |
+| `bukio financial-statements report --year YYYY --model micro\|klein [--format json\|pdf\|xlsx]` | Statutory annual accounts (NL: KVK deposit package as PDF). |
 | `bukio icp readout --period 2026-Q3` | ICP listing: EU btw-verlegde supplies per customer (manual filing aid). |
 | `bukio fx set --currency USD --date D --rate 1.0875` | FX rate store (upsert, audited). |
 | `bukio fx fetch --currency USD [--date D]` | ECB reference rate (free, no key) on/before a date, stored as source=ECB. |
@@ -163,7 +165,7 @@ split on `;` only (decimal commas stay intact). Journal/XAF `BtwCode` values
 are reported in `ignored_btw_codes` but NOT booked — the import is net; verify
 the booked amounts.
 
-**Posting syntax:** `--postings "1100:10000.00,3000:-10000.00"` — comma-separate or repeat the flag. `CODE` is the 4-digit account code. **Positive = debit, negative = credit. Sum must be zero.** Amount format: `1234.56`, max 2 decimals, no thousands separators, no Dutch comma decimals.
+**Posting syntax:** `--postings "1100:10000.00,3000:-10000.00"` — comma-separate or repeat the flag. `CODE` is the 4-digit account code. **Positive = debit, negative = credit. Sum must be zero.** Amount format: `1234.56`, max 2 decimals, no thousands separators, no Dutch comma decimals. Optional cost-center suffix: `4700:-100.00@SALES` tags that posting with cost center `SALES`.
 
 ---
 
@@ -361,8 +363,8 @@ There are **no VAT accounts** in the core chart — VAT is an optional module. W
 ### 6.1 Open the month / company start
 
 ```bash
-BUKIO_DB=$HOME/.bukio/demo.db bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on --dry-run
-BUKIO_DB=$HOME/.bukio/demo.db bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on
+BUKIO_DB=$HOME/.bukio/demo.db bukio init --name "Demo BV" --registration-id 12345678 --legal-form bv --vat on --dry-run
+BUKIO_DB=$HOME/.bukio/demo.db bukio init --name "Demo BV" --registration-id 12345678 --legal-form bv --vat on
 BUKIO_DB=$HOME/.bukio/demo.db bukio entry add --desc "Startkapitaal" \
   --postings "1100:10000.00,3000:-10000.00" --post --actor agent:bartholomeus --json
 ```
@@ -444,7 +446,7 @@ bukio vat book --date 2026-06-06 --desc "Inkoop verlegd" \
 ### 6.8 Extend the chart
 
 ```bash
-bukio account add --code 4350 --name "Reiskosten" --type expense --normal-balance debit --rgs-code WBED.42 --dry-run
+bukio account add --code 4350 --name "Reiskosten" --type expense --normal-balance debit --taxonomy-code WBED.42 --dry-run
 bukio account import --file assets/chart-nl.csv --dry-run   # validate; then import without --dry-run
 ```
 
@@ -918,6 +920,7 @@ authz off.
 | `BAD_JSON` / `BODY_TOO_LARGE` / `INVALID_ENVELOPE` / `CMD_MISMATCH` / `INVALID_LISTEN` / `TLS_KEY_REQUIRED` | Server rejected the request: body not JSON, > 10 MB, envelope missing `args.argv`, `cmd` does not match the argv's first words, `--listen` not `host:port`, or `--tls-cert` without `--tls-key` | Use the official CLI as the client; fix the `--listen`/TLS flags on `server start` |
 | `SERVER_EXEC` | The server could not spawn its own CLI (`node bin/bukio.js`) to run the verified envelope | Check the node runtime on the server host |
 | `ACCOUNT_EXISTS` / `ACCOUNT_TYPE` / `INVALID_CODE` / `INVALID_NORMAL_BALANCE` / `INVALID_RGS_CODE` | Account code taken, bad type, or malformed code/balance/rgs on `account add`/`import` | Fix the account arguments (RGS like `WKPR.70`) |
+| `COST_CENTER_EXISTS` / `COST_CENTER_NOT_FOUND` / `COST_CENTER_INACTIVE` / `INVALID_CODE` / `INVALID_NAME` | Cost center code taken, unknown, or inactive on `cost-center add`/`deactivate`; malformed code/name | Check `cost-center list` first; reactivate before re-booking |
 | `ALREADY_ACTIVE` / `ALREADY_INACTIVE` / `ALREADY_COMPLETED` / `ALREADY_DISPOSED` / `SCHEME_NAME_TAKEN` / `SCHEME_NOT_FOUND` | Assets state conflicts (activate/pause/dispose/completed) or scheme name taken/unknown | Check `assets list` / `assets schemes list` first |
 | `INVALID_COMBINATION` / `INVALID_DEPRECIATION` / `INVALID_LINE` / `INVALID_MODEL` / `INVALID_RESIDUAL` | Assets/jaarrekening argument combos malformed (depreciation method, line spec, micro/klein model) | Use the values the flag help shows |
 | `ALREADY_FINALIZED` / `CREDIT_NOT_PAYABLE` / `NOT_PAYABLE` / `NOT_SALES_INVOICE` / `NO_LINES` / `OVERPAYMENT` / `ENTRY_NOT_FOUND` / `CUSTOMER_INCOMPLETE` / `CUSTOMER_VAT_REQUIRED` / `SUPPLIER_INCOMPLETE` | Invoice lifecycle guard: already finalized, credit of a non-sales invoice, pay on a non-payable invoice, missing lines, overpayment, unknown entry, or missing customer/supplier fields (12-vereisten) | Complete the customer/supplier profile (`contact add` with address), then finalize |

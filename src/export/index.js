@@ -241,8 +241,8 @@ function buildXafAuditfile40(db, { year, out, actor, dryRun }) {
  * FAIA 2.01 reduced version B (Phase B3) — the Luxembourg AED audit file.
  *
  * Target: accounting-only systems (no invoicing module) — the schema WITHOUT
- * namespace, id 'FAIA'. Structure per the official XSD (docs-research/
- * faia-src/): AuditFile > Header (version 2.01, country LU, company with RCS
+ * namespace, id 'FAIA'. Structure per the official FAIA 2.01 XSD (pfi.public.lu):
+ * AuditFile > Header (version 2.01, country LU, company with RCS
  * registration number + AED tax registration, selection = the CIVIL year per
  * the XSD annotation — truncated periods are not permitted) + MasterFiles >
  * GeneralLedgerAccounts (PCN accounts with French AccountType values

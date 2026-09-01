@@ -44,7 +44,7 @@ let entryId;
 
 test.beforeEach(() => {
   t = tmpDb();
-  cli(t.file, ['init', '--name', 'Test Coaching', '--kvk', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
+  cli(t.file, ['init', '--name', 'Test Coaching', '--registration-id', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
   const db = openDb(t.file);
   try {
     const contact = createContact(db, { name: 'Acme BV', actor: 'agent:test' });
@@ -360,7 +360,7 @@ test('file-mode attachments dir is created under the DB dir (regression)', () =>
   const doc = Buffer.from('x');
   const file = path.join(t.dir, 'a.pdf');
   writeFileSync(file, doc);
-  cli(nestedDb, ['init', '--name', 'Test Coaching', '--kvk', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
+  cli(nestedDb, ['init', '--name', 'Test Coaching', '--registration-id', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
   const db = openDb(nestedDb);
   try {
     const contact = createContact(db, { name: 'Acme BV', actor: 'agent:test' });

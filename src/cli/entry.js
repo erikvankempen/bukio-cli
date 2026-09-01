@@ -14,6 +14,7 @@ import {
 } from '../core/entries.js';
 import { ensureDb, makeCtx, output, fail, table, withDb, cliError } from './util.js';
 import { resolveRate, toEurPostings } from '../fx/index.js';
+import { parsePostingSpecsWithCostCenter } from '../core/cost-centers.js';
 
 /** Convert posting specs to EUR when --currency given; auto rate lookup + ECB fallback. */
 async function applyFx(db, postings, { currency, rate, date, actor, dryRun = false }) {
@@ -39,6 +40,8 @@ function serializeEntry(entry) {
       account_type: p.account_type,
       amount_cents: p.amount_cents,
       amount: formatAmount(p.amount_cents),
+      cost_center_code: p.cost_center_code ?? null,
+      cost_center_name: p.cost_center_name ?? null,
     })),
   };
 }
@@ -46,7 +49,8 @@ function serializeEntry(entry) {
 function renderEntry(e) {
   console.log(`entry #${e.id}  [${e.state}]  ${e.date}  ${e.description}`);
   for (const p of e.postings) {
-    console.log(`  ${p.account_code}  ${p.account_name.padEnd(28)} ${p.amount}`);
+    const cc = p.cost_center_code ? `  CC:${p.cost_center_code}` : '';
+    console.log(`  ${p.account_code}  ${p.account_name.padEnd(28)} ${p.amount}${cc}`);
   }
   console.log(`  ${''.padEnd(31)} --------`);
   const total = e.postings.reduce((s, p) => s + p.amount_cents, 0);
@@ -113,7 +117,7 @@ function collect(value, previous) {
 }
 
 async function addAction(ctx, opts) {
-  const postings = parsePostingSpecs(opts.postings);
+  const postings = parsePostingSpecsWithCostCenter(opts.postings);
 
   if (ctx.dryRun) {
     // same validation as the real run where it needs no DB (createEntry does
@@ -132,8 +136,10 @@ async function addAction(ctx, opts) {
     try {
       converted = await applyFx(db, postings, { ...opts, actor: ctx.actor });
       if (db) {
-        resolved = resolvePostings(db, converted).map((p) => ({
+        resolvePostings(db, converted); // validates accounts + cost centers; throws if invalid
+        resolved = converted.map((p) => ({
           code: p.code, amount_cents: p.amountCents, amount: formatAmount(p.amountCents),
+          cost_center: p.costCenterCode ?? null,
           fx_currency: p.fxCurrency, fx_amount_cents: p.fxAmountCents,
         }));
       } else {
@@ -153,7 +159,7 @@ async function addAction(ctx, opts) {
       date: opts.date,
       description: opts.desc,
       currency: opts.currency ?? null,
-      postings: resolved ?? postings.map((p) => ({ code: p.code, amount_cents: p.amountCents, amount: formatAmount(p.amountCents) })),
+      postings: resolved ?? postings.map((p) => ({ code: p.code, amount_cents: p.amountCents, amount: formatAmount(p.amountCents), cost_center: p.costCenterCode ?? null })),
       sum_cents: sum,
       sum: formatAmount(sum),
       state: 'draft',
@@ -164,7 +170,8 @@ async function addAction(ctx, opts) {
       console.log(`plan: create entry ${d.date} "${d.description}"${d.currency ? ` (${d.currency} -> EUR)` : ''}`);
       for (const p of d.postings) {
         const fx = p.fx_currency ? `  [${p.fx_currency} ${p.fx_amount_cents != null ? (p.fx_amount_cents / 100).toFixed(2) : ''}]` : '';
-        console.log(`  ${p.code}  ${p.amount}${fx}`);
+        const cc = p.cost_center ? `  CC:${p.cost_center}` : '';
+        console.log(`  ${p.code}  ${p.amount}${fx}${cc}`);
       }
       console.log(`  sum: ${d.sum}${d.post ? '  -> will post' : ''}`);
       console.log(d.account_validation.startsWith('ok') ? '(accounts validated)' : `(note: ${d.account_validation})`);
@@ -179,7 +186,7 @@ async function addAction(ctx, opts) {
     let entry = createEntry(db, {
       date: opts.date,
       description: opts.desc,
-      postings: converted.map((p) => ({ code: p.code, amountCents: p.amountCents, fxCurrency: p.fxCurrency, fxAmountCents: p.fxAmountCents })),
+      postings: converted.map((p) => ({ code: p.code, amountCents: p.amountCents, fxCurrency: p.fxCurrency, fxAmountCents: p.fxAmountCents, costCenterCode: p.costCenterCode ?? null })),
       source: opts.source,
       sourceRef: opts.sourceRef ?? null,
       actor: ctx.actor,

@@ -38,7 +38,7 @@ function tmpDb() {
 
 test('recurring pause --dry-run and resume --dry-run render a plan (no fmtTemplate crash)', () => {
   const dbPath = tmpDb();
-  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--json']);
+  run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--json']);
   run(dbPath, ['recurring', 'add', '--name', 'Huur', '--postings', '4300:1000.00,1100:-1000.00', '--frequency', 'monthly', '--start', '2026-01-01', '--json']);
   // dry-run: must return a plan, not crash on fmtTemplate(plan-without-postings)
   const p = run(dbPath, ['recurring', 'pause', '--id', '1', '--dry-run', '--json']);
@@ -59,7 +59,7 @@ test('recurring pause --dry-run and resume --dry-run render a plan (no fmtTempla
 
 test('audit --format json prints JSON even without the global --json flag', () => {
   const dbPath = tmpDb();
-  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--json']);
+  run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--json']);
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
   const stdout = execFileSync(process.execPath, [BIN, 'audit', '--format', 'json'], { env, encoding: 'utf8' });
   const parsed = JSON.parse(stdout);
@@ -105,7 +105,7 @@ test('bank match post --dry-run rejects an already-matched transaction and a mis
 
 test('vat book --dry-run rejects unbalanced postings (parity with entry add)', () => {
   const dbPath = tmpDb();
-  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
+  run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
   // a spec that cannot balance: 100 debit with no contra leg
   const r = run(dbPath, ['vat', 'book', '--date', '2026-01-10', '--desc', 'x', '--postings', '8000:-100.00@21', '--dry-run', '--json'], { expectFail: true });
   assert.equal(r.code, 1);

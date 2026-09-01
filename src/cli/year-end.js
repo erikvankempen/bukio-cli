@@ -74,9 +74,8 @@ export function make(program) {
       }
     });
 
-  const reportAction = (deprecated) => async (opts, command) => {
+  const reportAction = async (opts, command) => {
     const ctx = makeCtx(command);
-    const warnings = deprecated ? ['jaarrekening is deprecated — use `financial-statements report`'] : undefined;
     try {
       const db = ensureDb(ctx);
       try {
@@ -86,17 +85,16 @@ export function make(program) {
           // without the global --json flag (parity with audit --format json)
           console.log(JSON.stringify({
             ok: true,
-            data: { financial_statements: report, ...(warnings ? { warnings } : {}) },
+            data: { financial_statements: report },
           }, null, 2));
           return;
         }
         if (opts.format === 'pdf') {
           const outPath = opts.out ?? `financial-statements-${opts.year}-${report.model}.pdf`;
           const result = await jaarrekeningToPdf(report, { outPath });
-          output(ctx, { path: result.path, bytes: result.bytes, ...(warnings ? { warnings } : {}) },
+          output(ctx, { path: result.path, bytes: result.bytes },
             (d) => {
               console.log(`wrote ${d.path} (${d.bytes} bytes)`);
-              for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
             });
           return;
         }
@@ -104,10 +102,9 @@ export function make(program) {
           const { renderJaarrekeningXlsx } = await import('../report/jaarrekening-xlsx.js');
           const outPath = opts.out ?? `financial-statements-${opts.year}-${report.model}.xlsx`;
           const result = await renderJaarrekeningXlsx(report, { outPath });
-          output(ctx, { path: result.path, bytes: result.bytes, ...(warnings ? { warnings } : {}) },
+          output(ctx, { path: result.path, bytes: result.bytes },
             (d) => {
               console.log(`wrote ${d.path} (${d.bytes} bytes)`);
-              for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
             });
           return;
         }
@@ -128,18 +125,7 @@ export function make(program) {
     .option('--model <model>', 'statutory model (per the country profile: NL micro|klein, LU abrege)')
     .option('--format <json|pdf|xlsx>', 'output format', 'json')
     .option('--out <path>', 'output path (pdf/xlsx)')
-    .action(reportAction(false));
-
-  // deprecated alias: the Dutch name is jurisdiction data, the command is not
-  const jr = program.command('jaarrekening').description('[deprecated] alias for financial-statements');
-  jr
-    .command('report')
-    .description('[deprecated] alias for financial-statements report')
-    .requiredOption('--year <yyyy>', 'fiscal year')
-    .option('--model <model>', 'statutory model (per the country profile: NL micro|klein, LU abrege)')
-    .option('--format <json|pdf|xlsx>', 'output format', 'json')
-    .option('--out <path>', 'output path (pdf/xlsx)')
-    .action(reportAction(true));
+    .action(reportAction);
 
   const icp = program.command('icp').description('ICP listing (intra-community supplies)');
   icp

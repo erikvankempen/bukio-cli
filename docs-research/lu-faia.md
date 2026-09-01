@@ -3,7 +3,7 @@
 **Purpose:** support the bukio-cli Luxembourg profile (`src/jurisdictions/lu.js`, PCN 2020) FAIA audit-file export (B3).
 **Current version:** FAIA **2.01** (final version AED 31-01-2013). Still the version published on the official portal (page last updated 21/07/2020). No newer version found (search 2024–2026 sources still reference 2.01). [high]
 **Variant to target for bukio-cli:** **Reduced version B** — bookkeeping without invoicing module (see §2).
-**Local copies of all primary sources** were downloaded to `/root/bukio-cli/docs-research/faia-src/` (XSD zip, FAIA_2_01.pdf, FAIA-recommandation.pdf, FAIA-FAQ.pdf) — inspect the XSD directly; do not guess.
+**Primary sources** are the official FAIA 2.01 XSD files (pfi.public.lu — XSD zip, FAIA_2_01.pdf, FAIA-recommandation.pdf, FAIA-FAQ.pdf); inspect the XSD directly; do not guess.
 
 ---
 

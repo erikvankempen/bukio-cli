@@ -403,7 +403,7 @@ test('FX+VAT: a range of amounts never trips UNBALANCED', () => {
 
 test('CLI: vat book --json reports the vat_code on tagged postings', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on']);
+  cli(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv', '--vat', 'on']);
   const { code, out } = cli(dbPath, ['vat', 'book', '--date', '2026-01-10', '--desc', 'verkoop', '--postings', '8000:-100.00@21,1100:121.00', '--post']);
   assert.equal(code, 0);
   const tagged = out.data.entry.postings.find((p) => p.account_code === '8000');
@@ -415,8 +415,8 @@ test('CLI: vat book --json reports the vat_code on tagged postings', () => {
 
 test('CLI: invoice pay rejects non-international amounts', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on']);
-  cli(dbPath, ['company', 'update', '--btw-id', 'NL123456789B01', '--address', 'Industrieweg 12', '--postal-code', '2712 CD', '--city', 'Zoetermeer', '--iban', 'NL91ABNA0417164300']);
+  cli(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv', '--vat', 'on']);
+  cli(dbPath, ['company', 'update', '--tax-id', 'NL123456789B01', '--address', 'Industrieweg 12', '--postal-code', '2712 CD', '--city', 'Zoetermeer', '--iban', 'NL91ABNA0417164300']);
   cli(dbPath, ['contact', 'add', '--name', 'ACME BV', '--address', 'Straat 1', '--city', 'Amsterdam']);
   cli(dbPath, ['invoice', 'create', '--contact', '1', '--lines', '1x Test @ 100.00 @21', '--date', '2026-01-10']);
   cli(dbPath, ['invoice', 'finalize', '--id', '1']);
@@ -526,7 +526,7 @@ test('dry-run: bank add + link write nothing', () => {
 
 test('CLI: backup --dry-run writes no file', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  cli(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv']);
   const outPath = path.join(path.dirname(dbPath), 'never.db');
   const { code, out } = cli(dbPath, ['backup', '--out', outPath, '--dry-run']);
   assert.equal(code, 0);
@@ -816,7 +816,7 @@ test('obReadout period with a year boundary stays within the period', () => {
 
 test('CLI: import xaf failure prints cleanly (no renderErrors crash)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  cli(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv']);
   const badFile = path.join(path.dirname(dbPath), 'bad.xaf');
   writeFileSync(badFile, '<?xml version="1.0"?><Xaf><XafHeader><Version>4.0</Version></XafHeader><Mutaties><Mutatie><Boekstuknummer>1</Boekstuknummer><Datum>2026-01-01</Datum></Mutatie></Mutaties></Xaf>');
   const { code, raw } = runRaw(dbPath, ['import', 'xaf', '--file', badFile]);
@@ -828,7 +828,7 @@ test('CLI: import xaf failure prints cleanly (no renderErrors crash)', () => {
 
 test('CLI: assets register --format csv has a header row and totals', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  cli(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv']);
   cli(dbPath, ['assets', 'add', '--name', 'Laptop', '--purchase-date', '2026-01-01', '--purchase-price', '1200.00', '--depreciation-start', '2026-01-01', '--recognition-date', '2026-01-01']);
   const csv = runRaw(dbPath, ['assets', 'register', '--format', 'csv']).raw;
   const lines = csv.trim().split('\n');
@@ -839,7 +839,7 @@ test('CLI: assets register --format csv has a header row and totals', () => {
 
 test('CLI: assets register --format json emits JSON without the global --json flag (round 11)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  cli(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv']);
   const raw = runRaw(dbPath, ['assets', 'register', '--format', 'json']).raw;
   const parsed = JSON.parse(raw);
   assert.equal(parsed.ok, true);
@@ -848,7 +848,7 @@ test('CLI: assets register --format json emits JSON without the global --json fl
 
 test('CLI: recurring run --dry-run renders plans, not undefined ids', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  cli(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv']);
   cli(dbPath, ['recurring', 'add', '--name', 'Huur', '--postings', '4300:1000.00,1100:-1000.00', '--frequency', 'monthly', '--start', '2026-01-10']);
   const out = runRaw(dbPath, ['recurring', 'run', '--dry-run']).raw;
   assert.ok(!out.includes('#undefined'), `dry-run must not render undefined ids, got: ${out.slice(0, 300)}`);
@@ -857,7 +857,7 @@ test('CLI: recurring run --dry-run renders plans, not undefined ids', () => {
 
 test('CLI: export xaf --dry-run writes nothing; scheme/depreciation dry-runs validate', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  cli(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv']);
   cli(dbPath, ['entry', 'add', '--date', '2026-01-10', '--desc', 'Start', '--postings', '1100:1000.00,3000:-1000.00', '--post']);
   const outPath = path.join(path.dirname(dbPath), 'never.xaf');
   const { code, out } = cli(dbPath, ['export', 'xaf', '--year', '2026', '--out', outPath, '--dry-run']);
@@ -891,7 +891,7 @@ test('bank ignore dry-run leaves the transaction untouched', () => {
 
 test('assets pause dry-run leaves the status unchanged', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv']);
+  cli(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv']);
   cli(dbPath, ['assets', 'add', '--name', 'Laptop', '--purchase-date', '2026-01-01', '--purchase-price', '1200.00', '--depreciation-start', '2026-01-01', '--recognition-date', '2026-01-01']);
   const paused = cli(dbPath, ['assets', 'pause', '--id', '1', '--dry-run']);
   assert.equal(paused.code, 0);
@@ -1424,7 +1424,7 @@ test('year-end status rejects a non-YYYY year', () => {
 
 test('bank match auto validates --window-days (garbage errors, 0 stays 0)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   const garbage = cli(dbPath, ['bank', 'match', 'auto', '--window-days', 'abc']);
   assert.equal(garbage.code, 1);
   assert.equal(garbage.out.error.code, 'INVALID_WINDOW');
@@ -1503,7 +1503,7 @@ test('year-end close handles a zero-result year (income == expense) without zero
 
 test('recurring add --due-days 0 stays 0 (the old Number(x) || 30 masked it)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   cli(dbPath, ['contact', 'add', '--name', 'ACME BV']);
   const zero = cli(dbPath, ['recurring', 'add', '--kind', 'invoice', '--contact', '1',
     '--lines', '1x Coaching @ 100.00', '--frequency', 'monthly', '--start', '2026-01-15',
@@ -1517,7 +1517,7 @@ test('recurring add --due-days 0 stays 0 (the old Number(x) || 30 masked it)', (
 
 test('recurring add rejects garbage --due-days (INVALID_DUE_DAYS) instead of silently defaulting to 30', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   cli(dbPath, ['contact', 'add', '--name', 'ACME BV']);
   const due = cli(dbPath, ['recurring', 'add', '--kind', 'invoice', '--contact', '1',
     '--lines', '1x Coaching @ 100.00', '--frequency', 'monthly', '--start', '2026-01-15',
@@ -1528,7 +1528,7 @@ test('recurring add rejects garbage --due-days (INVALID_DUE_DAYS) instead of sil
 
 test('recurring add --day 0 and --day abc are rejected (INVALID_DATE) instead of silently becoming day 1', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   const day0 = cli(dbPath, ['recurring', 'add', '--postings', '4300:100.00,1100:-100.00',
     '--frequency', 'monthly', '--start', '2026-01-15', '--day', '0', '--name', 't1']);
   assert.equal(day0.code, 1);
@@ -1562,7 +1562,7 @@ test('recurring run dry-run previews due_date = invoice date when due_days is 0 
 
 test('recurring add --dry-run validates like the real run (garbage rejected, nothing written)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   // the old hand-built dry-run plan echoed garbage as ok:true — now it validates
   const badDay = cli(dbPath, ['recurring', 'add', '--postings', '4300:100.00,1100:-100.00',
     '--frequency', 'monthly', '--start', '2026-01-15', '--day', 'abc', '--name', 't1', '--dry-run']);
@@ -1584,7 +1584,7 @@ test('recurring add --dry-run validates like the real run (garbage rejected, not
 
 test('invoice create --dry-run validates like the real run (garbage date/contact rejected, nothing written)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   cli(dbPath, ['contact', 'add', '--name', 'ACME BV']);
   // the old branch only parsed lines — a garbage date came back ok:true
   const badDate = cli(dbPath, ['invoice', 'create', '--contact', '1', '--lines', '1x Coaching @ 100.00', '--date', 'abc', '--dry-run']);
@@ -1623,7 +1623,7 @@ test('creditInvoice dry-run validates like the real run (no plan for nonexistent
 
 test('entry add --dry-run validates like the real run (garbage date/desc/unbalanced rejected, nothing written)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   // the old branch echoed garbage as ok:true
   const badDate = cli(dbPath, ['entry', 'add', '--date', 'abc', '--desc', 'x', '--postings', '1100:100.00,3000:-100.00', '--dry-run']);
   assert.equal(badDate.code, 1);
@@ -1648,7 +1648,7 @@ test('entry add --dry-run validates like the real run (garbage date/desc/unbalan
 
 test('entry add rejects day-overflow dates (2026-02-30 was posted before)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   const bad = cli(dbPath, ['entry', 'add', '--date', '2026-02-30', '--desc', 'x', '--postings', '1100:100.00,8000:-100.00']);
   assert.equal(bad.code, 1);
   assert.equal(bad.out.error.code, 'INVALID_DATE');
@@ -1665,7 +1665,7 @@ test('entry add rejects day-overflow dates (2026-02-30 was posted before)', () =
 
 test('import opening-balances rejects a day-overflow --date', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-ob-'));
   const csvPath = path.join(dir, 'ob.csv');
   writeFileSync(csvPath, '1100,10000.00\n3000,-10000.00\n');
@@ -1680,7 +1680,7 @@ test('import opening-balances rejects a day-overflow --date', () => {
 
 test('fx set rejects a day-overflow date (it used to store 2026-02-30 in fx_rates)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   const bad = cli(dbPath, ['fx', 'set', '--currency', 'USD', '--date', '2026-02-30', '--rate', '1.0875']);
   assert.equal(bad.code, 1);
   assert.equal(bad.out.error.code, 'INVALID_DATE');
@@ -1691,7 +1691,7 @@ test('fx set rejects a day-overflow date (it used to store 2026-02-30 in fx_rate
 
 test('report balance-sheet rejects a garbage as-of (it silently read as "forever" before)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   const bad = cli(dbPath, ['report', 'balance-sheet', '--as-of', 'garbage']);
   assert.equal(bad.code, 1);
   assert.equal(bad.out.error.code, 'INVALID_DATE');
@@ -1703,7 +1703,7 @@ test('report balance-sheet rejects a garbage as-of (it silently read as "forever
 
 test('report pnl / journal / trial-balance reject a garbage year (no abc-01-01 ranges)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   const pnlBad = cli(dbPath, ['report', 'pnl', '--year', 'abc']);
   assert.equal(pnlBad.code, 1);
   assert.equal(pnlBad.out.error.code, 'INVALID_DATE');
@@ -1720,7 +1720,7 @@ test('report pnl / journal / trial-balance reject a garbage year (no abc-01-01 r
 
 test('entry list rejects garbage date bounds (--date-to garbage returned ALL entries before)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   cli(dbPath, ['entry', 'add', '--date', '2026-01-15', '--desc', 'x', '--postings', '1100:100.00,8000:-100.00', '--post']);
   const badTo = cli(dbPath, ['entry', 'list', '--date-to', 'garbage']);
   assert.equal(badTo.code, 1);
@@ -1736,7 +1736,7 @@ test('entry list rejects garbage date bounds (--date-to garbage returned ALL ent
 
 test('import opening-balances accepts the documented optional header row (2- and 3-column)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-ob-'));
   // 2-column header layout — failed with INVALID_CODE before (doc promised it)
   const csv2 = path.join(dir, 'ob2.csv');
@@ -1746,7 +1746,7 @@ test('import opening-balances accepts the documented optional header row (2- and
   assert.equal(ok2.out.data.accounts, 2);
   // 3-column header layout on a second database
   const dbPath3 = tmpDb();
-  cli(dbPath3, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath3, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   const csv3 = path.join(dir, 'ob3.csv');
   writeFileSync(csv3, 'code,debet,credit\n1100,10000.00,\n3000,,10000.00\n');
   const ok3 = cli(dbPath3, ['import', 'opening-balances', '--file', csv3]);
@@ -1754,7 +1754,7 @@ test('import opening-balances accepts the documented optional header row (2- and
   assert.equal(ok3.out.data.accounts, 2);
   // a data-only file (no header) still works — first cell is a code
   const dbPath4 = tmpDb();
-  cli(dbPath4, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath4, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   const csv4 = path.join(dir, 'ob4.csv');
   writeFileSync(csv4, '1100,10000.00\n3000,-10000.00\n');
   const ok4 = cli(dbPath4, ['import', 'opening-balances', '--file', csv4]);
@@ -1763,7 +1763,7 @@ test('import opening-balances accepts the documented optional header row (2- and
 
 test('MCP entry_add dry-run validates like execute (garbage date/unbalanced/single-posting rejected, no isError:false plan)', async () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   const mcp = mcpSession(dbPath);
   try {
     // garbage date → INVALID_DATE even in the default dry-run mode
@@ -1789,7 +1789,7 @@ test('MCP entry_add dry-run validates like execute (garbage date/unbalanced/sing
 
 test('MCP entry_reverse / invoice_credit / invoice_pay dry-runs validate like execute', async () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   cli(dbPath, ['contact', 'add', '--name', 'ACME BV', '--address', 'Klantstraat 1', '--city', 'Amsterdam']);
   const mcp = mcpSession(dbPath);
   try {
@@ -1860,7 +1860,7 @@ test('init validates iban, vat choice and fiscal-year-end (garbage was stored si
 
 test('account add/deactivate/reactivate/import are audited (they mutated silently before)', () => {
   const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678']);
+  cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678']);
   cli(dbPath, ['account', 'add', '--code', '9999', '--name', 'Test account', '--type', 'asset', '--normal-balance', 'debit']);
   cli(dbPath, ['account', 'deactivate', '--code', '9999']);
   cli(dbPath, ['account', 'reactivate', '--code', '9999']);

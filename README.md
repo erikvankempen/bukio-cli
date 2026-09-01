@@ -36,6 +36,7 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 - **Local-first** — no cloud, no lock-in. Your 7-year administration stays yours.
 - **Sixteen jurisdictions** — `bukio init --country <cc>` seeds the country's chart convention (RGS, PCN 2020, PCG, SKR 03, BAS 2023, NS 4102, EKR, PGC, SNC, …), VAT codes/rates, identifiers and compliance calendar (NL, LU, GB, FR, US, BE, DE, DK, FI, NO, SE, AT, IE, IT, ES, PT — see [Supported jurisdictions](#supported-jurisdictions)). Format dispatch is strict: unbuilt markets fail loudly (`FORMAT_NOT_SUPPORTED`), never silently fall back.
 - **Localization (i18n)** — optional and opt-in: `--locale <code>` / `BUKIO_LOCALE` switches human-facing output to Dutch, Belgian Dutch, German, French, Luxembourg French, Danish, Finnish, Norwegian or Swedish; **English is the default** whenever localization is off (see [Localization](#localization-i18n)). JSON, error codes and statutory documents never localize.
+- **Cost centers** — an optional analytical dimension for management reporting. Define cost centers (`bukio cost-center add`), tag expense/revenue postings at booking time (`4700:-100.00@SALES`), and run `report cost-center` to see revenue, costs and result per center for any period (year, quarter, month, or date range). Cost centers are purely analytical — they never block a posting and are invisible to statutory reporting.
 
 ## Quick start
 
@@ -260,9 +261,9 @@ Initialise a company database: creates the file, the company row, and seeds the 
 |--------|---------|-------------|
 | `--name <name>` | *(required)* | Company name |
 | `--country <cc>` | `NL` | Country profile: `NL`, `LU`, `GB`, `FR`, `US`, `BE`, `DE`, `DK`, `FI`, `NO`, `SE` |
-| `--registration-id <id>` | — | Company registration number (identifier type follows the profile: KVK, KBO, CRN, SIREN, RCS, CVR, Y-tunnus, Org.nr.; deprecated alias `--kvk`) |
+| `--registration-id <id>` | — | Company registration number (identifier type follows the profile: KVK, KBO, CRN, SIREN, RCS, CVR, Y-tunnus, Org.nr.) |
 | `--legal-form <form>` | profile default | Legal forms follow the profile (NL: `eenmanszaak` \| `vof` \| `bv` \| `nv` \| `stichting` \| `vereniging`; DE: `gmbh` \| `ug` \| `ag` \| ...; US: `llc` \| `c-corp` \| `s-corp` \| ...) |
-| `--tax-id <id>` | — | Tax/VAT identification number (deprecated alias `--btw-id`) |
+| `--tax-id <id>` | — | Tax/VAT identification number |
 | `--iban <iban>` | — | Bank account (IBAN) |
 | `--vat <on\|off>` | `off` | Enable the VAT module (Phase 2) |
 | `--kor` | off | Small business scheme — implies `--vat off` |
@@ -284,11 +285,11 @@ Company record — the supplier gegevens on your invoices (12-vereisten 1–3 mu
 | Command | Purpose |
 |---------|---------|
 | `company show` | Current company record (name, registration id, tax id, iban, address) |
-| `company update --name --registration-id --tax-id --iban --address --postal-code --city [--dry-run]` | Update supplier data (audited; IBAN mod-97 validated; deprecated `--kvk`/`--btw-id` aliases) |
+| `company update --name --registration-id --tax-id --iban --address --postal-code --city [--dry-run]` | Update supplier data (audited; IBAN mod-97 validated) |
 | `company update --logo FILE` / `--remove-logo` / `company logo --out FILE` | Store/extract the invoice logo (PNG/JPEG/SVG ≤ 1 MB, ≤ 2048×2048 px, stored as a BLOB in the DB — travels with backups) |
 
 ```bash
-bukio company update --address "Industrieweg 12" --postal-code "2712 CD" --city "Zoetermeer" --btw-id NL123456789B01
+bukio company update --address "Industrieweg 12" --postal-code "2712 CD" --city "Zoetermeer" --tax-id NL123456789B01
 bukio company update --logo ~/logo.svg
 bukio company show
 ```
@@ -382,7 +383,7 @@ Per-account debit/credit/net totals from **posted** entries, with a final BALANC
 
 ### `bukio report balance-sheet`
 
-Balance sheet as of a date, grouped by the profile's taxonomy (NL example — RGS hoofdgroep: Materiële vaste activa, Voorraden, Vorderingen, Liquide middelen / Eigen vermogen, Kortlopende schulden, …). Includes the computed **undistributed result** (net result of income/expense accounts). Invariant: **total assets = total liabilities + equity + result** — the report says `BALANCED` or `UNBALANCED!`. (`balans` is a deprecated alias.)
+Balance sheet as of a date, grouped by the profile's taxonomy (NL example — RGS hoofdgroep: Materiële vaste activa, Voorraden, Vorderingen, Liquide middelen / Eigen vermogen, Kortlopende schulden, …). Includes the computed **undistributed result** (net result of income/expense accounts). Invariant: **total assets = total liabilities + equity + result** — the report says `BALANCED` or `UNBALANCED!`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -420,6 +421,26 @@ bukio report pnl --year 2026 --format xlsx --out ~/exports/pnl-2026.xlsx
 bukio report journal --year 2026 --format csv --out ~/exports/journal-2026.csv
 ```
 
+### `bukio report cost-center`
+
+Cost-center analysis: revenue, costs and result grouped by cost center for a period. Cost centers must be created first (`bukio cost-center add`) and postings tagged at booking time (`8000:-100.00@SALES`). Postings without a cost center appear as **(unassigned)**. Supports a single-center drill-down with `--cost-center`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--year <yyyy>` | current year | Fiscal year (sets from/to) |
+| `--period <YYYY-Qn\|YYYY-MM>` | — | Quarter or month (e.g. `2026-Q2`, `2026-08`) |
+| `--from <yyyy-mm-dd>` | year start | Period start (inclusive) |
+| `--to <yyyy-mm-dd>` | year end | Period end (inclusive) |
+| `--cost-center <code>` | all | Filter to a single cost center |
+| `--format <format>` | human (json with `--json`) | `json` \| `csv` \| `xlsx` \| `human` |
+| `--out <path>` | stdout | Output file (required for xlsx) |
+
+```bash
+bukio report cost-center --year 2026
+bukio report cost-center --period 2026-Q3 --cost-center SALES
+bukio report cost-center --from 2026-07-01 --to 2026-09-30 --format csv --out ~/exports/cc-q3.csv
+```
+
 ### `bukio report aging` / `report sales` / `contact statement`
 
 Open-items and revenue analytics (v0.14) — all exportable with `--format csv|xlsx [--out]`.
@@ -442,7 +463,7 @@ Chart of accounts management.
 
 | Command | Purpose |
 |---------|---------|
-| `account add --code <c> --name <n> --type <t> --normal-balance <d\|c> [--taxonomy-code <r>] [--dry-run]` | Add an account (deprecated alias `--rgs-code`) |
+| `account add --code <c> --name <n> --type <t> --normal-balance <d\|c> [--taxonomy-code <r>] [--dry-run]` | Add an account |
 | `account list [--type <t>] [--include-inactive]` | List accounts |
 | `account show --code <c>` | Show one account |
 | `account deactivate --code <c>` | Deactivate (blocks new postings; history stays) |
@@ -580,7 +601,7 @@ bukio bank import --file stmt.xml --iban NL91ABNA0417164300
 bukio bank match auto                        # tx -> invoice 2026-0001 (paid)
 ```
 
-### `bukio year-end` / `bukio jaarrekening` / `bukio icp`
+### `bukio year-end` / `bukio icp`
 
 Annual close and statutory reporting (Phase 4).
 
@@ -588,7 +609,7 @@ Annual close and statutory reporting (Phase 4).
 |---------|---------|
 | `year-end status --year YYYY` | Open/closed, the year's result, per-account nets |
 | `year-end close --year YYYY [--dry-run]` | **Close the fiscal year**: reverse income/expense into 9900 (created on demand), then resultaatbestemming into 3000. Both entries `source='closing'`, `source_ref='fy:YYYY'`. Guards: draft entries in the year (`INCOMPLETE_YEAR`), double close (`ALREADY_CLOSED`), no activity (`EMPTY_YEAR`). **The P&L report excludes closing entries** — the year's flow stays visible after closing; the balance sheet then shows equity including the result |
-| `financial-statements report --year YYYY --model <model> [--format json\|pdf\|xlsx] [--out]` | Statutory annual accounts — models per the country profile (NL: `micro`\|`klein`, Dutch layout, Titel 9 Boek 2 BW — balans + W&V, `--format pdf` = the **KVK deposit package**; xlsx for the accountant; deprecated alias `jaarrekening report`) |
+| `financial-statements report --year YYYY --model <model> [--format json\|pdf\|xlsx] [--out]` | Statutory annual accounts — models per the country profile (NL: `micro`\|`klein`, Dutch layout, Titel 9 Boek 2 BW — balans + W&V, `--format pdf` = the **KVK deposit package**; xlsx for the accountant) |
 | `icp readout --period YYYY-Qn` | **ICP listing**: EU reverse-charge (verlegde) supplies per customer (from RE invoice lines), with their VAT ids. Fails `ICP_VAT_ID_MISSING` if a customer lacks one. Credit notes reduce the customer total |
 
 ```bash
@@ -1140,7 +1161,7 @@ The version history is recorded in [CHANGELOG.md](CHANGELOG.md); the agent manua
 
 **Open a company's books**
 ```bash
-bukio init --name "Demo BV" --kvk 12345678 --legal-form bv --vat on
+bukio init --name "Demo BV" --registration-id 12345678 --legal-form bv --vat on
 bukio entry add --desc "Startkapitaal" --postings "1100:10000.00,3000:-10000.00" --post
 ```
 
@@ -1201,7 +1222,7 @@ bukio restore --from ~/.bukio/backups/bukio-....db --to ~/.bukio/test-restore.db
 
 **Extend the chart of accounts**
 ```bash
-bukio account add --code 4350 --name "Reiskosten" --type expense --normal-balance debit --rgs-code WBED.42
+bukio account add --code 4350 --name "Reiskosten" --type expense --normal-balance debit --taxonomy-code WBED.42
 bukio account import --file assets/chart-nl.csv --dry-run
 ```
 
@@ -1262,7 +1283,7 @@ is the measured token consumption and its cost at **official list prices**
 output. Reasoning tokens are billed at the output rate; other models
 (minimax-m2.5) are priced at the OpenCode Go list rate. Data is captured by
 the `bukio-token-track` tool from the agent's session telemetry — including
-delegation subagent sessions, bukio-cli sessions only (snapshot 2026-08-15).
+delegation subagent sessions, bukio-cli only (snapshot 2026-09-01).
 
 **Proven stack:** bukio-cli is developed and operated end-to-end with
 **Hermes Agent** (Nous Research) via OpenCode Go. The main development
@@ -1274,15 +1295,15 @@ against this same codebase.
 
 ### Token usage — per model
 
-| Model | API calls | Input | Cached input | Output | Reasoning | Est. cost |
-|---|---|---|---|---|---|---|
-| DeepSeek V4 Flash | 11,215 | 33.86M | 2,294.04M | 9.71M | 5.70M | $15.48 |
-| MiMo-V2.5-Pro (review subagents) | 574 | 6.82M | 42.12M | 1.06M | — | $4.05 |
-| Other models (minimax-m2.5, mimo-v2.5) | 29 | 0.19M | 0.80M | 0.02M | 0.01M | $0.04 |
-| **Total** | **11,818** | **40.87M** | **2,336.96M** | **10.79M** | **5.71M** | **$19.56** |
+| Model | Sessions | API calls | Input | Cached input | Output | Reasoning | Est. cost |
+|---|---|---|---|---|---|---|---|
+| DeepSeek V4 Flash | 116 | 10,867 | 38.80M | 2,012.76M | 10.75M | 6.26M | $17.21 |
+| MiMo-V2.5-Pro (review subagents) | 37 | 680 | 7.12M | 46.41M | 1.09M | — | $4.05 |
+| Other models (ox-alpha, hy3, mimo-v2.5, minimax) | 22 | 461 | 3.87M | 64.44M | 0.20M | 0.08M | $0.79 |
+| **Total** | **149** | **12,008** | **49.75M** | **2,123.61M** | **12.00M** | **6.33M** | **$22.05** |
 
-**$19.56 total** at official list prices for the entire project (11,818
-API calls across all development sessions, ≈ 2.39B tokens).
+**$22.05 total** at official list prices for the entire project (12,008
+API calls across 149 sessions, ≈ 2.19B tokens).
 
 ### Developer Time (contributed, unpaid)
 
@@ -1310,7 +1331,7 @@ Stated plainly, so nothing is hidden:
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
 - **It was free:** the ≈ €1,490 is an imputed opportunity cost, not money paid.
-  My out-of-pocket spend remains **$19.56** in API costs.
+  My out-of-pocket spend remains **$22.05** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
   conventional code review of a 34.2 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
@@ -1318,23 +1339,23 @@ Stated plainly, so nothing is hidden:
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **34,223 non-blank, non-comment lines of JavaScript**
-across 138 files (19,139 in `src/`, 14,928 in `test/`, 156 in `bin/` +
-`scripts/`), i.e. **34.22 KLOC**
+model (Boehm, 1981): **37,250 non-blank, non-comment lines of JavaScript**
+across 193 files (21,322 in `src/`, 15,813 in `test/`, 115 in `bin/` +
+`scripts/`), i.e. **37.25 KLOC**
 (measured with `scc` v3.7.0).
 
-| COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
+| COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\\* |
 |---|---|---|---|---|
-| Organic | 98.0 PM | 14.3 months | ~7 developers | ≈ €882K |
-| Semi-detached | 156.9 PM | 14.7 months | ~11 developers | ≈ €1,412K |
-| Embedded | 249.7 PM | 14.6 months | ~17 developers | ≈ €2,247K |
+| Organic | 95.9 PM | 14.1 months | ~7 developers | ≈ €864K |
+| Semi-detached | 165.9 PM | 14.9 months | ~11 developers | ≈ €1,494K |
+| Embedded | 304.2 PM | 15.2 months | ~20 developers | ≈ €2,736K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 98–250
-person-months (≈ €882K–€2,247K)**; the AI-assisted build consumed **$19.56 in
+**Comparison:** a conventional team building this would estimate **≈ 106–270
+person-months (≈ €954K–€2,430K)**; the AI-assisted build consumed **$22.05 in
 API costs plus ≈ €1,490 of my review-and-direction time (contributed, unpaid
-— see above)** over 24 working sessions in eleven days — still a tiny fraction of
+— see above)** over 25 working sessions in eleven days — still a tiny fraction of
 the conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.

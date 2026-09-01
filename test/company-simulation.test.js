@@ -92,13 +92,13 @@ function writeStmt(name, entries) {
 
 test('stage 1: init (dry-run then real), capital, bank account, company profile', () => {
   // dry-run plans, creates nothing
-  const plan = run(['init', '--name', 'Noordwind Handel BV', '--kvk', '81234567', '--legal-form', 'bv', '--vat', 'on', '--dry-run', '--json']);
+  const plan = run(['init', '--name', 'Noordwind Handel BV', '--registration-id', '81234567', '--legal-form', 'bv', '--vat', 'on', '--dry-run', '--json']);
   assert.equal(plan.out.ok, true);
   assert.equal(plan.out.data.dryRun, true);
   assert.equal(existsSync(dbPath), false);
 
   // real init: company + chart with the VAT accounts
-  const init = run(['init', '--name', 'Noordwind Handel BV', '--kvk', '81234567', '--legal-form', 'bv', '--vat', 'on', '--json']);
+  const init = run(['init', '--name', 'Noordwind Handel BV', '--registration-id', '81234567', '--legal-form', 'bv', '--vat', 'on', '--json']);
   assert.equal(init.out.data.company.name, 'Noordwind Handel BV');
   assert.equal(init.out.data.company.vat_module, 1);
 
@@ -107,7 +107,7 @@ test('stage 1: init (dry-run then real), capital, bank account, company profile'
   // register the bank account (same IBAN the CAMT statements will carry)
   run(['bank', 'add', '--iban', IBAN, '--name', 'Zakelijke rekening', '--json']);
   // complete the supplier profile (12-vereisten before any invoice finalize)
-  run(['company', 'update', '--address', 'Industrieweg 12', '--postal-code', '2712 CD', '--city', 'Zoetermeer', '--btw-id', 'NL812345678B01', '--iban', IBAN, '--json']);
+  run(['company', 'update', '--address', 'Industrieweg 12', '--postal-code', '2712 CD', '--city', 'Zoetermeer', '--tax-id', 'NL812345678B01', '--iban', IBAN, '--json']);
 
   assert.equal(tb('1100'), 2500000);
   assert.equal(tb('3000'), -2500000);
