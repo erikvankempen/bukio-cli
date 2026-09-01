@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-08-24 19:04:28 UTC — **❌ 930 passing · 2 failing (932 tests)**
+**Latest run:** 2026-09-01 19:19:52 UTC — **❌ 938 passing · 6 failing (944 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -165,12 +165,12 @@
 
 ### audit.test.js — audit log record/list, append-only trigger, migration 018/019, signature columns + verifyTrail classification matrix
 
-19 passing · 0 failing
+18 passing · 1 failing
 
     - ✅ record + list with filters
     - ✅ audit log is append-only: UPDATE and DELETE are blocked
     - ✅ args null is stored and read back as null
-    - ✅ migration 018: fresh DB gains the six signature columns + actor_keys + settings
+    - ❌ migration 018: fresh DB gains the six signature columns + actor_keys + settings
     - ✅ migration 019: actor_keys gains a composite (actor, keyid) primary key
     - ✅ migration 019: a v18 DB with single-row actor_keys upgrades without data loss
     - ✅ migration 018: existing DB keeps legacy rows with sig_status = unsigned
@@ -358,6 +358,23 @@
     - ✅ company show: returns the company record
     - ✅ company show: NO_COMPANY on a database without a company row
 
+### cost-centers.test.js — cost-center registry, @CC posting spec, entry/reversal carry CC, cost-center analysis report
+
+12 passing · 0 failing
+
+    - ✅ createCostCenter: basic CRUD
+    - ✅ createCostCenter: rejects duplicate code
+    - ✅ createCostCenter: invalid code is rejected
+    - ✅ deactivateCostCenter: blocks new bookings but history stays
+    - ✅ parsePostingSpecsWithCostCenter: plain specs (no CC)
+    - ✅ parsePostingSpecsWithCostCenter: @CC suffix
+    - ✅ createEntry: cost center is carried through and surfaced
+    - ✅ reverseEntry: cost center carried to contra-entry
+    - ✅ costCenterReport: groups postings by cost center
+    - ✅ trial-balance: still balanced after CC-tagged entries
+    - ✅ costCenterReport: period filtering (--from/--to)
+    - ✅ costCenterReport: --cost-center filter returns only that center
+
 ### direct-debit.test.js — SEPA direct debit: mandate register, pain.008.001.02 export, FRST/RCUR, CORE/B2B split
 
 8 passing · 0 failing
@@ -464,7 +481,7 @@
 
 ### hardening.test.js — 
 
-86 passing · 0 failing
+85 passing · 1 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -550,7 +567,7 @@
     - ✅ MCP entry_reverse / invoice_credit / invoice_pay dry-runs validate like execute
     - ✅ init validates iban, vat choice and fiscal-year-end (garbage was stored silently)
     - ✅ account add/deactivate/reactivate/import are audited (they mutated silently before)
-    - ✅ every emitted error code in src/ is documented in AGENTS.md §7
+    - ❌ every emitted error code in src/ is documented in AGENTS.md §7
     - ✅ MCP on a missing database errors NO_DATABASE instead of silently creating an empty company
 
 ### i18n.test.js — 
@@ -862,9 +879,9 @@
 
 ### migration-021.test.js — 
 
-2 passing · 0 failing
+1 passing · 1 failing
 
-    - ✅ migrations 021-025 upgrade a 020 DB: new columns, CHECK removals, renames, backfill
+    - ❌ migrations 021-025 upgrade a 020 DB: new columns, CHECK removals, renames, backfill
     - ✅ migration 021 keeps company data lossless across the rebuild
 
 ### money.test.js — integer-cents money helpers
@@ -921,10 +938,10 @@
 
 ### recurring-invoice.test.js — subscription invoice templates
 
-11 passing · 0 failing
+10 passing · 1 failing
 
     - ✅ invoice template: generates draft invoices on schedule (never auto-finalizes)
-    - ✅ invoice template: generated drafts finalize normally (compliance + number)
+    - ❌ invoice template: generated drafts finalize normally (compliance + number)
     - ✅ invoice template: guards
     - ✅ invoice template: entry templates keep working alongside
     - ✅ invoice template: dry-run shows the invoice plan, writes nothing

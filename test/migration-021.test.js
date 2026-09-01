@@ -61,7 +61,7 @@ test('migrations 021-025 upgrade a 020 DB: new columns, CHECK removals, renames,
   const file = buildDbAt020();
   const db = openDb(file); // runs the real migration runner (001 → 025)
   try {
-    assert.equal(db.pragma('user_version', { simple: true }), 25); // 021-025 chain (025 drops the language CHECK)
+    assert.equal(db.pragma('user_version', { simple: true }), 26); // 021-026 chain (026 adds cost_centers)
 
     // company: renamed identifier columns + jurisdiction columns + CHECK gone
     const cols = columnNames(db, 'company');
