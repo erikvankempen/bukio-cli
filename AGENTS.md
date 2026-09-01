@@ -49,6 +49,8 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio entry show --id N` | One entry + postings. |
 | `bukio account add/list/show/deactivate/reactivate` | Chart of accounts management. |
 | `bukio account import --file chart.csv [--dry-run]` | Import a chart: `code,name,type,normal_balance[,taxonomy_code]` (legacy header `rgs_code` still accepted). |
+| `bukio cost-center add --code C --name N` / `list` / `show --code C` / `deactivate` / `reactivate` | Cost-center registry (analytical dimension for management reporting). `admin.chart` role. |
+| `bukio report cost-center [--year YYYY] [--period YYYY-Qn\|YYYY-MM] [--from D --to D] [--cost-center CODE]` | Cost-center analysis: revenue/costs/result per center for any period. `report.read` role. |
 | `bukio report trial-balance [--year YYYY]` | Per-account totals; `data.balanced` tells you the books reconcile. |
 | `bukio report balance-sheet [--as-of YYYY-MM-DD]` | Balance sheet; `data.balanced` must be true. |
 | `bukio report pnl [--year YYYY]` | P&L: revenue, costs, result. |
@@ -163,7 +165,7 @@ split on `;` only (decimal commas stay intact). Journal/XAF `BtwCode` values
 are reported in `ignored_btw_codes` but NOT booked — the import is net; verify
 the booked amounts.
 
-**Posting syntax:** `--postings "1100:10000.00,3000:-10000.00"` — comma-separate or repeat the flag. `CODE` is the 4-digit account code. **Positive = debit, negative = credit. Sum must be zero.** Amount format: `1234.56`, max 2 decimals, no thousands separators, no Dutch comma decimals.
+**Posting syntax:** `--postings "1100:10000.00,3000:-10000.00"` — comma-separate or repeat the flag. `CODE` is the 4-digit account code. **Positive = debit, negative = credit. Sum must be zero.** Amount format: `1234.56`, max 2 decimals, no thousands separators, no Dutch comma decimals. Optional cost-center suffix: `4700:-100.00@SALES` tags that posting with cost center `SALES`.
 
 ---
 

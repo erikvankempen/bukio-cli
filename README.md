@@ -36,6 +36,7 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 - **Local-first** — no cloud, no lock-in. Your 7-year administration stays yours.
 - **Sixteen jurisdictions** — `bukio init --country <cc>` seeds the country's chart convention (RGS, PCN 2020, PCG, SKR 03, BAS 2023, NS 4102, EKR, PGC, SNC, …), VAT codes/rates, identifiers and compliance calendar (NL, LU, GB, FR, US, BE, DE, DK, FI, NO, SE, AT, IE, IT, ES, PT — see [Supported jurisdictions](#supported-jurisdictions)). Format dispatch is strict: unbuilt markets fail loudly (`FORMAT_NOT_SUPPORTED`), never silently fall back.
 - **Localization (i18n)** — optional and opt-in: `--locale <code>` / `BUKIO_LOCALE` switches human-facing output to Dutch, Belgian Dutch, German, French, Luxembourg French, Danish, Finnish, Norwegian or Swedish; **English is the default** whenever localization is off (see [Localization](#localization-i18n)). JSON, error codes and statutory documents never localize.
+- **Cost centers** — an optional analytical dimension for management reporting. Define cost centers (`bukio cost-center add`), tag expense/revenue postings at booking time (`4700:-100.00@SALES`), and run `report cost-center` to see revenue, costs and result per center for any period (year, quarter, month, or date range). Cost centers are purely analytical — they never block a posting and are invisible to statutory reporting.
 
 ## Quick start
 
@@ -418,6 +419,26 @@ Journal export — one row per posting with account info, for a period. Ideal fo
 bukio report balance-sheet --as-of 2026-12-31
 bukio report pnl --year 2026 --format xlsx --out ~/exports/pnl-2026.xlsx
 bukio report journal --year 2026 --format csv --out ~/exports/journal-2026.csv
+```
+
+### `bukio report cost-center`
+
+Cost-center analysis: revenue, costs and result grouped by cost center for a period. Cost centers must be created first (`bukio cost-center add`) and postings tagged at booking time (`8000:-100.00@SALES`). Postings without a cost center appear as **(unassigned)**. Supports a single-center drill-down with `--cost-center`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--year <yyyy>` | current year | Fiscal year (sets from/to) |
+| `--period <YYYY-Qn\|YYYY-MM>` | — | Quarter or month (e.g. `2026-Q2`, `2026-08`) |
+| `--from <yyyy-mm-dd>` | year start | Period start (inclusive) |
+| `--to <yyyy-mm-dd>` | year end | Period end (inclusive) |
+| `--cost-center <code>` | all | Filter to a single cost center |
+| `--format <format>` | human (json with `--json`) | `json` \| `csv` \| `xlsx` \| `human` |
+| `--out <path>` | stdout | Output file (required for xlsx) |
+
+```bash
+bukio report cost-center --year 2026
+bukio report cost-center --period 2026-Q3 --cost-center SALES
+bukio report cost-center --from 2026-07-01 --to 2026-09-30 --format csv --out ~/exports/cc-q3.csv
 ```
 
 ### `bukio report aging` / `report sales` / `contact statement`
