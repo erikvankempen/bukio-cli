@@ -14,6 +14,7 @@ import { pnl } from '../report/pnl.js';
 import { journal } from '../report/journal.js';
 import { aging } from '../report/aging.js';
 import { sales } from '../report/sales.js';
+import { costCenterReport } from '../report/cost-center.js';
 import { toCsv, writeXlsx } from '../report/export.js';
 import { fiscalYearWindow } from '../year-end/index.js';
 import { cliError, ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
@@ -437,6 +438,58 @@ export function make(program) {
               } else {
                 console.log(`totals: ${d.totals.line_count} lines, net ${formatAmount(d.totals.net_cents)}`);
               }
+            },
+          });
+        } finally {
+          db.close();
+        }
+      } catch (err) {
+        fail(ctx, err);
+      }
+    });
+
+  report
+    .command('cost-center')
+    .description('cost-center analysis: revenue/costs/result per cost center for a period')
+    .option('--year <yyyy>', 'fiscal year (default: current)')
+    .option('--format <format>', 'json|csv|xlsx|human')
+    .option('--out <path>', 'output file (csv/xlsx)')
+    .action(async (opts, command) => {
+      const ctx = makeCtx(command);
+      try {
+        const db = ensureDb(ctx);
+        try {
+          const year = opts.year || currentYear();
+          const r = costCenterReport(db, { year });
+          const fmt = (c) => formatAmount(c);
+          const data = {
+            year: r.year, from: r.from, to: r.to,
+            centers: r.centers.map((c) => ({
+              cost_center_code: c.cost_center_code,
+              cost_center_name: c.cost_center_name,
+              revenue: fmt(c.revenue_cents), costs: fmt(c.costs_cents), result: fmt(c.result_cents),
+            })),
+          };
+          const flatRows = (d) => d.centers.map((c) => ({
+            cost_center: c.cost_center_code ?? '(unassigned)',
+            name: c.cost_center_name ?? '',
+            revenue: c.revenue, costs: c.costs, result: c.result,
+          }));
+          const csvColumns = [
+            { key: 'cost_center', label: 'cost_center' }, { key: 'name', label: 'name' },
+            { key: 'revenue', label: 'revenue' }, { key: 'costs', label: 'costs' }, { key: 'result', label: 'result' },
+          ];
+          await emitReport(ctx, opts, data, {
+            csvColumns,
+            csvRows: flatRows,
+            sheets: (d) => [{ name: 'Cost Centers', columns: csvColumns.map((c) => ({ header: c.label, key: c.key })), rows: flatRows(d) }],
+            render: (d) => {
+              console.log(`cost center analysis ${d.year}`);
+              if (!d.centers.length) {
+                console.log('(no cost centers or no postings)');
+                return;
+              }
+              table(flatRows(d), csvColumns.map((c) => ({ key: c.key, label: c.label })));
             },
           });
         } finally {
