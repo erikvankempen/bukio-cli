@@ -6,6 +6,44 @@ match `package.json` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
+## [Unreleased]
+
+## [0.17.0] — 2026-09-01
+
+### Added
+
+- **Cost centers** — an optional analytical dimension for management reporting.
+  Define cost centers (`bukio cost-center add/list/show/deactivate/reactivate`),
+  tag expense/revenue postings at booking time (`4700:-100.00@SALES`), and run
+  `bukio report cost-center` to see revenue, costs and result per center for any
+  period (year, quarter, month, or date range). Cost centers are purely analytical
+  — they never block a posting and are invisible to statutory reporting.
+  Schema migration 026; nullable `cost_center_id` on postings; entry-level `@CC`
+  suffix in posting specs; cost center carried through reversals; period filtering
+  via `--period YYYY-Qn|YYYY-MM`, `--from/--to`, `--year`; single-center drill-down
+  with `--cost-center CODE`.
+- **Authz gate for cost centers** — `cost-center add/deactivate/reactivate` mapped
+  to `admin.chart` (owner + bookkeeper); `cost-center list/show` and
+  `report cost-center` mapped to `report.read`. Cost-center commands now
+  participate in the Tier 0.5 RBAC system like every other command.
+- **Flexible period filtering on cost-center reports** — `--period 2026-Q2` or
+  `--period 2026-08` (quarter/month), `--from/--to` (arbitrary date range),
+  `--year` (full fiscal year).
+
+### Changed
+
+- **Code cleanup** — ponytail audit cut deprecated CLI aliases, empty PLANNED
+  sections, and duplicated CSV parsers.
+- **README/AGENTS.md** — cost-center commands added to command quick reference;
+  posting spec documentation updated with `@CC` suffix; token usage snapshot
+  refreshed ($22.05 total, 149 sessions, 37.25 KLOC).
+
+### Internal
+
+- Migration 026: `cost_centers` table + nullable `cost_center_id` column on
+  `postings` with index.
+- 12 new cost-center tests; 941/944 tests passing (3 pre-existing).
+
 ## [0.16.3] — 2026-08-21
 
 ### Changed
