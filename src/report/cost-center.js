@@ -14,14 +14,22 @@ import { fiscalYearWindow } from '../year-end/index.js';
 /**
  * Analytical cost-center report for a period.
  * Returns per-center: accounts with net_cents, plus revenue/costs/result.
+ * @param {object} opts
+ * @param {string} [opts.year] - fiscal year shorthand (overrides from/to)
+ * @param {string} [opts.from] - period start (inclusive)
+ * @param {string} [opts.to] - period end (inclusive)
+ * @param {string} [opts.costCenter] - filter to a single cost center code
  */
-export function costCenterReport(db, { year = null } = {}) {
+export function costCenterReport(db, { year = null, from = null, to = null, costCenter = null } = {}) {
   if (year != null && !/^\d{4}$/.test(String(year))) {
     const e = new Error(`year '${year}' must be YYYY`);
     e.code = 'INVALID_YEAR';
     throw e;
   }
-  const [from, to] = year != null ? fiscalYearWindow(db, String(year)) : [null, null];
+  // year overrides from/to; from/to used directly when no year.
+  const [fyFrom, fyTo] = year != null ? fiscalYearWindow(db, String(year)) : [null, null];
+  const effectiveFrom = from ?? fyFrom;
+  const effectiveTo = to ?? fyTo;
 
   // One query: all posted income/expense postings with cost center.
   // LEFT JOIN so unassigned (NULL cc) still appear.
@@ -38,7 +46,8 @@ export function costCenterReport(db, { year = null } = {}) {
       AND a.type IN ('income','expense')
       AND (? IS NULL OR e.date >= ?)
       AND (? IS NULL OR e.date <= ?)
-  `).all(from, from, to, to);
+      AND (? IS NULL OR cc.code = ?)
+  `).all(effectiveFrom, effectiveFrom, effectiveTo, effectiveTo, costCenter, costCenter);
 
   // Group by cost center.
   const byCc = new Map(); // ccKey → { code, name, accounts: Map<accountId, {code,name,type,net}> }
@@ -94,5 +103,5 @@ export function costCenterReport(db, { year = null } = {}) {
     return a.cost_center_code.localeCompare(b.cost_center_code);
   });
 
-  return { year, from, to, centers };
+  return { year, from: effectiveFrom, to: effectiveTo, centers };
 }

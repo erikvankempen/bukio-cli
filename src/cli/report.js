@@ -15,6 +15,7 @@ import { journal } from '../report/journal.js';
 import { aging } from '../report/aging.js';
 import { sales } from '../report/sales.js';
 import { costCenterReport } from '../report/cost-center.js';
+import { parsePeriod } from '../vat/index.js';
 import { toCsv, writeXlsx } from '../report/export.js';
 import { fiscalYearWindow } from '../year-end/index.js';
 import { cliError, ensureDb, makeCtx, output, fail, table, withDb } from './util.js';
@@ -451,7 +452,11 @@ export function make(program) {
   report
     .command('cost-center')
     .description('cost-center analysis: revenue/costs/result per cost center for a period')
-    .option('--year <yyyy>', 'fiscal year (default: current)')
+    .option('--year <yyyy>', 'fiscal year (overrides --from/--to)')
+    .option('--period <YYYY-Qn|YYYY-MM>', 'quarter or month (e.g. 2026-Q2, 2026-08)')
+    .option('--from <yyyy-mm-dd>', 'period start (inclusive)')
+    .option('--to <yyyy-mm-dd>', 'period end (inclusive)')
+    .option('--cost-center <code>', 'filter to a single cost center')
     .option('--format <format>', 'json|csv|xlsx|human')
     .option('--out <path>', 'output file (csv/xlsx)')
     .action(async (opts, command) => {
@@ -459,8 +464,15 @@ export function make(program) {
       try {
         const db = ensureDb(ctx);
         try {
-          const year = opts.year || currentYear();
-          const r = costCenterReport(db, { year });
+          // Resolve period: --year wins, then --period, then --from/--to, else current year.
+          let { from, to } = opts;
+          if (opts.period) {
+            const p = parsePeriod(opts.period);
+            from = p.from;
+            to = p.to;
+          }
+          const year = opts.year || (!from && !to ? currentYear() : null);
+          const r = costCenterReport(db, { year, from, to, costCenter: opts.costCenter || null });
           const fmt = (c) => formatAmount(c);
           const data = {
             year: r.year, from: r.from, to: r.to,

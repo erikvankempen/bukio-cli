@@ -143,3 +143,41 @@ test('trial-balance: still balanced after CC-tagged entries', () => {
   const tb = trialBalance(db, { year: '2026' });
   assert.equal(tb.balanced, true);
 });
+
+test('costCenterReport: period filtering (--from/--to)', () => {
+  createCostCenter(db, { code: 'ADM', name: 'Admin' });
+  // Jan entry (outside filter) + Aug entry (inside filter)
+  createEntry(db, {
+    date: '2026-01-15', description: 'jan',
+    postings: [{ code: '4700', amountCents: 10000, costCenterCode: 'ADM' }, { code: '1100', amountCents: -10000 }],
+  });
+  createEntry(db, {
+    date: '2026-08-04', description: 'aug',
+    postings: [{ code: '4700', amountCents: 20000, costCenterCode: 'ADM' }, { code: '1100', amountCents: -20000 }],
+  });
+  for (const e of db.prepare('SELECT id FROM journal_entries').all()) postEntry(db, { id: e.id });
+  // Filter to Aug only
+  const r = costCenterReport(db, { from: '2026-08-01', to: '2026-08-31' });
+  const adm = r.centers.find((c) => c.cost_center_code === 'ADM');
+  assert.ok(adm);
+  // Only the Aug expense (20000) should appear — not Jan
+  const total = adm.accounts.reduce((s, a) => s + a.amount_cents, 0);
+  assert.equal(total, 20000);
+});
+
+test('costCenterReport: --cost-center filter returns only that center', () => {
+  createCostCenter(db, { code: 'ADM', name: 'Admin' });
+  createCostCenter(db, { code: 'SALES', name: 'Sales' });
+  createEntry(db, {
+    date: '2026-08-04', description: 'adm',
+    postings: [{ code: '4700', amountCents: 10000, costCenterCode: 'ADM' }, { code: '1100', amountCents: -10000 }],
+  });
+  createEntry(db, {
+    date: '2026-08-05', description: 'sales',
+    postings: [{ code: '4700', amountCents: 20000, costCenterCode: 'SALES' }, { code: '1100', amountCents: -20000 }],
+  });
+  for (const e of db.prepare('SELECT id FROM journal_entries').all()) postEntry(db, { id: e.id });
+  const r = costCenterReport(db, { year: '2026', costCenter: 'ADM' });
+  assert.equal(r.centers.length, 1);
+  assert.equal(r.centers[0].cost_center_code, 'ADM');
+});
