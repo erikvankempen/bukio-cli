@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-01 19:19:52 UTC — **❌ 938 passing · 6 failing (944 tests)**
+**Latest run:** 2026-09-01 20:22:31 UTC — **❌ 941 passing · 3 failing (944 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -165,12 +165,12 @@
 
 ### audit.test.js — audit log record/list, append-only trigger, migration 018/019, signature columns + verifyTrail classification matrix
 
-18 passing · 1 failing
+19 passing · 0 failing
 
     - ✅ record + list with filters
     - ✅ audit log is append-only: UPDATE and DELETE are blocked
     - ✅ args null is stored and read back as null
-    - ❌ migration 018: fresh DB gains the six signature columns + actor_keys + settings
+    - ✅ migration 018: fresh DB gains the six signature columns + actor_keys + settings
     - ✅ migration 019: actor_keys gains a composite (actor, keyid) primary key
     - ✅ migration 019: a v18 DB with single-row actor_keys upgrades without data loss
     - ✅ migration 018: existing DB keeps legacy rows with sig_status = unsigned
@@ -481,7 +481,7 @@
 
 ### hardening.test.js — 
 
-85 passing · 1 failing
+86 passing · 0 failing
 
     - ✅ reversal of a VAT entry cancels the OB readout and keeps vat fields
     - ✅ parsePeriod rejects out-of-range months
@@ -567,7 +567,7 @@
     - ✅ MCP entry_reverse / invoice_credit / invoice_pay dry-runs validate like execute
     - ✅ init validates iban, vat choice and fiscal-year-end (garbage was stored silently)
     - ✅ account add/deactivate/reactivate/import are audited (they mutated silently before)
-    - ❌ every emitted error code in src/ is documented in AGENTS.md §7
+    - ✅ every emitted error code in src/ is documented in AGENTS.md §7
     - ✅ MCP on a missing database errors NO_DATABASE instead of silently creating an empty company
 
 ### i18n.test.js — 
@@ -879,9 +879,9 @@
 
 ### migration-021.test.js — 
 
-1 passing · 1 failing
+2 passing · 0 failing
 
-    - ❌ migrations 021-025 upgrade a 020 DB: new columns, CHECK removals, renames, backfill
+    - ✅ migrations 021-025 upgrade a 020 DB: new columns, CHECK removals, renames, backfill
     - ✅ migration 021 keeps company data lossless across the rebuild
 
 ### money.test.js — integer-cents money helpers
