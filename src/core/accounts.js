@@ -6,6 +6,7 @@
 
 // Accounts — chart of accounts CRUD, CSV import, default chart seeding.
 import { readFileSync } from 'node:fs';
+import { splitCsvLine } from './csv.js';
 import { inferRgs } from './chart.js';
 import { resolveProfile } from '../jurisdictions/index.js';
 
@@ -118,7 +119,7 @@ export function importChartCsv(db, csvText) {
   if (lines.length < 2) {
     throw accountError('EMPTY_CSV', 'chart CSV must have a header row and at least one account');
   }
-  const header = parseCsvLine(lines[0]).map((h) => h.trim());
+  const header = splitCsvLine(lines[0], ',').map((h) => h.trim());
   const expected = ['code', 'name', 'type', 'normal_balance'];
   for (const col of expected) {
     if (!header.includes(col)) {
@@ -133,7 +134,7 @@ export function importChartCsv(db, csvText) {
   const created = [];
   const errors = [];
   for (let i = 1; i < lines.length; i += 1) {
-    const row = parseCsvLine(lines[i]).map((c) => c.trim());
+    const row = splitCsvLine(lines[i], ',').map((c) => c.trim());
     if (row.length === 1 && row[0] === '') continue;
     try {
       const account = {
@@ -157,24 +158,6 @@ export function importChartCsv(db, csvText) {
     }
   }
   return { created: created.length, skipped: errors.length, total: lines.length - 1, errors };
-}
-
-function parseCsvLine(line) {
-  const out = [];
-  let cur = '';
-  let inQuotes = false;
-  for (const ch of line) {
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-    } else if (ch === ',' && !inQuotes) {
-      out.push(cur);
-      cur = '';
-    } else {
-      cur += ch;
-    }
-  }
-  out.push(cur);
-  return out;
 }
 
 export function readChartCsvFile(filePath) {

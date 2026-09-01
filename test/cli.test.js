@@ -45,7 +45,7 @@ function tmpDb() {
 
 test('init --dry-run: shows plan, creates nothing', () => {
   const dbPath = tmpDb();
-  const { code, out } = run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--dry-run', '--json']);
+  const { code, out } = run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv', '--vat', 'on', '--dry-run', '--json']);
   assert.equal(code, 0);
   assert.equal(out.ok, true);
   assert.equal(out.data.dryRun, true);
@@ -56,7 +56,7 @@ test('init --dry-run: shows plan, creates nothing', () => {
 
 test('init: creates company + 30-account chart with VAT on', () => {
   const dbPath = tmpDb();
-  const { out } = run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
+  const { out } = run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
   assert.equal(out.ok, true);
   assert.equal(out.data.chart.accounts, 31); // 29 default + 2 VAT accounts
   assert.equal(out.data.chart.created, 31);
@@ -286,17 +286,6 @@ test('report balance-sheet --as-of is respected', () => {
   assert.equal(late.liabilities_and_equity.result, '500.00');
 });
 
-test('report balans stays available as a deprecated alias', () => {
-  const dbPath = tmpDb();
-  run(dbPath, ['init', '--name', 'A', '--json']);
-  run(dbPath, ['entry', 'add', '--date', '2026-01-05', '--desc', 'Startkapitaal', '--postings', '1100:1000.00,3000:-1000.00', '--post', '--json']);
-  const legacy = run(dbPath, ['report', 'balans', '--as-of', '2026-12-31', '--json']).out.data;
-  const modern = run(dbPath, ['report', 'balance-sheet', '--as-of', '2026-12-31', '--json']).out.data;
-  assert.equal(legacy.balanced, true);
-  assert.equal(legacy.assets.total, modern.assets.total);
-  assert.equal(legacy.liabilities_and_equity.result, modern.liabilities_and_equity.result);
-});
-
 test('backup + restore roundtrip', () => {
   const dbPath = tmpDb();
   run(dbPath, ['init', '--name', 'A', '--json']);
@@ -456,7 +445,7 @@ test('vat: module off blocks book, enable works on existing company', () => {
 
 test('account list: human mode renders without crashing (table import regression)', () => {
   const dbPath = tmpDb();
-  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'off', '--json']);
+  run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv', '--vat', 'off', '--json']);
   // human mode (no --json): the render callback calls table() — a missing
   // import crashed with 'table is not defined' instead of listing accounts
   const out = execFileSync(process.execPath, [BIN, '--db', dbPath, 'account', 'list'], {
@@ -507,7 +496,7 @@ test('update: fetches from origin/main via --repo (fixture only, never the live 
 
 test('vat file + settle with a custom af-te-dragen account (--account 2515)', () => {
   const dbPath = tmpDb();
-  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
+  run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
   run(dbPath, ['vat', 'book', '--date', '2026-07-01', '--desc', 'Omzet', '--postings', '1100:121.00,8000:-100.00@21', '--post', '--json']);
   // file to a custom account — the dry-run must show the same code
   const dry = run(dbPath, ['vat', 'file', '--account', '2515', '--period', '2026-Q3', '--dry-run', '--json']);
@@ -540,7 +529,7 @@ test('vat file + settle with a custom af-te-dragen account (--account 2515)', ()
 
 test('vat file + vat settle end-to-end: filing moves the position, the payment cancels it with the rounding difference in the P&L', () => {
   const dbPath = tmpDb();
-  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
+  run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
   run(dbPath, ['vat', 'book', '--date', '2026-07-01', '--desc', 'Omzet', '--postings', '1100:121.00,8000:-100.00@21', '--post', '--json']);
   run(dbPath, ['vat', 'book', '--date', '2026-07-05', '--desc', 'Inkoop', '--postings', '1100:-60.50,4300:50.00@21', '--post', '--json']);
 
@@ -593,7 +582,7 @@ test('vat file + vat settle end-to-end: filing moves the position, the payment c
 
 test('entry post --dry-run: rejects non-draft entries instead of a green plan', () => {
   const dbPath = tmpDb();
-  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'off', '--json']);
+  run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv', '--vat', 'off', '--json']);
   const { out } = run(dbPath, ['entry', 'add', '--date', '2026-01-01', '--desc', 'x', '--postings', '1100:100.00,3000:-100.00', '--post', '--json']);
   const id = out.data.id;
   // already posted -> dry-run must fail with ALREADY_POSTED, not "(no change)"
@@ -604,7 +593,7 @@ test('entry post --dry-run: rejects non-draft entries instead of a green plan', 
 
 test('entry reverse --dry-run: rejects drafts (NOT_POSTED) and double reversals', () => {
   const dbPath = tmpDb();
-  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'off', '--json']);
+  run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv', '--vat', 'off', '--json']);
   // draft entry -> reversal plan must NOT be shown
   const { out } = run(dbPath, ['entry', 'add', '--date', '2026-01-01', '--desc', 'x', '--postings', '1100:100.00,3000:-100.00', '--json']);
   const draftId = out.data.id;
@@ -621,7 +610,7 @@ test('entry reverse --dry-run: rejects drafts (NOT_POSTED) and double reversals'
 
 test('vat book --dry-run: validates date and description like the execute path', () => {
   const dbPath = tmpDb();
-  run(dbPath, ['init', '--name', 'Demo BV', '--kvk', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
+  run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv', '--vat', 'on', '--json']);
   const r = run(dbPath, ['vat', 'book', '--date', '2026-99-99', '--desc', 'x', '--postings', '1100:121.00,8000:-100.00@21', '--dry-run', '--json'], { expectFail: true });
   assert.equal(r.code, 1);
   assert.equal(r.out.error.code, 'INVALID_DATE');

@@ -105,7 +105,7 @@ let file;
 test.beforeEach(() => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-smtp-test-'));
   file = path.join(dir, 'test.db');
-  cli(file, ['init', '--name', 'Test Coaching', '--kvk', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
+  cli(file, ['init', '--name', 'Test Coaching', '--registration-id', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
   cli(file, ['company', 'update', '--address', 'Teststraat 1', '--postal-code', '1000 AA', '--city', 'Amsterdam']);
   db = openDb(file);
   t = dir;

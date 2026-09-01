@@ -16,6 +16,7 @@
 import { readFileSync } from 'node:fs';
 import { XMLParser } from 'fast-xml-parser';
 import { parseAmount, formatAmount } from '../core/money.js';
+import { splitCsvLine, detectDelimiter } from '../core/csv.js';
 import { createAccount, getAccountByCode } from '../core/accounts.js';
 import { inferRgs } from '../core/chart.js';
 import { createEntry, postEntry } from '../core/entries.js';
@@ -46,35 +47,18 @@ function todayIso() {
 
 // --- CSV plumbing -----------------------------------------------------------
 
-function parseCsvLine(line, delim) {
-  // Dutch bookkeeping exports use ';' as delimiter exactly because amounts
-  // carry decimal commas. The delimiter is decided ONCE from the first line
-  // (parseCsvRows) — a per-line heuristic flips a row to ';' mode when a
-  // comma-delimited field contains a semicolon, misparsing it.
-  const out = [];
-  let cur = '';
-  let inQuotes = false;
-  for (const ch of line) {
-    if (ch === '"') inQuotes = !inQuotes;
-    else if (ch === delim && !inQuotes) { out.push(cur); cur = ''; }
-    else cur += ch;
-  }
-  out.push(cur);
-  return out;
-}
-
 /** Split CSV text into data rows. Returns [{ line, cells }]; skips blanks. */
 export function parseCsvRows(csvText) {
   const rows = [];
   const lines = String(csvText).replace(/^\uFEFF/, '').split(/\r?\n/);
   // delimiter decided once from the first non-empty line (same rule as
-  // parseBatchCsv / bank/csv.js) — never per row
+  // bank/csv.js) — never per row
   const first = lines.find((l) => l.trim() !== '') ?? '';
-  const delim = first.split(';').length > first.split(',').length ? ';' : ',';
+  const delim = detectDelimiter(first);
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     if (line.trim() === '') continue;
-    rows.push({ line: i + 1, cells: parseCsvLine(line, delim).map((c) => c.trim()) });
+    rows.push({ line: i + 1, cells: splitCsvLine(line, delim).map((c) => c.trim()) });
   }
   return rows;
 }

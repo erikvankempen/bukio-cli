@@ -25,7 +25,7 @@ import { XMLParser } from 'fast-xml-parser';
 import { exportXaf } from '../src/export/index.js';
 import { complianceStatus, markFiled } from '../src/compliance/index.js';
 import { vatSettle } from '../src/vat/index.js';
-import { getProfile, PLANNED, normalizeCountry, resolveProfile } from '../src/jurisdictions/index.js';
+import { getProfile, normalizeCountry, resolveProfile } from '../src/jurisdictions/index.js';
 
 const MIGRATIONS_DIR = path.join(import.meta.dirname, '..', 'migrations');
 
@@ -62,14 +62,6 @@ test('getProfile rejects malformed country input with INVALID_COUNTRY', () => {
   for (const bad of ['NETHERLANDS', 'N', 'NLD', 'NL!', '', ' ', 42, null, undefined]) {
     assert.throws(() => getProfile(bad), (e) => e.code === 'INVALID_COUNTRY');
   }
-});
-
-test('getProfile throws COUNTRY_NOT_SUPPORTED for valid-but-planned countries', () => {
-  for (const cc of PLANNED) {
-    assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
-  }
-  // all sixteen markets are implemented — PLANNED is empty
-  assert.deepEqual([...PLANNED].sort(), []);
 });
 
 test('getProfile throws PROFILE_NOT_FOUND for unknown valid codes', () => {
@@ -255,13 +247,11 @@ test('M3 init: generic --registration-id/--tax-id are stored; no deprecation war
   assert.equal(r.out.data.warnings, undefined);
 });
 
-test('M3 init: legacy --kvk/--btw-id aliases map to the generic fields and warn', () => {
+test('M3 init: --registration-id/--tax-id set the company identifiers', () => {
   const dbPath = tmpDb();
-  const r = cli(dbPath, ['init', '--name', 'Test BV', '--kvk', '12345678', '--btw-id', 'NL123456789B01']);
+  const r = cli(dbPath, ['init', '--name', 'Test BV', '--registration-id', '12345678', '--tax-id', 'NL123456789B01']);
   assert.equal(r.out.data.company.registration_id, '12345678');
   assert.equal(r.out.data.company.tax_id, 'NL123456789B01');
-  assert.ok(r.out.data.warnings.some((w) => w.includes('--kvk is deprecated')));
-  assert.ok(r.out.data.warnings.some((w) => w.includes('--btw-id is deprecated')));
 });
 
 test('M3 company update: changing country is rejected with COUNTRY_IMMUTABLE', () => {
@@ -280,12 +270,11 @@ test('M3 company update: --country with the SAME value passes the immutability g
   assert.equal(r.out.data.company.city, 'Amsterdam');
 });
 
-test('M3 company update: --kvk alias warns and updates registration_id', () => {
+test('M3 company update: --registration-id updates registration_id', () => {
   const dbPath = tmpDb();
   cli(dbPath, ['init', '--name', 'Test BV']);
-  const r = cli(dbPath, ['company', 'update', '--kvk', '87654321']);
+  const r = cli(dbPath, ['company', 'update', '--registration-id', '87654321']);
   assert.equal(r.out.data.company.registration_id, '87654321');
-  assert.ok(r.out.data.warnings.some((w) => w.includes('--kvk is deprecated')));
 });
 
 test('M3 company update: generic --registration-id/--tax-id work without warnings', () => {
@@ -332,14 +321,6 @@ test('M5: jaarrekening resolves the profile (unknown company country -> PROFILE_
   db.close();
   const r = cli(dbPath, ['financial-statements', 'report', '--year', '2025'], { expectFail: true });
   assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
-});
-
-test('M5: deprecated alias `jaarrekening report` still works and warns', () => {
-  const dbPath = tmpDb();
-  cli(dbPath, ['init', '--name', 'Test BV', '--vat', 'on']);
-  const r = cli(dbPath, ['jaarrekening', 'report', '--year', '2026', '--format', 'json']);
-  assert.equal(r.out.data.financial_statements.year, '2026');
-  assert.ok(r.out.data.warnings.some((w) => w.includes('jaarrekening is deprecated')));
 });
 
 // --- Phase A M6: compliance calendar resolves the profile -------------------
@@ -408,19 +389,13 @@ test('M9: bank import resolves the profile (unknown company country -> PROFILE_N
   assert.equal(r.out.error.code, 'PROFILE_NOT_FOUND');
 });
 
-// --- review-fix: account taxonomy flag (regression + alias coverage) --------
+// --- review-fix: account taxonomy flag (regression) -------------------------
 
-test('review-fix: account add --taxonomy-code works; --rgs-code alias maps and warns', () => {
+test('review-fix: account add --taxonomy-code works', () => {
   const dbPath = tmpDb();
   cli(dbPath, ['init', '--name', 'Test BV']);
   const primary = cli(dbPath, ['account', 'add', '--code', '1300', '--name', 'Testrekening', '--type', 'asset', '--normal-balance', 'debit', '--taxonomy-code', 'BMVA.02', '--dry-run']);
   assert.equal(primary.out.data.account.taxonomy_code, 'BMVA.02');
-  const alias = cli(dbPath, ['account', 'add', '--code', '1300', '--name', 'Testrekening', '--type', 'asset', '--normal-balance', 'debit', '--rgs-code', 'BMVA.02', '--dry-run']);
-  assert.equal(alias.out.data.account.taxonomy_code, 'BMVA.02');
-  assert.ok(alias.out.data.warnings.some((w) => w.includes('--rgs-code is deprecated')));
-  const conflict = cli(dbPath, ['account', 'add', '--code', '1300', '--name', 'Testrekening', '--type', 'asset', '--normal-balance', 'debit', '--taxonomy-code', 'BMVA.02', '--rgs-code', 'BFVA.03', '--dry-run']);
-  assert.equal(conflict.out.data.account.taxonomy_code, 'BMVA.02'); // primary wins
-  assert.ok(conflict.out.data.warnings.some((w) => w.includes('--rgs-code ignored')));
 });
 
 // --- Phase B B1: Luxembourg profile (PCN 2020, French labels) ---------------
@@ -470,13 +445,8 @@ test('B1: getProfile returns the LU profile (French, PCN 2020 data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('B1: LU is implemented — PLANNED is empty (all thirty-one markets landed)', () => {
-  assert.ok(!PLANNED.includes('LU'));
-  assert.deepEqual([...PLANNED].sort(), []);
+test('B1: LU is implemented (all thirty-one markets landed)', () => {
   assert.equal(getProfile('LU').meta.country, 'LU');
-  for (const cc of PLANNED) {
-    assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
-  }
 });
 
 test('B1: the LU profile is deep-frozen', () => {
@@ -1063,14 +1033,6 @@ test('GB: getProfile returns the GB profile (GBP, en-GB, UK conventions)', () =>
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['gb-9-months', 'gb-ct600']);
 });
 
-test('GB: PLANNED is empty (all thirty-one markets landed)', () => {
-  assert.ok(!PLANNED.includes('GB'));
-  assert.deepEqual([...PLANNED].sort(), []);
-  for (const cc of PLANNED) {
-    assert.throws(() => getProfile(cc), (e) => e.code === 'COUNTRY_NOT_SUPPORTED');
-  }
-});
-
 test('GB: init --country GB creates a GBP company with the UK chart', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test Ltd', '--country', 'GB', '--legal-form', 'private-limited-company', '--vat', 'on']);
@@ -1175,11 +1137,6 @@ test('FR: getProfile returns the FR profile (EUR, fr, PCG data)', () => {
   assert.deepEqual(p.exchange.paymentFormats, ['sepa-pain.001', 'sepa-pain.008']);
 });
 
-test('FR: PLANNED is empty (all thirty-one markets landed)', () => {
-  assert.ok(!PLANNED.includes('FR'));
-  assert.deepEqual([...PLANNED].sort(), []);
-});
-
 test('FR: init --country FR creates a French company with the PCG chart', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'SAS Test', '--country', 'FR', '--legal-form', 'sas', '--vat', 'on']);
@@ -1280,11 +1237,6 @@ test('US: getProfile returns the US profile (USD, en-US, no federal VAT)', () =>
   assert.deepEqual(p.exchange.paymentFormats, []); // no SEPA; ACH is a B-milestone
   // US deadlines: 1120 (15th of 4th month after FYE) + 941 (quarterly)
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['us-1120', 'us-941']);
-});
-
-test('US: PLANNED is empty (all thirty-one markets landed)', () => {
-  assert.deepEqual([...PLANNED].sort(), []);
-  assert.equal(getProfile('US').meta.country, 'US');
 });
 
 test('US: init --country US creates a USD company with the US chart', () => {
@@ -1391,11 +1343,6 @@ test('BE: getProfile returns the BE profile (EUR, nl-BE, PCN-BE data)', () => {
   assert.equal(p.documents.eInvoicing, 'peppol-bis-3.0');
   // BE deadlines: VAT monthly (20th), annual accounts 7 months
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['be-vat-monthly', 'be-7-months']);
-});
-
-test('BE: PLANNED is empty (all thirty-one markets landed)', () => {
-  assert.ok(!PLANNED.includes('BE'));
-  assert.deepEqual([...PLANNED].sort(), []);
 });
 
 test('BE: init --country BE creates a Belgian company with the PCMN chart', () => {
@@ -1523,11 +1470,6 @@ test('DE: getProfile returns the DE profile (EUR, de-DE, SKR 03 data)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['de-ustva-quarterly', 'de-annual-vat', 'de-12-months']);
 });
 
-test('DE: PLANNED is empty (all thirty-one markets landed)', () => {
-  assert.ok(!PLANNED.includes('DE'));
-  assert.deepEqual([...PLANNED].sort(), []);
-});
-
 test('DE: init --country DE creates a German company with the SKR 03 chart', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test GmbH', '--country', 'DE', '--legal-form', 'gmbh', '--vat', 'on']);
@@ -1639,11 +1581,6 @@ test('DK: getProfile returns the DK profile (DKK, da-DK, 25% VAT only)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['dk-quarterly', 'dk-5-months']);
 });
 
-test('DK: PLANNED is empty (all thirty-one markets landed)', () => {
-  assert.ok(!PLANNED.includes('DK'));
-  assert.deepEqual([...PLANNED].sort(), []);
-});
-
 test('DK: init --country DK creates a Danish company with the kontoplan', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test ApS', '--country', 'DK', '--legal-form', 'aps', '--vat', 'on']);
@@ -1749,11 +1686,6 @@ test('FI: getProfile returns the FI profile (EUR, fi-FI, 25.5% VAT)', () => {
   assert.equal(p.documents.eInvoicing, 'peppol-bis-3.0');
   // FI deadlines: quarterly VAT (12th of 2nd month), accounts filed in 8 months
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['fi-quarterly', 'fi-8-months']);
-});
-
-test('FI: PLANNED is empty (all thirty-one markets landed)', () => {
-  assert.ok(!PLANNED.includes('FI'));
-  assert.deepEqual([...PLANNED].sort(), []);
 });
 
 test('FI: init --country FI creates a Finnish company with the model chart', () => {
@@ -1862,11 +1794,6 @@ test('NO: getProfile returns the NO profile (NOK, nb-NO, NS 4102)', () => {
   // NO deadlines: bi-monthly VAT + accounts 7 months
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['no-bimonthly', 'no-7-months']);
   assert.equal(p.compliance.filingTypes[0].periodShape, 'YYYY-Pn'); // bi-monthly shape
-});
-
-test('NO: PLANNED is empty (all thirty-one markets landed)', () => {
-  assert.ok(!PLANNED.includes('NO'));
-  assert.deepEqual([...PLANNED].sort(), []);
 });
 
 test('NO: init --country NO creates a Norwegian company with the NS 4102 chart', () => {
@@ -1979,11 +1906,6 @@ test('SE: getProfile returns the SE profile (SEK, sv-SE, BAS 2023)', () => {
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['se-quarterly', 'se-7-months']);
 });
 
-test('SE: PLANNED is empty (all thirty-one markets landed)', () => {
-  assert.ok(!PLANNED.includes('SE'));
-  assert.deepEqual([...PLANNED].sort(), []);
-});
-
 test('SE: init --country SE creates a Swedish company with the BAS chart', () => {
   const dbPath = tmpDb();
   const r = cli(dbPath, ['init', '--name', 'Test AB', '--country', 'SE', '--legal-form', 'ab', '--vat', 'on']);
@@ -2094,11 +2016,6 @@ test('AT: getProfile returns the AT profile (EUR, de-AT, EKR data)', () => {
   // AT deadlines: UVA quarterly (15th of the second following month), annual
   // VAT 30 June (electronic)
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['at-uva-quarterly', 'at-annual-vat']);
-});
-
-test('AT: PLANNED is empty (all thirty-one markets landed)', () => {
-  assert.ok(!PLANNED.includes('AT'));
-  assert.deepEqual([...PLANNED].sort(), []);
 });
 
 test('AT: init --country AT creates an Austrian company with the EKR chart', () => {
@@ -2217,11 +2134,6 @@ test('IE: getProfile returns the IE profile (EUR, en, UK-style chart)', () => {
   assert.equal(p.documents.eInvoicing, 'peppol-bis-3.0');
   // IE deadlines: VAT3 bi-monthly (23rd), annual accounts + CT1 9 months
   assert.deepEqual(p.compliance.filingTypes.map((ft) => ft.deadlineRule), ['ie-bimonthly', 'ie-9-months', 'ie-9-months']);
-});
-
-test('IE: PLANNED is empty (all thirty-one markets landed)', () => {
-  assert.ok(!PLANNED.includes('IE'));
-  assert.deepEqual([...PLANNED].sort(), []);
 });
 
 test('IE: init --country IE creates an Irish company with the UK-style chart', () => {

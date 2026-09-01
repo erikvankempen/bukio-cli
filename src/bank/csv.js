@@ -6,6 +6,7 @@
 
 // Dutch bank CSV parser — tolerant of Rabo / ING / ABN AMRO / generic exports.
 import { bankError } from './camt.js';
+import { splitCsvLine, detectDelimiter } from '../core/csv.js';
 
 const HEADER_ALIASES = {
   date: ['datum', 'date', 'boekingsdatum', 'transaction date', 'transactiedatum'],
@@ -19,25 +20,6 @@ const HEADER_ALIASES = {
 
 function normalizeHeader(h) {
   return String(h).trim().toLowerCase().replace(/\s+/g, ' ');
-}
-
-function detectDelimiter(line) {
-  const semicolons = (line.match(/;/g) || []).length;
-  const commas = (line.match(/,/g) || []).length;
-  return semicolons >= commas ? ';' : ',';
-}
-
-function splitLine(line, delimiter) {
-  const out = [];
-  let cur = '';
-  let inQuotes = false;
-  for (const ch of line) {
-    if (ch === '"') inQuotes = !inQuotes;
-    else if (ch === delimiter && !inQuotes) { out.push(cur); cur = ''; }
-    else cur += ch;
-  }
-  out.push(cur);
-  return out;
 }
 
 /**
@@ -123,7 +105,7 @@ export function parseBankCsv(csvText, { defaultIban = null } = {}) {
   if (lines.length < 2) throw bankError('EMPTY_CSV', 'bank CSV needs a header row and at least one transaction');
 
   const delimiter = detectDelimiter(lines[0]);
-  const header = splitLine(lines[0], delimiter).map(normalizeHeader);
+  const header = splitCsvLine(lines[0], delimiter).map(normalizeHeader);
   const columns = header.map((h) => findColumn(h, HEADER_ALIASES));
 
   const idx = {};
@@ -137,7 +119,7 @@ export function parseBankCsv(csvText, { defaultIban = null } = {}) {
   const transactions = [];
   const skipped = [];
   for (let i = 1; i < lines.length; i += 1) {
-    const row = splitLine(lines[i], delimiter);
+    const row = splitCsvLine(lines[i], delimiter);
     if (row.length === 1 && row[0].trim() === '') continue;
     const get = (key) => (idx[key] >= 0 ? (row[idx[key]] ?? '').trim() : '');
 

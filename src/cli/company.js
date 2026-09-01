@@ -154,8 +154,6 @@ export function make(program) {
     .option('--name <name>', 'company name')
     .option('--registration-id <id>', 'company registration number (KVK for NL)')
     .option('--tax-id <id>', 'tax identification number (btw-id for NL)')
-    .option('--kvk <kvk>', '[deprecated] alias for --registration-id')
-    .option('--btw-id <id>', '[deprecated] alias for --tax-id')
     .option('--country <CC>', 'country — immutable after init (rejected)')
     .option('--iban <iban>', 'bank account (IBAN)')
     .option('--address <address>', 'street address (for compliant invoices)')
@@ -168,19 +166,6 @@ export function make(program) {
         const row = getCompany(db);
         if (!row) throw dbError('NO_COMPANY', 'no company — run bukio init first');
 
-        // deprecated aliases: --kvk -> --registration-id, --btw-id -> --tax-id
-        if (opts.kvk !== undefined && opts.registrationId !== undefined) {
-          opts._warnings = [...(opts._warnings ?? []), '--kvk ignored because --registration-id was also given'];
-        } else if (opts.kvk !== undefined) {
-          opts.registrationId = opts.kvk;
-          opts._warnings = [...(opts._warnings ?? []), '--kvk is deprecated — use --registration-id'];
-        }
-        if (opts.btwId !== undefined && opts.taxId !== undefined) {
-          opts._warnings = [...(opts._warnings ?? []), '--btw-id ignored because --tax-id was also given'];
-        } else if (opts.btwId !== undefined) {
-          opts.taxId = opts.btwId;
-          opts._warnings = [...(opts._warnings ?? []), '--btw-id is deprecated — use --tax-id'];
-        }
         // country is immutable after init (decision §9.1.5)
         if (opts.country !== undefined) {
           const want = String(opts.country).trim().toUpperCase();
@@ -212,7 +197,6 @@ export function make(program) {
           changes,
           logo: logo === null ? null
             : { mime: logo.mime, bytes: logo.bytes ? logo.bytes.length : 0, width: logo.width, height: logo.height },
-          ...(opts._warnings?.length ? { warnings: opts._warnings } : {}),
           dryRun: true,
         };
         if (ctx.dryRun) {
@@ -220,7 +204,6 @@ export function make(program) {
             console.log('plan: company update');
             for (const [k, v] of Object.entries(d.changes)) console.log(`  ${k}: '${row[k]}' -> '${v}'`);
             if (d.logo) console.log(`  logo: ${d.logo.mime} (${d.logo.bytes} bytes${d.logo.width ? `, ${d.logo.width}×${d.logo.height} px` : ''})${d.logo.bytes === 0 ? ' — removed' : ''}`);
-            for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
             console.log('(dry run — nothing written)');
           });
           return;
@@ -245,13 +228,11 @@ export function make(program) {
         });
         output(ctx, {
           company: serializeCompany(updated), changes,
-          ...(opts._warnings?.length ? { warnings: opts._warnings } : {}),
         }, (d) => {
           console.log('company updated:');
           for (const [k, v] of Object.entries(d.changes)) console.log(`  ${k}: '${row[k]}' -> '${v}'`);
           if (logo !== null && logo.mime) console.log(`  logo: ${logo.mime} (${logo.bytes.length} bytes)`);
           if (logo !== null && !logo.mime) console.log('  logo: removed');
-          for (const w of d.warnings ?? []) console.error(`warning: ${w}`);
         });
     }));
 

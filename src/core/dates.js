@@ -19,9 +19,10 @@ export function isValidDate(s) {
 }
 
 /** Throw INVALID_DATE unless date is a valid yyyy-mm-dd calendar date. */
-export function validateDate(date, { code = 'INVALID_DATE' } = {}) {
+export function validateDate(date, { code = 'INVALID_DATE', label = null } = {}) {
+  const name = label ?? 'date';
   if (!DATE_RE.test(date)) {
-    const e = new Error(`date '${date}' must be yyyy-mm-dd`);
+    const e = new Error(`${name} '${date}' must be yyyy-mm-dd`);
     e.code = code;
     throw e;
   }
@@ -29,7 +30,7 @@ export function validateDate(date, { code = 'INVALID_DATE' } = {}) {
   // ISO round-trip: JS rolls day-overflow (2026-02-30 -> Mar 2) with a valid
   // getTime() — only exact calendar dates may reach the ledger
   if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) {
-    const e = new Error(`date '${date}' is not a valid calendar date`);
+    const e = new Error(`${name} '${date}' is not a valid calendar date`);
     e.code = code;
     throw e;
   }
@@ -55,15 +56,5 @@ export function addMonths(dateStr, n) {
 
 /** validateDate with a field label: `${label} '${v}' must be YYYY-MM-DD`. */
 export function validateLabeledDate(value, label) {
-  if (typeof value !== 'string' || !DATE_RE.test(value)) {
-    const e = new Error(`${label} '${value}' must be YYYY-MM-DD`);
-    e.code = 'INVALID_DATE';
-    throw e;
-  }
-  const d = new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) {
-    const e = new Error(`${label} '${value}' is not a valid calendar date`);
-    e.code = 'INVALID_DATE';
-    throw e;
-  }
+  return validateDate(value, { label });
 }

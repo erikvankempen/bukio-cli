@@ -132,7 +132,7 @@ let file;
 test.beforeEach(() => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-ubl-test-'));
   file = path.join(dir, 'test.db');
-  cli(file, ['init', '--name', 'Test Coaching', '--kvk', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
+  cli(file, ['init', '--name', 'Test Coaching', '--registration-id', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
   db = openDb(file);
   t = dir;
 });

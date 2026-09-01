@@ -35,6 +35,7 @@ const DESCRIPTIONS = {
   'canonical.test.js': 'canonical command digest: stable sorted-key JSON, sha256, excludes identity/output flags, includes --dry-run',
   'cli.test.js': 'CLI end-to-end: init, entries, reports, backup/restore',
   'company.test.js': 'company show/update',
+  'cost-centers.test.js': 'cost-center registry, @CC posting spec, entry/reversal carry CC, cost-center analysis report',
   'direct-debit.test.js': 'SEPA direct debit: mandate register, pain.008.001.02 export, FRST/RCUR, CORE/B2B split',
   'edge-cases.test.js': 'rounding, boundaries, idempotency, lifecycle violations, dry-run hygiene',
   'entries.test.js': 'journal entries: add/post/reverse, immutability',

@@ -8,6 +8,7 @@
 // Lifecycle: draft -> posted -> reversed. Posted entries are never deleted.
 import { parseAmount } from './money.js';
 import { getAccountByCode, getAccount } from './accounts.js';
+import { resolveCostCenterIds } from './cost-centers.js';
 import { record } from '../audit/index.js';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -92,6 +93,12 @@ export function resolvePostings(db, postings) {
       fxAmountCents = p.fxAmountCents;
     }
 
+    // Cost center: optional analytical dimension. Null code -> null id (no
+    // constraint, never blocks a posting). Named code must exist & be active.
+    const { costCenterId } = p.costCenterCode != null
+      ? resolveCostCenterIds(db, p)
+      : { costCenterId: null };
+
     return {
       accountId: account.id,
       code: account.code,
@@ -100,6 +107,7 @@ export function resolvePostings(db, postings) {
       vatAmountCents,
       fxCurrency,
       fxAmountCents,
+      costCenterId,
     };
   });
 }
@@ -135,14 +143,14 @@ export function createEntry(db, {
     'INSERT INTO journal_entries (date, description, source, source_ref, state, created_by) VALUES (?, ?, ?, ?, ?, ?)',
   );
   const insertPosting = db.prepare(
-    'INSERT INTO postings (entry_id, account_id, amount_cents, vat_code_id, vat_amount_cents, fx_currency, fx_amount_cents) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO postings (entry_id, account_id, amount_cents, vat_code_id, vat_amount_cents, fx_currency, fx_amount_cents, cost_center_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
   );
 
   const tx = db.transaction(() => {
     const info = insertEntry.run(date, String(description).trim(), source, sourceRef, 'draft', actor);
     const entryId = info.lastInsertRowid;
     for (const p of resolved) {
-      insertPosting.run(entryId, p.accountId, p.amountCents, p.vatCodeId, p.vatAmountCents, p.fxCurrency, p.fxAmountCents);
+      insertPosting.run(entryId, p.accountId, p.amountCents, p.vatCodeId, p.vatAmountCents, p.fxCurrency, p.fxAmountCents, p.costCenterId);
     }
     record(db, {
       actor, action: 'entry.create', command: 'entry add',
@@ -214,7 +222,7 @@ export function reverseEntry(db, { id, actor = 'human', reason = null, dryRun = 
     'INSERT INTO journal_entries (date, description, source, source_ref, state, reversed_from_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
   );
   const insertPosting = db.prepare(
-    'INSERT INTO postings (entry_id, account_id, amount_cents, vat_code_id, vat_amount_cents, fx_currency, fx_amount_cents) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    'INSERT INTO postings (entry_id, account_id, amount_cents, vat_code_id, vat_amount_cents, fx_currency, fx_amount_cents, cost_center_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
   );
 
   const tx = db.transaction(() => {
@@ -233,13 +241,15 @@ export function reverseEntry(db, { id, actor = 'human', reason = null, dryRun = 
     // it through the normal validated transition (count >= 2, sum == 0).
     // VAT fields are carried over (negated) so the OB readout cancels the
     // original entry — a reversal without vat_code_id would leave the
-    // readout counting VAT that is no longer due.
+    // readout counting VAT that is no longer due. Cost center is carried over
+    // (NOT negated) so the reversal still rolls up under the same cost center.
     const info = insertEntry.run(entry.date, description, 'reversal', null, 'draft', id, actor);
     const reversalId = info.lastInsertRowid;
     for (const p of entry.postings) {
       insertPosting.run(reversalId, p.account_id, -p.amount_cents,
         p.vat_code_id, p.vat_amount_cents == null ? null : -p.vat_amount_cents,
-        p.fx_currency, p.fx_amount_cents == null ? null : -p.fx_amount_cents);
+        p.fx_currency, p.fx_amount_cents == null ? null : -p.fx_amount_cents,
+        p.cost_center_id == null ? null : p.cost_center_id);
     }
     db.prepare("UPDATE journal_entries SET state = 'posted', posted_at = ? WHERE id = ?")
       .run(nowIso(), reversalId);
@@ -287,11 +297,12 @@ export function getEntry(db, id) {
   if (!entry) return null;
   entry.postings = db.prepare(
     `SELECT p.id, p.account_id, p.amount_cents, p.document_id, p.vat_code_id, p.vat_amount_cents,
-            p.fx_currency, p.fx_amount_cents,
+            p.fx_currency, p.fx_amount_cents, p.cost_center_id,
             a.code AS account_code, a.name AS account_name, a.type AS account_type,
-            vc.code AS vat_code
+            vc.code AS vat_code, cc.code AS cost_center_code, cc.name AS cost_center_name
      FROM postings p JOIN accounts a ON a.id = p.account_id
      LEFT JOIN vat_codes vc ON vc.id = p.vat_code_id
+     LEFT JOIN cost_centers cc ON cc.id = p.cost_center_id
      WHERE p.entry_id = ? ORDER BY p.id`,
   ).all(id);
   // surface EUR amount for FX postings

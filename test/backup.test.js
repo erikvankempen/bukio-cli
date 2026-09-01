@@ -41,7 +41,7 @@ let dbPath;
 test.beforeEach(() => {
   t = tmpDir();
   dbPath = path.join(t, 'test.db');
-  cli(dbPath, ['init', '--name', 'Test Coaching', '--kvk', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
+  cli(dbPath, ['init', '--name', 'Test Coaching', '--registration-id', '12345678', '--legal-form', 'eenmanszaak', '--vat', 'off']);
   cli(dbPath, ['entry', 'add', '--date', '2026-08-10', '--desc', 'Startkapitaal', '--postings', '1100:10000.00,3000:-10000.00', '--post']);
 });
 

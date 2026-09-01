@@ -33,6 +33,7 @@ import { make as attachCmd } from './attach.js';
 import { make as updateCmd } from './update.js';
 import { make as actorCmd } from './actor.js';
 import { make as serverCmd } from './server.js';
+import { make as costCenterCmd } from './cost-center.js';
 import { remotePreAction } from './remote.js';
 import { actorError } from '../core/actor.js';
 import { signCommand } from './util.js';
@@ -43,7 +44,7 @@ export async function runCli(argv) {
   program
     .name('bukio')
     .description('Agent-first bookkeeping for SMEs across thirty-one jurisdictions — SQLite, VAT-optional')
-    .version('0.16.3')
+    .version('0.17.0')
     .option('--json', 'machine-readable JSON output')
     .option('--db <path>', 'database file', process.env.BUKIO_DB || path.join(os.homedir(), '.bukio', 'bukio.db'))
     .option('--actor <who>', "acting entity '<role>:<name>' — e.g. agent:bartholomeus, human:erik (or BUKIO_ACTOR env; required)", undefined)
@@ -57,8 +58,8 @@ export async function runCli(argv) {
     initCmd, entryCmd, accountCmd, reportCmd, auditCmd, backupCmd, bankCmd,
     vatCmd, recurringCmd, invoiceCmd, yearEndCmd, fxCmd, mcpCmd,
     complianceCmd, importCmd, exportCmd, monthEndCmd, companyCmd, assetsCmd,
-    paymentsCmd, itemCmd, attachCmd, updateCmd, actorCmd, serverCmd,
-  ];
+ paymentsCmd, itemCmd, attachCmd, updateCmd, actorCmd, serverCmd, costCenterCmd,
+ ];
   for (const cmd of commands) cmd(program);
 
   // Named-actor enforcement: every action must identify as '<role>:<name>'
