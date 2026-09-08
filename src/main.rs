@@ -24,6 +24,7 @@ mod company;
 mod year_end;
 mod month_end;
 mod items;
+mod recurring;
 
 use money::{BukioError, Result};
 use serde_json::{json, Value};

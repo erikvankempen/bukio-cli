@@ -66,7 +66,8 @@ fn valid_cc_code(c: &str) -> bool {
     b[1..].iter().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, b' ' | b'.' | b'_' | b'-'))
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PostingSpec {
     pub code: String,
     pub amount_cents: i64,
