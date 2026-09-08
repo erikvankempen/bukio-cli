@@ -21,6 +21,8 @@ mod vat;
 mod fx;
 mod bank;
 mod company;
+mod year_end;
+mod month_end;
 
 use money::{BukioError, Result};
 use serde_json::{json, Value};
@@ -165,6 +167,9 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         ["vat", "codes"] => cmd_vat_codes(db_path),
         ["vat", "book"] => cmd_vat_book(argv, db_path, actor, dry_run),
         ["vat", "readout"] => cmd_vat_readout(argv, db_path, actor),
+        ["year-end", "status"] => cmd_year_end_status(argv, db_path),
+        ["year-end", "close"] => cmd_year_end_close(argv, db_path, actor, dry_run),
+        ["month-end"] => cmd_month_end(argv, db_path),
         ["company", "show"] => cmd_company_show(db_path),
         ["company", "update"] => cmd_company_update(argv, db_path, actor, dry_run),
         ["bank", "add"] => cmd_bank_add(argv, db_path, actor, dry_run),
@@ -952,4 +957,23 @@ fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
     }
     let (updated, changes_map) = company::update_company(&db, &changes, None, None, actor)?;
     Ok(json!({ "company": updated, "changes": changes_map }))
+}
+
+fn cmd_year_end_status(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let year = arg(argv, "--year").ok_or_else(|| BukioError::new("MISSING_ARG", "--year is required"))?;
+    year_end::year_end_status(&db, &year)
+}
+
+fn cmd_year_end_close(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let year = arg(argv, "--year").ok_or_else(|| BukioError::new("MISSING_ARG", "--year is required"))?;
+    year_end::year_end_close(&db, &year, actor, dry_run)
+}
+
+fn cmd_month_end(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let period = arg(argv, "--period").ok_or_else(|| BukioError::new("MISSING_ARG", "--period is required"))?;
+    month_end::month_end(&db, &period)
 }
