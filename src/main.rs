@@ -35,6 +35,7 @@ mod ubl;
 mod import_mod;
 mod mcp;
 mod actor_cli;
+mod backup;
 mod vat;
 mod year_end;
 

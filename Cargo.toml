@@ -7,7 +7,7 @@ description = "Agent-first, local-first double-entry bookkeeping for SMEs across
 publish = false
 
 [dependencies]
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
@@ -18,3 +18,4 @@ hex = "0.4"
 chrono = "0.4"
 ureq = "3"
 quick-xml = "0.37"
+ring = "0.17"

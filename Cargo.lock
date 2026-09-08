@@ -78,6 +78,7 @@ dependencies = [
  "hex",
  "quick-xml",
  "rand",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",
