@@ -19,6 +19,7 @@ mod accounts;
 mod reports;
 mod vat;
 mod fx;
+mod bank;
 
 use money::{BukioError, Result};
 use serde_json::{json, Value};
@@ -163,6 +164,16 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         ["vat", "codes"] => cmd_vat_codes(db_path),
         ["vat", "book"] => cmd_vat_book(argv, db_path, actor, dry_run),
         ["vat", "readout"] => cmd_vat_readout(argv, db_path, actor),
+        ["bank", "add"] => cmd_bank_add(argv, db_path, actor, dry_run),
+        ["bank", "list"] => cmd_bank_list(db_path),
+        ["bank", "import"] => cmd_bank_import(argv, db_path, actor, dry_run),
+        ["bank", "transactions"] => cmd_bank_transactions(argv, db_path),
+        ["bank", "match", "auto"] => cmd_bank_match_auto(argv, db_path, actor, dry_run),
+        ["bank", "match", "suggest"] => cmd_bank_match_suggest(db_path),
+        ["bank", "match", "link"] => cmd_bank_match_link(argv, db_path, actor, dry_run),
+        ["bank", "match", "post"] => cmd_bank_match_post(argv, db_path, actor, dry_run),
+        ["bank", "ignore"] => cmd_bank_ignore(argv, db_path, actor, dry_run),
+        ["bank", "unignore"] => cmd_bank_unignore(argv, db_path, actor, dry_run),
         ["fx", "set"] => cmd_fx_set(argv, db_path, actor, dry_run),
         ["fx", "show"] => cmd_fx_show(argv, db_path),
         ["fx", "list"] => cmd_fx_list(argv, db_path),
@@ -792,4 +803,118 @@ fn cmd_fx_list(argv: &[String], db_path: &str) -> Result<Value> {
     let limit: i64 = arg(argv, "--limit").and_then(|v| v.parse().ok()).unwrap_or(50);
     let rates = fx::list_fx_rates(&db, None, limit)?;
     Ok(json!({ "rates": rates }))
+}
+
+fn cmd_bank_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let iban = arg(argv, "--iban").ok_or_else(|| BukioError::new("MISSING_ARG", "--iban is required"))?;
+    let name = arg(argv, "--name");
+    let account_code = arg(argv, "--account-code").unwrap_or_else(|| "1100".into());
+    bank::get_or_create_bank_account(&db, &iban, name.as_deref(), &account_code, dry_run)
+}
+
+fn cmd_bank_list(db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let accounts = bank::list_bank_accounts(&db)?;
+    Ok(json!({ "accounts": accounts }))
+}
+
+fn cmd_bank_import(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let file = arg(argv, "--file").ok_or_else(|| BukioError::new("MISSING_ARG", "--file is required"))?;
+    let iban = arg(argv, "--iban").ok_or_else(|| BukioError::new("MISSING_ARG", "--iban is required"))?;
+    let format = arg(argv, "--format").unwrap_or_else(|| "auto".into());
+    let name = arg(argv, "--name");
+    let account_code = arg(argv, "--account-code").unwrap_or_else(|| "1100".into());
+    let content = std::fs::read_to_string(&file).map_err(|e| BukioError::new("FILE_ERROR", format!("cannot read {file}: {e}")))?;
+    let transactions = if content.trim_start().starts_with('<') {
+        bank::parse_camt053(&content).map_err(|e| BukioError::new("PARSE_ERROR", e.message.clone()))?
+    } else {
+        bank::parse_bank_csv(&content, &iban).map_err(|e| BukioError::new("PARSE_ERROR", e.message.clone()))?
+    };
+    if dry_run {
+        bank::preview_import(&db, &iban, &transactions)
+    } else {
+        bank::import_transactions(&db, &iban, &transactions, name.as_deref(), &account_code, actor)
+    }
+}
+
+fn cmd_bank_transactions(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let state = arg(argv, "--state");
+    let iban = arg(argv, "--iban");
+    let limit: i64 = arg(argv, "--limit").and_then(|v| v.parse().ok()).unwrap_or(200);
+    let transactions = bank::list_transactions(&db, state.as_deref(), iban.as_deref(), limit)?;
+    Ok(json!({ "transactions": transactions }))
+}
+
+fn cmd_bank_match_auto(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let window: i64 = arg(argv, "--window-days").and_then(|v| v.parse().ok()).unwrap_or(5);
+    bank::auto_match(&db, window, actor, dry_run)
+}
+
+fn cmd_bank_match_suggest(db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let suggestions = bank::suggest_unmatched(&db)?;
+    Ok(json!({ "suggestions": suggestions }))
+}
+
+fn cmd_bank_match_link(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let tx_id: i64 = arg(argv, "--tx").and_then(|v| v.parse().ok())
+        .ok_or_else(|| BukioError::new("MISSING_ARG", "--tx is required"))?;
+    let entry_id: i64 = arg(argv, "--entry").and_then(|v| v.parse().ok())
+        .ok_or_else(|| BukioError::new("MISSING_ARG", "--entry is required"))?;
+    let method = arg(argv, "--method").unwrap_or_else(|| "manual".into());
+    let result = bank::link_transaction(&db, tx_id, entry_id, &method, None, actor, dry_run)?;
+    if dry_run {
+        Ok(json!({ "plan": result }))
+    } else {
+        Ok(json!({ "transaction": result, "entry_id": entry_id }))
+    }
+}
+
+fn cmd_bank_match_post(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let tx_id: i64 = arg(argv, "--tx").and_then(|v| v.parse().ok())
+        .ok_or_else(|| BukioError::new("MISSING_ARG", "--tx is required"))?;
+    let account = arg(argv, "--account").ok_or_else(|| BukioError::new("MISSING_ARG", "--account is required"))?;
+    if dry_run {
+        let tx = bank::get_transaction(&db, tx_id)?
+            .ok_or_else(|| BukioError::new("NOT_FOUND", format!("bank transaction {tx_id} does not exist")))?;
+        let amount = tx["amount_cents"].as_i64().unwrap_or(0);
+        return Ok(json!({
+            "action": "post entry from bank transaction",
+            "tx": tx,
+            "postings": [
+                { "code": tx["account_code"], "amount_cents": amount, "amount": money::format_amount(amount) },
+                { "code": account, "amount_cents": -amount, "amount": money::format_amount(-amount) },
+            ],
+            "dryRun": true,
+        }));
+    }
+    let (tx, entry) = bank::post_from_transaction(&db, tx_id, &account, actor, true)?;
+    Ok(json!({ "entry_id": entry["id"], "state": entry["state"] }))
+}
+
+fn cmd_bank_ignore(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let tx_id: i64 = arg(argv, "--tx").and_then(|v| v.parse().ok())
+        .ok_or_else(|| BukioError::new("MISSING_ARG", "--tx is required"))?;
+    bank::set_transaction_state(&db, tx_id, "ignored", actor, dry_run)
+}
+
+fn cmd_bank_unignore(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let tx_id: i64 = arg(argv, "--tx").and_then(|v| v.parse().ok())
+        .ok_or_else(|| BukioError::new("MISSING_ARG", "--tx is required"))?;
+    bank::set_transaction_state(&db, tx_id, "unmatched", actor, dry_run)
 }

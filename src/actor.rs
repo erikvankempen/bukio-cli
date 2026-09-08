@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn registry_roundtrip_on_memory_db() {
-        let conn = db::open_db(":memory:").unwrap();
+        let conn = crate::db::open_db(":memory:").unwrap();
         assert!(get_actor_key(&conn, "human:erik").is_none());
         assert!(!get_enforce(&conn));
         conn.execute(
