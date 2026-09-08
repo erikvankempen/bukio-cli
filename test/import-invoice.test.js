@@ -15,12 +15,12 @@ import { openDb } from '../src/core/db.js';
 import { createContact } from '../src/invoice/index.js';
 import { importUblInvoice } from '../src/import/ubl-invoice.js';
 
-const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 
 function cli(dbPath, args, { expectFail = false } = {}) {
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
   try {
-    const stdout = execFileSync(process.execPath, [BIN, '--json', ...args], { env, encoding: 'utf8' });
+    const stdout = execFileSync(BIN, ['--json', ...args], { env, encoding: 'utf8' });
     return { code: 0, out: JSON.parse(stdout) };
   } catch (err) {
     if (expectFail) return { code: err.status, out: JSON.parse(err.stdout), err: err.stderr };
@@ -29,7 +29,7 @@ function cli(dbPath, args, { expectFail = false } = {}) {
 }
 
 function mcpSession(dbPath) {
-  const child = spawn(process.execPath, [BIN, 'mcp', '--db', dbPath], {
+  const child = spawn(BIN, ['mcp', '--db', dbPath], {
     cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), '..'),
     env: { ...process.env, BUKIO_ACTOR: 'agent:test' },
     stdio: ['pipe', 'pipe', 'pipe'],

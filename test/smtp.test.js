@@ -17,12 +17,12 @@ import { createContact, createInvoice, finalizeInvoice } from '../src/invoice/in
 import { emailInvoice } from '../src/invoice/email.js';
 import { sendMail, buildMime, smtpConfig, smtpValidate } from '../src/core/smtp.js';
 
-const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 
 function cli(dbPath, args, { expectFail = false, env = {} } = {}) {
   const fullEnv = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test', ...env };
   try {
-    const stdout = execFileSync(process.execPath, [BIN, '--json', ...args], { env: fullEnv, encoding: 'utf8' });
+    const stdout = execFileSync(BIN, ['--json', ...args], { env: fullEnv, encoding: 'utf8' });
     return { code: 0, out: JSON.parse(stdout) };
   } catch (err) {
     if (expectFail) return { code: err.status, out: JSON.parse(err.stdout), err: err.stderr };
@@ -413,7 +413,7 @@ test('cli: invoice email e2e with SMTP env + audit row', async () => {
 test('mcp: invoice_email dry-run parity (no connection) + execute', async () => {
   const invoice = seedInvoice();
   const mock = await smtpMock();
-  const mcp = spawn(process.execPath, [BIN, 'mcp', '--db', file], {
+  const mcp = spawn(BIN, ['mcp', '--db', file], {
     cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), '..'),
     env: {
       ...process.env, BUKIO_ACTOR: 'agent:test',

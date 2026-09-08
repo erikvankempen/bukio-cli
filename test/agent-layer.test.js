@@ -343,7 +343,7 @@ function mcpSession(dbPath, opts = {}) {
   // the sign gate (Task 8) reads keys + the nonce cache from the config
   // dir — ALWAYS pin a scratch one so the tests never touch ~/.bukio
   const configDir = opts.configDir ?? mkdtempSync(path.join(os.tmpdir(), 'bukio-mcp-cfg-'));
-  const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', dbPath], {
+  const child = spawn(BIN, ['mcp', '--db', dbPath], {
     cwd: process.cwd(),
     env: {
       ...process.env, BUKIO_ACTOR: 'agent:test', BUKIO_CONFIG_DIR: configDir, ...opts.env,
@@ -703,7 +703,7 @@ test('MCP: BUKIO_MCP_READONLY blocks execution', async () => {
   enableVatModule(fileDb);
   fileDb.close();
 
-  const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', dbPath], {
+  const child = spawn(BIN, ['mcp', '--db', dbPath], {
     cwd: process.cwd(),
     env: { ...process.env, BUKIO_ACTOR: 'agent:test', BUKIO_MCP_READONLY: '1' },
   });
@@ -753,7 +753,7 @@ test('fx resolveRate: a dry-run must not persist the fetched ECB rate', async ()
 
 // --- MCP signed execution (Tier 0, Task 8) ---------------------------------
 
-const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 
 /** Scratch company + config dir; agent:bartholomeus keygen'd and enrolled. */
 function signedCompany() {
@@ -761,7 +761,7 @@ function signedCompany() {
   const dbPath = path.join(dir, 'company.db');
   const configDir = path.join(dir, 'cfg');
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_CONFIG_DIR: configDir, BUKIO_ACTOR: 'agent:test' };
-  const cli = (args) => execFileSync(process.execPath, [BIN, '--json', ...args], { env, encoding: 'utf8' });
+  const cli = (args) => execFileSync(BIN, ['--json', ...args], { env, encoding: 'utf8' });
   cli(['--actor', 'human:erik', 'init', '--name', 'X']);
   cli(['--actor', 'agent:bartholomeus', 'actor', 'keygen']);
   cli(['--actor', 'agent:bartholomeus', 'actor', 'register']);
@@ -812,7 +812,7 @@ test('MCP: signed execute call -> audit row verified; audit verify reports ok', 
   assert.ok(row.digest_hash && row.sig && row.sig_keyid, 'signature bundle stored');
   // the CLI verifier accepts the MCP-signed row (cross-surface, shared digest scheme)
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_CONFIG_DIR: configDir, BUKIO_ACTOR: 'agent:test' };
-  const out = JSON.parse(execFileSync(process.execPath, [BIN, '--json', 'audit', 'verify'], { env, encoding: 'utf8' }));
+  const out = JSON.parse(execFileSync(BIN, ['--json', 'audit', 'verify'], { env, encoding: 'utf8' }));
   // entry.create + entry.post both verified (one signed tool call, two rows)
   assert.equal(out.data.summary.ok, 2, JSON.stringify(out.data.summary));
   assert.equal(out.data.summary.tampered, 0);
@@ -894,10 +894,10 @@ test('MCP: a second company DB uses its own registry/enforce state', async () =>
   const dirB = mkdtempSync(path.join(os.tmpdir(), 'bukio-mcp-second-'));
   const dbB = path.join(dirB, 'company.db');
   const envB = { ...process.env, BUKIO_DB: dbB, BUKIO_CONFIG_DIR: configDir, BUKIO_ACTOR: 'agent:test' };
-  execFileSync(process.execPath, [BIN, '--json', '--actor', 'human:erik', 'init', '--name', 'Y'], { env: envB, encoding: 'utf8' });
+  execFileSync(BIN, ['--json', '--actor', 'human:erik', 'init', '--name', 'Y'], { env: envB, encoding: 'utf8' });
 
   // A: enforce on — signed calls run, verified
-  execFileSync(process.execPath, [BIN, '--json', '--actor', 'human:erik', 'actor', 'enforce', '--on'], { env: { ...process.env, BUKIO_DB: dbA, BUKIO_CONFIG_DIR: configDir, BUKIO_ACTOR: 'agent:test' }, encoding: 'utf8' });
+  execFileSync(BIN, ['--json', '--actor', 'human:erik', 'actor', 'enforce', '--on'], { env: { ...process.env, BUKIO_DB: dbA, BUKIO_CONFIG_DIR: configDir, BUKIO_ACTOR: 'agent:test' }, encoding: 'utf8' });
   const mcpA = mcpSession(dbA, { configDir, env: { BUKIO_ACTOR: 'agent:bartholomeus' } });
   try {
     await mcpA.call('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'test', version: '1' } });

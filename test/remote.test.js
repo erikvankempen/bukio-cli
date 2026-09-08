@@ -23,7 +23,7 @@ import crypto from 'node:crypto';
 import { buildDigest } from '../src/core/canonical.js';
 import { keyidOf, publicKeyFromPrivate, sign } from '../src/core/sign.js';
 
-const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 
 let dir;
 let cfgDir;
@@ -35,7 +35,7 @@ let serverProc;
 function local(args, { expectFail = false, env = {} } = {}) {
   const e = { ...process.env, BUKIO_CONFIG_DIR: cfgDir, BUKIO_DB: dbPath, ...env };
   try {
-    const stdout = execFileSync(process.execPath, [BIN, ...args], { env: e, encoding: 'utf8' });
+    const stdout = execFileSync(BIN, [...args], { env: e, encoding: 'utf8' });
     return { code: 0, out: JSON.parse(stdout) };
   } catch (err) {
     if (expectFail) return { code: err.status, out: JSON.parse(err.stdout), err: err.stderr };
@@ -47,7 +47,7 @@ function local(args, { expectFail = false, env = {} } = {}) {
 function remote(args, { expectFail = false } = {}) {
   const e = { ...process.env, BUKIO_CONFIG_DIR: cfgDir, BUKIO_ACTOR: 'agent:remote' };
   try {
-    const stdout = execFileSync(process.execPath, [BIN, '--server', serverUrl, ...args], { env: e, encoding: 'utf8' });
+    const stdout = execFileSync(BIN, ['--server', serverUrl, ...args], { env: e, encoding: 'utf8' });
     return { code: 0, out: JSON.parse(stdout) };
   } catch (err) {
     if (expectFail) return { code: err.status, out: JSON.parse(err.stdout), err: err.stderr };
@@ -57,7 +57,7 @@ function remote(args, { expectFail = false } = {}) {
 
 /** Mint a token on the server side (operator act) and return it. */
 function mintToken(actor, ttl = '24') {
-  const out = execFileSync(process.execPath, [BIN, 'server', 'token', actor, '--actor', actor, '--ttl-hours', ttl], {
+  const out = execFileSync(BIN, ['server', 'token', actor, '--actor', actor, '--ttl-hours', ttl], {
     env: { ...process.env, BUKIO_CONFIG_DIR: cfgDir },
     encoding: 'utf8',
   });
@@ -102,7 +102,7 @@ before(async () => {
   local(['actor', 'register', '--actor', 'agent:op', '--json']);
   // the server daemon needs an actor identity to pass the gate, but is
   // signing-exempt (a bridge, like mcp)
-  serverProc = spawn(process.execPath, [BIN, 'server', 'start', '--listen', '127.0.0.1:0', '--serve-db', dbPath, '--actor', 'agent:op'], {
+  serverProc = spawn(BIN, ['server', 'start', '--listen', '127.0.0.1:0', '--serve-db', dbPath, '--actor', 'agent:op'], {
     env: { ...process.env, BUKIO_CONFIG_DIR: cfgDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -242,8 +242,8 @@ test('remote mutation: dry-run parity (plan, no side effect)', () => {
 
 test('remote human output: byte-identical to local human output', () => {
   const e = { ...process.env, BUKIO_CONFIG_DIR: cfgDir, BUKIO_ACTOR: 'agent:remote' };
-  const remoteText = execFileSync(process.execPath, [BIN, '--server', serverUrl, 'report', 'trial-balance'], { env: e, encoding: 'utf8' });
-  const localText = execFileSync(process.execPath, [BIN, 'report', 'trial-balance'], { env: { ...e, BUKIO_DB: dbPath }, encoding: 'utf8' });
+  const remoteText = execFileSync(BIN, ['--server', serverUrl, 'report', 'trial-balance'], { env: e, encoding: 'utf8' });
+  const localText = execFileSync(BIN, ['report', 'trial-balance'], { env: { ...e, BUKIO_DB: dbPath }, encoding: 'utf8' });
   assert.equal(remoteText, localText);
 });
 
@@ -310,7 +310,7 @@ test('authz: a readonly actor is refused a mutation (AUTHZ_DENIED)', async () =>
     const e = { ...process.env, BUKIO_CONFIG_DIR: cfgDir, BUKIO_ACTOR: 'agent:readonly' };
     let stdout = '';
     try {
-      execFileSync(process.execPath, [BIN, '--server', serverUrl, 'entry', 'add', '--date', '2026-08-13', '--desc', 'nope', '--postings', '1000:1,8000:-1', '--json'], { env: e, encoding: 'utf8' });
+      execFileSync(BIN, ['--server', serverUrl, 'entry', 'add', '--date', '2026-08-13', '--desc', 'nope', '--postings', '1000:1,8000:-1', '--json'], { env: e, encoding: 'utf8' });
     } catch (err) {
       stdout = err.stdout;
     }
@@ -334,7 +334,7 @@ test('local-only commands refuse under --server (LOCAL_ONLY)', () => {
     const e = { ...process.env, BUKIO_CONFIG_DIR: cfgDir, BUKIO_ACTOR: 'agent:remote' };
     let body = null;
     try {
-      execFileSync(process.execPath, [BIN, '--server', serverUrl, ...args, '--json'], { env: e, encoding: 'utf8' });
+      execFileSync(BIN, ['--server', serverUrl, ...args, '--json'], { env: e, encoding: 'utf8' });
     } catch (err) {
       body = JSON.parse(err.stdout);
     }
@@ -375,7 +375,7 @@ test('unreachable server: clean REMOTE_UNREACHABLE error', () => {
   const e = { ...process.env, BUKIO_CONFIG_DIR: cfgDir, BUKIO_ACTOR: 'agent:remote' };
   let body = null;
   try {
-    execFileSync(process.execPath, [BIN, '--server', 'http://127.0.0.1:1', 'report', 'trial-balance', '--json'], { env: e, encoding: 'utf8' });
+    execFileSync(BIN, ['--server', 'http://127.0.0.1:1', 'report', 'trial-balance', '--json'], { env: e, encoding: 'utf8' });
   } catch (err) {
     body = JSON.parse(err.stdout);
   }
@@ -387,7 +387,7 @@ test('unreachable server: clean REMOTE_UNREACHABLE error', () => {
 test('server token rejects a bad --ttl-hours value', () => {
   let body = null;
   try {
-    execFileSync(process.execPath, [BIN, 'server', 'token', 'agent:x', '--actor', 'agent:x', '--ttl-hours', 'abc', '--json'], {
+    execFileSync(BIN, ['server', 'token', 'agent:x', '--actor', 'agent:x', '--ttl-hours', 'abc', '--json'], {
       env: { ...process.env, BUKIO_CONFIG_DIR: cfgDir },
       encoding: 'utf8',
     });

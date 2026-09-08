@@ -18,12 +18,12 @@ import {
   encryptBackupFile, decryptBackupFile, isEncryptedBackup, pruneBackups, BACKUP_MAGIC,
 } from '../src/cli/backup.js';
 
-const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 
 function cli(dbPath, args, { expectFail = false, env = {} } = {}) {
   const fullEnv = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test', ...env };
   try {
-    const stdout = execFileSync(process.execPath, [BIN, '--json', ...args], { env: fullEnv, encoding: 'utf8' });
+    const stdout = execFileSync(BIN, ['--json', ...args], { env: fullEnv, encoding: 'utf8' });
     return { code: 0, out: JSON.parse(stdout) };
   } catch (err) {
     if (expectFail) return { code: err.status, out: JSON.parse(err.stdout), err: err.stderr };

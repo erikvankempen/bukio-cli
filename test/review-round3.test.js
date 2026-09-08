@@ -18,12 +18,12 @@ import { seedDefaultChart } from '../src/core/accounts.js';
 import { createEntry, postEntry } from '../src/core/entries.js';
 import { importTransactions } from '../src/bank/index.js';
 
-const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 
 function run(dbPath, args, { expectFail = false } = {}) {
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
   try {
-    const stdout = execFileSync(process.execPath, [BIN, ...args], { env, encoding: 'utf8' });
+    const stdout = execFileSync(BIN, [...args], { env, encoding: 'utf8' });
     return { code: 0, out: JSON.parse(stdout) };
   } catch (err) {
     if (expectFail) return { code: err.status, out: JSON.parse(err.stdout), err: err.stderr };
@@ -61,7 +61,7 @@ test('audit --format json prints JSON even without the global --json flag', () =
   const dbPath = tmpDb();
   run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--json']);
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
-  const stdout = execFileSync(process.execPath, [BIN, 'audit', '--format', 'json'], { env, encoding: 'utf8' });
+  const stdout = execFileSync(BIN, ['audit', '--format', 'json'], { env, encoding: 'utf8' });
   const parsed = JSON.parse(stdout);
   assert.equal(parsed.ok, true);
   assert.ok(Array.isArray(parsed.data.entries));

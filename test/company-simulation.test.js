@@ -22,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 const IBAN = 'NL91ABNA0417164300';
 
 let dir;
@@ -45,7 +45,7 @@ after(() => {
 function run(args, { expectFail = false } = {}) {
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
   try {
-    const stdout = execFileSync(process.execPath, [BIN, ...args], { env, encoding: 'utf8' });
+    const stdout = execFileSync(BIN, [...args], { env, encoding: 'utf8' });
     return { code: 0, out: JSON.parse(stdout) };
   } catch (err) {
     if (expectFail) return { code: err.status, out: JSON.parse(err.stdout), err: err.stderr };

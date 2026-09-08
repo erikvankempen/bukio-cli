@@ -20,12 +20,12 @@ import { createItem } from '../src/items/index.js';
 import { aging } from '../src/report/aging.js';
 import { sales } from '../src/report/sales.js';
 
-const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 
 function cli(dbPath, args, { expectFail = false } = {}) {
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
   try {
-    const stdout = execFileSync(process.execPath, [BIN, '--json', ...args], { env, encoding: 'utf8' });
+    const stdout = execFileSync(BIN, ['--json', ...args], { env, encoding: 'utf8' });
     return { code: 0, out: JSON.parse(stdout) };
   } catch (err) {
     if (expectFail) return { code: err.status, out: JSON.parse(err.stdout), err: err.stderr };
@@ -34,7 +34,7 @@ function cli(dbPath, args, { expectFail = false } = {}) {
 }
 
 function mcpSession(dbPath) {
-  const child = spawn(process.execPath, [BIN, 'mcp', '--db', dbPath], {
+  const child = spawn(BIN, ['mcp', '--db', dbPath], {
     cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), '..'),
     env: { ...process.env, BUKIO_ACTOR: 'agent:test' },
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -342,7 +342,7 @@ test('cli: report aging + sales + contact statement e2e with csv export', () => 
 
   const csvPath = path.join(t.dir, 'aging.csv');
   // csv --out prints a human line (not JSON) — same pattern as the journal csv tests
-  execFileSync(process.execPath, [BIN, '--json', 'report', 'aging', '--format', 'csv', '--out', csvPath], {
+  execFileSync(BIN, ['--json', 'report', 'aging', '--format', 'csv', '--out', csvPath], {
     env: { ...process.env, BUKIO_DB: t.file, BUKIO_ACTOR: 'agent:test' }, encoding: 'utf8',
   });
   const csv = readFileSync(csvPath, 'utf8');

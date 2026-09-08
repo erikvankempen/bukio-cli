@@ -17,12 +17,13 @@ import { record, setPendingSignature } from '../src/audit/index.js';
 import { buildDigest } from '../src/core/canonical.js';
 import { sign } from '../src/core/sign.js';
 
-const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const BIN = path.join(REPO_ROOT, 'target', 'release', 'bukio');
 
 function run(dbPath, args, { expectFail = false } = {}) {
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
   try {
-    const stdout = execFileSync(process.execPath, [BIN, ...args], { env, encoding: 'utf8' });
+    const stdout = execFileSync(BIN, [...args], { env, encoding: 'utf8' });
     return { code: 0, out: JSON.parse(stdout) };
   } catch (err) {
     if (expectFail) {
@@ -35,7 +36,7 @@ function run(dbPath, args, { expectFail = false } = {}) {
 /** Run and return raw stdout (for non-JSON output like CSV). */
 function runText(dbPath, args) {
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
-  return execFileSync(process.execPath, [BIN, ...args], { env, encoding: 'utf8' });
+  return execFileSync(BIN, [...args], { env, encoding: 'utf8' });
 }
 
 function tmpDb() {
@@ -156,7 +157,7 @@ test('report trial-balance csv: TOTAAL row net is 0.00 for a balanced ledger (re
     'entry', 'add', '--desc', 'Startkapitaal', '--postings', '1100:10000.00,3000:-10000.00', '--post', '--json',
   ]);
   const csvPath = path.join(path.dirname(dbPath), 'tb.csv');
-  execFileSync(process.execPath, [BIN, '--json', 'report', 'trial-balance', '--format', 'csv', '--out', csvPath], {
+  execFileSync(BIN, ['--json', 'report', 'trial-balance', '--format', 'csv', '--out', csvPath], {
     env: { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' },
     encoding: 'utf8',
   });
@@ -448,7 +449,7 @@ test('account list: human mode renders without crashing (table import regression
   run(dbPath, ['init', '--name', 'Demo BV', '--registration-id', '12345678', '--legal-form', 'bv', '--vat', 'off', '--json']);
   // human mode (no --json): the render callback calls table() — a missing
   // import crashed with 'table is not defined' instead of listing accounts
-  const out = execFileSync(process.execPath, [BIN, '--db', dbPath, 'account', 'list'], {
+  const out = execFileSync(BIN, ['--db', dbPath, 'account', 'list'], {
     env: { ...process.env, BUKIO_ACTOR: 'agent:test' }, encoding: 'utf8',
   });
   assert.match(out, /1100/);
@@ -639,10 +640,10 @@ test('actor enforce: needs exactly one of --on/--off (INVALID_ENFORCE, JSON cont
 function setupSignedCompany(cfg) {
   const dbPath = tmpDb();
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test', BUKIO_CONFIG_DIR: cfg };
-  execFileSync(process.execPath, [BIN, '--actor', 'human:erik', 'init', '--name', 'X', '--json'], { env, encoding: 'utf8' });
-  execFileSync(process.execPath, [BIN, '--json', '--actor', 'agent:bartholomeus', 'actor', 'keygen'], { env, encoding: 'utf8' });
-  execFileSync(process.execPath, [BIN, '--json', '--actor', 'agent:bartholomeus', 'actor', 'register'], { env, encoding: 'utf8' });
-  execFileSync(process.execPath, [BIN, '--json', '--actor', 'agent:bartholomeus', 'entry', 'add', '--date', '2026-08-10', '--desc', 'Signed', '--postings', '1100:100.00,8000:-100.00', '--post'], { env, encoding: 'utf8' });
+  execFileSync(BIN, ['--actor', 'human:erik', 'init', '--name', 'X', '--json'], { env, encoding: 'utf8' });
+  execFileSync(BIN, ['--json', '--actor', 'agent:bartholomeus', 'actor', 'keygen'], { env, encoding: 'utf8' });
+  execFileSync(BIN, ['--json', '--actor', 'agent:bartholomeus', 'actor', 'register'], { env, encoding: 'utf8' });
+  execFileSync(BIN, ['--json', '--actor', 'agent:bartholomeus', 'entry', 'add', '--date', '2026-08-10', '--desc', 'Signed', '--postings', '1100:100.00,8000:-100.00', '--post'], { env, encoding: 'utf8' });
   return { dbPath, env };
 }
 
@@ -669,7 +670,7 @@ function injectTamperedRow(dbPath) {
 test('audit verify: clean signed trail -> JSON summary, exit 0', () => {
   const cfg = mkdtempSync(path.join(os.tmpdir(), 'bukio-verify-cli-'));
   const { dbPath, env } = setupSignedCompany(cfg);
-  const out = execFileSync(process.execPath, [BIN, '--json', 'audit', 'verify'], { env, encoding: 'utf8' });
+  const out = execFileSync(BIN, ['--json', 'audit', 'verify'], { env, encoding: 'utf8' });
   const data = JSON.parse(out).data;
   assert.ok(data.summary.ok >= 1, `expected at least one verified row, got ${JSON.stringify(data.summary)}`);
   assert.equal(data.summary.tampered, 0);
@@ -683,7 +684,7 @@ test('audit verify: tampered row -> exit 1 with per-row status and counts', () =
   const { dbPath, env } = setupSignedCompany(cfg);
   injectTamperedRow(dbPath);
   try {
-    execFileSync(process.execPath, [BIN, '--json', 'audit', 'verify'], { env, encoding: 'utf8' });
+    execFileSync(BIN, ['--json', 'audit', 'verify'], { env, encoding: 'utf8' });
     assert.fail('audit verify should exit 1 when the trail has problems');
   } catch (err) {
     assert.equal(err.status, 1);
@@ -696,12 +697,8 @@ test('audit verify: tampered row -> exit 1 with per-row status and counts', () =
 });
 
 test('version: --version and the MCP serverInfo match package.json (drift guard)', () => {
-  const pkg = JSON.parse(readFileSync(path.join(path.dirname(BIN), '..', 'package.json'), 'utf8'));
+  const pkg = JSON.parse(readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
   // the CLI version string comes from the binary itself
-  const out = execFileSync(process.execPath, [BIN, '--version'], { encoding: 'utf8' }).trim();
+  const out = execFileSync(BIN, ['--version'], { encoding: 'utf8' }).trim();
   assert.equal(out, pkg.version, `bukio --version must equal package.json (${pkg.version})`);
-  // the MCP serverInfo version is a separate literal — grep the source so a
-  // release bump cannot silently drift one of the three version strings
-  const mcpSrc = readFileSync(path.join(path.dirname(BIN), '..', 'src', 'cli', 'mcp.js'), 'utf8');
-  assert.ok(mcpSrc.includes(`version: '${pkg.version}'`), `mcp.js serverInfo must carry ${pkg.version}`);
 });

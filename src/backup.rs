@@ -141,6 +141,13 @@ pub fn cmd_restore(from: &str, to: &str, force: bool, actor: &str, dry_run: bool
 
     validate_backup_file(src_path)?;
 
+    if !force && Path::new(to).exists() {
+        return Err(BukioError::new(
+            "RESTORE_EXISTS",
+            format!("target '{to}' already exists — pass --force to overwrite"),
+        ));
+    }
+
     if dry_run {
         return Ok(json!({
             "action": "restore", "from": from, "to": to, "dryRun": true,

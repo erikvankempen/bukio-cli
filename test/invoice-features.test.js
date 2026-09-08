@@ -642,7 +642,7 @@ import { fileURLToPath } from 'node:url';
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 
 function mcpSession(dbPath) {
-  const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', dbPath], {
+  const child = spawn(BIN, ['mcp', '--db', dbPath], {
     cwd: REPO_ROOT,
     env: { ...process.env, BUKIO_ACTOR: 'agent:test' },
   });
@@ -804,8 +804,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
+
 function runCli(args, dbPath) {
-  const out = execFileSync('node', ['bin/bukio.js', '--db', dbPath, '--actor', 'agent:test', '--json', ...args], {
+  const out = execFileSync(BIN, ['--db', dbPath, '--actor', 'agent:test', '--json', ...args], {
     encoding: 'utf8', cwd: path.resolve(import.meta.dirname, '..'),
   });
   return JSON.parse(out);

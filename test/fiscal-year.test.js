@@ -26,11 +26,11 @@ import { sales } from '../src/report/sales.js';
 import { createContact, createInvoice, finalizeInvoice } from '../src/invoice/index.js';
 import { fiscalYearWindow } from '../src/year-end/index.js';
 
-const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 
 function cli(dbPath, args) {
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
-  const stdout = execFileSync(process.execPath, [BIN, '--json', ...args], { env, encoding: 'utf8' });
+  const stdout = execFileSync(BIN, ['--json', ...args], { env, encoding: 'utf8' });
   return JSON.parse(stdout);
 }
 

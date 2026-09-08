@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { openDb } from '../src/core/db.js';
 import { seedDefaultChart, getAccountByCode } from '../src/core/accounts.js';
@@ -170,7 +171,7 @@ test('export xaf: escaping — ampersands and < in descriptions survive XML', ()
 
 function cli(dbPath, args) {
   const root = path.resolve(import.meta.dirname, '..');
-  return execFileSync('node', [path.join(root, 'bin/bukio.js'), '--db', dbPath, ...args], {
+  return execFileSync(BIN, ['--db', dbPath, ...args], {
     encoding: 'utf8', env: { ...process.env, BUKIO_ACTOR: 'agent:test' },
   });
 }

@@ -7,9 +7,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 import { mkdtempSync, existsSync, statSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isValidActor, actorError } from '../src/core/actor.js';
 import { openDb } from '../src/core/db.js';
 import { readSessionKey, sessionFilePath, verifySignatureBundle, isNonceUsed } from '../src/cli/util.js';
@@ -62,7 +65,7 @@ function runCli(args, env = {}) {
   // ALWAYS pin a scratch DB: without this, a forgotten --db in any call
   // silently runs against ~/.bukio/bukio.db (the live company DB).
   const hasDb = args.includes('--db') || env.BUKIO_DB !== undefined;
-  return spawnSync(process.execPath, ['bin/bukio.js', ...args], {
+  return spawnSync(BIN, [...args], {
     cwd: process.cwd(), encoding: 'utf8',
     env: { ...process.env, ...env, ...(hasDb ? {} : { BUKIO_DB: tmpDb() }) },
   });
@@ -115,7 +118,7 @@ test('CLI: BUKIO_ACTOR env is recorded in the audit trail', () => {
 // --- actor identity commands (Tier 0: keygen/register/list/revoke/enforce/unlock/lock/verify) ---
 
 function keyFile(cfg, actor) {
-  return path.join(cfg, 'keys', actor.replace(':', '-') + '.key');
+  return path.join(cfg, 'keys', actor + '.key');
 }
 
 test('actor keygen: agent key writes a plain 0600 key file (BUKIO_CONFIG_DIR respected)', () => {

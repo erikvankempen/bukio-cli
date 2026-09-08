@@ -90,7 +90,7 @@ import { markFiled } from '../src/compliance/index.js';
 import { toCsv, writeXlsx } from '../src/report/export.js';
 import { renderJaarrekeningXlsx } from '../src/report/jaarrekening-xlsx.js';
 
-const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 
 let db;
 
@@ -121,7 +121,7 @@ function addContact(name = 'ACME BV') {
 function cli(dbPath, args) {
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
   try {
-    const stdout = execFileSync(process.execPath, [BIN, '--json', ...args], { env, encoding: 'utf8' });
+    const stdout = execFileSync(BIN, ['--json', ...args], { env, encoding: 'utf8' });
     return { code: 0, out: JSON.parse(stdout) };
   } catch (err) {
     const combined = `${err.stdout ?? ''}${err.stderr ?? ''}`;
@@ -137,7 +137,7 @@ function tmpDb() {
 function runRaw(dbPath, args) {
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
   try {
-    return { code: 0, raw: execFileSync(process.execPath, [BIN, ...args], { env, encoding: 'utf8' }) };
+    return { code: 0, raw: execFileSync(BIN, [...args], { env, encoding: 'utf8' }) };
   } catch (err) {
     return { code: err.status, raw: `${err.stdout ?? ''}${err.stderr ?? ''}` };
   }
@@ -145,7 +145,7 @@ function runRaw(dbPath, args) {
 
 /** MCP stdio session against a real child process (harness like agent-layer.test.js). */
 function mcpSession(dbPath) {
-  const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', dbPath], {
+  const child = spawn(BIN, ['mcp', '--db', dbPath], {
     cwd: path.join(path.dirname(fileURLToPath(import.meta.url)), '..'),
     env: { ...process.env, BUKIO_ACTOR: 'agent:test' },
   });
@@ -1902,7 +1902,7 @@ test('every emitted error code in src/ is documented in AGENTS.md §7', () => {
 test('MCP on a missing database errors NO_DATABASE instead of silently creating an empty company', () => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'bukio-mcp-'));
   const missingPath = path.join(dir, 'missing.db');
-  const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', missingPath], {
+  const child = spawn(BIN, ['mcp', '--db', missingPath], {
     cwd: process.cwd(),
     env: { ...process.env, BUKIO_ACTOR: 'agent:test' },
   });

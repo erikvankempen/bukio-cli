@@ -14,9 +14,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, spawn } from 'node:child_process';
+
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { openDb } from '../src/core/db.js';
 
 function tmpDb() {
@@ -31,7 +34,7 @@ function tmpConfig() {
 function runCli(args, env = {}) {
   // ALWAYS pin a scratch DB — never the live ~/.bukio/bukio.db
   const hasDb = args.includes('--db') || env.BUKIO_DB !== undefined;
-  return spawnSync(process.execPath, ['bin/bukio.js', ...args], {
+  return spawnSync(BIN, [...args], {
     cwd: process.cwd(), encoding: 'utf8',
     env: { ...process.env, ...env, ...(hasDb ? {} : { BUKIO_DB: tmpDb() }) },
   });
@@ -395,7 +398,7 @@ test('revoke --target: needs the OWNER role REGARDLESS of authz mode (D8)', () =
 
 function mcpSession(dbPath, opts = {}) {
   const configDir = opts.configDir ?? mkdtempSync(path.join(os.tmpdir(), 'bukio-authz-mcp-cfg-'));
-  const child = spawn(process.execPath, ['bin/bukio.js', 'mcp', '--db', dbPath], {
+  const child = spawn(BIN, ['mcp', '--db', dbPath], {
     cwd: process.cwd(),
     env: {
       ...process.env, BUKIO_ACTOR: 'agent:test', BUKIO_CONFIG_DIR: configDir, ...opts.env,

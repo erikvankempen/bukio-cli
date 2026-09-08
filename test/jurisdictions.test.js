@@ -192,13 +192,13 @@ test('resolveProfile throws for unsupported / unknown company countries (decisio
 
 // --- Phase A M3: init --country + generic identifier flags (CLI level) -----
 
-const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'bukio.js');
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
 
 function cli(dbPath, args, { expectFail = false } = {}) {
   const env = { ...process.env, BUKIO_DB: dbPath, BUKIO_ACTOR: 'agent:test' };
   const fullArgs = args.includes('--json') ? args : [...args, '--json'];
   try {
-    const stdout = execFileSync(process.execPath, [BIN, ...fullArgs], { env, encoding: 'utf8' });
+    const stdout = execFileSync(BIN, [...fullArgs], { env, encoding: 'utf8' });
     return { code: 0, out: JSON.parse(stdout) };
   } catch (err) {
     if (expectFail) return { code: err.status, out: JSON.parse(err.stdout || '{}'), err: err.stderr };
