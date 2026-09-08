@@ -92,10 +92,16 @@ pub fn get_or_create_bank_account(
 ) -> Result<Value> {
     let iban_norm = normalize_iban(iban);
     if !crate::dates::is_valid_iban(&iban_norm) {
-        return Err(bank_error("INVALID_IBAN", format!("'{iban_norm}' is not a valid IBAN")));
+        return Err(bank_error(
+            "INVALID_IBAN",
+            format!("'{iban_norm}' is not a valid IBAN"),
+        ));
     }
     if get_account_by_code(db, account_code).is_none() {
-        return Err(bank_error("ACCOUNT_NOT_FOUND", format!("ledger account {account_code} does not exist")));
+        return Err(bank_error(
+            "ACCOUNT_NOT_FOUND",
+            format!("ledger account {account_code} does not exist"),
+        ));
     }
     // check existing
     let existing: Option<(i64, String, Option<String>, String)> = db
@@ -127,7 +133,9 @@ pub fn get_or_create_bank_account(
             BankAccount::from_row,
         )
         .map_err(sql_err)?;
-    Ok(json!({ "id": row.id, "iban": row.iban, "name": row.name, "account_code": row.account_code }))
+    Ok(
+        json!({ "id": row.id, "iban": row.iban, "name": row.name, "account_code": row.account_code }),
+    )
 }
 
 /// List all bank accounts with transaction stats.
@@ -166,14 +174,21 @@ pub fn list_bank_accounts(db: &Connection) -> Result<Vec<Value>> {
 pub fn preview_import(db: &Connection, iban: &str, transactions: &[BankTx]) -> Result<Value> {
     let iban_norm = normalize_iban(iban);
     if !crate::dates::is_valid_iban(&iban_norm) {
-        return Err(bank_error("INVALID_IBAN", format!("'{iban_norm}' is not a valid IBAN")));
+        return Err(bank_error(
+            "INVALID_IBAN",
+            format!("'{iban_norm}' is not a valid IBAN"),
+        ));
     }
     let mut imported = 0i64;
     let mut duplicates = 0i64;
     for tx in transactions {
         let hash = tx_hash(&iban_norm, tx);
         let exists: bool = db
-            .query_row("SELECT 1 FROM bank_transactions WHERE hash = ?1", [&hash], |_| Ok(true))
+            .query_row(
+                "SELECT 1 FROM bank_transactions WHERE hash = ?1",
+                [&hash],
+                |_| Ok(true),
+            )
             .unwrap_or(false);
         if exists {
             duplicates += 1;
@@ -246,7 +261,9 @@ pub fn import_transactions(
                 actor,
                 action: "bank.import",
                 command: Some("bank import"),
-                args: Some(json!({ "iban": iban_norm, "transactions": transactions.len(), "imported": imported, "duplicates": duplicates })),
+                args: Some(
+                    json!({ "iban": iban_norm, "transactions": transactions.len(), "imported": imported, "duplicates": duplicates }),
+                ),
                 outcome: "ok",
                 entry_ids: vec![],
             },
@@ -295,9 +312,7 @@ pub fn list_transactions(
     let mut stmt = db.prepare(&sql).map_err(sql_err)?;
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
     let rows = stmt
-        .query_map(param_refs.as_slice(), |r| {
-            Ok(tx_to_json(r)?)
-        })
+        .query_map(param_refs.as_slice(), |r| Ok(tx_to_json(r)?))
         .map_err(sql_err)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
@@ -347,7 +362,13 @@ pub fn set_transaction_state(
     dry_run: bool,
 ) -> Result<Value> {
     if !VALID_TX_STATES.contains(&state) {
-        return Err(bank_error("INVALID_STATE", format!("transaction state '{state}' must be one of {}", VALID_TX_STATES.join(", "))));
+        return Err(bank_error(
+            "INVALID_STATE",
+            format!(
+                "transaction state '{state}' must be one of {}",
+                VALID_TX_STATES.join(", ")
+            ),
+        ));
     }
     let tx_row = get_transaction(db, id)?
         .ok_or_else(|| bank_error("NOT_FOUND", format!("bank transaction {id} does not exist")))?;
@@ -357,9 +378,22 @@ pub fn set_transaction_state(
             "from": tx_row["state"], "to": state, "dryRun": true,
         }));
     }
-    db.execute("UPDATE bank_transactions SET state = ?1 WHERE id = ?2", rusqlite::params![state, id])
-        .map_err(sql_err)?;
-    record(db, RecordArgs { actor, action: &format!("bank.{state}"), command: Some("bank match"), args: Some(json!({ "id": id })), outcome: "ok", entry_ids: vec![] })?;
+    db.execute(
+        "UPDATE bank_transactions SET state = ?1 WHERE id = ?2",
+        rusqlite::params![state, id],
+    )
+    .map_err(sql_err)?;
+    record(
+        db,
+        RecordArgs {
+            actor,
+            action: &format!("bank.{state}"),
+            command: Some("bank match"),
+            args: Some(json!({ "id": id })),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     get_transaction(db, id)?.ok_or_else(|| bank_error("NOT_FOUND", "transaction disappeared"))
 }
 
@@ -373,15 +407,26 @@ pub fn link_transaction(
     actor: &str,
     dry_run: bool,
 ) -> Result<Value> {
-    let tx_row = get_transaction(db, tx_id)?
-        .ok_or_else(|| bank_error("NOT_FOUND", format!("bank transaction {tx_id} does not exist")))?;
+    let tx_row = get_transaction(db, tx_id)?.ok_or_else(|| {
+        bank_error(
+            "NOT_FOUND",
+            format!("bank transaction {tx_id} does not exist"),
+        )
+    })?;
     if tx_row["state"] != "unmatched" {
-        return Err(bank_error("ALREADY_MATCHED", format!("bank transaction {tx_id} is already {}", tx_row["state"])));
+        return Err(bank_error(
+            "ALREADY_MATCHED",
+            format!("bank transaction {tx_id} is already {}", tx_row["state"]),
+        ));
     }
     let entry_opt = get_entry(db, entry_id);
-    let entry = entry_opt.ok_or_else(|| bank_error("NOT_FOUND", format!("entry {entry_id} does not exist")))?;
+    let entry = entry_opt
+        .ok_or_else(|| bank_error("NOT_FOUND", format!("entry {entry_id} does not exist")))?;
     if entry.state != "posted" {
-        return Err(bank_error("NOT_POSTED", format!("entry {entry_id} must be posted before linking")));
+        return Err(bank_error(
+            "NOT_POSTED",
+            format!("entry {entry_id} must be posted before linking"),
+        ));
     }
     if dry_run {
         return Ok(json!({
@@ -398,13 +443,25 @@ pub fn link_transaction(
             rusqlite::params![tx_id, entry_id, method, confidence, actor],
         )
         .map_err(sql_err)?;
-        tx_ref.execute("UPDATE bank_transactions SET state = 'matched' WHERE id = ?1", [tx_id])
+        tx_ref
+            .execute(
+                "UPDATE bank_transactions SET state = 'matched' WHERE id = ?1",
+                [tx_id],
+            )
             .map_err(sql_err)?;
-        record(&tx_ref, RecordArgs {
-            actor, action: "bank.link", command: Some("bank match --link"),
-            args: Some(json!({ "txId": tx_id, "entryId": entry_id, "method": method, "confidence": confidence })),
-            outcome: "ok", entry_ids: vec![entry_id],
-        })?;
+        record(
+            &tx_ref,
+            RecordArgs {
+                actor,
+                action: "bank.link",
+                command: Some("bank match --link"),
+                args: Some(
+                    json!({ "txId": tx_id, "entryId": entry_id, "method": method, "confidence": confidence }),
+                ),
+                outcome: "ok",
+                entry_ids: vec![entry_id],
+            },
+        )?;
     }
     tx_ref.commit().map_err(sql_err)?;
     get_transaction(db, tx_id)?.ok_or_else(|| bank_error("NOT_FOUND", "transaction disappeared"))
@@ -418,13 +475,23 @@ pub fn post_from_transaction(
     actor: &str,
     do_post: bool,
 ) -> Result<(Value, Value)> {
-    let tx_row = get_transaction(db, tx_id)?
-        .ok_or_else(|| bank_error("NOT_FOUND", format!("bank transaction {tx_id} does not exist")))?;
+    let tx_row = get_transaction(db, tx_id)?.ok_or_else(|| {
+        bank_error(
+            "NOT_FOUND",
+            format!("bank transaction {tx_id} does not exist"),
+        )
+    })?;
     if tx_row["state"] != "unmatched" {
-        return Err(bank_error("ALREADY_MATCHED", format!("bank transaction {tx_id} is already {}", tx_row["state"])));
+        return Err(bank_error(
+            "ALREADY_MATCHED",
+            format!("bank transaction {tx_id} is already {}", tx_row["state"]),
+        ));
     }
     if get_account_by_code(db, account_code).is_none() {
-        return Err(bank_error("ACCOUNT_NOT_FOUND", format!("account {account_code} does not exist")));
+        return Err(bank_error(
+            "ACCOUNT_NOT_FOUND",
+            format!("account {account_code} does not exist"),
+        ));
     }
     let description_raw = tx_row["description"]
         .as_str()
@@ -434,19 +501,38 @@ pub fn post_from_transaction(
     let amount = tx_row["amount_cents"].as_i64().unwrap();
     let ledger_code = tx_row["account_code"].as_str().unwrap();
     let date = tx_row["date"].as_str().unwrap();
-    let entry = create_entry(db, CreateEntry {
-        date,
-        description,
-        postings: vec![
-            PostingSpec { code: ledger_code.to_string(), amount_cents: amount, cost_center_code: None },
-            PostingSpec { code: account_code.to_string(), amount_cents: -amount, cost_center_code: None },
-        ],
-        source: "bank",
-        source_ref: Some(&format!("tx:{tx_id}")),
-        actor,
-    })?;
-    let posted = if do_post { post_entry(db, entry.id, actor)? } else { entry.clone() };
-    let method = if actor.starts_with("agent") { "agent" } else { "manual" };
+    let entry = create_entry(
+        db,
+        CreateEntry {
+            date,
+            description,
+            postings: vec![
+                PostingSpec {
+                    code: ledger_code.to_string(),
+                    amount_cents: amount,
+                    cost_center_code: None,
+                },
+                PostingSpec {
+                    code: account_code.to_string(),
+                    amount_cents: -amount,
+                    cost_center_code: None,
+                },
+            ],
+            source: "bank",
+            source_ref: Some(&format!("tx:{tx_id}")),
+            actor,
+        },
+    )?;
+    let posted = if do_post {
+        post_entry(db, entry.id, actor)?
+    } else {
+        entry.clone()
+    };
+    let method = if actor.starts_with("agent") {
+        "agent"
+    } else {
+        "manual"
+    };
     let tx_ref = db.unchecked_transaction().map_err(sql_err)?;
     {
         tx_ref.execute(
@@ -455,13 +541,23 @@ pub fn post_from_transaction(
             rusqlite::params![tx_id, posted.id, method, actor],
         )
         .map_err(sql_err)?;
-        tx_ref.execute("UPDATE bank_transactions SET state = 'matched' WHERE id = ?1", [tx_id])
+        tx_ref
+            .execute(
+                "UPDATE bank_transactions SET state = 'matched' WHERE id = ?1",
+                [tx_id],
+            )
             .map_err(sql_err)?;
-        record(&tx_ref, RecordArgs {
-            actor, action: "bank.post", command: Some("bank match --post"),
-            args: Some(json!({ "txId": tx_id, "accountCode": account_code })),
-            outcome: "ok", entry_ids: vec![posted.id],
-        })?;
+        record(
+            &tx_ref,
+            RecordArgs {
+                actor,
+                action: "bank.post",
+                command: Some("bank match --post"),
+                args: Some(json!({ "txId": tx_id, "accountCode": account_code })),
+                outcome: "ok",
+                entry_ids: vec![posted.id],
+            },
+        )?;
     }
     tx_ref.commit().map_err(sql_err)?;
     let tx_json = get_transaction(db, tx_id)?
@@ -484,7 +580,11 @@ pub fn suggest_unmatched(db: &Connection) -> Result<Vec<Value>> {
         .query_map([], |r| {
             let mut v = tx_to_json(r)?;
             let amount = v["amount_cents"].as_i64().unwrap_or(0);
-            v["suggested_account"] = Value::String(if amount > 0 { "8000".into() } else { "4300".into() });
+            v["suggested_account"] = Value::String(if amount > 0 {
+                "8000".into()
+            } else {
+                "4300".into()
+            });
             Ok(v)
         })
         .map_err(sql_err)?;
@@ -493,14 +593,12 @@ pub fn suggest_unmatched(db: &Connection) -> Result<Vec<Value>> {
 
 /// Auto-match: match unmatched transactions to posted entries or invoices.
 /// Stubs the invoice-matching path until the invoice module is ported.
-pub fn auto_match(
-    db: &Connection,
-    window_days: i64,
-    actor: &str,
-    dry_run: bool,
-) -> Result<Value> {
+pub fn auto_match(db: &Connection, window_days: i64, actor: &str, dry_run: bool) -> Result<Value> {
     if window_days < 0 {
-        return Err(bank_error("INVALID_WINDOW", format!("window-days must be non-negative, got {window_days}")));
+        return Err(bank_error(
+            "INVALID_WINDOW",
+            format!("window-days must be non-negative, got {window_days}"),
+        ));
     }
     let unmatched_sql = "SELECT bt.id, bt.date, bt.amount_cents, bt.counterparty, bt.description,
                         bt.iban_counter, bt.hash, bt.state, bt.bank_account_id,
@@ -530,7 +628,8 @@ pub fn auto_match(
         let exclusion = if used_entry_ids.is_empty() {
             String::new()
         } else {
-            let placeholders: Vec<String> = used_entry_ids.iter().map(|_| "?".to_string()).collect();
+            let placeholders: Vec<String> =
+                used_entry_ids.iter().map(|_| "?".to_string()).collect();
             format!("AND e.id NOT IN ({})", placeholders.join(","))
         };
 
@@ -567,7 +666,8 @@ pub fn auto_match(
         params.push(Box::new(bank_account_id));
 
         let mut cand_stmt = db.prepare(&candidate_sql).map_err(sql_err)?;
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
         let candidate: Option<(i64, String, f64)> = cand_stmt
             .query_row(param_refs.as_slice(), |r| {
                 Ok((r.get(0)?, r.get(1)?, r.get(2)?))
@@ -606,15 +706,27 @@ pub fn auto_match(
                     rusqlite::params![tx_id, entry_id, method, confidence, actor],
                 )
                 .map_err(sql_err)?;
-                tx_ref.execute("UPDATE bank_transactions SET state = 'matched' WHERE id = ?1", [tx_id])
+                tx_ref
+                    .execute(
+                        "UPDATE bank_transactions SET state = 'matched' WHERE id = ?1",
+                        [tx_id],
+                    )
                     .map_err(sql_err)?;
             }
-            record(&tx_ref, RecordArgs {
-                actor, action: "bank.auto_match", command: Some("bank match --auto"),
-                args: Some(json!({ "windowDays": window_days, "matched": matches.len() })),
-                outcome: "ok",
-                entry_ids: matches.iter().filter_map(|m| m["entry_id"].as_i64()).collect(),
-            })?;
+            record(
+                &tx_ref,
+                RecordArgs {
+                    actor,
+                    action: "bank.auto_match",
+                    command: Some("bank match --auto"),
+                    args: Some(json!({ "windowDays": window_days, "matched": matches.len() })),
+                    outcome: "ok",
+                    entry_ids: matches
+                        .iter()
+                        .filter_map(|m| m["entry_id"].as_i64())
+                        .collect(),
+                },
+            )?;
         }
         tx_ref.commit().map_err(sql_err)?;
     }
@@ -636,20 +748,34 @@ mod tests {
 
     fn db() -> Connection {
         let db = open_db(":memory:").unwrap();
-        db.execute("INSERT INTO company (name) VALUES ('Bank Co')", []).unwrap();
+        db.execute("INSERT INTO company (name) VALUES ('Bank Co')", [])
+            .unwrap();
         crate::accounts::seed_default_chart(&db).unwrap();
         db
     }
 
     #[test]
     fn normalize_iban_strips_and_uppercases() {
-        assert_eq!(normalize_iban("nl91 abna 0417 1643 00"), "NL91ABNA0417164300");
-        assert_eq!(normalize_iban("NL91-ABNA-0417-1643-00"), "NL91ABNA0417164300");
+        assert_eq!(
+            normalize_iban("nl91 abna 0417 1643 00"),
+            "NL91ABNA0417164300"
+        );
+        assert_eq!(
+            normalize_iban("NL91-ABNA-0417-1643-00"),
+            "NL91ABNA0417164300"
+        );
     }
 
     #[test]
     fn tx_hash_deterministic() {
-        let tx = BankTx { date: "2026-01-15".into(), amount_cents: 10000, counterparty: Some("ACME".into()), description: Some("Invoice".into()), iban_counter: None, bank_ref: None };
+        let tx = BankTx {
+            date: "2026-01-15".into(),
+            amount_cents: 10000,
+            counterparty: Some("ACME".into()),
+            description: Some("Invoice".into()),
+            iban_counter: None,
+            bank_ref: None,
+        };
         let h1 = tx_hash("NL91ABNA0417164300", &tx);
         let h2 = tx_hash("NL91ABNA0417164300", &tx);
         assert_eq!(h1, h2);
@@ -659,8 +785,10 @@ mod tests {
     #[test]
     fn get_or_create_bank_account_idempotent() {
         let d = db();
-        let a1 = get_or_create_bank_account(&d, "NL91ABNA0417164300", Some("Main"), "1100", false).unwrap();
-        let a2 = get_or_create_bank_account(&d, "NL91ABNA0417164300", Some("Main"), "1100", false).unwrap();
+        let a1 = get_or_create_bank_account(&d, "NL91ABNA0417164300", Some("Main"), "1100", false)
+            .unwrap();
+        let a2 = get_or_create_bank_account(&d, "NL91ABNA0417164300", Some("Main"), "1100", false)
+            .unwrap();
         assert_eq!(a1["id"], a2["id"]); // same record
     }
 
@@ -668,13 +796,29 @@ mod tests {
     fn import_and_list_transactions() {
         let d = db();
         let txs = vec![
-            BankTx { date: "2026-01-15".into(), amount_cents: 5000, counterparty: Some("ACME".into()), description: None, iban_counter: None, bank_ref: None },
-            BankTx { date: "2026-01-16".into(), amount_cents: -2000, counterparty: None, description: Some("Payment".into()), iban_counter: None, bank_ref: None },
+            BankTx {
+                date: "2026-01-15".into(),
+                amount_cents: 5000,
+                counterparty: Some("ACME".into()),
+                description: None,
+                iban_counter: None,
+                bank_ref: None,
+            },
+            BankTx {
+                date: "2026-01-16".into(),
+                amount_cents: -2000,
+                counterparty: None,
+                description: Some("Payment".into()),
+                iban_counter: None,
+                bank_ref: None,
+            },
         ];
-        let r = import_transactions(&d, "NL91ABNA0417164300", &txs, None, "1100", "human:erik").unwrap();
+        let r = import_transactions(&d, "NL91ABNA0417164300", &txs, None, "1100", "human:erik")
+            .unwrap();
         assert_eq!(r["imported"], 2);
         // idempotent: second import = 0 new
-        let r2 = import_transactions(&d, "NL91ABNA0417164300", &txs, None, "1100", "human:erik").unwrap();
+        let r2 = import_transactions(&d, "NL91ABNA0417164300", &txs, None, "1100", "human:erik")
+            .unwrap();
         assert_eq!(r2["imported"], 0);
         assert_eq!(r2["duplicates"], 2);
         // list
@@ -685,7 +829,14 @@ mod tests {
     #[test]
     fn state_change_and_link() {
         let d = db();
-        let txs = vec![BankTx { date: "2026-01-15".into(), amount_cents: 10000, counterparty: None, description: None, iban_counter: None, bank_ref: None }];
+        let txs = vec![BankTx {
+            date: "2026-01-15".into(),
+            amount_cents: 10000,
+            counterparty: None,
+            description: None,
+            iban_counter: None,
+            bank_ref: None,
+        }];
         import_transactions(&d, "NL91ABNA0417164300", &txs, None, "1100", "human:erik").unwrap();
         let tx = get_transaction(&d, 1).unwrap().unwrap();
         assert_eq!(tx["state"], "unmatched");
@@ -700,7 +851,14 @@ mod tests {
     #[test]
     fn post_from_transaction_creates_entry() {
         let d = db();
-        let txs = vec![BankTx { date: "2026-01-15".into(), amount_cents: 5000, counterparty: Some("Shop".into()), description: Some("Koffie".into()), iban_counter: None, bank_ref: None }];
+        let txs = vec![BankTx {
+            date: "2026-01-15".into(),
+            amount_cents: 5000,
+            counterparty: Some("Shop".into()),
+            description: Some("Koffie".into()),
+            iban_counter: None,
+            bank_ref: None,
+        }];
         import_transactions(&d, "NL91ABNA0417164300", &txs, None, "1100", "human:erik").unwrap();
         let (tx, entry) = post_from_transaction(&d, 1, "4300", "human:erik", true).unwrap();
         assert_eq!(tx["state"], "matched");

@@ -7,13 +7,17 @@
 
 use crate::money::{BukioError, Result};
 use serde_json::{json, Value};
-fn sql_err(e: rusqlite::Error) -> BukioError { BukioError::new("DB_ERROR", e.to_string()) }
+fn sql_err(e: rusqlite::Error) -> BukioError {
+    BukioError::new("DB_ERROR", e.to_string())
+}
 use rusqlite::Connection;
 use std::time::Duration;
 
 /// ^(agent|human|system):[A-Za-z0-9][A-Za-z0-9._-]{0,63}$
 pub fn is_valid_actor(actor: &str) -> bool {
-    let Some((role, name)) = actor.split_once(':') else { return false };
+    let Some((role, name)) = actor.split_once(':') else {
+        return false;
+    };
     if !matches!(role, "agent" | "human" | "system") {
         return false;
     }
@@ -46,7 +50,14 @@ pub fn actor_error(actor: Option<&str>) -> Option<BukioError> {
 
 // --- registry (mirrors actor-registry.js) -----------------------------------
 
-pub const VALID_ROLES: [&str; 6] = ["owner", "bookkeeper", "payments", "tax", "assets", "readonly"];
+pub const VALID_ROLES: [&str; 6] = [
+    "owner",
+    "bookkeeper",
+    "payments",
+    "tax",
+    "assets",
+    "readonly",
+];
 
 pub fn now_iso() -> String {
     let now = std::time::SystemTime::now()
@@ -142,7 +153,6 @@ pub fn get_roles(db: &Connection, actor: &str) -> Vec<String> {
     rows
 }
 
-
 pub fn can_act_enrolled(db: &Connection, actor: &str) -> bool {
     get_actor_key(db, actor).is_some()
 }
@@ -167,7 +177,10 @@ pub fn set_authz_mode(db: &Connection, on: bool) {
 
 pub fn grant_role(db: &Connection, actor: &str, role: &str, granted_by: &str) -> Result<()> {
     if !crate::authz::ROLES.contains(&role) {
-        return Err(BukioError::new("INVALID_ROLE", format!("{role} is not a valid role")));
+        return Err(BukioError::new(
+            "INVALID_ROLE",
+            format!("{role} is not a valid role"),
+        ));
     }
     db.execute("INSERT INTO actor_roles (actor, role, granted_by, granted_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(actor, role) DO NOTHING",
         rusqlite::params![actor, role, granted_by, now_iso()]).map_err(sql_err)?;
@@ -176,20 +189,39 @@ pub fn grant_role(db: &Connection, actor: &str, role: &str, granted_by: &str) ->
 
 pub fn revoke_role(db: &Connection, actor: &str, role: &str) -> Result<()> {
     if role == "owner" {
-        let count: i64 = db.query_row("SELECT COUNT(*) FROM actor_roles WHERE role = 'owner'", [], |r| r.get(0)).map_err(sql_err)?;
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM actor_roles WHERE role = 'owner'",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(sql_err)?;
         if count <= 1 {
-            return Err(BukioError::new("LAST_OWNER", format!("{actor} is the last owner — grant owner to another actor first")));
+            return Err(BukioError::new(
+                "LAST_OWNER",
+                format!("{actor} is the last owner — grant owner to another actor first"),
+            ));
         }
     }
-    let affected = db.execute("DELETE FROM actor_roles WHERE actor = ?1 AND role = ?2", rusqlite::params![actor, role]).map_err(sql_err)?;
+    let affected = db
+        .execute(
+            "DELETE FROM actor_roles WHERE actor = ?1 AND role = ?2",
+            rusqlite::params![actor, role],
+        )
+        .map_err(sql_err)?;
     if affected == 0 {
-        return Err(BukioError::new("ROLE_NOT_GRANTED", format!("actor {actor} does not hold role '{role}'")));
+        return Err(BukioError::new(
+            "ROLE_NOT_GRANTED",
+            format!("actor {actor} does not hold role '{role}'"),
+        ));
     }
     Ok(())
 }
 
 pub fn list_role_grants(db: &Connection) -> Result<Vec<Value>> {
-    let mut stmt = db.prepare("SELECT actor, role, granted_by, granted_at FROM actor_roles ORDER BY actor, role").map_err(sql_err)?;
+    let mut stmt = db
+        .prepare("SELECT actor, role, granted_by, granted_at FROM actor_roles ORDER BY actor, role")
+        .map_err(sql_err)?;
     let rows = stmt.query_map([], |r| {
         Ok(json!({"actor": r.get::<_, String>(0)?, "role": r.get::<_, String>(1)?, "granted_by": r.get::<_, String>(2)?, "granted_at": r.get::<_, String>(3)?}))
     }).map_err(sql_err)?;
@@ -214,8 +246,15 @@ mod tests {
             assert!(is_valid_actor(&good), "should accept {good}");
         }
         for bad in [
-            "", "human", "agent", "agent:", ":erik", "robot:erik", "agent:-lead",
-            "agent:x y", "human:erik:extra",
+            "",
+            "human",
+            "agent",
+            "agent:",
+            ":erik",
+            "robot:erik",
+            "agent:-lead",
+            "agent:x y",
+            "human:erik:extra",
         ] {
             assert!(!is_valid_actor(&bad), "should reject {bad:?}");
         }

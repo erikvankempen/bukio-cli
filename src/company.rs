@@ -51,7 +51,9 @@ pub fn serialize_company(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
 
 pub fn get_company(db: &Connection) -> Result<Value> {
     let row = db
-        .query_row("SELECT * FROM company WHERE id = 1", [], |r| serialize_company(r))
+        .query_row("SELECT * FROM company WHERE id = 1", [], |r| {
+            serialize_company(r)
+        })
         .map_err(|_| BukioError::new("NO_COMPANY", "no company — run bukio init first"))?;
     Ok(row)
 }
@@ -70,11 +72,21 @@ pub fn update_company(
     let mut updates: Vec<(String, String)> = Vec::new();
     for (col, val) in changes {
         if val.is_empty() && col != "tax_id" {
-            let label = COMPANY_FIELDS.iter().find(|(opt, c, _)| *c == *col).map(|f| f.2).unwrap_or("field");
-            return Err(BukioError::new("INVALID_VALUE", format!("{label} cannot be empty")));
+            let label = COMPANY_FIELDS
+                .iter()
+                .find(|(opt, c, _)| *c == *col)
+                .map(|f| f.2)
+                .unwrap_or("field");
+            return Err(BukioError::new(
+                "INVALID_VALUE",
+                format!("{label} cannot be empty"),
+            ));
         }
         if col == "iban" && !val.is_empty() && !is_valid_iban(val) {
-            return Err(BukioError::new("INVALID_IBAN", format!("invalid IBAN '{val}'")));
+            return Err(BukioError::new(
+                "INVALID_IBAN",
+                format!("invalid IBAN '{val}'"),
+            ));
         }
         updates.push((col.clone(), val.clone()));
     }
@@ -88,7 +100,10 @@ pub fn update_company(
         let set_clauses: Vec<String> = updates.iter().map(|(c, _)| format!("{c} = ?")).collect();
         let sql = format!("UPDATE company SET {} WHERE id = 1", set_clauses.join(", "));
         let params: Vec<String> = updates.iter().map(|(_, v)| v.clone()).collect();
-        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p as &dyn rusqlite::types::ToSql).collect();
+        let param_refs: Vec<&dyn rusqlite::types::ToSql> = params
+            .iter()
+            .map(|p| p as &dyn rusqlite::types::ToSql)
+            .collect();
         db.execute(&sql, param_refs.as_slice()).map_err(sql_err)?;
     }
 
@@ -105,7 +120,9 @@ pub fn update_company(
 
     // build changes map for audit
     let changes_map = serde_json::Map::from_iter(
-        updates.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))),
+        updates
+            .iter()
+            .map(|(k, v)| (k.clone(), Value::String(v.clone()))),
     );
     let changes_map = Value::Object(changes_map);
 
@@ -147,7 +164,8 @@ mod tests {
 
     fn db() -> Connection {
         let d = open_db(":memory:").unwrap();
-        d.execute("INSERT INTO company (name) VALUES ('Test BV')", []).unwrap();
+        d.execute("INSERT INTO company (name) VALUES ('Test BV')", [])
+            .unwrap();
         d
     }
 
@@ -161,7 +179,14 @@ mod tests {
     #[test]
     fn update_name() {
         let d = db();
-        let (updated, changes) = update_company(&d, &[("name".into(), "New BV".into())], None, None, "human:erik").unwrap();
+        let (updated, changes) = update_company(
+            &d,
+            &[("name".into(), "New BV".into())],
+            None,
+            None,
+            "human:erik",
+        )
+        .unwrap();
         assert_eq!(updated["name"], "New BV");
         assert_eq!(changes["name"], "New BV");
     }
@@ -169,7 +194,8 @@ mod tests {
     #[test]
     fn update_empty_name_rejected() {
         let d = db();
-        let err = update_company(&d, &[("name".into(), "".into())], None, None, "human:erik").unwrap_err();
+        let err = update_company(&d, &[("name".into(), "".into())], None, None, "human:erik")
+            .unwrap_err();
         assert_eq!(err.code, "INVALID_VALUE");
     }
 

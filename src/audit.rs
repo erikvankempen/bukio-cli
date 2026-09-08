@@ -50,7 +50,10 @@ pub struct RecordArgs<'a> {
 pub fn record(db: &Connection, a: RecordArgs<'_>) -> Result<()> {
     let s = pending_signature().unwrap_or_default();
     let stored_args = s.signed_args.clone().or(a.args);
-    let stored_command = s.signed_command.clone().or_else(|| a.command.map(String::from));
+    let stored_command = s
+        .signed_command
+        .clone()
+        .or_else(|| a.command.map(String::from));
     db.execute(
         "INSERT INTO audit_log (actor, action, command, args_json, outcome, entry_ids,
                                 digest_hash, sig_keyid, sig_nonce, sig_ts, sig, sig_status)
@@ -59,7 +62,9 @@ pub fn record(db: &Connection, a: RecordArgs<'_>) -> Result<()> {
             a.actor,
             a.action,
             stored_command,
-            stored_args.as_ref().map(|v| serde_json::to_string(v).unwrap()),
+            stored_args
+                .as_ref()
+                .map(|v| serde_json::to_string(v).unwrap()),
             a.outcome,
             if a.entry_ids.is_empty() {
                 None
@@ -71,7 +76,11 @@ pub fn record(db: &Connection, a: RecordArgs<'_>) -> Result<()> {
             s.sig_nonce,
             s.sig_ts,
             s.sig,
-            if s.sig_status.is_empty() { "unsigned".to_string() } else { s.sig_status.clone() },
+            if s.sig_status.is_empty() {
+                "unsigned".to_string()
+            } else {
+                s.sig_status.clone()
+            },
         ],
     )
     .map_err(|e| BukioError::new("AUDIT_WRITE_FAILED", e.to_string()))?;
@@ -171,7 +180,12 @@ pub fn verify_trail(db: &Connection) -> Result<Value> {
     Ok(json!({ "summary": summary, "rows": checked }))
 }
 
-pub fn list(db: &Connection, since: Option<&str>, actor: Option<&str>, limit: i64) -> Result<Vec<Value>> {
+pub fn list(
+    db: &Connection,
+    since: Option<&str>,
+    actor: Option<&str>,
+    limit: i64,
+) -> Result<Vec<Value>> {
     if limit < 0 {
         return Err(BukioError::new(
             "INVALID_LIMIT",
@@ -228,7 +242,6 @@ pub fn list(db: &Connection, since: Option<&str>, actor: Option<&str>, limit: i6
     Ok(rows)
 }
 
-
 /// ponytail: dyn-param helper — rusqlite 0.32 has no params_from_vec; refs
 /// satisfy Params for &[&dyn ToSql].
 fn params_refs(params: &[Box<dyn rusqlite::types::ToSql>]) -> Vec<&dyn rusqlite::types::ToSql> {
@@ -243,10 +256,17 @@ mod tests {
     #[test]
     fn record_and_verify_trail_unsigned() {
         let db = open_db(":memory:").unwrap();
-        record(&db, RecordArgs {
-            actor: "agent:test", action: "entry.create", command: Some("entry add"),
-            args: Some(json!({"date": "2026-01-01"})), outcome: "ok", entry_ids: vec![1],
-        })
+        record(
+            &db,
+            RecordArgs {
+                actor: "agent:test",
+                action: "entry.create",
+                command: Some("entry add"),
+                args: Some(json!({"date": "2026-01-01"})),
+                outcome: "ok",
+                entry_ids: vec![1],
+            },
+        )
         .unwrap();
         let out = verify_trail(&db).unwrap();
         assert_eq!(out["summary"]["total"], 1);
@@ -257,14 +277,20 @@ mod tests {
     #[test]
     fn empty_map_default_record() {
         let db = open_db(":memory:").unwrap();
-        record(&db, RecordArgs {
-            actor: "human:erik", action: "x", command: None, args: None, outcome: "ok",
-            entry_ids: vec![],
-        })
+        record(
+            &db,
+            RecordArgs {
+                actor: "human:erik",
+                action: "x",
+                command: None,
+                args: None,
+                outcome: "ok",
+                entry_ids: vec![],
+            },
+        )
         .unwrap();
         let listed = list(&db, None, None, 10).unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0]["entry_ids"].as_array().unwrap().len(), 0);
     }
 }
-

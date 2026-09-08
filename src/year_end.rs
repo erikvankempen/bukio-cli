@@ -87,7 +87,10 @@ pub fn is_year_closed(db: &Connection, year: &str) -> Result<bool> {
 /// Year-end status: is it closed, result amount, accounts, closing entries.
 pub fn year_end_status(db: &Connection, year: &str) -> Result<Value> {
     if year.len() != 4 || !year.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(year_end_error("INVALID_YEAR", format!("year '{year}' must be YYYY")));
+        return Err(year_end_error(
+            "INVALID_YEAR",
+            format!("year '{year}' must be YYYY"),
+        ));
     }
     let sql = "SELECT id, date, description, state FROM journal_entries
                WHERE source = 'closing' AND source_ref = ?1 ORDER BY id";
@@ -107,7 +110,10 @@ pub fn year_end_status(db: &Connection, year: &str) -> Result<Value> {
         .collect();
 
     let accounts = result_accounts(db, year)?;
-    let raw_result: i64 = accounts.iter().filter_map(|a| a["net_cents"].as_i64()).sum();
+    let raw_result: i64 = accounts
+        .iter()
+        .filter_map(|a| a["net_cents"].as_i64())
+        .sum();
     let result_cents = if raw_result == 0 { 0 } else { -raw_result };
 
     Ok(json!({
@@ -120,20 +126,21 @@ pub fn year_end_status(db: &Connection, year: &str) -> Result<Value> {
 }
 
 /// Close the fiscal year.
-pub fn year_end_close(
-    db: &Connection,
-    year: &str,
-    actor: &str,
-    dry_run: bool,
-) -> Result<Value> {
+pub fn year_end_close(db: &Connection, year: &str, actor: &str, dry_run: bool) -> Result<Value> {
     if year.len() != 4 || !year.bytes().all(|b| b.is_ascii_digit()) {
-        return Err(year_end_error("INVALID_YEAR", format!("year '{year}' must be YYYY")));
+        return Err(year_end_error(
+            "INVALID_YEAR",
+            format!("year '{year}' must be YYYY"),
+        ));
     }
     let company_exists: bool = db
         .query_row("SELECT 1 FROM company WHERE id = 1", [], |_| Ok(true))
         .unwrap_or(false);
     if !company_exists {
-        return Err(year_end_error("NOT_INITIALISED", "company database not initialised"));
+        return Err(year_end_error(
+            "NOT_INITIALISED",
+            "company database not initialised",
+        ));
     }
 
     let profile = resolve_profile(db)?;
@@ -152,11 +159,17 @@ pub fn year_end_close(
         )
         .map_err(sql_err)?;
     if drafts > 0 {
-        return Err(year_end_error("INCOMPLETE_YEAR", format!("{drafts} draft entry/entries in {year} — post or reverse them before closing")));
+        return Err(year_end_error(
+            "INCOMPLETE_YEAR",
+            format!("{drafts} draft entry/entries in {year} — post or reverse them before closing"),
+        ));
     }
 
     if is_year_closed(db, year)? {
-        return Err(year_end_error("ALREADY_CLOSED", format!("{year} is already closed (undo with entry reverse on the closing entries)")));
+        return Err(year_end_error(
+            "ALREADY_CLOSED",
+            format!("{year} is already closed (undo with entry reverse on the closing entries)"),
+        ));
     }
 
     let accounts = result_accounts(db, year)?;
@@ -168,7 +181,10 @@ pub fn year_end_close(
         }));
     }
 
-    let raw_result: i64 = accounts.iter().filter_map(|a| a["net_cents"].as_i64()).sum();
+    let raw_result: i64 = accounts
+        .iter()
+        .filter_map(|a| a["net_cents"].as_i64())
+        .sum();
     let result_cents = if raw_result == 0 { 0 } else { -raw_result };
 
     // build closing postings
@@ -177,7 +193,11 @@ pub fn year_end_close(
         .filter_map(|a| {
             let net = a["net_cents"].as_i64()?;
             let code = a["code"].as_str()?.to_string();
-            Some(PostingSpec { code, amount_cents: -net, cost_center_code: None })
+            Some(PostingSpec {
+                code,
+                amount_cents: -net,
+                cost_center_code: None,
+            })
         })
         .collect();
     if result_cents != 0 {
@@ -191,17 +211,33 @@ pub fn year_end_close(
     // appropriation postings (only when there's a result)
     let appropriation_postings: Vec<PostingSpec> = if result_cents != 0 {
         vec![
-            PostingSpec { code: result_account.to_string(), amount_cents: result_cents, cost_center_code: None },
-            PostingSpec { code: equity_account.to_string(), amount_cents: -result_cents, cost_center_code: None },
+            PostingSpec {
+                code: result_account.to_string(),
+                amount_cents: result_cents,
+                cost_center_code: None,
+            },
+            PostingSpec {
+                code: equity_account.to_string(),
+                amount_cents: -result_cents,
+                cost_center_code: None,
+            },
         ]
     } else {
         vec![]
     };
 
     if dry_run {
-        let closing_json: Vec<Value> = closing_postings.iter().map(|p| json!({ "code": p.code, "amountCents": p.amount_cents })).collect();
-        let appropriation_json: Vec<Value> = appropriation_postings.iter().map(|p| json!({ "code": p.code, "amountCents": p.amount_cents })).collect();
-        let mut entries = vec![json!({ "description": format!("Afsluiting boekjaar {year}"), "postings": closing_json })];
+        let closing_json: Vec<Value> = closing_postings
+            .iter()
+            .map(|p| json!({ "code": p.code, "amountCents": p.amount_cents }))
+            .collect();
+        let appropriation_json: Vec<Value> = appropriation_postings
+            .iter()
+            .map(|p| json!({ "code": p.code, "amountCents": p.amount_cents }))
+            .collect();
+        let mut entries = vec![
+            json!({ "description": format!("Afsluiting boekjaar {year}"), "postings": closing_json }),
+        ];
         if !appropriation_json.is_empty() {
             entries.push(json!({ "description": format!("Resultaatbestemming {year}"), "postings": appropriation_json }));
         }
@@ -217,50 +253,62 @@ pub fn year_end_close(
     {
         // create 9900 if needed
         if result_cents != 0 && get_account_by_code(db, result_account).is_none() {
-            create_account(db, &NewAccount {
-                code: result_account,
-                name: "Resultaat boekjaar",
-                type_: "equity",
-                normal_balance: "credit",
-                taxonomy_code: Some("BEIV.05"),
-            })?;
+            create_account(
+                db,
+                &NewAccount {
+                    code: result_account,
+                    name: "Resultaat boekjaar",
+                    type_: "equity",
+                    normal_balance: "credit",
+                    taxonomy_code: Some("BEIV.05"),
+                },
+            )?;
         }
 
         // entry 1: closing
-        let e1 = create_entry(db, CreateEntry {
-            date: close_date,
-            description: &format!("Afsluiting boekjaar {year}"),
-            postings: closing_postings,
-            source: "closing",
-            source_ref: Some(&format!("fy:{year}")),
-            actor: "closing",
-        })?;
+        let e1 = create_entry(
+            db,
+            CreateEntry {
+                date: close_date,
+                description: &format!("Afsluiting boekjaar {year}"),
+                postings: closing_postings,
+                source: "closing",
+                source_ref: Some(&format!("fy:{year}")),
+                actor: "closing",
+            },
+        )?;
         let p1 = post_entry(db, e1.id, "closing")?;
 
         let mut results = vec![p1];
 
         // entry 2: appropriation (only when there's a result)
         if !appropriation_postings.is_empty() {
-            let e2 = create_entry(db, CreateEntry {
-                date: close_date,
-                description: &format!("Resultaatbestemming {year}"),
-                postings: appropriation_postings,
-                source: "closing",
-                source_ref: Some(&format!("fy:{year}")),
-                actor: "closing",
-            })?;
+            let e2 = create_entry(
+                db,
+                CreateEntry {
+                    date: close_date,
+                    description: &format!("Resultaatbestemming {year}"),
+                    postings: appropriation_postings,
+                    source: "closing",
+                    source_ref: Some(&format!("fy:{year}")),
+                    actor: "closing",
+                },
+            )?;
             let p2 = post_entry(db, e2.id, "closing")?;
             results.push(p2);
         }
 
-        record(db, RecordArgs {
-            actor,
-            action: "year_end.close",
-            command: Some("year-end close"),
-            args: Some(json!({ "year": year, "result_cents": result_cents })),
-            outcome: "ok",
-            entry_ids: results.iter().map(|e| e.id).collect(),
-        })?;
+        record(
+            db,
+            RecordArgs {
+                actor,
+                action: "year_end.close",
+                command: Some("year-end close"),
+                args: Some(json!({ "year": year, "result_cents": result_cents })),
+                outcome: "ok",
+                entry_ids: results.iter().map(|e| e.id).collect(),
+            },
+        )?;
     }
 
     let closing_entries = year_end_status(db, year)?;
@@ -281,26 +329,57 @@ mod tests {
 
     fn db_with_data() -> Connection {
         let d = open_db(":memory:").unwrap();
-        d.execute("INSERT INTO company (name) VALUES ('YECo')", []).unwrap();
+        d.execute("INSERT INTO company (name) VALUES ('YECo')", [])
+            .unwrap();
         crate::accounts::seed_default_chart(&d).unwrap();
         // post some income/expense
-        crate::entries::create_entry(&d, CreateEntry {
-            date: "2026-03-15", description: "Verkoop",
-            postings: vec![
-                PostingSpec { code: "1100".into(), amount_cents: 12100, cost_center_code: None },
-                PostingSpec { code: "8000".into(), amount_cents: -12100, cost_center_code: None },
-            ],
-            source: "manual", source_ref: None, actor: "human:erik",
-        }).unwrap();
+        crate::entries::create_entry(
+            &d,
+            CreateEntry {
+                date: "2026-03-15",
+                description: "Verkoop",
+                postings: vec![
+                    PostingSpec {
+                        code: "1100".into(),
+                        amount_cents: 12100,
+                        cost_center_code: None,
+                    },
+                    PostingSpec {
+                        code: "8000".into(),
+                        amount_cents: -12100,
+                        cost_center_code: None,
+                    },
+                ],
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        )
+        .unwrap();
         crate::entries::post_entry(&d, 1, "human:erik").unwrap();
-        crate::entries::create_entry(&d, CreateEntry {
-            date: "2026-04-01", description: "Kosten",
-            postings: vec![
-                PostingSpec { code: "4300".into(), amount_cents: -5000, cost_center_code: None },
-                PostingSpec { code: "1100".into(), amount_cents: 5000, cost_center_code: None },
-            ],
-            source: "manual", source_ref: None, actor: "human:erik",
-        }).unwrap();
+        crate::entries::create_entry(
+            &d,
+            CreateEntry {
+                date: "2026-04-01",
+                description: "Kosten",
+                postings: vec![
+                    PostingSpec {
+                        code: "4300".into(),
+                        amount_cents: -5000,
+                        cost_center_code: None,
+                    },
+                    PostingSpec {
+                        code: "1100".into(),
+                        amount_cents: 5000,
+                        cost_center_code: None,
+                    },
+                ],
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        )
+        .unwrap();
         crate::entries::post_entry(&d, 2, "human:erik").unwrap();
         d
     }
@@ -310,7 +389,10 @@ mod tests {
         let d = db_with_data();
         let accounts = result_accounts(&d, "2026").unwrap();
         assert!(accounts.len() >= 2);
-        let total: i64 = accounts.iter().filter_map(|a| a["net_cents"].as_i64()).sum();
+        let total: i64 = accounts
+            .iter()
+            .filter_map(|a| a["net_cents"].as_i64())
+            .sum();
         assert_ne!(total, 0);
     }
 

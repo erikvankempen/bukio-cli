@@ -10,11 +10,27 @@
 pub struct BukioError {
     pub code: &'static str,
     pub message: String,
+    pub details: Option<serde_json::Value>,
 }
 
 impl BukioError {
     pub fn new(code: &'static str, message: impl Into<String>) -> Self {
-        Self { code, message: message.into() }
+        Self {
+            code,
+            message: message.into(),
+            details: None,
+        }
+    }
+    pub fn with_details(
+        code: &'static str,
+        message: impl Into<String>,
+        details: serde_json::Value,
+    ) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            details: Some(details),
+        }
     }
 }
 
@@ -32,11 +48,17 @@ pub type Result<T> = std::result::Result<T, BukioError>;
 /// format, no thousands separators (mirrors parseAmount).
 pub fn parse_amount(input: &str) -> Result<i64> {
     let s = input.trim();
-    let invalid = || BukioError::new(
+    let invalid = || {
+        BukioError::new(
         "INVALID_AMOUNT",
         format!("invalid amount '{input}' — use e.g. 1234.56 (max 2 decimals, no thousands separators)"),
-    );
-    let body = if let Some(rest) = s.strip_prefix('-') { rest } else { s };
+    )
+    };
+    let body = if let Some(rest) = s.strip_prefix('-') {
+        rest
+    } else {
+        s
+    };
     if body.is_empty() {
         return Err(invalid());
     }
@@ -80,7 +102,11 @@ pub fn parse_amount(input: &str) -> Result<i64> {
     }
     let cents = cents as i64;
     let negative = s.starts_with('-');
-    Ok(if negative && cents != 0 { -cents } else { cents })
+    Ok(if negative && cents != 0 {
+        -cents
+    } else {
+        cents
+    })
 }
 
 /// Format integer cents as "1234.56" (mirrors formatAmount).
@@ -106,7 +132,9 @@ mod tests {
 
     #[test]
     fn rejects_bad_formats() {
-        for bad in ["", "1,5", "1.234", "12.345", "1.2.3", "abc", "1 000", "--1", "1.", ".5"] {
+        for bad in [
+            "", "1,5", "1.234", "12.345", "1.2.3", "abc", "1 000", "--1", "1.", ".5",
+        ] {
             assert!(parse_amount(bad).is_err(), "should reject {bad:?}");
         }
     }

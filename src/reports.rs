@@ -12,7 +12,11 @@ use serde_json::{json, Value};
 /// fiscalYearWindow (mirrors year-end/index.js).
 pub fn fiscal_year_window(db: &Connection, year: &str) -> (String, String) {
     let fy: String = db
-        .query_row("SELECT fiscal_year_end FROM company WHERE id = 1", [], |r| r.get(0))
+        .query_row(
+            "SELECT fiscal_year_end FROM company WHERE id = 1",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or_else(|_| "12-31".into());
     let parts: Vec<&str> = fy.split('-').collect();
     let mm: u32 = parts[parts.len() - 2].parse().unwrap_or(12);
@@ -43,7 +47,11 @@ fn days_in_month(y: i32, m: u32) -> u32 {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
         2 => {
-            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 { 29 } else { 28 }
+            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+                29
+            } else {
+                28
+            }
         }
         _ => 30,
     }
@@ -61,16 +69,18 @@ fn rgs_label(code: &str) -> String {
 fn resolve_profile_for_labels() -> &'static Value {
     // NL labels are the canonical RGS labels (mirrors core/chart.js RGS_LABELS)
     static LABELS: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
-    LABELS.get_or_init(|| {
-        crate::accounts::get_profile("NL").unwrap()["reporting"]["labels"].clone()
-    })
+    LABELS
+        .get_or_init(|| crate::accounts::get_profile("NL").unwrap()["reporting"]["labels"].clone())
 }
 
 fn valid_year(year: &str) -> Result<()> {
     if year.len() == 4 && year.bytes().all(|b| b.is_ascii_digit()) {
         Ok(())
     } else {
-        Err(BukioError::new("INVALID_YEAR", format!("year '{year}' must be YYYY")))
+        Err(BukioError::new(
+            "INVALID_YEAR",
+            format!("year '{year}' must be YYYY"),
+        ))
     }
 }
 
@@ -122,8 +132,14 @@ pub fn trial_balance(db: &Connection, year: Option<&str>) -> Result<Value> {
         .map_err(sql_err)?
         .filter_map(|x| x.ok())
         .collect();
-    let total_debit: i64 = rows.iter().map(|r| r["debit_cents"].as_i64().unwrap_or(0)).sum();
-    let total_credit: i64 = rows.iter().map(|r| r["credit_cents"].as_i64().unwrap_or(0)).sum();
+    let total_debit: i64 = rows
+        .iter()
+        .map(|r| r["debit_cents"].as_i64().unwrap_or(0))
+        .sum();
+    let total_credit: i64 = rows
+        .iter()
+        .map(|r| r["credit_cents"].as_i64().unwrap_or(0))
+        .sum();
     Ok(json!({
         "year": year_out,
         "accounts": rows,
@@ -149,9 +165,18 @@ struct NetRow {
     net_cents: i64,
 }
 
-fn net_per_account(db: &Connection, as_of: &str, types: &[&str], exclude_closing: bool) -> Result<Vec<NetRow>> {
+fn net_per_account(
+    db: &Connection,
+    as_of: &str,
+    types: &[&str],
+    exclude_closing: bool,
+) -> Result<Vec<NetRow>> {
     // types are static literals from this module — inline them (safe)
-    let list = types.iter().map(|t| format!("'{t}'")).collect::<Vec<_>>().join(",");
+    let list = types
+        .iter()
+        .map(|t| format!("'{t}'"))
+        .collect::<Vec<_>>()
+        .join(",");
     let sql = format!(
         "SELECT a.code, a.name, a.type, a.taxonomy_code, COALESCE(SUM(p.amount_cents), 0)
          FROM accounts a
@@ -164,7 +189,11 @@ fn net_per_account(db: &Connection, as_of: &str, types: &[&str], exclude_closing
          WHERE a.type IN ({list})
          GROUP BY a.id
          ORDER BY a.code",
-        exclude = if exclude_closing { "AND e.source != 'closing'" } else { "" },
+        exclude = if exclude_closing {
+            "AND e.source != 'closing'"
+        } else {
+            ""
+        },
     );
     let mut stmt = db.prepare(&sql).map_err(sql_err)?;
     let rows = stmt
@@ -189,7 +218,10 @@ fn sectionize(groups: &[&str], rows: &[NetRow], types: &[&str], sign: SignFn) ->
     for code in groups {
         let accounts: Vec<Value> = rows
             .iter()
-            .filter(|r| types.contains(&r.type_.as_str()) && (r.taxonomy_code.clone().unwrap_or("overig".into()) == *code))
+            .filter(|r| {
+                types.contains(&r.type_.as_str())
+                    && (r.taxonomy_code.clone().unwrap_or("overig".into()) == *code)
+            })
             .map(|r| {
                 json!({
                     "code": r.code, "name": r.name, "type": r.type_,
@@ -201,7 +233,10 @@ fn sectionize(groups: &[&str], rows: &[NetRow], types: &[&str], sign: SignFn) ->
         if accounts.is_empty() {
             continue;
         }
-        let total: i64 = accounts.iter().map(|a| a["balance_cents"].as_i64().unwrap_or(0)).sum();
+        let total: i64 = accounts
+            .iter()
+            .map(|a| a["balance_cents"].as_i64().unwrap_or(0))
+            .sum();
         sections.push(json!({
             "taxonomy_code": code,
             "label": rgs_label(code),
@@ -213,7 +248,10 @@ fn sectionize(groups: &[&str], rows: &[NetRow], types: &[&str], sign: SignFn) ->
     let known: Vec<&str> = groups.to_vec();
     let leftover: Vec<Value> = rows
         .iter()
-        .filter(|r| types.contains(&r.type_.as_str()) && !known.contains(&r.taxonomy_code.clone().unwrap_or("overig".into()).as_str()))
+        .filter(|r| {
+            types.contains(&r.type_.as_str())
+                && !known.contains(&r.taxonomy_code.clone().unwrap_or("overig".into()).as_str())
+        })
         .map(|r| {
             json!({
                 "code": r.code, "name": r.name, "type": r.type_,
@@ -223,7 +261,10 @@ fn sectionize(groups: &[&str], rows: &[NetRow], types: &[&str], sign: SignFn) ->
         .filter(|a| a["balance_cents"].as_i64().unwrap_or(0) != 0)
         .collect();
     if !leftover.is_empty() {
-        let total: i64 = leftover.iter().map(|a| a["balance_cents"].as_i64().unwrap_or(0)).sum();
+        let total: i64 = leftover
+            .iter()
+            .map(|a| a["balance_cents"].as_i64().unwrap_or(0))
+            .sum();
         sections.push(json!({
             "taxonomy_code": null,
             "label": "Overig",
@@ -249,13 +290,23 @@ pub fn balans(db: &Connection, as_of: &str) -> Result<Value> {
         .map_err(sql_err)?;
     let result_cents = -result_net;
 
-    fn one(_: &str) -> i64 { 1 }
-fn neg_one(_: &str) -> i64 { -1 }
+    fn one(_: &str) -> i64 {
+        1
+    }
+    fn neg_one(_: &str) -> i64 {
+        -1
+    }
 
     let asset_sections = sectionize(&ASSET_GROUPS, &rows, &["asset"], one);
     let passiva_sections = sectionize(&PASSIVA_GROUPS, &rows, &["liability", "equity"], neg_one);
-    let total_assets: i64 = asset_sections.iter().map(|s| s["total_cents"].as_i64().unwrap_or(0)).sum();
-    let passiva_total: i64 = passiva_sections.iter().map(|s| s["total_cents"].as_i64().unwrap_or(0)).sum();
+    let total_assets: i64 = asset_sections
+        .iter()
+        .map(|s| s["total_cents"].as_i64().unwrap_or(0))
+        .sum();
+    let passiva_total: i64 = passiva_sections
+        .iter()
+        .map(|s| s["total_cents"].as_i64().unwrap_or(0))
+        .sum();
     let total_passiva: i64 = passiva_total + result_cents;
 
     Ok(json!({
@@ -270,7 +321,9 @@ fn neg_one(_: &str) -> i64 { -1 }
     }))
 }
 
-const PNL_GROUPS: [&str; 7] = ["WOMZ.80", "WOVB.82", "WKPR.70", "WPER.40", "WAFS.41", "WBED.42", "WFBE.84"];
+const PNL_GROUPS: [&str; 7] = [
+    "WOMZ.80", "WOVB.82", "WKPR.70", "WPER.40", "WAFS.41", "WBED.42", "WFBE.84",
+];
 
 pub fn pnl(db: &Connection, from: &str, to: &str) -> Result<Value> {
     validate_labeled(from, "from")?;
@@ -307,8 +360,16 @@ pub fn pnl(db: &Connection, from: &str, to: &str) -> Result<Value> {
 
     // section sign: income -> -net (positive revenue), expense -> net
     let sections = sectionize_pnl(&PNL_GROUPS, &rows);
-    let revenue: i64 = rows.iter().filter(|r| r.type_ == "income").map(|r| -r.net_cents).sum();
-    let costs: i64 = rows.iter().filter(|r| r.type_ == "expense").map(|r| r.net_cents).sum();
+    let revenue: i64 = rows
+        .iter()
+        .filter(|r| r.type_ == "income")
+        .map(|r| -r.net_cents)
+        .sum();
+    let costs: i64 = rows
+        .iter()
+        .filter(|r| r.type_ == "expense")
+        .map(|r| r.net_cents)
+        .sum();
     Ok(json!({
         "from": from, "to": to,
         "sections": sections,
@@ -336,7 +397,10 @@ fn sectionize_pnl(groups: &[&str], rows: &[NetRow]) -> Vec<Value> {
         if accounts.is_empty() {
             continue;
         }
-        let total: i64 = accounts.iter().map(|a| a["amount_cents"].as_i64().unwrap_or(0)).sum();
+        let total: i64 = accounts
+            .iter()
+            .map(|a| a["amount_cents"].as_i64().unwrap_or(0))
+            .sum();
         sections.push(json!({
             "taxonomy_code": code,
             "label": rgs_label(code),
@@ -357,7 +421,10 @@ fn sectionize_pnl(groups: &[&str], rows: &[NetRow]) -> Vec<Value> {
         .filter(|a| a["amount_cents"].as_i64().unwrap_or(0) != 0)
         .collect();
     if !leftover.is_empty() {
-        let total: i64 = leftover.iter().map(|a| a["amount_cents"].as_i64().unwrap_or(0)).sum();
+        let total: i64 = leftover
+            .iter()
+            .map(|a| a["amount_cents"].as_i64().unwrap_or(0))
+            .sum();
         sections.push(json!({
             "taxonomy_code": null,
             "label": "Overig",
@@ -411,13 +478,14 @@ fn sql_err(e: rusqlite::Error) -> BukioError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts::{seed_default_chart, NewAccount, create_account};
+    use crate::accounts::{create_account, seed_default_chart, NewAccount};
     use crate::db::open_db;
     use crate::entries::{create_entry, post_entry, CreateEntry, PostingSpec};
 
     fn books() -> Connection {
         let db = open_db(":memory:").unwrap();
-        db.execute("INSERT INTO company (name) VALUES ('T')", []).unwrap();
+        db.execute("INSERT INTO company (name) VALUES ('T')", [])
+            .unwrap();
         seed_default_chart(&db).unwrap();
         db
     }
@@ -425,12 +493,23 @@ mod tests {
     fn add(db: &Connection, date: &str, desc: &str, postings: &[(&str, i64)], post: bool) -> i64 {
         let specs: Vec<PostingSpec> = postings
             .iter()
-            .map(|(c, a)| PostingSpec { code: c.to_string(), amount_cents: *a, cost_center_code: None })
+            .map(|(c, a)| PostingSpec {
+                code: c.to_string(),
+                amount_cents: *a,
+                cost_center_code: None,
+            })
             .collect();
-        let e = create_entry(db, CreateEntry {
-            date, description: desc, postings: specs,
-            source: "manual", source_ref: None, actor: "human:erik",
-        })
+        let e = create_entry(
+            db,
+            CreateEntry {
+                date,
+                description: desc,
+                postings: specs,
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        )
         .unwrap();
         if post {
             post_entry(db, e.id, "human:erik").unwrap();
@@ -441,9 +520,31 @@ mod tests {
     #[test]
     fn trial_balance_balances() {
         let db = books();
-        create_account(&db, &NewAccount { code: "1500", name: "BTW", type_: "liability", normal_balance: "credit", taxonomy_code: None }).unwrap();
-        add(&db, "2026-01-05", "start", &[("1100", 500000), ("3000", -500000)], true);
-        add(&db, "2026-02-05", "verkoop", &[("1100", 12100), ("8000", -10000), ("1500", -2100)], true);
+        create_account(
+            &db,
+            &NewAccount {
+                code: "1500",
+                name: "BTW",
+                type_: "liability",
+                normal_balance: "credit",
+                taxonomy_code: None,
+            },
+        )
+        .unwrap();
+        add(
+            &db,
+            "2026-01-05",
+            "start",
+            &[("1100", 500000), ("3000", -500000)],
+            true,
+        );
+        add(
+            &db,
+            "2026-02-05",
+            "verkoop",
+            &[("1100", 12100), ("8000", -10000), ("1500", -2100)],
+            true,
+        );
         let tb = trial_balance(&db, Some("2026")).unwrap();
         assert_eq!(tb["balanced"], true);
         assert_eq!(tb["total_debit_cents"], 512100);
@@ -456,9 +557,31 @@ mod tests {
     #[test]
     fn balans_and_pnl_shape() {
         let db = books();
-        create_account(&db, &NewAccount { code: "1510", name: "BTW te betalen", type_: "liability", normal_balance: "credit", taxonomy_code: None }).unwrap();
-        add(&db, "2026-01-05", "start", &[("1100", 1000000), ("3000", -1000000)], true);
-        add(&db, "2026-03-05", "omzet", &[("1100", 6050), ("8000", -5000), ("1510", -1050)], true);
+        create_account(
+            &db,
+            &NewAccount {
+                code: "1510",
+                name: "BTW te betalen",
+                type_: "liability",
+                normal_balance: "credit",
+                taxonomy_code: None,
+            },
+        )
+        .unwrap();
+        add(
+            &db,
+            "2026-01-05",
+            "start",
+            &[("1100", 1000000), ("3000", -1000000)],
+            true,
+        );
+        add(
+            &db,
+            "2026-03-05",
+            "omzet",
+            &[("1100", 6050), ("8000", -5000), ("1510", -1050)],
+            true,
+        );
         let b = balans(&db, "2026-12-31").unwrap();
         assert_eq!(b["balanced"], true);
         assert_eq!(b["as_of"], "2026-12-31");
@@ -473,15 +596,28 @@ mod tests {
     #[test]
     fn fiscal_year_windows() {
         let db = books(); // fiscal_year_end default 12-31
-        assert_eq!(fiscal_year_window(&db, "2026"), ("2026-01-01".into(), "2026-12-31".into()));
-        db.execute("UPDATE company SET fiscal_year_end = '06-30'", []).unwrap();
-        assert_eq!(fiscal_year_window(&db, "2026"), ("2025-07-01".into(), "2026-06-30".into()));
+        assert_eq!(
+            fiscal_year_window(&db, "2026"),
+            ("2026-01-01".into(), "2026-12-31".into())
+        );
+        db.execute("UPDATE company SET fiscal_year_end = '06-30'", [])
+            .unwrap();
+        assert_eq!(
+            fiscal_year_window(&db, "2026"),
+            ("2025-07-01".into(), "2026-06-30".into())
+        );
     }
 
     #[test]
     fn journal_lists_postings() {
         let db = books();
-        add(&db, "2026-01-05", "start", &[("1100", 100000), ("3000", -100000)], true);
+        add(
+            &db,
+            "2026-01-05",
+            "start",
+            &[("1100", 100000), ("3000", -100000)],
+            true,
+        );
         let rows = journal(&db, "2026-01-01", "2026-12-31", None).unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["account_code"], "1100");

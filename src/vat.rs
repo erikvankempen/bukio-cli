@@ -6,20 +6,20 @@
 // OB-aangifte readout, filing & settlement.
 
 use crate::accounts::{create_account, get_account_by_code, resolve_profile, NewAccount};
+use crate::actor::now_iso;
 use crate::audit::{record, RecordArgs};
 use crate::dates::today_iso;
-use crate::entries::{
-    create_entry, post_entry, CreateEntry, PostingSpec,
-};
+use crate::entries::{create_entry, post_entry, CreateEntry, PostingSpec};
 use crate::money::{format_amount, parse_amount, BukioError, Result};
-use crate::actor::now_iso;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
 pub fn is_vat_enabled(db: &Connection) -> bool {
-    db.query_row("SELECT vat_module, kor_flag FROM company WHERE id = 1", [], |r| {
-        Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?))
-    })
+    db.query_row(
+        "SELECT vat_module, kor_flag FROM company WHERE id = 1",
+        [],
+        |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
+    )
     .map(|(v, k)| v == 1 && k == 0)
     .unwrap_or(false)
 }
@@ -37,7 +37,9 @@ fn require_vat(db: &Connection) -> Result<()> {
 /// Enable the VAT module: flag + VAT accounts + VAT codes. Idempotent.
 pub fn enable_vat_module(db: &Connection, actor: &str) -> Result<Value> {
     let kor: i64 = db
-        .query_row("SELECT kor_flag FROM company WHERE id = 1", [], |r| r.get(0))
+        .query_row("SELECT kor_flag FROM company WHERE id = 1", [], |r| {
+            r.get(0)
+        })
         .unwrap_or(0);
     if kor == 1 {
         return Err(BukioError::new("KOR_ACTIVE", "this company uses the KOR (kleineondernemersregeling) — the VAT module cannot be enabled"));
@@ -46,17 +48,25 @@ pub fn enable_vat_module(db: &Connection, actor: &str) -> Result<Value> {
     let tax = &profile["tax"];
     let tx = db.unchecked_transaction().map_err(sql_err)?;
     {
-        tx.execute("UPDATE company SET vat_module = 1 WHERE id = 1", []).map_err(sql_err)?;
-        for a in tax["accounts"]["ledger"].as_array().cloned().unwrap_or_default() {
+        tx.execute("UPDATE company SET vat_module = 1 WHERE id = 1", [])
+            .map_err(sql_err)?;
+        for a in tax["accounts"]["ledger"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+        {
             let code = a["code"].as_str().unwrap_or_default();
             if get_account_by_code(&tx, code).is_none() {
-                create_account(&tx, &NewAccount {
-                    code,
-                    name: a["name"].as_str().unwrap_or_default(),
-                    type_: a["type"].as_str().unwrap_or("liability"),
-                    normal_balance: a["normalBalance"].as_str().unwrap_or("credit"),
-                    taxonomy_code: a["taxonomyCode"].as_str(),
-                })?;
+                create_account(
+                    &tx,
+                    &NewAccount {
+                        code,
+                        name: a["name"].as_str().unwrap_or_default(),
+                        type_: a["type"].as_str().unwrap_or("liability"),
+                        normal_balance: a["normalBalance"].as_str().unwrap_or("credit"),
+                        taxonomy_code: a["taxonomyCode"].as_str(),
+                    },
+                )?;
             }
         }
         for c in tax["codes"].as_array().cloned().unwrap_or_default() {
@@ -72,14 +82,35 @@ pub fn enable_vat_module(db: &Connection, actor: &str) -> Result<Value> {
             )
             .map_err(sql_err)?;
         }
-        record(&tx, RecordArgs {
-            actor, action: "vat.enable", command: Some("vat enable"),
-            args: Some(json!({})), outcome: "ok", entry_ids: vec![],
-        })?;
+        record(
+            &tx,
+            RecordArgs {
+                actor,
+                action: "vat.enable",
+                command: Some("vat enable"),
+                args: Some(json!({})),
+                outcome: "ok",
+                entry_ids: vec![],
+            },
+        )?;
     }
     tx.commit().map_err(sql_err)?;
-    let accounts: Vec<String> = tax["accounts"]["ledger"].as_array().map(|a| a.iter().map(|x| x["code"].as_str().unwrap_or_default().to_string()).collect()).unwrap_or_default();
-    let codes: Vec<String> = tax["codes"].as_array().map(|a| a.iter().map(|x| x["code"].as_str().unwrap_or_default().to_string()).collect()).unwrap_or_default();
+    let accounts: Vec<String> = tax["accounts"]["ledger"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|x| x["code"].as_str().unwrap_or_default().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    let codes: Vec<String> = tax["codes"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .map(|x| x["code"].as_str().unwrap_or_default().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(json!({ "vat_module": 1, "accounts": accounts, "codes": codes }))
 }
 
@@ -120,11 +151,15 @@ pub fn parse_vat_posting_specs(raw: &[String]) -> Result<Vec<VatSpec>> {
             if t.is_empty() {
                 continue;
             }
-            let bad = || BukioError::new(
-                "INVALID_POSTING",
-                format!("posting '{t}' must be CODE:AMOUNT[@VATCODE] (e.g. 8000:-100.00@21)"),
-            );
-            let Some((code, rest)) = t.split_once(':') else { return Err(bad()) };
+            let bad = || {
+                BukioError::new(
+                    "INVALID_POSTING",
+                    format!("posting '{t}' must be CODE:AMOUNT[@VATCODE] (e.g. 8000:-100.00@21)"),
+                )
+            };
+            let Some((code, rest)) = t.split_once(':') else {
+                return Err(bad());
+            };
             if code.is_empty() || code.len() > 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
                 return Err(bad());
             }
@@ -148,12 +183,18 @@ pub fn parse_vat_posting_specs(raw: &[String]) -> Result<Vec<VatSpec>> {
 }
 
 /// Expand VAT-aware specs into core postings (mirrors expandVatPostings).
-pub fn expand_vat_postings(db: &Connection, specs: &[VatSpec]) -> Result<(Vec<PostingSpec>, Vec<(Option<String>, Option<i64>)>)> {
+pub fn expand_vat_postings(
+    db: &Connection,
+    specs: &[VatSpec],
+) -> Result<(Vec<PostingSpec>, Vec<(Option<String>, Option<i64>)>)> {
     require_vat(db)?;
     let profile = resolve_profile(db)?;
     let tax = &profile["tax"];
     let reverse_rate = tax["reverseChargeEffectiveRateBp"].as_i64().unwrap_or(2100);
-    let ledger = tax["accounts"]["ledger"].as_array().cloned().unwrap_or_default();
+    let ledger = tax["accounts"]["ledger"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let input_acc = ledger.iter().find(|a| a["type"] == "asset");
     let output_acc = ledger.iter().find(|a| a["type"] == "liability");
     let (input_code, output_code) = match (input_acc, output_acc) {
@@ -180,8 +221,12 @@ pub fn expand_vat_postings(db: &Connection, specs: &[VatSpec]) -> Result<(Vec<Po
     let mut vat_legs: Vec<PostingSpec> = Vec::new();
 
     for spec in specs {
-        let account = get_account_by_code(db, &spec.code)
-            .ok_or_else(|| BukioError::new("ACCOUNT_NOT_FOUND", format!("account {} does not exist", spec.code)))?;
+        let account = get_account_by_code(db, &spec.code).ok_or_else(|| {
+            BukioError::new(
+                "ACCOUNT_NOT_FOUND",
+                format!("account {} does not exist", spec.code),
+            )
+        })?;
         match &spec.vat_code {
             Some(vc) => {
                 let vat: Option<(i64, String, bool)> = db
@@ -192,13 +237,24 @@ pub fn expand_vat_postings(db: &Connection, specs: &[VatSpec]) -> Result<(Vec<Po
                     )
                     .ok();
                 let Some((rate_bp, vtype, eu_reverse)) = vat else {
-                    return Err(BukioError::new("VAT_CODE_NOT_FOUND", format!("vat code '{vc}' does not exist")));
+                    return Err(BukioError::new(
+                        "VAT_CODE_NOT_FOUND",
+                        format!("vat code '{vc}' does not exist"),
+                    ));
                 };
                 if vtype == "margin" {
-                    return Err(BukioError::new("VAT_MARGIN_NOT_SUPPORTED", "margeregeling cannot be split automatically — book it manually"));
+                    return Err(BukioError::new(
+                        "VAT_MARGIN_NOT_SUPPORTED",
+                        "margeregeling cannot be split automatically — book it manually",
+                    ));
                 }
-                let effective_rate = if vtype == "reverse" || vtype == "private" { reverse_rate } else { rate_bp };
-                let num = (spec.amount_cents.abs() as i128 * effective_rate as i128) as f64 / 10000.0;
+                let effective_rate = if vtype == "reverse" || vtype == "private" {
+                    reverse_rate
+                } else {
+                    rate_bp
+                };
+                let num =
+                    (spec.amount_cents.abs() as i128 * effective_rate as i128) as f64 / 10000.0;
                 let rounded = num.round() as i64;
                 let vat_amount = if vtype == "private" {
                     -rounded
@@ -206,7 +262,11 @@ pub fn expand_vat_postings(db: &Connection, specs: &[VatSpec]) -> Result<(Vec<Po
                     rounded * spec.amount_cents.signum()
                 };
                 let is_output = account["type"] == "income" || vtype == "private";
-                let vat_account = if is_output { output_code.clone() } else { input_code.clone() };
+                let vat_account = if is_output {
+                    output_code.clone()
+                } else {
+                    input_code.clone()
+                };
                 expanded.push(Expanded {
                     code: spec.code.clone(),
                     amount_cents: spec.amount_cents,
@@ -214,7 +274,11 @@ pub fn expand_vat_postings(db: &Connection, specs: &[VatSpec]) -> Result<(Vec<Po
                     vat_amount_cents: Some(vat_amount),
                 });
                 if vat_amount != 0 && vtype != "reverse" {
-                    vat_legs.push(PostingSpec { code: vat_account, amount_cents: vat_amount, cost_center_code: None });
+                    vat_legs.push(PostingSpec {
+                        code: vat_account,
+                        amount_cents: vat_amount,
+                        cost_center_code: None,
+                    });
                 }
             }
             None => expanded.push(Expanded {
@@ -237,8 +301,10 @@ pub fn expand_vat_postings(db: &Connection, specs: &[VatSpec]) -> Result<(Vec<Po
         .collect();
     // carry vat info separately — resolved inside create_entry via vat_code? No:
     // bukio stores vat_code_id on the posting; extend PostingSpec use below.
-    let vat_info: Vec<(Option<String>, Option<i64>)> =
-        expanded.iter().map(|e| (e.vat_code.clone(), e.vat_amount_cents)).collect();
+    let vat_info: Vec<(Option<String>, Option<i64>)> = expanded
+        .iter()
+        .map(|e| (e.vat_code.clone(), e.vat_amount_cents))
+        .collect();
     result.extend(vat_legs);
     let sum: i64 = result.iter().map(|p| p.amount_cents).sum();
     if sum != 0 {
@@ -274,14 +340,17 @@ pub fn book_vat_entry(
     post: bool,
 ) -> Result<Value> {
     let (expanded_specs, vat_info) = expand_vat_postings(db, specs)?;
-    let entry = create_entry(db, CreateEntry {
-        date,
-        description,
-        postings: expanded_specs,
-        source,
-        source_ref,
-        actor,
-    })?;
+    let entry = create_entry(
+        db,
+        CreateEntry {
+            date,
+            description,
+            postings: expanded_specs,
+            source,
+            source_ref,
+            actor,
+        },
+    )?;
     // attach vat code + amount to the ORIGINAL (tagged) postings
     for spec in specs {
         if let Some(vc) = &spec.vat_code {
@@ -294,11 +363,21 @@ pub fn book_vat_entry(
                 .ok();
             if let Some((vat_id, rate_bp, vtype)) = vat_row {
                 let profile = resolve_profile(db)?;
-                let reverse_rate = profile["tax"]["reverseChargeEffectiveRateBp"].as_i64().unwrap_or(2100);
-                let effective = if vtype == "reverse" || vtype == "private" { reverse_rate } else { rate_bp };
+                let reverse_rate = profile["tax"]["reverseChargeEffectiveRateBp"]
+                    .as_i64()
+                    .unwrap_or(2100);
+                let effective = if vtype == "reverse" || vtype == "private" {
+                    reverse_rate
+                } else {
+                    rate_bp
+                };
                 let num = (spec.amount_cents.abs() as i128 * effective as i128) as f64 / 10000.0;
                 let rounded = num.round() as i64;
-                let vat_amount = if vtype == "private" { -rounded } else { rounded * spec.amount_cents.signum() };
+                let vat_amount = if vtype == "private" {
+                    -rounded
+                } else {
+                    rounded * spec.amount_cents.signum()
+                };
                 // find the posting row: account code + amount match on this entry
                 let posting_id: Option<i64> = db
                     .query_row(
@@ -332,7 +411,8 @@ pub fn book_vat_entry(
                 .query_row(
                     "SELECT vc.code, p.vat_amount_cents FROM postings p
                      LEFT JOIN vat_codes vc ON vc.id = p.vat_code_id WHERE p.id = ?1",
-                    [p.id], |r| Ok((r.get(0)?, r.get(1)?)),
+                    [p.id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .unwrap_or((None, None));
             json!({
@@ -353,10 +433,12 @@ pub fn book_vat_entry(
 
 /// Parse '2026-Q2' or '2026-07' into { from, to }.
 pub fn parse_period(period: &str) -> Result<(String, String)> {
-    let bad = || BukioError::new(
-        "INVALID_PERIOD",
-        format!("period '{period}' must be YYYY-Qn or YYYY-MM"),
-    );
+    let bad = || {
+        BukioError::new(
+            "INVALID_PERIOD",
+            format!("period '{period}' must be YYYY-Qn or YYYY-MM"),
+        )
+    };
     let parts: Vec<&str> = period.split('-').collect();
     if parts.len() == 2 {
         let y = parts[0];
@@ -366,7 +448,11 @@ pub fn parse_period(period: &str) -> Result<(String, String)> {
                     if (1..=4).contains(&q) {
                         let from = format!("{y}-{:02}-01", (q - 1) * 3 + 1);
                         let to_month = q * 3;
-                        let to = format!("{y}-{:02}-{:02}", to_month, dim(y.parse().unwrap(), to_month));
+                        let to = format!(
+                            "{y}-{:02}-{:02}",
+                            to_month,
+                            dim(y.parse().unwrap(), to_month)
+                        );
                         return Ok((from, to));
                     }
                 }
@@ -395,7 +481,11 @@ fn dim(y: i32, m: u32) -> u32 {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
         2 => {
-            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 { 29 } else { 28 }
+            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+                29
+            } else {
+                28
+            }
         }
         _ => 30,
     }
@@ -406,12 +496,19 @@ pub fn ob_readout(db: &Connection, period: &str) -> Result<Value> {
     require_vat(db)?;
     let profile = resolve_profile(db)?;
     if profile["tax"]["returnLayout"].as_str() != Some("ob-1a-5d") {
-        return Err(BukioError::new("FORMAT_NOT_SUPPORTED", "no VAT-return layout for this jurisdiction yet"));
+        return Err(BukioError::new(
+            "FORMAT_NOT_SUPPORTED",
+            "no VAT-return layout for this jurisdiction yet",
+        ));
     }
     let (from, to) = parse_period(period)?;
     let clearing: Vec<String> = profile["tax"]["accounts"]["ledger"]
         .as_array()
-        .map(|a| a.iter().map(|x| format!("'{}'", x["code"].as_str().unwrap_or_default())).collect())
+        .map(|a| {
+            a.iter()
+                .map(|x| format!("'{}'", x["code"].as_str().unwrap_or_default()))
+                .collect()
+        })
         .unwrap_or_default();
     let sql = format!(
         "SELECT p.amount_cents, p.vat_amount_cents, vc.code, vc.rate_bp, vc.type, vc.eu_reverse, a.type, a.code
@@ -487,7 +584,13 @@ pub fn ob_readout(db: &Connection, period: &str) -> Result<Value> {
                 } else if account_type == "income" {
                     f1c += -amount;
                 } else if account_type == "expense" {
-                    if eu_reverse { f3b += amount; f4b += vat_amount; } else { f3a += amount; f4a += vat_amount; }
+                    if eu_reverse {
+                        f3b += amount;
+                        f4b += vat_amount;
+                    } else {
+                        f3a += amount;
+                        f4a += vat_amount;
+                    }
                     f5b += vat_amount;
                 }
             }
@@ -527,13 +630,19 @@ pub fn mark_filed(db: &Connection, period: &str, actor: &str) -> Result<Value> {
         rusqlite::params![period, fields, now_iso()],
     )
     .map_err(sql_err)?;
-    record(db, RecordArgs {
-        actor, action: "vat.filed", command: Some("vat readout --mark-filed"),
-        args: Some(json!({ "period": period })), outcome: "ok", entry_ids: vec![],
-    })?;
+    record(
+        db,
+        RecordArgs {
+            actor,
+            action: "vat.filed",
+            command: Some("vat readout --mark-filed"),
+            args: Some(json!({ "period": period })),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     Ok(json!({ "period": period, "from": from, "to": to, "status": "filed" }))
 }
-
 
 /// Reclassify the outstanding VAT position to the af-te-dragen account at
 /// filing (mirrors vatFile). VAT leg amounts use exact booked cents.
@@ -548,10 +657,16 @@ pub fn vat_file(
     require_vat(db)?;
     let profile = resolve_profile(db)?;
     let tax = &profile["tax"];
-    let mut account = account
-        .map(String::from)
-        .unwrap_or_else(|| tax["accounts"]["fileDefault"].as_str().unwrap_or("2510").to_string());
-    let ledger = tax["accounts"]["ledger"].as_array().cloned().unwrap_or_default();
+    let mut account = account.map(String::from).unwrap_or_else(|| {
+        tax["accounts"]["fileDefault"]
+            .as_str()
+            .unwrap_or("2510")
+            .to_string()
+    });
+    let ledger = tax["accounts"]["ledger"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let input_acc = ledger.iter().find(|a| a["type"] == "asset");
     let output_acc = ledger.iter().find(|a| a["type"] == "liability");
     let (input_code, output_code) = match (input_acc, output_acc) {
@@ -573,17 +688,31 @@ pub fn vat_file(
     account = resolve_vat_settlement_account(db, &account)?;
 
     let mut postings = vec![
-        PostingSpec { code: output_code.clone(), amount_cents: -bal_output, cost_center_code: None },
-        PostingSpec { code: input_code.clone(), amount_cents: -bal_input, cost_center_code: None },
-        PostingSpec { code: account.clone(), amount_cents: bal_output + bal_input, cost_center_code: None },
+        PostingSpec {
+            code: output_code.clone(),
+            amount_cents: -bal_output,
+            cost_center_code: None,
+        },
+        PostingSpec {
+            code: input_code.clone(),
+            amount_cents: -bal_input,
+            cost_center_code: None,
+        },
+        PostingSpec {
+            code: account.clone(),
+            amount_cents: bal_output + bal_input,
+            cost_center_code: None,
+        },
     ];
     postings.retain(|p| p.amount_cents != 0);
     let owe = net > 0;
     let liability = net.abs();
     let description = desc.map(String::from).unwrap_or_else(|| {
         let direction = if owe { "payable" } else { "receivable" };
-        format!("VAT filing{period_part} — reclassify to {account} ({direction})",
-            period_part = period.map(|p| format!(" {p}")).unwrap_or_default())
+        format!(
+            "VAT filing{period_part} — reclassify to {account} ({direction})",
+            period_part = period.map(|p| format!(" {p}")).unwrap_or_default()
+        )
     });
 
     if dry_run {
@@ -595,21 +724,35 @@ pub fn vat_file(
     }
 
     ensure_vat_settlement_account(db, &account)?;
-    let postings_json: Vec<Value> = postings.iter().map(|p| json!({ "code": p.code, "amountCents": p.amount_cents })).collect();
-    let created = create_entry(db, CreateEntry {
-        date: &today_iso(),
-        description: &description,
-        postings,
-        source: "manual",
-        source_ref: None,
-        actor,
-    })?;
+    let postings_json: Vec<Value> = postings
+        .iter()
+        .map(|p| json!({ "code": p.code, "amountCents": p.amount_cents }))
+        .collect();
+    let created = create_entry(
+        db,
+        CreateEntry {
+            date: &today_iso(),
+            description: &description,
+            postings,
+            source: "manual",
+            source_ref: None,
+            actor,
+        },
+    )?;
     post_entry(db, created.id, actor)?;
-    record(db, RecordArgs {
-        actor, action: "vat.file", command: Some("vat file"),
-        args: Some(json!({ "account": account, "period": period, "owe": owe, "liability_cents": liability, "description": description })),
-        outcome: "ok", entry_ids: vec![created.id],
-    })?;
+    record(
+        db,
+        RecordArgs {
+            actor,
+            action: "vat.file",
+            command: Some("vat file"),
+            args: Some(
+                json!({ "account": account, "period": period, "owe": owe, "liability_cents": liability, "description": description }),
+            ),
+            outcome: "ok",
+            entry_ids: vec![created.id],
+        },
+    )?;
     Ok(json!({
         "action": "vat.file", "entry_id": created.id, "account": account, "owe": owe,
         "liability_cents": liability,
@@ -618,21 +761,28 @@ pub fn vat_file(
 }
 
 fn settlement_account_name(db: &Connection) -> String {
-    resolve_profile(db)
-        .unwrap_or_else(|_| crate::accounts::get_profile("NL").unwrap())
-        ["tax"]["accounts"]["settlementAccountName"]
+    resolve_profile(db).unwrap_or_else(|_| crate::accounts::get_profile("NL").unwrap())["tax"]
+        ["accounts"]["settlementAccountName"]
         .as_str()
         .unwrap_or("Af te dragen omzetbelasting")
         .to_string()
 }
 
 fn is_vat_settlement_account(db: &Connection, code: &str) -> bool {
-    let Some(a) = get_account_by_code(db, code) else { return false };
+    let Some(a) = get_account_by_code(db, code) else {
+        return false;
+    };
     let profile = resolve_profile(db).unwrap();
-    let file_default = profile["tax"]["accounts"]["fileDefault"].as_str().unwrap_or("");
+    let file_default = profile["tax"]["accounts"]["fileDefault"]
+        .as_str()
+        .unwrap_or("");
     let seeded = profile["reporting"]["defaultChart"]
         .as_array()
-        .and_then(|chart| chart.iter().find(|c| c["code"].as_str() == Some(file_default)));
+        .and_then(|chart| {
+            chart
+                .iter()
+                .find(|c| c["code"].as_str() == Some(file_default))
+        });
     if let Some(seeded_row) = seeded {
         if code == file_default
             && a["name"].as_str() == seeded_row["name"].as_str()
@@ -673,7 +823,12 @@ fn resolve_vat_settlement_account(db: &Connection, account: &str) -> Result<Stri
         }
         guard += 1;
         if guard > 999 {
-            return Err(BukioError::new("VAT_ACCOUNT_COLLISION", format!("no free numeric successor after {account} — pick a free code with --account")));
+            return Err(BukioError::new(
+                "VAT_ACCOUNT_COLLISION",
+                format!(
+                    "no free numeric successor after {account} — pick a free code with --account"
+                ),
+            ));
         }
     }
 }
@@ -686,13 +841,16 @@ fn ensure_vat_settlement_account(db: &Connection, account: &str) -> Result<()> {
             .as_array()
             .map(|c| c.iter().any(|a| a["taxonomyCode"].is_string()))
             .unwrap_or(false);
-        create_account(db, &NewAccount {
-            code: &resolved,
-            name: &settlement_account_name(db),
-            type_: "liability",
-            normal_balance: "credit",
-            taxonomy_code: if uses_taxonomy { Some("BSCH.12") } else { None },
-        })?;
+        create_account(
+            db,
+            &NewAccount {
+                code: &resolved,
+                name: &settlement_account_name(db),
+                type_: "liability",
+                normal_balance: "credit",
+                taxonomy_code: if uses_taxonomy { Some("BSCH.12") } else { None },
+            },
+        )?;
     }
     Ok(())
 }
@@ -713,17 +871,26 @@ pub fn vat_settle(
 ) -> Result<Value> {
     require_vat(db)?;
     let tax = &resolve_profile(db)?["tax"];
-    let account = account
-        .map(String::from)
-        .unwrap_or_else(|| tax["accounts"]["fileDefault"].as_str().unwrap_or("2510").to_string());
-    let difference_account = difference_account
-        .map(String::from)
-        .unwrap_or_else(|| tax["accounts"]["differenceDefault"].as_str().unwrap_or("4700").to_string());
+    let account = account.map(String::from).unwrap_or_else(|| {
+        tax["accounts"]["fileDefault"]
+            .as_str()
+            .unwrap_or("2510")
+            .to_string()
+    });
+    let difference_account = difference_account.map(String::from).unwrap_or_else(|| {
+        tax["accounts"]["differenceDefault"]
+            .as_str()
+            .unwrap_or("4700")
+            .to_string()
+    });
     let balance = account_balance(db, &account)?;
     if balance == 0 {
         return Err(BukioError::new(
             "VAT_SETTLE_NOTHING",
-            format!("no outstanding balance on {account} ({}) to settle", settlement_account_name(db)),
+            format!(
+                "no outstanding balance on {account} ({}) to settle",
+                settlement_account_name(db)
+            ),
         ));
     }
     let owe = balance < 0;
@@ -749,17 +916,31 @@ pub fn vat_settle(
         ));
     }
     let mut postings = vec![
-        PostingSpec { code: account.clone(), amount_cents: if owe { liability } else { -liability }, cost_center_code: None },
-        PostingSpec { code: bank_account_code.to_string(), amount_cents: tx_amount_cents, cost_center_code: None },
+        PostingSpec {
+            code: account.clone(),
+            amount_cents: if owe { liability } else { -liability },
+            cost_center_code: None,
+        },
+        PostingSpec {
+            code: bank_account_code.to_string(),
+            amount_cents: tx_amount_cents,
+            cost_center_code: None,
+        },
     ];
     if difference != 0 {
-        postings.push(PostingSpec { code: difference_account.clone(), amount_cents: difference, cost_center_code: None });
+        postings.push(PostingSpec {
+            code: difference_account.clone(),
+            amount_cents: difference,
+            cost_center_code: None,
+        });
     }
     let description = desc.map(String::from).unwrap_or_else(|| {
-        format!("VAT settlement{period_part} — {} (difference {diff})",
+        format!(
+            "VAT settlement{period_part} — {} (difference {diff})",
             settlement_account_name(db),
             period_part = period.map(|p| format!(" {p}")).unwrap_or_default(),
-            diff = format_amount(difference))
+            diff = format_amount(difference)
+        )
     });
     let date = tx_date.map(String::from).unwrap_or_else(today_iso);
     if dry_run {
@@ -770,17 +951,35 @@ pub fn vat_settle(
             "postings": postings.iter().map(|p| json!({ "code": p.code, "amount_cents": p.amount_cents })).collect::<Vec<_>>(),
         }));
     }
-    let postings_json: Vec<Value> = postings.iter().map(|p| json!({ "code": p.code, "amountCents": p.amount_cents })).collect();
-    let created = create_entry(db, CreateEntry {
-        date: &date, description: &description, postings,
-        source: "manual", source_ref: None, actor,
-    })?;
+    let postings_json: Vec<Value> = postings
+        .iter()
+        .map(|p| json!({ "code": p.code, "amountCents": p.amount_cents }))
+        .collect();
+    let created = create_entry(
+        db,
+        CreateEntry {
+            date: &date,
+            description: &description,
+            postings,
+            source: "manual",
+            source_ref: None,
+            actor,
+        },
+    )?;
     post_entry(db, created.id, actor)?;
-    record(db, RecordArgs {
-        actor, action: "vat.settle", command: Some("vat settle"),
-        args: Some(json!({ "account": account, "period": period, "owe": owe, "liability_cents": liability, "paid_cents": paid, "difference_cents": difference, "difference_account": difference_account, "description": description })),
-        outcome: "ok", entry_ids: vec![created.id],
-    })?;
+    record(
+        db,
+        RecordArgs {
+            actor,
+            action: "vat.settle",
+            command: Some("vat settle"),
+            args: Some(
+                json!({ "account": account, "period": period, "owe": owe, "liability_cents": liability, "paid_cents": paid, "difference_cents": difference, "difference_account": difference_account, "description": description }),
+            ),
+            outcome: "ok",
+            entry_ids: vec![created.id],
+        },
+    )?;
     Ok(json!({
         "action": "vat.settle", "entry_id": created.id, "account": account, "owe": owe,
         "liability_cents": liability, "paid_cents": paid, "difference_cents": difference,
@@ -841,8 +1040,16 @@ mod tests {
             "2026-04-10",
             "Verkoop",
             &[
-                VatSpec { code: "1100".into(), amount_cents: 12100, vat_code: None },
-                VatSpec { code: "8000".into(), amount_cents: -10000, vat_code: Some("21".into()) },
+                VatSpec {
+                    code: "1100".into(),
+                    amount_cents: 12100,
+                    vat_code: None,
+                },
+                VatSpec {
+                    code: "8000".into(),
+                    amount_cents: -10000,
+                    vat_code: Some("21".into()),
+                },
             ],
             "manual",
             None,
@@ -860,26 +1067,81 @@ mod tests {
     #[test]
     fn file_and_settle_roundtrip() {
         let db = vat_company();
-        book_vat_entry(&db, "2026-04-10", "Verkoop",
-            &[VatSpec { code: "1100".into(), amount_cents: 12100, vat_code: None },
-              VatSpec { code: "8000".into(), amount_cents: -10000, vat_code: Some("21".into()) }],
-            "manual", None, "human:erik", true).unwrap();
+        book_vat_entry(
+            &db,
+            "2026-04-10",
+            "Verkoop",
+            &[
+                VatSpec {
+                    code: "1100".into(),
+                    amount_cents: 12100,
+                    vat_code: None,
+                },
+                VatSpec {
+                    code: "8000".into(),
+                    amount_cents: -10000,
+                    vat_code: Some("21".into()),
+                },
+            ],
+            "manual",
+            None,
+            "human:erik",
+            true,
+        )
+        .unwrap();
         // nothing outstanding on 2510 yet -> file moves 2500 position
         let filed = vat_file(&db, None, Some("2026-Q2"), None, "human:erik", false).unwrap();
         assert_eq!(filed["owe"], true);
         assert_eq!(filed["liability_cents"], 2100);
         // settle the rounded whole-euro payment (21.00 exact -> difference 0)
-        let settled = vat_settle(&db, -2100, Some("2026-07-01"), "1100", None, None, Some("2026-Q2"), None, "human:erik", false).unwrap();
+        let settled = vat_settle(
+            &db,
+            -2100,
+            Some("2026-07-01"),
+            "1100",
+            None,
+            None,
+            Some("2026-Q2"),
+            None,
+            "human:erik",
+            false,
+        )
+        .unwrap();
         assert_eq!(settled["difference_cents"], 0);
         // nothing left to settle
-        assert_eq!(vat_settle(&db, -100, None, "1100", None, None, None, None, "human:erik", false).unwrap_err().code, "VAT_SETTLE_NOTHING");
+        assert_eq!(
+            vat_settle(
+                &db,
+                -100,
+                None,
+                "1100",
+                None,
+                None,
+                None,
+                None,
+                "human:erik",
+                false
+            )
+            .unwrap_err()
+            .code,
+            "VAT_SETTLE_NOTHING"
+        );
     }
 
     #[test]
     fn period_parsing() {
-        assert_eq!(parse_period("2026-Q2").unwrap(), ("2026-04-01".into(), "2026-06-30".into()));
-        assert_eq!(parse_period("2026-02").unwrap(), ("2026-02-01".into(), ("2026-02-28").into()));
-        assert_eq!(parse_period("2024-02").unwrap(), ("2024-02-01".into(), "2024-02-29".into()));
+        assert_eq!(
+            parse_period("2026-Q2").unwrap(),
+            ("2026-04-01".into(), "2026-06-30".into())
+        );
+        assert_eq!(
+            parse_period("2026-02").unwrap(),
+            ("2026-02-01".into(), ("2026-02-28").into())
+        );
+        assert_eq!(
+            parse_period("2024-02").unwrap(),
+            ("2024-02-01".into(), "2024-02-29".into())
+        );
         assert!(parse_period("2026-13").is_err());
         assert!(parse_period("garbage").is_err());
     }

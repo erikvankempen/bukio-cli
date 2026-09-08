@@ -12,8 +12,7 @@ fn main() {
         .map(|e| e.file_name().to_string_lossy().to_string())
         .filter(|n| {
             let mut cs = n.chars();
-            cs.next().map_or(false, |c| c.is_ascii_digit())
-                && n.ends_with(".sql")
+            cs.next().map_or(false, |c| c.is_ascii_digit()) && n.ends_with(".sql")
         })
         .map(|n| {
             let v: u32 = n.split('_').next().unwrap().parse().unwrap();
@@ -24,7 +23,9 @@ fn main() {
     let mut out = String::from("pub static MIGRATIONS: &[(u32, &str)] = &[\n");
     for (v, n) in entries {
         println!("cargo:rerun-if-changed=migrations/{n}");
-        out.push_str(&format!("    ({v}, include_str!(\"../migrations/{n}\")),\n"));
+        out.push_str(&format!(
+            "    ({v}, include_str!(\"../migrations/{n}\")),\n"
+        ));
     }
     out.push_str("];\n");
     let dest = Path::new(&dir).join("src").join("migrations_data.rs");

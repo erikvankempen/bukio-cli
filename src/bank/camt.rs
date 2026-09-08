@@ -34,10 +34,9 @@ fn parse_ntry(block: &str) -> Option<BankTx> {
     let amount_str = extract_tag(block, "Amt")?;
     let amount_cents = parse_amount_cents(&amount_str)?;
     let counterparty = extract_tag(block, "Nm").or_else(|| extract_tag(block, "Cdtr/Nm"));
-    let description = extract_tag(block, "AddtlNtryInf")
-        .or_else(|| extract_tag(block, "Desc"));
-    let iban_counter = extract_tag(block, "CdtrAcct/Id/IBAN")
-        .or_else(|| extract_tag(block, "DbtrAcct/Id/IBAN"));
+    let description = extract_tag(block, "AddtlNtryInf").or_else(|| extract_tag(block, "Desc"));
+    let iban_counter =
+        extract_tag(block, "CdtrAcct/Id/IBAN").or_else(|| extract_tag(block, "DbtrAcct/Id/IBAN"));
     let bank_ref = extract_tag(block, "AcctSvcrRef");
 
     Some(BankTx {
@@ -61,7 +60,11 @@ fn extract_tag(xml: &str, tag: &str) -> Option<String> {
     let end = xml[content_start..].find(&end_tag)?;
     let value = &xml[content_start..content_start + end];
     let trimmed = value.trim().to_string();
-    if trimmed.is_empty() { None } else { Some(trimmed) }
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
 }
 
 fn parse_amount_cents(s: &str) -> Option<i64> {

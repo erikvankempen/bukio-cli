@@ -9,9 +9,13 @@ use crate::money::BukioError;
 
 /// Auto-detect the delimiter (semicolon, comma, tab) from the header line.
 fn detect_delimiter(header: &str) -> char {
-    if header.contains(';') { ';' }
-    else if header.contains('\t') { '\t' }
-    else { ',' }
+    if header.contains(';') {
+        ';'
+    } else if header.contains('\t') {
+        '\t'
+    } else {
+        ','
+    }
 }
 
 /// Split a CSV line respecting quotes (naive but sufficient for bank exports).
@@ -23,7 +27,9 @@ fn split_csv_line(line: &str, delimiter: char) -> Vec<String> {
     let mut i = 0;
     while i < chars.len() {
         match chars[i] {
-            '"' if !in_quotes => { in_quotes = true; }
+            '"' if !in_quotes => {
+                in_quotes = true;
+            }
             '"' if in_quotes => {
                 // check for escaped quote ""
                 if i + 1 < chars.len() && chars[i + 1] == '"' {
@@ -47,8 +53,7 @@ fn split_csv_line(line: &str, delimiter: char) -> Vec<String> {
 
 /// Normalize a header name to a canonical key.
 fn normalize_header(h: &str) -> String {
-    h.trim().to_lowercase()
-        .replace([' ', '_', '-'], "")
+    h.trim().to_lowercase().replace([' ', '_', '-'], "")
 }
 
 /// Find the column index for a canonical key.
@@ -60,7 +65,10 @@ fn find_column(header: &[String], key: &str) -> Option<usize> {
 pub fn parse_bank_csv(content: &str, _default_iban: &str) -> Result<Vec<BankTx>, BukioError> {
     let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
     if lines.len() < 2 {
-        return Err(BukioError::new("EMPTY_CSV", "bank CSV needs a header row and at least one transaction"));
+        return Err(BukioError::new(
+            "EMPTY_CSV",
+            "bank CSV needs a header row and at least one transaction",
+        ));
     }
     let delimiter = detect_delimiter(lines[0]);
     let header: Vec<String> = split_csv_line(lines[0], delimiter)
@@ -87,8 +95,18 @@ pub fn parse_bank_csv(content: &str, _default_iban: &str) -> Result<Vec<BankTx>,
         .or_else(|| find_column(&header, "iban"))
         .or_else(|| find_column(&header, "tegenrekeningnummer"));
 
-    let date_idx = date_idx.ok_or_else(|| BukioError::new("INVALID_CSV_HEADER", "bank CSV needs a date column (datum/date)"))?;
-    let amount_idx = amount_idx.ok_or_else(|| BukioError::new("INVALID_CSV_HEADER", "bank CSV needs an amount column (bedrag/amount)"))?;
+    let date_idx = date_idx.ok_or_else(|| {
+        BukioError::new(
+            "INVALID_CSV_HEADER",
+            "bank CSV needs a date column (datum/date)",
+        )
+    })?;
+    let amount_idx = amount_idx.ok_or_else(|| {
+        BukioError::new(
+            "INVALID_CSV_HEADER",
+            "bank CSV needs an amount column (bedrag/amount)",
+        )
+    })?;
 
     let mut txs = Vec::new();
     for (i, line) in lines[1..].iter().enumerate() {
@@ -105,7 +123,9 @@ pub fn parse_bank_csv(content: &str, _default_iban: &str) -> Result<Vec<BankTx>,
             Some(v) => v,
             None => continue, // skip unparseable rows
         };
-        if date.is_empty() { continue; }
+        if date.is_empty() {
+            continue;
+        }
         txs.push(BankTx {
             date,
             amount_cents,
@@ -136,7 +156,9 @@ fn normalize_date(s: &str) -> String {
 /// Parse a bank amount string (handles Dutch "1.234,56" and English "1,234.56").
 fn parse_bank_amount(s: &str) -> Option<i64> {
     let s = s.trim();
-    if s.is_empty() { return None; }
+    if s.is_empty() {
+        return None;
+    }
     let negative = s.starts_with('-');
     let s = s.trim_start_matches(['-', '+']);
 
@@ -159,7 +181,7 @@ fn parse_bank_amount(s: &str) -> Option<i64> {
         }
         (true, false) => s.replace(',', ""), // English with dots only
         (false, true) => s.replace(',', "."), // Dutch with comma only
-        (false, false) => s.to_string(), // integer
+        (false, false) => s.to_string(),     // integer
     };
 
     // parse as decimal

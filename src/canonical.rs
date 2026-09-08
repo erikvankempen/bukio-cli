@@ -75,7 +75,10 @@ mod tests {
     #[test]
     fn sorts_keys_recursively() {
         let v = json!({"b": 1, "a": {"z": [3, {"y": 1, "x": 2}], "b": true}});
-        assert_eq!(canonical_json(&v), r#"{"a":{"b":true,"z":[3,{"x":2,"y":1}]},"b":1}"#);
+        assert_eq!(
+            canonical_json(&v),
+            r#"{"a":{"b":true,"z":[3,{"x":2,"y":1}]},"b":1}"#
+        );
     }
 
     #[test]
@@ -104,8 +107,20 @@ mod tests {
     fn digest_excludes_identity_args() {
         let base = json!({"postings": ["1100:100.00"], "date": "2026-01-01"});
         let with_identity = json!({"postings": ["1100:100.00"], "date": "2026-01-01", "actor": "human:erik", "signKey": "/x", "json": true});
-        let d1 = build_digest("human:erik", "entry add", &base, "2026-01-01T00:00:00Z", "n");
-        let d2 = build_digest("human:erik", "entry add", &with_identity, "2026-01-01T00:00:00Z", "n");
+        let d1 = build_digest(
+            "human:erik",
+            "entry add",
+            &base,
+            "2026-01-01T00:00:00Z",
+            "n",
+        );
+        let d2 = build_digest(
+            "human:erik",
+            "entry add",
+            &with_identity,
+            "2026-01-01T00:00:00Z",
+            "n",
+        );
         assert_eq!(d1, d2);
     }
 }

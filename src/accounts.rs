@@ -26,9 +26,12 @@ pub fn get_profile(country: &str) -> Result<&'static Value> {
             format!("country '{country}' must be an ISO 3166-1 alpha-2 code (e.g. NL)"),
         ));
     }
-    profiles()
-        .get(&cc)
-        .ok_or_else(|| BukioError::new("PROFILE_NOT_FOUND", format!("no jurisdiction profile for country {cc}")))
+    profiles().get(&cc).ok_or_else(|| {
+        BukioError::new(
+            "PROFILE_NOT_FOUND",
+            format!("no jurisdiction profile for country {cc}"),
+        )
+    })
 }
 
 /// resolveProfile(db): the company's country, or NL pre-init.
@@ -53,11 +56,13 @@ pub struct NewAccount<'a> {
 }
 
 pub fn validate_account(a: &NewAccount<'_>) -> Result<()> {
-    let code_ok = !a.code.is_empty()
-        && a.code.len() <= 6
-        && a.code.bytes().all(|b| b.is_ascii_digit());
+    let code_ok =
+        !a.code.is_empty() && a.code.len() <= 6 && a.code.bytes().all(|b| b.is_ascii_digit());
     if !code_ok {
-        return Err(BukioError::new("INVALID_CODE", format!("account code '{}' must be 1-6 digits", a.code)));
+        return Err(BukioError::new(
+            "INVALID_CODE",
+            format!("account code '{}' must be 1-6 digits", a.code),
+        ));
     }
     if a.name.trim().is_empty() {
         return Err(BukioError::new("INVALID_NAME", "account name is required"));
@@ -65,13 +70,20 @@ pub fn validate_account(a: &NewAccount<'_>) -> Result<()> {
     if !VALID_TYPES.contains(&a.type_) {
         return Err(BukioError::new(
             "INVALID_TYPE",
-            format!("account type '{}' must be one of {}", a.type_, VALID_TYPES.join(", ")),
+            format!(
+                "account type '{}' must be one of {}",
+                a.type_,
+                VALID_TYPES.join(", ")
+            ),
         ));
     }
     if !matches!(a.normal_balance, "debit" | "credit") {
         return Err(BukioError::new(
             "INVALID_NORMAL_BALANCE",
-            format!("normal_balance '{}' must be debit or credit", a.normal_balance),
+            format!(
+                "normal_balance '{}' must be debit or credit",
+                a.normal_balance
+            ),
         ));
     }
     if let Some(t) = a.taxonomy_code {
@@ -87,8 +99,11 @@ pub fn validate_account(a: &NewAccount<'_>) -> Result<()> {
 
 fn valid_taxonomy(t: &str) -> bool {
     // ^[A-Z]{2,5}\.\d{2}(\.\d{1,3})*$
-    let Some((head, tail)) = t.split_once('.') else { return false };
-    let head_ok = head.len() >= 2 && head.len() <= 5 && head.bytes().all(|b| b.is_ascii_uppercase());
+    let Some((head, tail)) = t.split_once('.') else {
+        return false;
+    };
+    let head_ok =
+        head.len() >= 2 && head.len() <= 5 && head.bytes().all(|b| b.is_ascii_uppercase());
     if !head_ok {
         return false;
     }
@@ -107,7 +122,9 @@ fn valid_taxonomy(t: &str) -> bool {
 
 pub fn create_account(db: &Connection, a: &NewAccount<'_>) -> Result<Value> {
     validate_account(a)?;
-    let taxonomy = resolve_profile(db)?["reporting"]["taxonomy"].as_str().unwrap_or("RGS");
+    let taxonomy = resolve_profile(db)?["reporting"]["taxonomy"]
+        .as_str()
+        .unwrap_or("RGS");
     let insert = db.execute(
         "INSERT INTO accounts (code, name, type, taxonomy_code, normal_balance, taxonomy) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![a.code, a.name.trim(), a.type_, non_empty(a.taxonomy_code), a.normal_balance, taxonomy],
@@ -115,10 +132,17 @@ pub fn create_account(db: &Connection, a: &NewAccount<'_>) -> Result<Value> {
     if let Err(e) = insert {
         let msg = e.to_string();
         if msg.contains("UNIQUE constraint failed: accounts.code") {
-            return Err(BukioError::new("ACCOUNT_EXISTS", format!("account code {} already exists", a.code)));
+            return Err(BukioError::new(
+                "ACCOUNT_EXISTS",
+                format!("account code {} already exists", a.code),
+            ));
         }
         if msg.contains("CHECK constraint failed") {
-            let expected = if a.type_ == "asset" || a.type_ == "expense" { "debit" } else { "credit" };
+            let expected = if a.type_ == "asset" || a.type_ == "expense" {
+                "debit"
+            } else {
+                "credit"
+            };
             return Err(BukioError::new(
                 "INVALID_COMBINATION",
                 format!("type '{}' requires normal_balance '{}'", a.type_, expected),
@@ -156,8 +180,14 @@ fn row_to_account(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     }))
 }
 
-pub fn list_accounts(db: &Connection, type_filter: Option<&str>, include_inactive: bool) -> Result<Vec<Value>> {
-    let mut sql = String::from("SELECT code, name, type, taxonomy_code, normal_balance, active FROM accounts");
+pub fn list_accounts(
+    db: &Connection,
+    type_filter: Option<&str>,
+    include_inactive: bool,
+) -> Result<Vec<Value>> {
+    let mut sql = String::from(
+        "SELECT code, name, type, taxonomy_code, normal_balance, active FROM accounts",
+    );
     let mut clauses = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(t) = type_filter {
@@ -182,7 +212,10 @@ pub fn list_accounts(db: &Connection, type_filter: Option<&str>, include_inactiv
 
 /// Seed the default chart from the company's jurisdiction profile.
 pub fn seed_default_chart(db: &Connection) -> Result<usize> {
-    let chart = resolve_profile(db)?["reporting"]["defaultChart"].as_array().cloned().unwrap_or_default();
+    let chart = resolve_profile(db)?["reporting"]["defaultChart"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let mut created = 0;
     for a in chart {
         let code = a["code"].as_str().unwrap_or_default();
@@ -205,22 +238,38 @@ pub fn seed_default_chart(db: &Connection) -> Result<usize> {
 }
 
 pub fn deactivate_account(db: &Connection, code: &str) -> Result<Value> {
-    let a = get_account_by_code(db, code)
-        .ok_or_else(|| BukioError::new("ACCOUNT_NOT_FOUND", format!("account {code} does not exist")))?;
+    let a = get_account_by_code(db, code).ok_or_else(|| {
+        BukioError::new(
+            "ACCOUNT_NOT_FOUND",
+            format!("account {code} does not exist"),
+        )
+    })?;
     if !a["active"].as_bool().unwrap_or(false) {
-        return Err(BukioError::new("ALREADY_INACTIVE", format!("account {code} is already inactive")));
+        return Err(BukioError::new(
+            "ALREADY_INACTIVE",
+            format!("account {code} is already inactive"),
+        ));
     }
-    db.execute("UPDATE accounts SET active = 0 WHERE code = ?1", [code]).map_err(sql_err)?;
+    db.execute("UPDATE accounts SET active = 0 WHERE code = ?1", [code])
+        .map_err(sql_err)?;
     get_account_by_code(db, code).ok_or_else(|| BukioError::new("INTERNAL", "account vanished"))
 }
 
 pub fn reactivate_account(db: &Connection, code: &str) -> Result<Value> {
-    let a = get_account_by_code(db, code)
-        .ok_or_else(|| BukioError::new("ACCOUNT_NOT_FOUND", format!("account {code} does not exist")))?;
+    let a = get_account_by_code(db, code).ok_or_else(|| {
+        BukioError::new(
+            "ACCOUNT_NOT_FOUND",
+            format!("account {code} does not exist"),
+        )
+    })?;
     if a["active"].as_bool().unwrap_or(false) {
-        return Err(BukioError::new("ALREADY_ACTIVE", format!("account {code} is already active")));
+        return Err(BukioError::new(
+            "ALREADY_ACTIVE",
+            format!("account {code} is already active"),
+        ));
     }
-    db.execute("UPDATE accounts SET active = 1 WHERE code = ?1", [code]).map_err(sql_err)?;
+    db.execute("UPDATE accounts SET active = 1 WHERE code = ?1", [code])
+        .map_err(sql_err)?;
     get_account_by_code(db, code).ok_or_else(|| BukioError::new("INTERNAL", "account vanished"))
 }
 
@@ -229,8 +278,12 @@ pub fn reactivate_account(db: &Connection, code: &str) -> Result<Value> {
 pub fn create_cost_center(db: &Connection, code: &str, name: &str) -> Result<Value> {
     let code_ok = {
         let b = code.as_bytes();
-        !b.is_empty() && b.len() <= 32 && b[0].is_ascii_alphanumeric()
-            && b[1..].iter().all(|c| c.is_ascii_alphanumeric() || matches!(c, b' ' | b'.' | b'_' | b'-'))
+        !b.is_empty()
+            && b.len() <= 32
+            && b[0].is_ascii_alphanumeric()
+            && b[1..]
+                .iter()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b' ' | b'.' | b'_' | b'-'))
     };
     if !code_ok {
         return Err(BukioError::new(
@@ -239,18 +292,25 @@ pub fn create_cost_center(db: &Connection, code: &str, name: &str) -> Result<Val
         ));
     }
     if name.trim().is_empty() {
-        return Err(BukioError::new("INVALID_NAME", "cost center name is required"));
+        return Err(BukioError::new(
+            "INVALID_NAME",
+            "cost center name is required",
+        ));
     }
     if let Err(e) = db.execute(
         "INSERT INTO cost_centers (code, name, active) VALUES (?1, ?2, 1)",
         rusqlite::params![code, name.trim()],
     ) {
         if e.to_string().contains("UNIQUE constraint failed") {
-            return Err(BukioError::new("COST_CENTER_EXISTS", format!("cost center '{code}' already exists")));
+            return Err(BukioError::new(
+                "COST_CENTER_EXISTS",
+                format!("cost center '{code}' already exists"),
+            ));
         }
         return Err(BukioError::new("DB_ERROR", e.to_string()));
     }
-    get_cost_center_by_code(db, code).ok_or_else(|| BukioError::new("INTERNAL", "cost center vanished"))
+    get_cost_center_by_code(db, code)
+        .ok_or_else(|| BukioError::new("INTERNAL", "cost center vanished"))
 }
 
 pub fn get_cost_center_by_code(db: &Connection, code: &str) -> Option<Value> {
@@ -279,19 +339,39 @@ pub fn list_cost_centers(db: &Connection, include_inactive: bool) -> Result<Vec<
     Ok(rows)
 }
 
-pub fn set_cost_center_active(db: &Connection, code: &str, active: bool, want: bool) -> Result<Value> {
-    let cc = get_cost_center_by_code(db, code)
-        .ok_or_else(|| BukioError::new("COST_CENTER_NOT_FOUND", format!("cost center '{code}' does not exist")))?;
+pub fn set_cost_center_active(
+    db: &Connection,
+    code: &str,
+    active: bool,
+    want: bool,
+) -> Result<Value> {
+    let cc = get_cost_center_by_code(db, code).ok_or_else(|| {
+        BukioError::new(
+            "COST_CENTER_NOT_FOUND",
+            format!("cost center '{code}' does not exist"),
+        )
+    })?;
     if cc["active"].as_bool().unwrap_or(false) == want {
-        let err_code = if want { "ALREADY_ACTIVE" } else { "ALREADY_INACTIVE" };
-        return Err(BukioError::new(err_code, format!("cost center '{code}' is already {}", if want { "active" } else { "inactive" })));
+        let err_code = if want {
+            "ALREADY_ACTIVE"
+        } else {
+            "ALREADY_INACTIVE"
+        };
+        return Err(BukioError::new(
+            err_code,
+            format!(
+                "cost center '{code}' is already {}",
+                if want { "active" } else { "inactive" }
+            ),
+        ));
     }
     db.execute(
         "UPDATE cost_centers SET active = ?1 WHERE code = ?2",
         rusqlite::params![if active { 1 } else { 0 }, code],
     )
     .map_err(sql_err)?;
-    get_cost_center_by_code(db, code).ok_or_else(|| BukioError::new("INTERNAL", "cost center vanished"))
+    get_cost_center_by_code(db, code)
+        .ok_or_else(|| BukioError::new("INTERNAL", "cost center vanished"))
 }
 
 // --- chart CSV import (mirrors importChartCsv) ------------------------------
@@ -319,22 +399,46 @@ pub fn infer_rgs(type_: &str, name: &str) -> Option<&'static str> {
     let has = |kws: &[&str]| kws.iter().any(|k| n.contains(k));
     match type_ {
         "income" => {
-            if has(&["diensten", "service"]) { Some("WOVB.82") }
-            else if has(&["omzet", "verkopen", "verkoop"]) { Some("WOMZ.80") }
-            else { Some("WOVB.82") }
+            if has(&["diensten", "service"]) {
+                Some("WOVB.82")
+            } else if has(&["omzet", "verkopen", "verkoop"]) {
+                Some("WOMZ.80")
+            } else {
+                Some("WOVB.82")
+            }
         }
         "expense" => {
-            if has(&["inkoop", "voorraad", "uitbesteed"]) { Some("WKPR.70") }
-            else if has(&["personeel", "loon", "salaris", "sociale", "pensioen"]) { Some("WPER.40") }
-            else if has(&["afschrijving", "afschr"]) { Some("WAFS.41") }
-            else if has(&["rente", "financie", "interest", "bankkosten"]) { Some("WFBE.84") }
-            else { Some("WBED.42") }
+            if has(&["inkoop", "voorraad", "uitbesteed"]) {
+                Some("WKPR.70")
+            } else if has(&["personeel", "loon", "salaris", "sociale", "pensioen"]) {
+                Some("WPER.40")
+            } else if has(&["afschrijving", "afschr"]) {
+                Some("WAFS.41")
+            } else if has(&["rente", "financie", "interest", "bankkosten"]) {
+                Some("WFBE.84")
+            } else {
+                Some("WBED.42")
+            }
         }
         "asset" => {
-            if has(&["bank", "kas", "geld", "tegoed", "spaar", "sumup", "onefor", "business"]) { Some("BLIM.10") }
-            else if has(&["debiteur", "vorderen", "vraagpost", "kruispost", "vooruitbetaald", "nog te ontvangen"]) { Some("BVOR.11") }
-            else if has(&["voorraad"]) { Some("BVRD.30") }
-            else { Some("BMVA.02") }
+            if has(&[
+                "bank", "kas", "geld", "tegoed", "spaar", "sumup", "onefor", "business",
+            ]) {
+                Some("BLIM.10")
+            } else if has(&[
+                "debiteur",
+                "vorderen",
+                "vraagpost",
+                "kruispost",
+                "vooruitbetaald",
+                "nog te ontvangen",
+            ]) {
+                Some("BVOR.11")
+            } else if has(&["voorraad"]) {
+                Some("BVRD.30")
+            } else {
+                Some("BMVA.02")
+            }
         }
         "liability" => Some("BSCH.12"),
         "equity" => Some("BEIV.05"),
@@ -350,25 +454,45 @@ pub struct ChartImportResult {
 }
 
 pub fn import_chart_csv(db: &Connection, csv_text: &str) -> Result<ChartImportResult> {
-    let lines: Vec<&str> = csv_text.split(['\r', '\n']).filter(|l| !l.trim().is_empty()).collect();
+    let lines: Vec<&str> = csv_text
+        .split(['\r', '\n'])
+        .filter(|l| !l.trim().is_empty())
+        .collect();
     if lines.len() < 2 {
-        return Err(BukioError::new("EMPTY_CSV", "chart CSV must have a header row and at least one account"));
+        return Err(BukioError::new(
+            "EMPTY_CSV",
+            "chart CSV must have a header row and at least one account",
+        ));
     }
-    let header: Vec<String> = split_csv_line(lines[0], ',').iter().map(|h| h.trim().to_string()).collect();
+    let header: Vec<String> = split_csv_line(lines[0], ',')
+        .iter()
+        .map(|h| h.trim().to_string())
+        .collect();
     for col in ["code", "name", "type", "normal_balance"] {
         if !header.iter().any(|h| h == col) {
             return Err(BukioError::new(
                 "INVALID_CSV_HEADER",
-                format!("chart CSV is missing column '{col}' (got: {})", header.join(",")),
+                format!(
+                    "chart CSV is missing column '{col}' (got: {})",
+                    header.join(",")
+                ),
             ));
         }
     }
     let idx = |name: &str| header.iter().position(|h| h == name);
     let tax_idx = idx("taxonomy_code").or_else(|| idx("rgs_code"));
 
-    let mut result = ChartImportResult { created: 0, skipped: 0, total: lines.len() - 1, errors: Vec::new() };
+    let mut result = ChartImportResult {
+        created: 0,
+        skipped: 0,
+        total: lines.len() - 1,
+        errors: Vec::new(),
+    };
     for (i, line) in lines.iter().enumerate().skip(1) {
-        let row: Vec<String> = split_csv_line(line, ',').iter().map(|c| c.trim().to_string()).collect();
+        let row: Vec<String> = split_csv_line(line, ',')
+            .iter()
+            .map(|c| c.trim().to_string())
+            .collect();
         if row.len() == 1 && row[0].is_empty() {
             continue;
         }
@@ -382,12 +506,15 @@ pub fn import_chart_csv(db: &Connection, csv_text: &str) -> Result<ChartImportRe
             name: &cell("name"),
             type_: &cell("type"),
             normal_balance: &cell("normal_balance"),
-            taxonomy_code: taxonomy.as_deref().or_else(|| {
-                infer_rgs(&cell("type"), &cell("name"))
-            }),
+            taxonomy_code: taxonomy
+                .as_deref()
+                .or_else(|| infer_rgs(&cell("type"), &cell("name"))),
         };
         let res = if get_account_by_code(db, account.code).is_some() {
-            Err(BukioError::new("ACCOUNT_EXISTS", format!("account {} already exists (skipped)", account.code)))
+            Err(BukioError::new(
+                "ACCOUNT_EXISTS",
+                format!("account {} already exists (skipped)", account.code),
+            ))
         } else {
             create_account(db, &account)
         };
@@ -395,7 +522,9 @@ pub fn import_chart_csv(db: &Connection, csv_text: &str) -> Result<ChartImportRe
             Ok(_) => result.created += 1,
             Err(e) => {
                 result.skipped += 1;
-                result.errors.push((i + 1, format!("{}: {}", e.code, e.message)));
+                result
+                    .errors
+                    .push((i + 1, format!("{}: {}", e.code, e.message)));
             }
         }
     }
@@ -405,7 +534,6 @@ pub fn import_chart_csv(db: &Connection, csv_text: &str) -> Result<ChartImportRe
 fn sql_err(e: rusqlite::Error) -> BukioError {
     BukioError::new("DB_ERROR", e.to_string())
 }
-
 
 /// ponytail: dyn-param helper — rusqlite 0.32 has no params_from_vec; refs
 /// satisfy Params for &[&dyn ToSql].
@@ -420,7 +548,8 @@ mod tests {
 
     fn company_db() -> Connection {
         let db = open_db(":memory:").unwrap();
-        db.execute("INSERT INTO company (name) VALUES ('T')", []).unwrap();
+        db.execute("INSERT INTO company (name) VALUES ('T')", [])
+            .unwrap();
         db
     }
 
@@ -450,18 +579,61 @@ mod tests {
         let db = company_db();
         seed_default_chart(&db).unwrap();
         assert_eq!(
-            create_account(&db, &NewAccount { code: "1100", name: "dup", type_: "asset", normal_balance: "debit", taxonomy_code: None }).unwrap_err().code,
+            create_account(
+                &db,
+                &NewAccount {
+                    code: "1100",
+                    name: "dup",
+                    type_: "asset",
+                    normal_balance: "debit",
+                    taxonomy_code: None
+                }
+            )
+            .unwrap_err()
+            .code,
             "ACCOUNT_EXISTS"
         );
         assert_eq!(
-            create_account(&db, &NewAccount { code: "9", name: "bad type", type_: "cash", normal_balance: "debit", taxonomy_code: None }).unwrap_err().code,
+            create_account(
+                &db,
+                &NewAccount {
+                    code: "9",
+                    name: "bad type",
+                    type_: "cash",
+                    normal_balance: "debit",
+                    taxonomy_code: None
+                }
+            )
+            .unwrap_err()
+            .code,
             "INVALID_TYPE"
         );
         assert_eq!(
-            create_account(&db, &NewAccount { code: "10", name: "bad combo", type_: "income", normal_balance: "debit", taxonomy_code: None }).unwrap_err().code,
+            create_account(
+                &db,
+                &NewAccount {
+                    code: "10",
+                    name: "bad combo",
+                    type_: "income",
+                    normal_balance: "debit",
+                    taxonomy_code: None
+                }
+            )
+            .unwrap_err()
+            .code,
             "INVALID_COMBINATION"
         );
-        let ok = create_account(&db, &NewAccount { code: "1230", name: "Spaarrekening 2", type_: "asset", normal_balance: "debit", taxonomy_code: None }).unwrap();
+        let ok = create_account(
+            &db,
+            &NewAccount {
+                code: "1230",
+                name: "Spaarrekening 2",
+                type_: "asset",
+                normal_balance: "debit",
+                taxonomy_code: None,
+            },
+        )
+        .unwrap();
         assert_eq!(ok["taxonomy_code"], Value::Null); // JS createAccount does not infer (only CSV import does)
         assert_eq!(ok["active"], true);
     }
@@ -484,9 +656,17 @@ mod tests {
         let db = company_db();
         let cc = create_cost_center(&db, "HQ", "Hoofdkantoor").unwrap();
         assert_eq!(cc["active"], true);
-        assert_eq!(create_cost_center(&db, "HQ", "again").unwrap_err().code, "COST_CENTER_EXISTS");
+        assert_eq!(
+            create_cost_center(&db, "HQ", "again").unwrap_err().code,
+            "COST_CENTER_EXISTS"
+        );
         let off = set_cost_center_active(&db, "HQ", false, false).unwrap();
         assert_eq!(off["active"], false);
-        assert_eq!(set_cost_center_active(&db, "HQ", false, false).unwrap_err().code, "ALREADY_INACTIVE");
+        assert_eq!(
+            set_cost_center_active(&db, "HQ", false, false)
+                .unwrap_err()
+                .code,
+            "ALREADY_INACTIVE"
+        );
     }
 }

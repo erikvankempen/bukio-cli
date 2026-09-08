@@ -8,7 +8,9 @@ use crate::money::{BukioError, Result};
 
 /// True when s is a real calendar date in yyyy-mm-dd form (no overflow).
 pub fn is_valid_date(s: &str) -> bool {
-    let Some((y, m, d)) = parse_parts(s) else { return false };
+    let Some((y, m, d)) = parse_parts(s) else {
+        return false;
+    };
     calendar_ok(y, m, d)
 }
 
@@ -18,8 +20,15 @@ pub fn validate_date(date: &str) -> Result<()> {
 }
 
 pub fn validate_labeled(date: &str, label: &str) -> Result<()> {
-    let bad_shape = || BukioError::new("INVALID_DATE", format!("{label} '{date}' must be yyyy-mm-dd"));
-    let Some((y, m, d)) = parse_parts(date) else { return Err(bad_shape()) };
+    let bad_shape = || {
+        BukioError::new(
+            "INVALID_DATE",
+            format!("{label} '{date}' must be yyyy-mm-dd"),
+        )
+    };
+    let Some((y, m, d)) = parse_parts(date) else {
+        return Err(bad_shape());
+    };
     if !calendar_ok(y, m, d) {
         return Err(BukioError::new(
             "INVALID_DATE",
@@ -38,7 +47,8 @@ fn parse_parts(s: &str) -> Option<(i32, u32, u32)> {
         return None;
     }
     // strict shape: no leading '+', month/day 2-digit (parse above accepts "1")
-    if !s[5..7].bytes().all(|b| b.is_ascii_digit()) || !s[8..10].bytes().all(|b| b.is_ascii_digit()) {
+    if !s[5..7].bytes().all(|b| b.is_ascii_digit()) || !s[8..10].bytes().all(|b| b.is_ascii_digit())
+    {
         return None;
     }
     Some((y, m, d))
@@ -49,7 +59,11 @@ fn days_in_month(y: i32, m: u32) -> u32 {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
         4 | 6 | 9 | 11 => 30,
         2 => {
-            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 { 29 } else { 28 }
+            if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+                29
+            } else {
+                28
+            }
         }
         _ => 0,
     }
@@ -67,7 +81,9 @@ pub fn today_iso() -> String {
 
 /// Add n months; day clamped to the target month's last day.
 pub fn add_months(date_str: &str, n: i32) -> String {
-    let Some((y, m, d)) = parse_parts(date_str) else { return date_str.to_string() };
+    let Some((y, m, d)) = parse_parts(date_str) else {
+        return date_str.to_string();
+    };
     let total = y * 12 + (m as i32 - 1) + n;
     let yy = total.div_euclid(12);
     let mm = (total.rem_euclid(12) + 1) as u32;
@@ -79,7 +95,10 @@ pub fn add_months(date_str: &str, n: i32) -> String {
 // --- IBAN (mirrors src/core/iban.js) ---------------------------------------
 
 pub fn normalize_iban(iban: &str) -> String {
-    iban.chars().filter(|c| !c.is_whitespace() && *c != '-').collect::<String>().to_uppercase()
+    iban.chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .collect::<String>()
+        .to_uppercase()
 }
 
 pub fn is_valid_iban(iban: &str) -> bool {
@@ -88,14 +107,16 @@ pub fn is_valid_iban(iban: &str) -> bool {
     if b.len() < 15 || b.len() > 34 {
         return false;
     }
-    if !b[0..2].iter().all(|c| c.is_ascii_uppercase()) || !b[2..4].iter().all(|c| c.is_ascii_digit()) {
+    if !b[0..2].iter().all(|c| c.is_ascii_uppercase())
+        || !b[2..4].iter().all(|c| c.is_ascii_digit())
+    {
         return false;
     }
     if !b[4..].iter().all(|c| c.is_ascii_alphanumeric()) {
         return false;
     }
     // mod-97 via running remainder (no bignum needed)
-    let rearranged: Vec<u8> = [ &b[4..], &b[0..4] ].concat();
+    let rearranged: Vec<u8> = [&b[4..], &b[0..4]].concat();
     let mut rem: u32 = 0;
     for &ch in &rearranged {
         let digits: Vec<u8> = if ch.is_ascii_digit() {
@@ -125,7 +146,10 @@ mod tests {
         assert!(!is_valid_date("2026-1-1"));
         assert!(!is_valid_date("garbage"));
         assert!(validate_date("2026-09-08").is_ok());
-        assert_eq!(validate_date("2026-02-30").unwrap_err().code, "INVALID_DATE");
+        assert_eq!(
+            validate_date("2026-02-30").unwrap_err().code,
+            "INVALID_DATE"
+        );
     }
 
     #[test]

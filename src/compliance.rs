@@ -19,11 +19,30 @@ fn compliance_error(code: &'static str, msg: impl Into<String>) -> BukioError {
 /// Quarter deadline: Q1→Apr 30, Q2→Jul 31, Q3→Oct 31, Q4→Jan 31 next year.
 pub fn quarter_deadline(period: &str) -> Result<(&str, String)> {
     let parts: Vec<&str> = period.split("-Q").collect();
-    if parts.len() != 2 { return Err(compliance_error("INVALID_PERIOD", format!("period '{period}' must be YYYY-Qn"))); }
-    let year: i32 = parts[0].parse().map_err(|_| compliance_error("INVALID_PERIOD", format!("bad year in '{period}'")))?;
-    let qn: u32 = parts[1].parse().map_err(|_| compliance_error("INVALID_PERIOD", format!("bad quarter in '{period}'")))?;
-    if qn < 1 || qn > 4 { return Err(compliance_error("INVALID_PERIOD", format!("quarter must be 1-4, got '{qn}'"))); }
-    let month_day = match qn { 1 => "04-30", 2 => "07-31", 3 => "10-31", _ => "01-31" };
+    if parts.len() != 2 {
+        return Err(compliance_error(
+            "INVALID_PERIOD",
+            format!("period '{period}' must be YYYY-Qn"),
+        ));
+    }
+    let year: i32 = parts[0]
+        .parse()
+        .map_err(|_| compliance_error("INVALID_PERIOD", format!("bad year in '{period}'")))?;
+    let qn: u32 = parts[1]
+        .parse()
+        .map_err(|_| compliance_error("INVALID_PERIOD", format!("bad quarter in '{period}'")))?;
+    if qn < 1 || qn > 4 {
+        return Err(compliance_error(
+            "INVALID_PERIOD",
+            format!("quarter must be 1-4, got '{qn}'"),
+        ));
+    }
+    let month_day = match qn {
+        1 => "04-30",
+        2 => "07-31",
+        3 => "10-31",
+        _ => "01-31",
+    };
     let y = if qn == 4 { year + 1 } else { year };
     Ok((period, format!("{y}-{month_day}")))
 }
@@ -49,9 +68,18 @@ pub fn jaarrekening_deadline(fiscal_year_end: &str, year: i32) -> String {
 /// Quarter deadline on offset: q*3+offset months, day D.
 fn quarter_deadline_on_offset(period: &str, offset: i32, day: u32) -> Result<String> {
     let parts: Vec<&str> = period.split("-Q").collect();
-    if parts.len() != 2 { return Err(compliance_error("INVALID_PERIOD", format!("expected YYYY-Qn, got '{period}'"))); }
-    let year: i32 = parts[0].parse().map_err(|_| compliance_error("INVALID_PERIOD", "bad year"))?;
-    let qn: i32 = parts[1].parse().map_err(|_| compliance_error("INVALID_PERIOD", "bad quarter"))?;
+    if parts.len() != 2 {
+        return Err(compliance_error(
+            "INVALID_PERIOD",
+            format!("expected YYYY-Qn, got '{period}'"),
+        ));
+    }
+    let year: i32 = parts[0]
+        .parse()
+        .map_err(|_| compliance_error("INVALID_PERIOD", "bad year"))?;
+    let qn: i32 = parts[1]
+        .parse()
+        .map_err(|_| compliance_error("INVALID_PERIOD", "bad quarter"))?;
     let m = qn * 3 + offset;
     let y = year + if m > 12 { 1 } else { 0 };
     let month = ((m - 1).rem_euclid(12) + 1) as u32;
@@ -61,10 +89,21 @@ fn quarter_deadline_on_offset(period: &str, offset: i32, day: u32) -> Result<Str
 /// Day D of the month following YYYY-MM.
 fn day_of_next_month(period: &str, day: u32) -> Result<String> {
     let parts: Vec<&str> = period.split('-').collect();
-    if parts.len() != 2 { return Err(compliance_error("INVALID_PERIOD_SHAPE", format!("expected YYYY-MM, got '{period}'"))); }
-    let y: i32 = parts[0].parse().map_err(|_| compliance_error("INVALID_PERIOD", "bad year"))?;
-    let m: u32 = parts[1].parse().map_err(|_| compliance_error("INVALID_PERIOD", "bad month"))?;
-    if m < 1 || m > 12 { return Err(compliance_error("INVALID_PERIOD", "month must be 1-12")); }
+    if parts.len() != 2 {
+        return Err(compliance_error(
+            "INVALID_PERIOD_SHAPE",
+            format!("expected YYYY-MM, got '{period}'"),
+        ));
+    }
+    let y: i32 = parts[0]
+        .parse()
+        .map_err(|_| compliance_error("INVALID_PERIOD", "bad year"))?;
+    let m: u32 = parts[1]
+        .parse()
+        .map_err(|_| compliance_error("INVALID_PERIOD", "bad month"))?;
+    if m < 1 || m > 12 {
+        return Err(compliance_error("INVALID_PERIOD", "month must be 1-12"));
+    }
     let (ny, nm) = if m == 12 { (y + 1, 1) } else { (y, m + 1) };
     Ok(format!("{ny}-{nm:02}-{day:02}"))
 }
@@ -97,36 +136,59 @@ pub fn mark_filed(
     dry_run: bool,
 ) -> Result<Value> {
     let profile = resolve_profile(db)?;
-    let ft_arr = profile["compliance"]["filingTypes"].as_array().cloned().unwrap_or_default();
+    let ft_arr = profile["compliance"]["filingTypes"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let known_types: Vec<&str> = ft_arr.iter().filter_map(|ft| ft["type"].as_str()).collect();
     if !known_types.contains(&filing_type) {
-        return Err(compliance_error("INVALID_TYPE", format!("type must be one of {}", known_types.join(", "))));
+        return Err(compliance_error(
+            "INVALID_TYPE",
+            format!("type must be one of {}", known_types.join(", ")),
+        ));
     }
     if filing_type == "OB" {
-        return Err(compliance_error("INVALID_TYPE", "OB filings are recorded with 'bukio vat readout --mark-filed'"));
+        return Err(compliance_error(
+            "INVALID_TYPE",
+            "OB filings are recorded with 'bukio vat readout --mark-filed'",
+        ));
     }
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     let today_owned = today;
     let default_date = today_owned.clone();
     let filed_date = date.unwrap_or(&default_date);
     if dry_run {
-        return Ok(json!({ "action": "compliance.mark", "type": filing_type, "period": period, "filed_at": filed_date, "dryRun": true }));
+        return Ok(
+            json!({ "action": "compliance.mark", "type": filing_type, "period": period, "filed_at": filed_date, "dryRun": true }),
+        );
     }
     db.execute(
         "INSERT INTO filings (type, period, filed_at, created_by) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(type, period) DO UPDATE SET filed_at = excluded.filed_at",
         rusqlite::params![filing_type, period, filed_date, actor],
-    ).map_err(sql_err)?;
-    record(db, RecordArgs {
-        actor, action: "compliance.mark", command: Some("compliance mark"),
-        args: Some(json!({ "type": filing_type, "period": period, "filed_at": filed_date })),
-        outcome: "ok", entry_ids: vec![],
-    })?;
+    )
+    .map_err(sql_err)?;
+    record(
+        db,
+        RecordArgs {
+            actor,
+            action: "compliance.mark",
+            command: Some("compliance mark"),
+            args: Some(json!({ "type": filing_type, "period": period, "filed_at": filed_date })),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     Ok(json!({ "type": filing_type, "period": period, "filed_at": filed_date }))
 }
 
 /// Compute deadline for a filing type using the profile's deadline rules.
-fn compute_deadline(fiscal_year_end: &str, deadline_rule: &str, year: i32, period: &str) -> Result<String> {
+fn compute_deadline(
+    fiscal_year_end: &str,
+    deadline_rule: &str,
+    year: i32,
+    period: &str,
+) -> Result<String> {
     match deadline_rule {
         "nl-quarterly" => Ok(quarter_deadline(period)?.1),
         "nl-13-months" => Ok(jaarrekening_deadline(fiscal_year_end, year)),
@@ -165,10 +227,13 @@ fn compute_deadline(fiscal_year_end: &str, deadline_rule: &str, year: i32, perio
             let parts: Vec<&str> = period.split("-P").collect();
             let y: i32 = parts[0].parse().unwrap();
             let p: u32 = parts[1].parse().unwrap();
-            match p { 6 => Ok(format!("{}-02-10", y + 1)), _ => {
-                let sched = ["", "04-10", "06-10", "08-31", "10-10", "12-10"];
-                Ok(format!("{y}-{}", sched[p as usize]))
-            }}
+            match p {
+                6 => Ok(format!("{}-02-10", y + 1)),
+                _ => {
+                    let sched = ["", "04-10", "06-10", "08-31", "10-10", "12-10"];
+                    Ok(format!("{y}-{}", sched[p as usize]))
+                }
+            }
         }
         "no-7-months" => Ok(months_after_fy_end(fiscal_year_end, year, 7)),
         "se-quarterly" => {
@@ -188,10 +253,13 @@ fn compute_deadline(fiscal_year_end: &str, deadline_rule: &str, year: i32, perio
             let parts: Vec<&str> = period.split("-P").collect();
             let y: i32 = parts[0].parse().unwrap();
             let p: u32 = parts[1].parse().unwrap();
-            match p { 6 => Ok(format!("{}-01-23", y + 1)), _ => {
-                let sched = ["", "03-23", "05-23", "07-23", "09-23", "11-23"];
-                Ok(format!("{y}-{}", sched[p as usize]))
-            }}
+            match p {
+                6 => Ok(format!("{}-01-23", y + 1)),
+                _ => {
+                    let sched = ["", "03-23", "05-23", "07-23", "09-23", "11-23"];
+                    Ok(format!("{y}-{}", sched[p as usize]))
+                }
+            }
         }
         "ie-9-months" => Ok(months_after_fy_end(fiscal_year_end, year, 9)),
         "it-liquidazione-quarterly" => quarter_deadline_on_offset(period, 2, 16),
@@ -201,14 +269,19 @@ fn compute_deadline(fiscal_year_end: &str, deadline_rule: &str, year: i32, perio
             let parts: Vec<&str> = period.split("-Q").collect();
             let y: i32 = parts[0].parse().unwrap();
             let qn: i32 = parts[1].parse().unwrap();
-            if qn == 4 { return Ok(format!("{}-01-30", y + 1)); }
+            if qn == 4 {
+                return Ok(format!("{}-01-30", y + 1));
+            }
             Ok(format!("{}-{:02}-20", y, qn * 3 + 1))
         }
         "es-390" => Ok(format!("{}-01-30", year + 1)),
         "es-200" => {
             let mm2 = 7u32;
             let yy2 = year + (mm2 as i32 - 1).div_euclid(12);
-            Ok(format!("{yy2}-{:02}-25", ((mm2 as i32 - 1).rem_euclid(12) + 1) as u32))
+            Ok(format!(
+                "{yy2}-{:02}-25",
+                ((mm2 as i32 - 1).rem_euclid(12) + 1) as u32
+            ))
         }
         "es-7-months" => Ok(months_after_fy_end(fiscal_year_end, year, 7)),
         "pt-dp-quarterly" => quarter_deadline_on_offset(period, 2, 20),
@@ -258,15 +331,22 @@ fn compute_deadline(fiscal_year_end: &str, deadline_rule: &str, year: i32, perio
         "xk-annual-accounts" | "xk-cit" => Ok(format!("{}-03-31", year + 1)),
         // US
         "us-941" => Ok(quarter_deadline(period)?.1),
-        _ => Err(compliance_error("DEADLINE_RULE_NOT_FOUND", format!("rule '{deadline_rule}' is not implemented"))),
+        _ => Err(compliance_error(
+            "DEADLINE_RULE_NOT_FOUND",
+            format!("rule '{deadline_rule}' is not implemented"),
+        )),
     }
 }
 
 /// Full compliance status for a year.
 pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
-    let company_row = db.query_row("SELECT name, fiscal_year_end FROM company WHERE id = 1", [], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
-    }).map_err(|_| compliance_error("NOT_INITIALISED", "company database not initialised"))?;
+    let company_row = db
+        .query_row(
+            "SELECT name, fiscal_year_end FROM company WHERE id = 1",
+            [],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+        )
+        .map_err(|_| compliance_error("NOT_INITIALISED", "company database not initialised"))?;
     let company_name = company_row.0;
     let fy_end = company_row.1.unwrap_or_else(|| "12-31".into());
 
@@ -275,7 +355,9 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
     let mut obligations = Vec::new();
 
     let filing_types = profile["compliance"]["filingTypes"]
-        .as_array().cloned().unwrap_or_default();
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
 
     for ft in &filing_types {
         let ftype = ft["type"].as_str().unwrap_or("");
@@ -288,7 +370,13 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
                     let period = format!("{year}-Q{qn}");
                     if let Ok(deadline) = compute_deadline(&fy_end, rule_name, year, &period) {
                         let filed = is_filed(db, ftype, &period)?;
-                        let status = if filed { "filed" } else if deadline < today { "overdue" } else { "open" };
+                        let status = if filed {
+                            "filed"
+                        } else if deadline < today {
+                            "overdue"
+                        } else {
+                            "open"
+                        };
                         obligations.push(json!({ "type": ftype, "period": period, "deadline": deadline, "status": status }));
                     }
                 }
@@ -297,7 +385,13 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
                 if let Ok(deadline) = compute_deadline(&fy_end, rule_name, year - 1, &prev_period) {
                     if deadline >= format!("{year}-01-01") {
                         let filed = is_filed(db, ftype, &prev_period)?;
-                        let status = if filed { "filed" } else if deadline < today { "overdue" } else { "open" };
+                        let status = if filed {
+                            "filed"
+                        } else if deadline < today {
+                            "overdue"
+                        } else {
+                            "open"
+                        };
                         obligations.push(json!({ "type": ftype, "period": prev_period, "deadline": deadline, "status": status }));
                     }
                 }
@@ -308,7 +402,13 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
                     if let Ok(deadline) = compute_deadline(&fy_end, rule_name, year, &period) {
                         if deadline >= format!("{year}-01-01") {
                             let filed = is_filed(db, ftype, &period)?;
-                            let status = if filed { "filed" } else if deadline < today { "overdue" } else { "open" };
+                            let status = if filed {
+                                "filed"
+                            } else if deadline < today {
+                                "overdue"
+                            } else {
+                                "open"
+                            };
                             obligations.push(json!({ "type": ftype, "period": period, "deadline": deadline, "status": status }));
                         }
                     }
@@ -317,7 +417,13 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
                 if let Ok(deadline) = compute_deadline(&fy_end, rule_name, year - 1, &prev_dec) {
                     if deadline >= format!("{year}-01-01") {
                         let filed = is_filed(db, ftype, &prev_dec)?;
-                        let status = if filed { "filed" } else if deadline < today { "overdue" } else { "open" };
+                        let status = if filed {
+                            "filed"
+                        } else if deadline < today {
+                            "overdue"
+                        } else {
+                            "open"
+                        };
                         obligations.push(json!({ "type": ftype, "period": prev_dec, "deadline": deadline, "status": status }));
                     }
                 }
@@ -328,7 +434,13 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
                     if let Ok(deadline) = compute_deadline(&fy_end, rule_name, year, &period) {
                         if deadline >= format!("{year}-01-01") {
                             let filed = is_filed(db, ftype, &period)?;
-                            let status = if filed { "filed" } else if deadline < today { "overdue" } else { "open" };
+                            let status = if filed {
+                                "filed"
+                            } else if deadline < today {
+                                "overdue"
+                            } else {
+                                "open"
+                            };
                             obligations.push(json!({ "type": ftype, "period": period, "deadline": deadline, "status": status }));
                         }
                     }
@@ -337,7 +449,13 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
                 if let Ok(deadline) = compute_deadline(&fy_end, rule_name, year - 1, &prev_p6) {
                     if deadline >= format!("{year}-01-01") {
                         let filed = is_filed(db, ftype, &prev_p6)?;
-                        let status = if filed { "filed" } else if deadline < today { "overdue" } else { "open" };
+                        let status = if filed {
+                            "filed"
+                        } else if deadline < today {
+                            "overdue"
+                        } else {
+                            "open"
+                        };
                         obligations.push(json!({ "type": ftype, "period": prev_p6, "deadline": deadline, "status": status }));
                     }
                 }
@@ -346,7 +464,13 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
                 let period_str = year.to_string();
                 if let Ok(deadline) = compute_deadline(&fy_end, rule_name, year, &period_str) {
                     let filed = is_filed(db, ftype, &period_str)?;
-                    let status = if filed { "filed" } else if deadline < today { "overdue" } else { "open" };
+                    let status = if filed {
+                        "filed"
+                    } else if deadline < today {
+                        "overdue"
+                    } else {
+                        "open"
+                    };
                     let closed = is_year_closed(db, &year_str(year))?;
                     obligations.push(json!({ "type": ftype, "period": period_str, "deadline": deadline, "status": status, "books_closed": closed }));
                 }
@@ -355,8 +479,14 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
         }
     }
 
-    let filed_count = obligations.iter().filter(|o| o["status"] == "filed").count();
-    let overdue_count = obligations.iter().filter(|o| o["status"] == "overdue").count();
+    let filed_count = obligations
+        .iter()
+        .filter(|o| o["status"] == "filed")
+        .count();
+    let overdue_count = obligations
+        .iter()
+        .filter(|o| o["status"] == "overdue")
+        .count();
     let open_count = obligations.iter().filter(|o| o["status"] == "open").count();
 
     Ok(json!({
@@ -368,7 +498,9 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
     }))
 }
 
-fn year_str(y: i32) -> String { y.to_string() }
+fn year_str(y: i32) -> String {
+    y.to_string()
+}
 
 fn sql_err(e: rusqlite::Error) -> BukioError {
     BukioError::new("DB_ERROR", e.to_string())
@@ -394,27 +526,45 @@ mod tests {
 
     #[test]
     fn compute_deadline_nl_quarterly() {
-        assert_eq!(compute_deadline("12-31", "nl-quarterly", 2026, "2026-Q1").unwrap(), "2026-04-30");
+        assert_eq!(
+            compute_deadline("12-31", "nl-quarterly", 2026, "2026-Q1").unwrap(),
+            "2026-04-30"
+        );
     }
 
     #[test]
     fn compute_deadline_be_monthly() {
-        assert_eq!(compute_deadline("12-31", "be-vat-monthly", 2026, "2026-03").unwrap(), "2026-04-20");
+        assert_eq!(
+            compute_deadline("12-31", "be-vat-monthly", 2026, "2026-03").unwrap(),
+            "2026-04-20"
+        );
     }
 
     #[test]
     fn compute_deadline_de_quarterly() {
-        assert_eq!(compute_deadline("12-31", "de-ustva-quarterly", 2026, "2026-Q1").unwrap(), "2026-04-10");
+        assert_eq!(
+            compute_deadline("12-31", "de-ustva-quarterly", 2026, "2026-Q1").unwrap(),
+            "2026-04-10"
+        );
     }
 
     #[test]
     fn no_bimonthly_p6() {
-        assert_eq!(compute_deadline("12-31", "no-bimonthly", 2026, "2026-P6").unwrap(), "2027-02-10");
+        assert_eq!(
+            compute_deadline("12-31", "no-bimonthly", 2026, "2026-P6").unwrap(),
+            "2027-02-10"
+        );
     }
 
     #[test]
     fn se_quarterly_august_exception() {
-        assert_eq!(compute_deadline("12-31", "se-quarterly", 2026, "2026-Q2").unwrap(), "2026-08-17");
-        assert_eq!(compute_deadline("12-31", "se-quarterly", 2026, "2026-Q1").unwrap(), "2026-05-12");
+        assert_eq!(
+            compute_deadline("12-31", "se-quarterly", 2026, "2026-Q2").unwrap(),
+            "2026-08-17"
+        );
+        assert_eq!(
+            compute_deadline("12-31", "se-quarterly", 2026, "2026-Q1").unwrap(),
+            "2026-05-12"
+        );
     }
 }

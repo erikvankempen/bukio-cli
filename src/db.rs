@@ -34,7 +34,8 @@ pub fn migrate(db: &Connection) -> rusqlite::Result<()> {
         if sql.to_ascii_lowercase().contains("pragma foreign_keys") {
             // Rebuild migrations run OUTSIDE a transaction — the pragma is a
             // no-op inside one (mirrors the JS runner).
-            let was_on: bool = db.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))? == 1;
+            let was_on: bool =
+                db.query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))? == 1;
             db.pragma_update(None, "foreign_keys", "OFF")?;
             let result = (|| -> rusqlite::Result<()> {
                 db.execute_batch(sql)?;
@@ -72,12 +73,18 @@ mod tests {
     #[test]
     fn fresh_memory_db_reaches_latest_migration() {
         let db = open_db(":memory:").unwrap();
-        let v: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let v: i64 = db
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         let last = migrations_data::MIGRATIONS.last().unwrap().0 as i64;
         assert_eq!(v, last, "fresh DB must apply every migration");
         // the core tables exist
         let n: i64 = db
-            .query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='journal_entries'", [], |r| r.get(0))
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='journal_entries'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(n, 1);
     }
@@ -86,7 +93,9 @@ mod tests {
     fn reopen_existing_db_does_not_reapply() {
         let db = open_db(":memory:").unwrap();
         migrate(&db).unwrap(); // idempotent second call
-        let v: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        let v: i64 = db
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(v, migrations_data::MIGRATIONS.last().unwrap().0 as i64);
     }
 }

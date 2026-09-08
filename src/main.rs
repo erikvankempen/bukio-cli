@@ -7,55 +7,67 @@
 // phase. Human (non-JSON) output is deferred — the parity harness compares
 // --json output (the machine contract everything consumes).
 
-mod actor;
-mod audit;
-mod canonical;
-mod db;
-mod money;
-mod sign;
-mod dates;
-mod entries;
 mod accounts;
-mod reports;
-mod vat;
-mod fx;
-mod bank;
-mod company;
-mod year_end;
-mod month_end;
-mod items;
-mod recurring;
+mod actor;
 mod assets;
+mod attachments;
+mod audit;
+mod authz;
+mod bank;
+mod canonical;
+mod company;
 mod compliance;
 mod contacts;
-mod invoice;
-mod payments;
+mod dates;
+mod db;
+mod entries;
 mod export;
+mod fx;
+mod invoice;
+mod items;
+mod money;
+mod month_end;
+mod payments;
+mod recurring;
+mod reports;
+mod sign;
 mod ubl;
-mod attachments;
-mod authz;
+mod import_mod;
+mod vat;
+mod year_end;
 
 use money::{BukioError, Result};
 use serde_json::{json, Value};
 use std::io::Write;
 
 fn ok(data: Value) {
-    println!("{}", serde_json::to_string_pretty(&json!({ "ok": true, "data": data })).unwrap());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json!({ "ok": true, "data": data })).unwrap()
+    );
 }
 
 fn fail_json(err: &BukioError) -> ! {
     println!(
         "{}",
-        serde_json::to_string_pretty(&json!({ "ok": false, "error": { "code": err.code, "message": err.message } })).unwrap()
+        serde_json::to_string_pretty(
+            &json!({ "ok": false, "error": { "code": err.code, "message": err.message } })
+        )
+        .unwrap()
     );
     std::process::exit(1);
 }
 
 fn arg(argv: &[String], flag: &str) -> Option<String> {
     let eq = format!("{flag}=");
-    argv.iter().position(|a| a == flag).map(|i| argv.get(i + 1).cloned())
+    argv.iter()
+        .position(|a| a == flag)
+        .map(|i| argv.get(i + 1).cloned())
         .flatten()
-        .or_else(|| argv.iter().find_map(|a| a.strip_prefix(&eq).map(String::from)))
+        .or_else(|| {
+            argv.iter()
+                .find_map(|a| a.strip_prefix(&eq).map(String::from))
+        })
 }
 
 fn has_flag(argv: &[String], flag: &str) -> bool {
@@ -82,7 +94,10 @@ fn repeated(argv: &[String], flag: &str) -> Vec<String> {
 }
 
 fn no_database(db_path: &str) -> BukioError {
-    BukioError::new("NO_DATABASE", format!("no database at {db_path} — run 'bukio init' first"))
+    BukioError::new(
+        "NO_DATABASE",
+        format!("no database at {db_path} — run 'bukio init' first"),
+    )
 }
 
 fn ensure_db_exists(db_path: &str) -> Result<std::path::PathBuf> {
@@ -168,7 +183,9 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         ["account", "import"] => cmd_account_import(argv, db_path, actor, dry_run),
         ["cost-center", "add"] => cmd_cc_add(argv, db_path, actor),
         ["cost-center", "list"] => cmd_cc_list(argv, db_path),
-        ["cost-center", "deactivate"] | ["cost-center", "reactivate"] => cmd_cc_toggle(argv, db_path, actor),
+        ["cost-center", "deactivate"] | ["cost-center", "reactivate"] => {
+            cmd_cc_toggle(argv, db_path, actor)
+        }
         ["report", "trial-balance"] => cmd_tb(argv, db_path),
         ["report", "balance-sheet"] | ["report", "balans"] => cmd_balans(argv, db_path),
         ["report", "pnl"] => cmd_pnl(argv, db_path),
@@ -201,7 +218,10 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         ["audit", "verify"] => cmd_audit_verify(db_path),
         _ => Err(BukioError::new(
             "UNKNOWN_COMMAND",
-            format!("command '{}' is not ported to Rust yet", positional.join(" ")),
+            format!(
+                "command '{}' is not ported to Rust yet",
+                positional.join(" ")
+            ),
         )),
     }
 }
@@ -215,7 +235,8 @@ fn require_actor(actor: &str) -> Result<()> {
 
 fn cmd_init(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
-    let name = arg(argv, "--name").ok_or_else(|| BukioError::new("MISSING_ARG", "--name is required"))?;
+    let name =
+        arg(argv, "--name").ok_or_else(|| BukioError::new("MISSING_ARG", "--name is required"))?;
     let country = arg(argv, "--country").unwrap_or_else(|| "NL".into());
     let profile = accounts::get_profile(&country)?;
     let legal_form = arg(argv, "--legal-form").unwrap_or_else(|| "eenmanszaak".into());
@@ -226,24 +247,40 @@ fn cmd_init(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
     if !legal_forms.contains(&legal_form.as_str()) {
         return Err(BukioError::new(
             "INVALID_LEGAL_FORM",
-            format!("legal form '{}' must be one of {}", legal_form, legal_forms.join(", ")),
+            format!(
+                "legal form '{}' must be one of {}",
+                legal_form,
+                legal_forms.join(", ")
+            ),
         ));
     }
     let vat = arg(argv, "--vat").unwrap_or_else(|| "off".into());
     if vat != "on" && vat != "off" {
-        return Err(BukioError::new("INVALID_VAT_CHOICE", format!("--vat must be 'on' or 'off', got '{vat}'")));
+        return Err(BukioError::new(
+            "INVALID_VAT_CHOICE",
+            format!("--vat must be 'on' or 'off', got '{vat}'"),
+        ));
     }
     let kor = has_flag(argv, "--kor");
     if kor && profile["tax"]["smallBusinessScheme"].as_str() != Some("kor") {
-        return Err(BukioError::new("INVALID_VAT_CHOICE", format!("--kor is not available for country {}", country)));
+        return Err(BukioError::new(
+            "INVALID_VAT_CHOICE",
+            format!("--kor is not available for country {}", country),
+        ));
     }
     let iban = arg(argv, "--iban");
     if let Some(i) = &iban {
         if !dates::is_valid_iban(i) {
-            return Err(BukioError::new("INVALID_IBAN", format!("'{i}' is not a valid IBAN")));
+            return Err(BukioError::new(
+                "INVALID_IBAN",
+                format!("'{i}' is not a valid IBAN"),
+            ));
         }
     }
-    let chart_len = profile["reporting"]["defaultChart"].as_array().map(|a| a.len()).unwrap_or(0);
+    let chart_len = profile["reporting"]["defaultChart"]
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
     let company = json!({
         "name": name,
         "registration_id": arg(argv, "--registration-id"),
@@ -273,10 +310,16 @@ fn cmd_init(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         }));
     }
     if std::path::Path::new(db_path).exists() {
-        let existing = db::open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
-        let has: i64 = existing.query_row("SELECT count(*) FROM company", [], |r| r.get(0)).unwrap_or(0);
+        let existing =
+            db::open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
+        let has: i64 = existing
+            .query_row("SELECT count(*) FROM company", [], |r| r.get(0))
+            .unwrap_or(0);
         if has > 0 {
-            return Err(BukioError::new("ALREADY_INITIALISED", format!("database {db_path} already has a company")));
+            return Err(BukioError::new(
+                "ALREADY_INITIALISED",
+                format!("database {db_path} already has a company"),
+            ));
         }
     }
     if let Some(parent) = std::path::Path::new(db_path).parent() {
@@ -300,18 +343,26 @@ fn cmd_init(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
     let mut vat_created = 0;
     if company["vat_module"] == 1 {
         let vat_result = vat::enable_vat_module(&db, actor)?;
-        vat_created = vat_result["accounts"].as_array().map(|a| a.len()).unwrap_or(0);
+        vat_created = vat_result["accounts"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0);
     }
-    audit::record(&db, audit::RecordArgs {
-        actor,
-        action: "company.init",
-        command: Some("init"),
-        args: Some(company.clone()),
-        outcome: "ok",
-        entry_ids: vec![],
-    })?;
+    audit::record(
+        &db,
+        audit::RecordArgs {
+            actor,
+            action: "company.init",
+            command: Some("init"),
+            args: Some(company.clone()),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     let total = accounts::list_accounts(&db, None, true)?.len();
-    Ok(json!({ "company": company, "db": db_path, "chart": { "accounts": total, "created": created + vat_created }, "dryRun": false }))
+    Ok(
+        json!({ "company": company, "db": db_path, "chart": { "accounts": total, "created": created + vat_created }, "dryRun": false }),
+    )
 }
 
 fn open_existing(db_path: &str) -> Result<rusqlite::Connection> {
@@ -322,20 +373,30 @@ fn open_existing(db_path: &str) -> Result<rusqlite::Connection> {
 fn cmd_entry_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let date = arg(argv, "--date").unwrap_or_else(|| dates::today_iso());
-    let desc = arg(argv, "--desc").ok_or_else(|| BukioError::new("MISSING_ARG", "--desc is required"))?;
+    let desc =
+        arg(argv, "--desc").ok_or_else(|| BukioError::new("MISSING_ARG", "--desc is required"))?;
     let postings_raw = repeated(argv, "--postings");
     let specs = entries::parse_posting_specs(&postings_raw)?;
     if dry_run {
         dates::validate_date(&date)?;
         if desc.trim().is_empty() {
-            return Err(BukioError::new("INVALID_DESCRIPTION", "description is required"));
+            return Err(BukioError::new(
+                "INVALID_DESCRIPTION",
+                "description is required",
+            ));
         }
         if specs.len() < 2 {
-            return Err(BukioError::new("TOO_FEW_POSTINGS", "an entry needs at least 2 postings"));
+            return Err(BukioError::new(
+                "TOO_FEW_POSTINGS",
+                "an entry needs at least 2 postings",
+            ));
         }
         let sum: i64 = specs.iter().map(|s| s.amount_cents).sum();
         if sum != 0 {
-            return Err(BukioError::new("UNBALANCED", format!("postings do not sum to zero (sum = {sum} cents)")));
+            return Err(BukioError::new(
+                "UNBALANCED",
+                format!("postings do not sum to zero (sum = {sum} cents)"),
+            ));
         }
         let plan: Vec<Value> = specs
             .iter()
@@ -350,14 +411,21 @@ fn cmd_entry_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> 
                     for s in &specs {
                         match db.query_row(
                             "SELECT active FROM accounts WHERE code = ?1",
-                            [&s.code], |r| r.get::<_, i64>(0),
+                            [&s.code],
+                            |r| r.get::<_, i64>(0),
                         ) {
                             Ok(active) if active == 1 => {}
-                            _ => { bad = true; break; }
+                            _ => {
+                                bad = true;
+                                break;
+                            }
                         }
                     }
                     if bad {
-                        return Err(BukioError::new("ACCOUNT_NOT_FOUND", "account validation failed"));
+                        return Err(BukioError::new(
+                            "ACCOUNT_NOT_FOUND",
+                            "account validation failed",
+                        ));
                     }
                     "ok"
                 }
@@ -374,14 +442,17 @@ fn cmd_entry_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> 
         }));
     }
     let db = open_existing(db_path)?;
-    let e = entries::create_entry(&db, entries::CreateEntry {
-        date: &date,
-        description: &desc,
-        postings: specs,
-        source: "manual",
-        source_ref: arg(argv, "--source-ref").as_deref(),
-        actor,
-    })?;
+    let e = entries::create_entry(
+        &db,
+        entries::CreateEntry {
+            date: &date,
+            description: &desc,
+            postings: specs,
+            source: "manual",
+            source_ref: arg(argv, "--source-ref").as_deref(),
+            actor,
+        },
+    )?;
     let e = if has_flag(argv, "--post") {
         entries::post_entry(&db, e.id, actor)?
     } else {
@@ -392,17 +463,27 @@ fn cmd_entry_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> 
 
 fn cmd_entry_post(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
-    let id: i64 = arg(argv, "--id").and_then(|v| v.parse().ok())
+    let id: i64 = arg(argv, "--id")
+        .and_then(|v| v.parse().ok())
         .ok_or_else(|| BukioError::new("MISSING_ARG", "--id is required"))?;
     let db = open_existing(db_path)?;
     let entry = entries::get_entry(&db, id)
         .ok_or_else(|| BukioError::new("NOT_FOUND", format!("entry {id} does not exist")))?;
     if entry.state != "draft" {
-        let code = if entry.state == "reversed" { "ALREADY_REVERSED" } else { "ALREADY_POSTED" };
-        return Err(BukioError::new(code, format!("entry {id} is {}", entry.state)));
+        let code = if entry.state == "reversed" {
+            "ALREADY_REVERSED"
+        } else {
+            "ALREADY_POSTED"
+        };
+        return Err(BukioError::new(
+            code,
+            format!("entry {id} is {}", entry.state),
+        ));
     }
     if dry_run {
-        return Ok(json!({ "action": "post entry", "id": id, "current_state": "draft", "target_state": "posted", "dry_run": true }));
+        return Ok(
+            json!({ "action": "post entry", "id": id, "current_state": "draft", "target_state": "posted", "dry_run": true }),
+        );
     }
     let posted = entries::post_entry(&db, id, actor)?;
     Ok(entries::entry_to_json(&posted))
@@ -410,13 +491,18 @@ fn cmd_entry_post(argv: &[String], db_path: &str, actor: &str, dry_run: bool) ->
 
 fn cmd_entry_reverse(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
-    let id: i64 = arg(argv, "--id").and_then(|v| v.parse().ok())
+    let id: i64 = arg(argv, "--id")
+        .and_then(|v| v.parse().ok())
         .ok_or_else(|| BukioError::new("MISSING_ARG", "--id is required"))?;
     let db = open_existing(db_path)?;
     let entry = entries::get_entry(&db, id)
         .ok_or_else(|| BukioError::new("NOT_FOUND", format!("entry {id} does not exist")))?;
     if entry.state != "posted" {
-        let code = if entry.state == "draft" { "NOT_POSTED" } else { "ALREADY_REVERSED" };
+        let code = if entry.state == "draft" {
+            "NOT_POSTED"
+        } else {
+            "ALREADY_REVERSED"
+        };
         let msg = if entry.state == "draft" {
             format!("entry {id} must be posted before it can be reversed")
         } else {
@@ -424,18 +510,26 @@ fn cmd_entry_reverse(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
         };
         return Err(BukioError::new(code, msg));
     }
-    let reversals: i64 = db.query_row(
-        "SELECT COUNT(*) FROM journal_entries WHERE reversed_from_id = ?1 AND state = 'posted'",
-        [id], |r| r.get(0),
-    ).unwrap_or(0);
+    let reversals: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM journal_entries WHERE reversed_from_id = ?1 AND state = 'posted'",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
     if reversals > 0 {
-        return Err(BukioError::new("ALREADY_REVERSED", format!("entry {id} is already reversed")));
+        return Err(BukioError::new(
+            "ALREADY_REVERSED",
+            format!("entry {id} is already reversed"),
+        ));
     }
     if dry_run {
         let reversed: Vec<Value> = entry.postings.iter().map(|p| json!({
             "account_code": p.account_code, "amount_cents": -p.amount_cents, "amount": money::format_amount(-p.amount_cents),
         })).collect();
-        return Ok(json!({ "action": "reverse entry (create linked contra-entry)", "id": id, "current_state": "posted", "reversed_postings": reversed, "dry_run": true }));
+        return Ok(
+            json!({ "action": "reverse entry (create linked contra-entry)", "id": id, "current_state": "posted", "reversed_postings": reversed, "dry_run": true }),
+        );
     }
     let reason = arg(argv, "--reason");
     let reversed = entries::reverse_entry(&db, id, actor, reason.as_deref())?;
@@ -444,11 +538,15 @@ fn cmd_entry_reverse(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
 
 fn cmd_entry_list(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let limit: i64 = arg(argv, "--limit").and_then(|v| v.parse().ok()).unwrap_or(100);
+    let limit: i64 = arg(argv, "--limit")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(100);
     let rows = entries::list_entries(
         &db,
         arg(argv, "--state").as_deref().filter(|s| !s.is_empty()),
-        arg(argv, "--date-from").as_deref().filter(|s| !s.is_empty()),
+        arg(argv, "--date-from")
+            .as_deref()
+            .filter(|s| !s.is_empty()),
         arg(argv, "--date-to").as_deref().filter(|s| !s.is_empty()),
         limit,
     )?;
@@ -457,7 +555,8 @@ fn cmd_entry_list(argv: &[String], db_path: &str) -> Result<Value> {
 
 fn cmd_entry_show(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let id: i64 = arg(argv, "--id").and_then(|v| v.parse().ok())
+    let id: i64 = arg(argv, "--id")
+        .and_then(|v| v.parse().ok())
         .ok_or_else(|| BukioError::new("MISSING_ARG", "--id is required"))?;
     let e = entries::get_entry(&db, id)
         .ok_or_else(|| BukioError::new("NOT_FOUND", format!("entry {id} does not exist")))?;
@@ -466,12 +565,22 @@ fn cmd_entry_show(argv: &[String], db_path: &str) -> Result<Value> {
 
 fn cmd_account_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
-    let code = arg(argv, "--code").ok_or_else(|| BukioError::new("MISSING_ARG", "--code is required"))?;
-    let name = arg(argv, "--name").ok_or_else(|| BukioError::new("MISSING_ARG", "--name is required"))?;
-    let type_ = arg(argv, "--type").ok_or_else(|| BukioError::new("MISSING_ARG", "--type is required"))?;
-    let nb = arg(argv, "--normal-balance").ok_or_else(|| BukioError::new("MISSING_ARG", "--normal-balance is required"))?;
+    let code =
+        arg(argv, "--code").ok_or_else(|| BukioError::new("MISSING_ARG", "--code is required"))?;
+    let name =
+        arg(argv, "--name").ok_or_else(|| BukioError::new("MISSING_ARG", "--name is required"))?;
+    let type_ =
+        arg(argv, "--type").ok_or_else(|| BukioError::new("MISSING_ARG", "--type is required"))?;
+    let nb = arg(argv, "--normal-balance")
+        .ok_or_else(|| BukioError::new("MISSING_ARG", "--normal-balance is required"))?;
     let tax = arg(argv, "--taxonomy-code");
-    let new = accounts::NewAccount { code: &code, name: &name, type_: &type_, normal_balance: &nb, taxonomy_code: tax.as_deref() };
+    let new = accounts::NewAccount {
+        code: &code,
+        name: &name,
+        type_: &type_,
+        normal_balance: &nb,
+        taxonomy_code: tax.as_deref(),
+    };
     if dry_run {
         accounts::validate_account(&new)?;
         let db = open_existing(db_path)?;
@@ -484,11 +593,19 @@ fn cmd_account_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
     }
     let db = open_existing(db_path)?;
     let account = accounts::create_account(&db, &new)?;
-    audit::record(&db, audit::RecordArgs {
-        actor, action: "account.add", command: Some("account add"),
-        args: Some(json!({ "code": code, "name": name, "type": type_, "normal_balance": nb, "taxonomy_code": tax })),
-        outcome: "ok", entry_ids: vec![],
-    })?;
+    audit::record(
+        &db,
+        audit::RecordArgs {
+            actor,
+            action: "account.add",
+            command: Some("account add"),
+            args: Some(
+                json!({ "code": code, "name": name, "type": type_, "normal_balance": nb, "taxonomy_code": tax }),
+            ),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     Ok(account)
 }
 
@@ -504,53 +621,105 @@ fn cmd_account_list(argv: &[String], db_path: &str) -> Result<Value> {
 
 fn cmd_account_show(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let code = arg(argv, "--code").ok_or_else(|| BukioError::new("MISSING_ARG", "--code is required"))?;
-    accounts::get_account_by_code(&db, &code)
-        .ok_or_else(|| BukioError::new("ACCOUNT_NOT_FOUND", format!("account {code} does not exist")))
+    let code =
+        arg(argv, "--code").ok_or_else(|| BukioError::new("MISSING_ARG", "--code is required"))?;
+    accounts::get_account_by_code(&db, &code).ok_or_else(|| {
+        BukioError::new(
+            "ACCOUNT_NOT_FOUND",
+            format!("account {code} does not exist"),
+        )
+    })
 }
 
-fn cmd_account_deactivate(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+fn cmd_account_deactivate(
+    argv: &[String],
+    db_path: &str,
+    actor: &str,
+    dry_run: bool,
+) -> Result<Value> {
     require_actor(actor)?;
-    let code = arg(argv, "--code").ok_or_else(|| BukioError::new("MISSING_ARG", "--code is required"))?;
+    let code =
+        arg(argv, "--code").ok_or_else(|| BukioError::new("MISSING_ARG", "--code is required"))?;
     let db = open_existing(db_path)?;
-    let a = accounts::get_account_by_code(&db, &code)
-        .ok_or_else(|| BukioError::new("ACCOUNT_NOT_FOUND", format!("account {code} does not exist")))?;
+    let a = accounts::get_account_by_code(&db, &code).ok_or_else(|| {
+        BukioError::new(
+            "ACCOUNT_NOT_FOUND",
+            format!("account {code} does not exist"),
+        )
+    })?;
     if dry_run {
-        let current = if a["active"].as_bool().unwrap_or(false) { "active" } else { "inactive" };
-        return Ok(json!({ "action": "deactivate account", "code": code, "current": current, "dry_run": true }));
+        let current = if a["active"].as_bool().unwrap_or(false) {
+            "active"
+        } else {
+            "inactive"
+        };
+        return Ok(
+            json!({ "action": "deactivate account", "code": code, "current": current, "dry_run": true }),
+        );
     }
     let updated = accounts::deactivate_account(&db, &code)?;
-    audit::record(&db, audit::RecordArgs {
-        actor, action: "account.deactivate", command: Some("account deactivate"),
-        args: Some(json!({ "code": code })), outcome: "ok", entry_ids: vec![],
-    })?;
+    audit::record(
+        &db,
+        audit::RecordArgs {
+            actor,
+            action: "account.deactivate",
+            command: Some("account deactivate"),
+            args: Some(json!({ "code": code })),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     Ok(updated)
 }
 
-fn cmd_account_reactivate(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+fn cmd_account_reactivate(
+    argv: &[String],
+    db_path: &str,
+    actor: &str,
+    dry_run: bool,
+) -> Result<Value> {
     require_actor(actor)?;
-    let code = arg(argv, "--code").ok_or_else(|| BukioError::new("MISSING_ARG", "--code is required"))?;
+    let code =
+        arg(argv, "--code").ok_or_else(|| BukioError::new("MISSING_ARG", "--code is required"))?;
     let db = open_existing(db_path)?;
     if dry_run {
-        let a = accounts::get_account_by_code(&db, &code)
-            .ok_or_else(|| BukioError::new("ACCOUNT_NOT_FOUND", format!("account {code} does not exist")))?;
+        let a = accounts::get_account_by_code(&db, &code).ok_or_else(|| {
+            BukioError::new(
+                "ACCOUNT_NOT_FOUND",
+                format!("account {code} does not exist"),
+            )
+        })?;
         if a["active"].as_bool().unwrap_or(false) {
-            return Err(BukioError::new("ALREADY_ACTIVE", format!("account {code} is already active")));
+            return Err(BukioError::new(
+                "ALREADY_ACTIVE",
+                format!("account {code} is already active"),
+            ));
         }
-        return Ok(json!({ "action": "account.reactivate", "code": code, "from": "inactive", "to": "active", "dry_run": true }));
+        return Ok(
+            json!({ "action": "account.reactivate", "code": code, "from": "inactive", "to": "active", "dry_run": true }),
+        );
     }
     let updated = accounts::reactivate_account(&db, &code)?;
-    audit::record(&db, audit::RecordArgs {
-        actor, action: "account.reactivate", command: Some("account reactivate"),
-        args: Some(json!({ "code": code })), outcome: "ok", entry_ids: vec![],
-    })?;
+    audit::record(
+        &db,
+        audit::RecordArgs {
+            actor,
+            action: "account.reactivate",
+            command: Some("account reactivate"),
+            args: Some(json!({ "code": code })),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     Ok(updated)
 }
 
 fn cmd_account_import(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
-    let file = arg(argv, "--file").ok_or_else(|| BukioError::new("MISSING_ARG", "--file is required"))?;
-    let text = std::fs::read_to_string(&file).map_err(|e| BukioError::new("IO_ERROR", format!("cannot read {file}: {e}")))?;
+    let file =
+        arg(argv, "--file").ok_or_else(|| BukioError::new("MISSING_ARG", "--file is required"))?;
+    let text = std::fs::read_to_string(&file)
+        .map_err(|e| BukioError::new("IO_ERROR", format!("cannot read {file}: {e}")))?;
     let db = if dry_run {
         db::open_db(":memory:").map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?
     } else {
@@ -558,11 +727,17 @@ fn cmd_account_import(argv: &[String], db_path: &str, actor: &str, dry_run: bool
     };
     let r = accounts::import_chart_csv(&db, &text)?;
     if !dry_run {
-        audit::record(&db, audit::RecordArgs {
-            actor, action: "account.import", command: Some("account import"),
-            args: Some(json!({ "file": file, "created": r.created, "skipped": r.skipped })),
-            outcome: "ok", entry_ids: vec![],
-        })?;
+        audit::record(
+            &db,
+            audit::RecordArgs {
+                actor,
+                action: "account.import",
+                command: Some("account import"),
+                args: Some(json!({ "file": file, "created": r.created, "skipped": r.skipped })),
+                outcome: "ok",
+                entry_ids: vec![],
+            },
+        )?;
     }
     Ok(json!({
         "file": file, "created": r.created, "skipped": r.skipped, "total": r.total,
@@ -573,14 +748,23 @@ fn cmd_account_import(argv: &[String], db_path: &str, actor: &str, dry_run: bool
 
 fn cmd_cc_add(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     require_actor(actor)?;
-    let code = arg(argv, "--code").ok_or_else(|| BukioError::new("MISSING_ARG", "--code is required"))?;
-    let name = arg(argv, "--name").ok_or_else(|| BukioError::new("MISSING_ARG", "--name is required"))?;
+    let code =
+        arg(argv, "--code").ok_or_else(|| BukioError::new("MISSING_ARG", "--code is required"))?;
+    let name =
+        arg(argv, "--name").ok_or_else(|| BukioError::new("MISSING_ARG", "--name is required"))?;
     let db = open_existing(db_path)?;
     let cc = accounts::create_cost_center(&db, &code, &name)?;
-    audit::record(&db, audit::RecordArgs {
-        actor, action: "cost_center.add", command: Some("cost-center add"),
-        args: Some(json!({ "code": code, "name": name })), outcome: "ok", entry_ids: vec![],
-    })?;
+    audit::record(
+        &db,
+        audit::RecordArgs {
+            actor,
+            action: "cost_center.add",
+            command: Some("cost-center add"),
+            args: Some(json!({ "code": code, "name": name })),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     Ok(cc)
 }
 
@@ -593,26 +777,44 @@ fn cmd_cc_list(argv: &[String], db_path: &str) -> Result<Value> {
 fn cmd_cc_toggle(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     require_actor(actor)?;
     let reactivate = argv.iter().any(|a| a == "reactivate");
-    let code = arg(argv, "--code").ok_or_else(|| BukioError::new("MISSING_ARG", "--code is required"))?;
+    let code =
+        arg(argv, "--code").ok_or_else(|| BukioError::new("MISSING_ARG", "--code is required"))?;
     let db = open_existing(db_path)?;
     let updated = accounts::set_cost_center_active(&db, &code, reactivate, reactivate)?;
-    audit::record(&db, audit::RecordArgs {
-        actor,
-        action: if reactivate { "cost_center.reactivate" } else { "cost_center.deactivate" },
-        command: Some(if reactivate { "cost-center reactivate" } else { "cost-center deactivate" }),
-        args: Some(json!({ "code": code })), outcome: "ok", entry_ids: vec![],
-    })?;
+    audit::record(
+        &db,
+        audit::RecordArgs {
+            actor,
+            action: if reactivate {
+                "cost_center.reactivate"
+            } else {
+                "cost_center.deactivate"
+            },
+            command: Some(if reactivate {
+                "cost-center reactivate"
+            } else {
+                "cost-center deactivate"
+            }),
+            args: Some(json!({ "code": code })),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     Ok(updated)
 }
 
 fn cmd_tb(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    reports::trial_balance(&db, arg(argv, "--year").as_deref().filter(|s| !s.is_empty()))
+    reports::trial_balance(
+        &db,
+        arg(argv, "--year").as_deref().filter(|s| !s.is_empty()),
+    )
 }
 
 fn cmd_balans(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let as_of = arg(argv, "--as-of").unwrap_or_else(|| format!("{}-12-31", dates::today_iso().get(0..4).unwrap_or("2026")));
+    let as_of = arg(argv, "--as-of")
+        .unwrap_or_else(|| format!("{}-12-31", dates::today_iso().get(0..4).unwrap_or("2026")));
     reports::balans(&db, &as_of)
 }
 
@@ -625,13 +827,20 @@ fn cmd_pnl(argv: &[String], db_path: &str) -> Result<Value> {
 fn cmd_journal(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let year = arg(argv, "--year").unwrap_or_else(|| dates::today_iso()[0..4].to_string());
-    let rows = reports::journal(&db, &format!("{year}-01-01"), &format!("{year}-12-31"), None)?;
+    let rows = reports::journal(
+        &db,
+        &format!("{year}-01-01"),
+        &format!("{year}-12-31"),
+        None,
+    )?;
     Ok(json!({ "rows": rows }))
 }
 
 fn cmd_audit_list(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let limit: i64 = arg(argv, "--limit").and_then(|v| v.parse().ok()).unwrap_or(50);
+    let limit: i64 = arg(argv, "--limit")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50);
     let rows = audit::list(
         &db,
         arg(argv, "--since").as_deref().filter(|s| !s.is_empty()),
@@ -679,7 +888,8 @@ fn cmd_vat_codes(db_path: &str) -> Result<Value> {
 fn cmd_vat_book(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let date = arg(argv, "--date").unwrap_or_else(|| dates::today_iso());
-    let desc = arg(argv, "--desc").ok_or_else(|| BukioError::new("MISSING_ARG", "--desc is required"))?;
+    let desc =
+        arg(argv, "--desc").ok_or_else(|| BukioError::new("MISSING_ARG", "--desc is required"))?;
     let postings_raw = repeated(argv, "--postings");
     let specs = vat::parse_vat_posting_specs(&postings_raw)?;
     if dry_run {
@@ -692,7 +902,13 @@ fn cmd_vat_book(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
     }
     let db = open_existing(db_path)?;
     let entry = vat::book_vat_entry(
-        &db, &date, &desc, &specs, "manual", arg(argv, "--source-ref").as_deref(), actor,
+        &db,
+        &date,
+        &desc,
+        &specs,
+        "manual",
+        arg(argv, "--source-ref").as_deref(),
+        actor,
         has_flag(argv, "--post"),
     )?;
     // expanded mirrors the JS CLI: every expanded leg incl. auto VAT legs
@@ -713,7 +929,8 @@ fn cmd_vat_book(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
 
 fn cmd_vat_readout(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let period = arg(argv, "--period").ok_or_else(|| BukioError::new("MISSING_ARG", "--period is required"))?;
+    let period = arg(argv, "--period")
+        .ok_or_else(|| BukioError::new("MISSING_ARG", "--period is required"))?;
     if has_flag(argv, "--mark-filed") {
         require_actor(actor)?;
         let result = vat::mark_filed(&db, &period, actor)?;
@@ -726,7 +943,10 @@ fn cmd_vat_readout(argv: &[String], db_path: &str, actor: &str) -> Result<Value>
     if let Some(obj) = readout["fields"].as_object() {
         for (k, v) in obj {
             let cents = v.as_i64().unwrap_or(0);
-            fields.insert(k.clone(), json!({ "cents": cents, "amount": money::format_amount(cents) }));
+            fields.insert(
+                k.clone(),
+                json!({ "cents": cents, "amount": money::format_amount(cents) }),
+            );
         }
     }
     Ok(json!({
@@ -752,7 +972,8 @@ fn cmd_vat_file(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
 
 fn cmd_vat_settle(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
-    let tx: i64 = arg(argv, "--tx").and_then(|v| v.parse().ok())
+    let tx: i64 = arg(argv, "--tx")
+        .and_then(|v| v.parse().ok())
         .ok_or_else(|| BukioError::new("MISSING_ARG", "--tx is required (bank transaction id)"))?;
     let db = open_existing(db_path)?;
     // fetch the bank transaction (amount + account) like the JS CLI
@@ -765,7 +986,10 @@ fn cmd_vat_settle(argv: &[String], db_path: &str, actor: &str, dry_run: bool) ->
         )
         .ok();
     let Some((tx_amount, bank_code)) = row else {
-        return Err(BukioError::new("NOT_FOUND", format!("bank transaction {tx} does not exist")));
+        return Err(BukioError::new(
+            "NOT_FOUND",
+            format!("bank transaction {tx} does not exist"),
+        ));
     };
     let result = vat::vat_settle(
         &db,
@@ -794,9 +1018,11 @@ fn cmd_vat_settle(argv: &[String], db_path: &str, actor: &str, dry_run: bool) ->
 fn cmd_fx_set(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
-    let currency = arg(argv, "--currency").ok_or_else(|| BukioError::new("MISSING_ARG", "--currency is required"))?;
+    let currency = arg(argv, "--currency")
+        .ok_or_else(|| BukioError::new("MISSING_ARG", "--currency is required"))?;
     let date = arg(argv, "--date").unwrap_or_else(dates::today_iso);
-    let rate = arg(argv, "--rate").ok_or_else(|| BukioError::new("MISSING_ARG", "--rate is required"))?;
+    let rate =
+        arg(argv, "--rate").ok_or_else(|| BukioError::new("MISSING_ARG", "--rate is required"))?;
     let source = arg(argv, "--source").unwrap_or_else(|| "manual".into());
     let r = fx::set_fx_rate(&db, &currency, &date, &rate, &source, actor, dry_run)?;
     if dry_run {
@@ -811,15 +1037,20 @@ fn cmd_fx_set(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Res
 
 fn cmd_fx_show(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let currency = arg(argv, "--currency").ok_or_else(|| BukioError::new("MISSING_ARG", "--currency is required"))?;
-    let limit: i64 = arg(argv, "--limit").and_then(|v| v.parse().ok()).unwrap_or(50);
+    let currency = arg(argv, "--currency")
+        .ok_or_else(|| BukioError::new("MISSING_ARG", "--currency is required"))?;
+    let limit: i64 = arg(argv, "--limit")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50);
     let rates = fx::list_fx_rates(&db, Some(&currency), limit)?;
     Ok(json!({ "currency": currency, "rates": rates }))
 }
 
 fn cmd_fx_list(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let limit: i64 = arg(argv, "--limit").and_then(|v| v.parse().ok()).unwrap_or(50);
+    let limit: i64 = arg(argv, "--limit")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(50);
     let rates = fx::list_fx_rates(&db, None, limit)?;
     Ok(json!({ "rates": rates }))
 }
@@ -827,7 +1058,8 @@ fn cmd_fx_list(argv: &[String], db_path: &str) -> Result<Value> {
 fn cmd_bank_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
-    let iban = arg(argv, "--iban").ok_or_else(|| BukioError::new("MISSING_ARG", "--iban is required"))?;
+    let iban =
+        arg(argv, "--iban").ok_or_else(|| BukioError::new("MISSING_ARG", "--iban is required"))?;
     let name = arg(argv, "--name");
     let account_code = arg(argv, "--account-code").unwrap_or_else(|| "1100".into());
     bank::get_or_create_bank_account(&db, &iban, name.as_deref(), &account_code, dry_run)
@@ -842,21 +1074,33 @@ fn cmd_bank_list(db_path: &str) -> Result<Value> {
 fn cmd_bank_import(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
-    let file = arg(argv, "--file").ok_or_else(|| BukioError::new("MISSING_ARG", "--file is required"))?;
-    let iban = arg(argv, "--iban").ok_or_else(|| BukioError::new("MISSING_ARG", "--iban is required"))?;
+    let file =
+        arg(argv, "--file").ok_or_else(|| BukioError::new("MISSING_ARG", "--file is required"))?;
+    let iban =
+        arg(argv, "--iban").ok_or_else(|| BukioError::new("MISSING_ARG", "--iban is required"))?;
     let format = arg(argv, "--format").unwrap_or_else(|| "auto".into());
     let name = arg(argv, "--name");
     let account_code = arg(argv, "--account-code").unwrap_or_else(|| "1100".into());
-    let content = std::fs::read_to_string(&file).map_err(|e| BukioError::new("FILE_ERROR", format!("cannot read {file}: {e}")))?;
+    let content = std::fs::read_to_string(&file)
+        .map_err(|e| BukioError::new("FILE_ERROR", format!("cannot read {file}: {e}")))?;
     let transactions = if content.trim_start().starts_with('<') {
-        bank::parse_camt053(&content).map_err(|e| BukioError::new("PARSE_ERROR", e.message.clone()))?
+        bank::parse_camt053(&content)
+            .map_err(|e| BukioError::new("PARSE_ERROR", e.message.clone()))?
     } else {
-        bank::parse_bank_csv(&content, &iban).map_err(|e| BukioError::new("PARSE_ERROR", e.message.clone()))?
+        bank::parse_bank_csv(&content, &iban)
+            .map_err(|e| BukioError::new("PARSE_ERROR", e.message.clone()))?
     };
     if dry_run {
         bank::preview_import(&db, &iban, &transactions)
     } else {
-        bank::import_transactions(&db, &iban, &transactions, name.as_deref(), &account_code, actor)
+        bank::import_transactions(
+            &db,
+            &iban,
+            &transactions,
+            name.as_deref(),
+            &account_code,
+            actor,
+        )
     }
 }
 
@@ -864,15 +1108,24 @@ fn cmd_bank_transactions(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let state = arg(argv, "--state");
     let iban = arg(argv, "--iban");
-    let limit: i64 = arg(argv, "--limit").and_then(|v| v.parse().ok()).unwrap_or(200);
+    let limit: i64 = arg(argv, "--limit")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(200);
     let transactions = bank::list_transactions(&db, state.as_deref(), iban.as_deref(), limit)?;
     Ok(json!({ "transactions": transactions }))
 }
 
-fn cmd_bank_match_auto(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+fn cmd_bank_match_auto(
+    argv: &[String],
+    db_path: &str,
+    actor: &str,
+    dry_run: bool,
+) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
-    let window: i64 = arg(argv, "--window-days").and_then(|v| v.parse().ok()).unwrap_or(5);
+    let window: i64 = arg(argv, "--window-days")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5);
     bank::auto_match(&db, window, actor, dry_run)
 }
 
@@ -882,12 +1135,19 @@ fn cmd_bank_match_suggest(db_path: &str) -> Result<Value> {
     Ok(json!({ "suggestions": suggestions }))
 }
 
-fn cmd_bank_match_link(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+fn cmd_bank_match_link(
+    argv: &[String],
+    db_path: &str,
+    actor: &str,
+    dry_run: bool,
+) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
-    let tx_id: i64 = arg(argv, "--tx").and_then(|v| v.parse().ok())
+    let tx_id: i64 = arg(argv, "--tx")
+        .and_then(|v| v.parse().ok())
         .ok_or_else(|| BukioError::new("MISSING_ARG", "--tx is required"))?;
-    let entry_id: i64 = arg(argv, "--entry").and_then(|v| v.parse().ok())
+    let entry_id: i64 = arg(argv, "--entry")
+        .and_then(|v| v.parse().ok())
         .ok_or_else(|| BukioError::new("MISSING_ARG", "--entry is required"))?;
     let method = arg(argv, "--method").unwrap_or_else(|| "manual".into());
     let result = bank::link_transaction(&db, tx_id, entry_id, &method, None, actor, dry_run)?;
@@ -898,15 +1158,26 @@ fn cmd_bank_match_link(argv: &[String], db_path: &str, actor: &str, dry_run: boo
     }
 }
 
-fn cmd_bank_match_post(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+fn cmd_bank_match_post(
+    argv: &[String],
+    db_path: &str,
+    actor: &str,
+    dry_run: bool,
+) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
-    let tx_id: i64 = arg(argv, "--tx").and_then(|v| v.parse().ok())
+    let tx_id: i64 = arg(argv, "--tx")
+        .and_then(|v| v.parse().ok())
         .ok_or_else(|| BukioError::new("MISSING_ARG", "--tx is required"))?;
-    let account = arg(argv, "--account").ok_or_else(|| BukioError::new("MISSING_ARG", "--account is required"))?;
+    let account = arg(argv, "--account")
+        .ok_or_else(|| BukioError::new("MISSING_ARG", "--account is required"))?;
     if dry_run {
-        let tx = bank::get_transaction(&db, tx_id)?
-            .ok_or_else(|| BukioError::new("NOT_FOUND", format!("bank transaction {tx_id} does not exist")))?;
+        let tx = bank::get_transaction(&db, tx_id)?.ok_or_else(|| {
+            BukioError::new(
+                "NOT_FOUND",
+                format!("bank transaction {tx_id} does not exist"),
+            )
+        })?;
         let amount = tx["amount_cents"].as_i64().unwrap_or(0);
         return Ok(json!({
             "action": "post entry from bank transaction",
@@ -925,7 +1196,8 @@ fn cmd_bank_match_post(argv: &[String], db_path: &str, actor: &str, dry_run: boo
 fn cmd_bank_ignore(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
-    let tx_id: i64 = arg(argv, "--tx").and_then(|v| v.parse().ok())
+    let tx_id: i64 = arg(argv, "--tx")
+        .and_then(|v| v.parse().ok())
         .ok_or_else(|| BukioError::new("MISSING_ARG", "--tx is required"))?;
     bank::set_transaction_state(&db, tx_id, "ignored", actor, dry_run)
 }
@@ -933,7 +1205,8 @@ fn cmd_bank_ignore(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
 fn cmd_bank_unignore(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
-    let tx_id: i64 = arg(argv, "--tx").and_then(|v| v.parse().ok())
+    let tx_id: i64 = arg(argv, "--tx")
+        .and_then(|v| v.parse().ok())
         .ok_or_else(|| BukioError::new("MISSING_ARG", "--tx is required"))?;
     bank::set_transaction_state(&db, tx_id, "unmatched", actor, dry_run)
 }
@@ -948,8 +1221,15 @@ fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
     require_actor(actor)?;
     let db = open_existing(db_path)?;
     // build changes from flags
-    let fields = [("name", "name"), ("registration-id", "registration_id"), ("tax-id", "tax_id"),
-                  ("iban", "iban"), ("address", "address"), ("postal-code", "postal_code"), ("city", "city")];
+    let fields = [
+        ("name", "name"),
+        ("registration-id", "registration_id"),
+        ("tax-id", "tax_id"),
+        ("iban", "iban"),
+        ("address", "address"),
+        ("postal-code", "postal_code"),
+        ("city", "city"),
+    ];
     let mut changes = Vec::new();
     for (opt, col) in fields {
         if let Some(v) = arg(argv, opt) {
@@ -972,19 +1252,22 @@ fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
 
 fn cmd_year_end_status(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let year = arg(argv, "--year").ok_or_else(|| BukioError::new("MISSING_ARG", "--year is required"))?;
+    let year =
+        arg(argv, "--year").ok_or_else(|| BukioError::new("MISSING_ARG", "--year is required"))?;
     year_end::year_end_status(&db, &year)
 }
 
 fn cmd_year_end_close(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
-    let year = arg(argv, "--year").ok_or_else(|| BukioError::new("MISSING_ARG", "--year is required"))?;
+    let year =
+        arg(argv, "--year").ok_or_else(|| BukioError::new("MISSING_ARG", "--year is required"))?;
     year_end::year_end_close(&db, &year, actor, dry_run)
 }
 
 fn cmd_month_end(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let period = arg(argv, "--period").ok_or_else(|| BukioError::new("MISSING_ARG", "--period is required"))?;
+    let period = arg(argv, "--period")
+        .ok_or_else(|| BukioError::new("MISSING_ARG", "--period is required"))?;
     month_end::month_end(&db, &period)
 }

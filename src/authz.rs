@@ -9,13 +9,49 @@ use crate::actor::{get_authz, get_roles};
 use crate::money::BukioError;
 use rusqlite::Connection;
 
-pub const ROLES: &[&str] = &["owner", "bookkeeper", "payments", "tax", "assets", "readonly"];
+pub const ROLES: &[&str] = &[
+    "owner",
+    "bookkeeper",
+    "payments",
+    "tax",
+    "assets",
+    "readonly",
+];
 
 pub const ROLE_CAPABILITIES: &[(&str, &[&str])] = &[
-    ("owner", &[]),  // null → everything (checked in canAct)
-    ("bookkeeper", &["admin.chart", "entry.draft", "entry.post", "contacts.manage", "invoice.manage", "bank.import", "bank.match", "vat.book", "assets.manage", "recurring.manage", "fx.manage", "report.read"]),
-    ("payments", &["bank.import", "bank.match", "payments.sepa", "report.read"]),
-    ("tax", &["vat.book", "vat.file", "close.month", "close.year", "export.manage", "report.read"]),
+    ("owner", &[]), // null → everything (checked in canAct)
+    (
+        "bookkeeper",
+        &[
+            "admin.chart",
+            "entry.draft",
+            "entry.post",
+            "contacts.manage",
+            "invoice.manage",
+            "bank.import",
+            "bank.match",
+            "vat.book",
+            "assets.manage",
+            "recurring.manage",
+            "fx.manage",
+            "report.read",
+        ],
+    ),
+    (
+        "payments",
+        &["bank.import", "bank.match", "payments.sepa", "report.read"],
+    ),
+    (
+        "tax",
+        &[
+            "vat.book",
+            "vat.file",
+            "close.month",
+            "close.year",
+            "export.manage",
+            "report.read",
+        ],
+    ),
     ("assets", &["assets.manage", "report.read"]),
     ("readonly", &["report.read"]),
 ];
@@ -143,39 +179,69 @@ const CLI_CAPABILITIES: &[(&str, &str)] = &[
 ];
 
 const SOD_PAIRS: &[(&[&str], &str)] = &[
-    (&["bookkeeper", "payments"], "bookkeeper + payments: the same actor books AND authorises money out"),
-    (&["bookkeeper", "tax"], "bookkeeper + tax: the same actor books AND files tax"),
-    (&["payments", "tax"], "payments + tax: the same actor authorises money out AND files tax"),
+    (
+        &["bookkeeper", "payments"],
+        "bookkeeper + payments: the same actor books AND authorises money out",
+    ),
+    (
+        &["bookkeeper", "tax"],
+        "bookkeeper + tax: the same actor books AND files tax",
+    ),
+    (
+        &["payments", "tax"],
+        "payments + tax: the same actor authorises money out AND files tax",
+    ),
 ];
 
 const SOD_CAPABILITY_PAIR: (&[&str], &str) = (&["entry.post", "payments.sepa"], "entry.post + payments.sepa: the same actor moves the ledger AND authorises money out (strongest pair)");
 
-const EXEMPT_CMDS: &[&str] = &["actor keygen", "actor unlock", "actor lock", "mcp", "server start", "server token"];
+const EXEMPT_CMDS: &[&str] = &[
+    "actor keygen",
+    "actor unlock",
+    "actor lock",
+    "mcp",
+    "server start",
+    "server token",
+];
 
 /// Check if a capability is in a role's set.
 fn has_capability(role: &str, capability: &str) -> bool {
     for &(r, caps) in ROLE_CAPABILITIES {
-        if r == role { return caps.contains(&capability); }
+        if r == role {
+            return caps.contains(&capability);
+        }
     }
     false
 }
 
 /// SoD warnings for a set of roles.
 pub fn sod_warnings(roles: &[String]) -> Vec<String> {
-    if roles.iter().any(|r| r == "owner") { return vec![]; }
+    if roles.iter().any(|r| r == "owner") {
+        return vec![];
+    }
     let role_set: std::collections::HashSet<&str> = roles.iter().map(|r| r.as_str()).collect();
     let mut caps = std::collections::HashSet::new();
     for r in roles {
-        if r == "owner" { continue; }
+        if r == "owner" {
+            continue;
+        }
         for &(role, role_caps) in ROLE_CAPABILITIES {
-            if role == r.as_str() { role_caps.iter().for_each(|c| { caps.insert(*c); }); }
+            if role == r.as_str() {
+                role_caps.iter().for_each(|c| {
+                    caps.insert(*c);
+                });
+            }
         }
     }
     let mut warnings = Vec::new();
     for &(pair_roles, msg) in SOD_PAIRS {
-        if pair_roles.iter().all(|r| role_set.contains(*r)) { warnings.push(msg.to_string()); }
+        if pair_roles.iter().all(|r| role_set.contains(*r)) {
+            warnings.push(msg.to_string());
+        }
     }
-    if SOD_CAPABILITY_PAIR.0.iter().all(|c| caps.contains(*c)) { warnings.push(SOD_CAPABILITY_PAIR.1.to_string()); }
+    if SOD_CAPABILITY_PAIR.0.iter().all(|c| caps.contains(*c)) {
+        warnings.push(SOD_CAPABILITY_PAIR.1.to_string());
+    }
     warnings
 }
 
@@ -185,39 +251,71 @@ pub fn capability_of(cmd: &str, post: bool) -> Option<&'static str> {
         // MCP tools not yet mapped — return None (fail closed)
         return None;
     }
-    if cmd == "entry add" { return Some(if post { "entry.post" } else { "entry.draft" }); }
+    if cmd == "entry add" {
+        return Some(if post { "entry.post" } else { "entry.draft" });
+    }
     for &(c, cap) in CLI_CAPABILITIES {
-        if c == cmd { return Some(cap); }
+        if c == cmd {
+            return Some(cap);
+        }
     }
     None
 }
 
 /// May this actor perform this capability?
 pub fn can_act(db: &Connection, actor: &str, capability: &str) -> bool {
-    if capability.is_empty() { return false; }
+    if capability.is_empty() {
+        return false;
+    }
     for role in get_roles(db, actor) {
-        if role == "owner" { return true; }
-        if has_capability(&role, capability) { return true; }
+        if role == "owner" {
+            return true;
+        }
+        if has_capability(&role, capability) {
+            return true;
+        }
     }
     false
 }
 
 /// Is this command exempt from authz checking?
 pub fn is_authz_exempt(cmd: &str, has_target: bool) -> bool {
-    if EXEMPT_CMDS.contains(&cmd) { return true; }
-    if cmd == "actor register" { return true; }
-    if cmd == "actor verify" { return true; }
-    if cmd == "actor roles" && !has_target { return true; }
-    if cmd == "actor can" && !has_target { return true; }
-    if cmd == "actor revoke" && !has_target { return true; }
+    if EXEMPT_CMDS.contains(&cmd) {
+        return true;
+    }
+    if cmd == "actor register" {
+        return true;
+    }
+    if cmd == "actor verify" {
+        return true;
+    }
+    if cmd == "actor roles" && !has_target {
+        return true;
+    }
+    if cmd == "actor can" && !has_target {
+        return true;
+    }
+    if cmd == "actor revoke" && !has_target {
+        return true;
+    }
     false
 }
 
 /// The authz gate. Called after signature verification, before any mutation.
-pub fn check_authz(db: &Connection, actor: &str, cmd: &str, has_target: bool, post: bool) -> Result<(), BukioError> {
+pub fn check_authz(
+    db: &Connection,
+    actor: &str,
+    cmd: &str,
+    has_target: bool,
+    post: bool,
+) -> Result<(), BukioError> {
     let is_owner_kill = cmd == "actor revoke" && has_target;
-    if !is_owner_kill && is_authz_exempt(cmd, has_target) { return Ok(()); }
-    if !get_authz(db) && !is_owner_kill { return Ok(()); }
+    if !is_owner_kill && is_authz_exempt(cmd, has_target) {
+        return Ok(());
+    }
+    if !get_authz(db) && !is_owner_kill {
+        return Ok(());
+    }
     if is_owner_kill {
         let roles = get_roles(db, actor);
         if !roles.iter().any(|r| r == "owner") {
@@ -259,7 +357,10 @@ mod tests {
         assert_eq!(capability_of("entry add", false), Some("entry.draft"));
         assert_eq!(capability_of("entry add", true), Some("entry.post"));
         assert_eq!(capability_of("entry post", false), Some("entry.post"));
-        assert_eq!(capability_of("report trial-balance", false), Some("report.read"));
+        assert_eq!(
+            capability_of("report trial-balance", false),
+            Some("report.read")
+        );
         assert_eq!(capability_of("nonexistent", false), None);
     }
 

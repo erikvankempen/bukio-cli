@@ -4,15 +4,24 @@
 //
 // Posting engine (mirrors src/core/entries.js) — the heart of bukio-cli.
 
+use crate::actor::now_iso;
 use crate::audit::{record, RecordArgs};
 use crate::dates::validate_date;
 use crate::money::{parse_amount, BukioError, Result};
-use crate::actor::now_iso;
 use rusqlite::Connection;
 use serde_json::{json, Map, Value};
 
 pub const VALID_SOURCES: [&str; 10] = [
-    "manual", "bank", "invoice", "agent", "reversal", "recurring", "closing", "import", "xaf", "assets",
+    "manual",
+    "bank",
+    "invoice",
+    "agent",
+    "reversal",
+    "recurring",
+    "closing",
+    "import",
+    "xaf",
+    "assets",
 ];
 
 /// Parse a posting spec "CODE:AMOUNT[@CC]" list (comma-splittable) into
@@ -27,11 +36,17 @@ pub fn parse_posting_specs(raw: &[String]) -> Result<Vec<PostingSpec>> {
                 continue;
             }
             // CODE:AMOUNT[@CC]
-            let bad = || BukioError::new(
-                "INVALID_POSTING",
-                format!("posting '{t}' must be CODE:AMOUNT[@COSTCENTER] (e.g. 8000:-100.00@HQ)"),
-            );
-            let Some((code, rest)) = t.split_once(':') else { return Err(bad()) };
+            let bad = || {
+                BukioError::new(
+                    "INVALID_POSTING",
+                    format!(
+                        "posting '{t}' must be CODE:AMOUNT[@COSTCENTER] (e.g. 8000:-100.00@HQ)"
+                    ),
+                )
+            };
+            let Some((code, rest)) = t.split_once(':') else {
+                return Err(bad());
+            };
             if code.is_empty() || code.len() > 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
                 return Err(bad());
             }
@@ -63,7 +78,9 @@ fn valid_cc_code(c: &str) -> bool {
     if !b[0].is_ascii_alphanumeric() {
         return false;
     }
-    b[1..].iter().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, b' ' | b'.' | b'_' | b'-'))
+    b[1..]
+        .iter()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, b' ' | b'.' | b'_' | b'-'))
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -179,23 +196,38 @@ pub struct CreateEntry<'a> {
 pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
     validate_date(input.date)?;
     if input.description.trim().is_empty() {
-        return Err(BukioError::new("INVALID_DESCRIPTION", "description is required"));
+        return Err(BukioError::new(
+            "INVALID_DESCRIPTION",
+            "description is required",
+        ));
     }
     if input.postings.len() < 2 {
-        return Err(BukioError::new("TOO_FEW_POSTINGS", "an entry needs at least 2 postings"));
+        return Err(BukioError::new(
+            "TOO_FEW_POSTINGS",
+            "an entry needs at least 2 postings",
+        ));
     }
     if !VALID_SOURCES.contains(&input.source) {
-        return Err(BukioError::new("INVALID_SOURCE", format!("source '{}' is not allowed", input.source)));
+        return Err(BukioError::new(
+            "INVALID_SOURCE",
+            format!("source '{}' is not allowed", input.source),
+        ));
     }
     if input.actor.trim().is_empty() {
-        return Err(BukioError::new("INVALID_ACTOR", "actor is required (human or agent:<name>)"));
+        return Err(BukioError::new(
+            "INVALID_ACTOR",
+            "actor is required (human or agent:<name>)",
+        ));
     }
 
     // resolve postings: accounts exist + active; cost centers exist + active
     let mut resolved: Vec<(i64, i64, Option<i64>)> = Vec::new(); // (account_id, amount, cc_id)
     for p in &input.postings {
         if p.amount_cents == 0 {
-            return Err(BukioError::new("INVALID_AMOUNT_CENTS", "posting amounts must be non-zero integers (cents)"));
+            return Err(BukioError::new(
+                "INVALID_AMOUNT_CENTS",
+                "posting amounts must be non-zero integers (cents)",
+            ));
         }
         let account = db
             .query_row(
@@ -203,9 +235,17 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
                 [&p.code],
                 |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
             )
-            .map_err(|_| BukioError::new("ACCOUNT_NOT_FOUND", format!("account {} does not exist", p.code)))?;
+            .map_err(|_| {
+                BukioError::new(
+                    "ACCOUNT_NOT_FOUND",
+                    format!("account {} does not exist", p.code),
+                )
+            })?;
         if account.1 == 0 {
-            return Err(BukioError::new("ACCOUNT_INACTIVE", format!("account {} is inactive", p.code)));
+            return Err(BukioError::new(
+                "ACCOUNT_INACTIVE",
+                format!("account {} is inactive", p.code),
+            ));
         }
         let cc_id = match &p.cost_center_code {
             None => None,
@@ -217,10 +257,16 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
                         |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)),
                     )
                     .map_err(|_| {
-                        BukioError::new("COST_CENTER_NOT_FOUND", format!("cost center '{code}' does not exist"))
+                        BukioError::new(
+                            "COST_CENTER_NOT_FOUND",
+                            format!("cost center '{code}' does not exist"),
+                        )
                     })?;
                 if cc.1 == 0 {
-                    return Err(BukioError::new("COST_CENTER_INACTIVE", format!("cost center '{code}' is inactive")));
+                    return Err(BukioError::new(
+                        "COST_CENTER_INACTIVE",
+                        format!("cost center '{code}' is inactive"),
+                    ));
                 }
                 Some(cc.0)
             }
@@ -230,7 +276,10 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
 
     let sum: i64 = resolved.iter().map(|(_, a, _)| a).sum();
     if sum != 0 {
-        return Err(BukioError::new("UNBALANCED", format!("postings do not sum to zero (sum = {sum} cents)")));
+        return Err(BukioError::new(
+            "UNBALANCED",
+            format!("postings do not sum to zero (sum = {sum} cents)"),
+        ));
     }
 
     let tx = db.unchecked_transaction().map_err(sql_err)?;
@@ -238,7 +287,13 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
         tx.execute(
             "INSERT INTO journal_entries (date, description, source, source_ref, state, created_by)
              VALUES (?1, ?2, ?3, ?4, 'draft', ?5)",
-            rusqlite::params![input.date, input.description.trim(), input.source, input.source_ref, input.actor],
+            rusqlite::params![
+                input.date,
+                input.description.trim(),
+                input.source,
+                input.source_ref,
+                input.actor
+            ],
         )
         .map_err(sql_err)?;
         let id = tx.last_insert_rowid();
@@ -270,7 +325,8 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
         id
     };
     tx.commit().map_err(sql_err)?;
-    get_entry(db, entry_id).ok_or_else(|| BukioError::new("INTERNAL", "entry vanished after insert"))
+    get_entry(db, entry_id)
+        .ok_or_else(|| BukioError::new("INTERNAL", "entry vanished after insert"))
 }
 
 fn sql_err(e: rusqlite::Error) -> BukioError {
@@ -282,8 +338,18 @@ pub fn post_entry(db: &Connection, id: i64, actor: &str) -> Result<Entry> {
     let entry = get_entry(db, id)
         .ok_or_else(|| BukioError::new("NOT_FOUND", format!("entry {id} does not exist")))?;
     match entry.state.as_str() {
-        "posted" => return Err(BukioError::new("ALREADY_POSTED", format!("entry {id} is already posted"))),
-        "reversed" => return Err(BukioError::new("ALREADY_REVERSED", format!("entry {id} is reversed"))),
+        "posted" => {
+            return Err(BukioError::new(
+                "ALREADY_POSTED",
+                format!("entry {id} is already posted"),
+            ))
+        }
+        "reversed" => {
+            return Err(BukioError::new(
+                "ALREADY_REVERSED",
+                format!("entry {id} is reversed"),
+            ))
+        }
         _ => {}
     }
     let tx = db.unchecked_transaction().map_err(sql_err)?;
@@ -305,7 +371,10 @@ pub fn post_entry(db: &Connection, id: i64, actor: &str) -> Result<Entry> {
         if !inactive.is_empty() {
             return Err(BukioError::new(
                 "ACCOUNT_INACTIVE",
-                format!("entry {id} postings reference deactivated account(s): {}", inactive.join(", ")),
+                format!(
+                    "entry {id} postings reference deactivated account(s): {}",
+                    inactive.join(", ")
+                ),
             ));
         }
         tx.execute(
@@ -335,10 +404,16 @@ pub fn reverse_entry(db: &Connection, id: i64, actor: &str, reason: Option<&str>
         .ok_or_else(|| BukioError::new("NOT_FOUND", format!("entry {id} does not exist")))?;
     match entry.state.as_str() {
         "draft" => {
-            return Err(BukioError::new("NOT_POSTED", format!("entry {id} must be posted before it can be reversed")))
+            return Err(BukioError::new(
+                "NOT_POSTED",
+                format!("entry {id} must be posted before it can be reversed"),
+            ))
         }
         "reversed" => {
-            return Err(BukioError::new("ALREADY_REVERSED", format!("entry {id} is already reversed")))
+            return Err(BukioError::new(
+                "ALREADY_REVERSED",
+                format!("entry {id} is already reversed"),
+            ))
         }
         _ => {}
     }
@@ -351,7 +426,10 @@ pub fn reverse_entry(db: &Connection, id: i64, actor: &str, reason: Option<&str>
         .map_err(sql_err)
     };
     if count_reversals(db)? > 0 {
-        return Err(BukioError::new("ALREADY_REVERSED", format!("entry {id} already has a posted reversal")));
+        return Err(BukioError::new(
+            "ALREADY_REVERSED",
+            format!("entry {id} already has a posted reversal"),
+        ));
     }
 
     let description = match reason {
@@ -362,7 +440,10 @@ pub fn reverse_entry(db: &Connection, id: i64, actor: &str, reason: Option<&str>
     let reversal_id = {
         // re-check inside the transaction (two processes, WAL) — same guard as JS
         if count_reversals(&tx)? > 0 {
-            return Err(BukioError::new("ALREADY_REVERSED", format!("entry {id} already has a posted reversal")));
+            return Err(BukioError::new(
+                "ALREADY_REVERSED",
+                format!("entry {id} already has a posted reversal"),
+            ));
         }
         tx.execute(
             "INSERT INTO journal_entries (date, description, source, source_ref, state, reversed_from_id, created_by)
@@ -415,7 +496,10 @@ pub fn list_entries(
     limit: i64,
 ) -> Result<Vec<Value>> {
     if limit < 0 {
-        return Err(BukioError::new("INVALID_LIMIT", format!("limit must be a non-negative integer, got '{limit}'")));
+        return Err(BukioError::new(
+            "INVALID_LIMIT",
+            format!("limit must be a non-negative integer, got '{limit}'"),
+        ));
     }
     if let Some(d) = date_from {
         validate_date(d)?;
@@ -497,7 +581,6 @@ pub fn entry_to_json(e: &Entry) -> Value {
     Value::Object(root)
 }
 
-
 /// ponytail: dyn-param helper — rusqlite 0.32 has no params_from_vec; refs
 /// satisfy Params for &[&dyn ToSql].
 fn params_refs(params: &[Box<dyn rusqlite::types::ToSql>]) -> Vec<&dyn rusqlite::types::ToSql> {
@@ -511,11 +594,8 @@ mod tests {
 
     fn setup() -> Connection {
         let db = open_db(":memory:").unwrap();
-        db.execute(
-            "INSERT INTO company (name) VALUES ('Test BV')",
-            [],
-        )
-        .unwrap();
+        db.execute("INSERT INTO company (name) VALUES ('Test BV')", [])
+            .unwrap();
         for (code, name, ty) in [
             ("1100", "Bank", "asset"),
             ("3000", "Eigen vermogen", "equity"),
@@ -533,21 +613,28 @@ mod tests {
     fn spec(items: &[(&str, i64)]) -> Vec<PostingSpec> {
         items
             .iter()
-            .map(|(c, a)| PostingSpec { code: c.to_string(), amount_cents: *a, cost_center_code: None })
+            .map(|(c, a)| PostingSpec {
+                code: c.to_string(),
+                amount_cents: *a,
+                cost_center_code: None,
+            })
             .collect()
     }
 
     #[test]
     fn create_post_reverse_lifecycle() {
         let db = setup();
-        let e = create_entry(&db, CreateEntry {
-            date: "2026-01-10",
-            description: "Startkapitaal",
-            postings: spec(&[("1100", 1000000), ("3000", -1000000)]),
-            source: "manual",
-            source_ref: None,
-            actor: "human:erik",
-        })
+        let e = create_entry(
+            &db,
+            CreateEntry {
+                date: "2026-01-10",
+                description: "Startkapitaal",
+                postings: spec(&[("1100", 1000000), ("3000", -1000000)]),
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        )
         .unwrap();
         assert_eq!(e.state, "draft");
         assert_eq!(e.postings.len(), 2);
@@ -560,35 +647,64 @@ mod tests {
         assert_eq!(r.state, "posted");
         assert_eq!(r.reversed_from_id, Some(p.id));
         // double reversal refused
-        assert_eq!(reverse_entry(&db, p.id, "human:erik", None).unwrap_err().code, "ALREADY_REVERSED");
+        assert_eq!(
+            reverse_entry(&db, p.id, "human:erik", None)
+                .unwrap_err()
+                .code,
+            "ALREADY_REVERSED"
+        );
     }
 
     #[test]
     fn rejects_like_js() {
         let db = setup();
-        let unbalanced = create_entry(&db, CreateEntry {
-            date: "2026-01-10", description: "x",
-            postings: spec(&[("1100", 100), ("3000", -99)]),
-            source: "manual", source_ref: None, actor: "human:erik",
-        });
+        let unbalanced = create_entry(
+            &db,
+            CreateEntry {
+                date: "2026-01-10",
+                description: "x",
+                postings: spec(&[("1100", 100), ("3000", -99)]),
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        );
         assert_eq!(unbalanced.unwrap_err().code, "UNBALANCED");
-        let one = create_entry(&db, CreateEntry {
-            date: "2026-01-10", description: "x",
-            postings: spec(&[("1100", 100)]),
-            source: "manual", source_ref: None, actor: "human:erik",
-        });
+        let one = create_entry(
+            &db,
+            CreateEntry {
+                date: "2026-01-10",
+                description: "x",
+                postings: spec(&[("1100", 100)]),
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        );
         assert_eq!(one.unwrap_err().code, "TOO_FEW_POSTINGS");
-        let unknown = create_entry(&db, CreateEntry {
-            date: "2026-01-10", description: "x",
-            postings: spec(&[("9999", 100), ("3000", -100)]),
-            source: "manual", source_ref: None, actor: "human:erik",
-        });
+        let unknown = create_entry(
+            &db,
+            CreateEntry {
+                date: "2026-01-10",
+                description: "x",
+                postings: spec(&[("9999", 100), ("3000", -100)]),
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        );
         assert_eq!(unknown.unwrap_err().code, "ACCOUNT_NOT_FOUND");
-        let bad_date = create_entry(&db, CreateEntry {
-            date: "2026-02-30", description: "x",
-            postings: spec(&[("1100", 100), ("3000", -100)]),
-            source: "manual", source_ref: None, actor: "human:erik",
-        });
+        let bad_date = create_entry(
+            &db,
+            CreateEntry {
+                date: "2026-02-30",
+                description: "x",
+                postings: spec(&[("1100", 100), ("3000", -100)]),
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        );
         assert_eq!(bad_date.unwrap_err().code, "INVALID_DATE");
     }
 

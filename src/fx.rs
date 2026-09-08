@@ -5,11 +5,11 @@
 // FX translation (mirrors src/fx/index.js + src/fx/ecb.js):
 // EUR-conversion rates stored per currency per date; ECB reference-rate fetch.
 
+use crate::accounts::resolve_profile;
 use crate::actor::now_iso;
 use crate::audit::{record, RecordArgs};
 use crate::dates::today_iso;
 use crate::money::{format_amount, BukioError, Result};
-use crate::accounts::resolve_profile;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
@@ -26,11 +26,17 @@ pub fn parse_rate(rate: &str) -> Result<i64> {
         Some((w, f)) => (w, f),
         None => (rate, ""),
     };
-    let whole: i64 = whole_str
-        .parse()
-        .map_err(|_| fx_error("INVALID_RATE", format!("rate '{rate}' must be a positive number (e.g. 1.0875)")))?;
+    let whole: i64 = whole_str.parse().map_err(|_| {
+        fx_error(
+            "INVALID_RATE",
+            format!("rate '{rate}' must be a positive number (e.g. 1.0875)"),
+        )
+    })?;
     if frac_str.len() > 4 {
-        return Err(fx_error("INVALID_RATE", "rate must have at most 4 decimal places"));
+        return Err(fx_error(
+            "INVALID_RATE",
+            "rate must have at most 4 decimal places",
+        ));
     }
     let frac_padded = format!("{:0<4}", frac_str);
     let rate_x10000: i64 = whole * 10000
@@ -67,14 +73,24 @@ pub fn set_fx_rate(
     dry_run: bool,
 ) -> Result<Value> {
     if !(currency.len() == 3 && currency.bytes().all(|b| b.is_ascii_uppercase())) {
-        return Err(fx_error("INVALID_CURRENCY", format!("currency '{currency}' must be ISO 4217 (3 letters)")));
+        return Err(fx_error(
+            "INVALID_CURRENCY",
+            format!("currency '{currency}' must be ISO 4217 (3 letters)"),
+        ));
     }
     if !(date.len() == 10 && date.as_bytes()[4] == b'-' && date.as_bytes()[7] == b'-') {
-        return Err(fx_error("INVALID_DATE", format!("date '{date}' must be YYYY-MM-DD")));
+        return Err(fx_error(
+            "INVALID_DATE",
+            format!("date '{date}' must be YYYY-MM-DD"),
+        ));
     }
     // calendar validity check (chrono rejects Feb 30 etc.)
-    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
-        .map_err(|_| fx_error("INVALID_DATE", format!("date '{date}' is not a valid calendar date")))?;
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| {
+        fx_error(
+            "INVALID_DATE",
+            format!("date '{date}' is not a valid calendar date"),
+        )
+    })?;
 
     let rate_x10000 = parse_rate(rate)?;
     if dry_run {
@@ -96,7 +112,9 @@ pub fn set_fx_rate(
             actor,
             action: "fx.set",
             command: Some("fx set"),
-            args: Some(json!({ "currency": currency, "date": date, "rate": format_rate(rate_x10000) })),
+            args: Some(
+                json!({ "currency": currency, "date": date, "rate": format_rate(rate_x10000) }),
+            ),
             outcome: "ok",
             entry_ids: vec![],
         },
@@ -165,18 +183,28 @@ pub fn fetch_ecb_rate(currency: &str, date: &str) -> Result<Option<(String, i64)
     let from = {
         let d = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
             .map_err(|_| fx_error("INVALID_DATE", format!("date '{date}' is not valid")))?;
-        (d - chrono::Duration::days(WINDOW_DAYS)).format("%Y-%m-%d").to_string()
+        (d - chrono::Duration::days(WINDOW_DAYS))
+            .format("%Y-%m-%d")
+            .to_string()
     };
-    let url = format!("{}/D.{currency}.EUR.SP00.A?startPeriod={from}&endPeriod={date}", ECB_BASE);
-    let body = ureq::get(&url)
-        .call()
-        .map_err(|e| fx_error("ECB_FETCH_FAILED", format!("ECB unreachable for {currency}: {e}")))?;
+    let url = format!(
+        "{}/D.{currency}.EUR.SP00.A?startPeriod={from}&endPeriod={date}",
+        ECB_BASE
+    );
+    let body = ureq::get(&url).call().map_err(|e| {
+        fx_error(
+            "ECB_FETCH_FAILED",
+            format!("ECB unreachable for {currency}: {e}"),
+        )
+    })?;
 
     // simple SDMX-ML parsing: extract ObsDimension value + ObsValue value pairs
-    let xml = body
-        .into_body()
-        .read_to_string()
-        .map_err(|e| fx_error("ECB_FETCH_FAILED", format!("failed to read ECB response: {e}")))?;
+    let xml = body.into_body().read_to_string().map_err(|e| {
+        fx_error(
+            "ECB_FETCH_FAILED",
+            format!("failed to read ECB response: {e}"),
+        )
+    })?;
 
     let mut observations: Vec<(String, f64)> = Vec::new();
     // simple XML scan: find <ObsDimension value="..."/> and <ObsValue value="..."/> pairs
@@ -197,7 +225,9 @@ pub fn fetch_ecb_rate(currency: &str, date: &str) -> Result<Option<(String, i64)
             let val_start = start + 7;
             if let Some(end) = rest[val_start..].find('\"') {
                 if let Ok(v) = rest[val_start..val_start + end].parse::<f64>() {
-                    if v > 0.0 { obs_values.push(v); }
+                    if v > 0.0 {
+                        obs_values.push(v);
+                    }
                 }
             }
         }
@@ -210,7 +240,10 @@ pub fn fetch_ecb_rate(currency: &str, date: &str) -> Result<Option<(String, i64)
         return Ok(None);
     }
     // take the latest observation on or before the target date
-    let best = observations.iter().filter(|(d, _)| d.as_str() <= date).last();
+    let best = observations
+        .iter()
+        .filter(|(d, _)| d.as_str() <= date)
+        .last();
     match best {
         Some((d, rate)) => Ok(Some((d.clone(), (*rate * 10000.0).round() as i64))),
         None => Ok(None),
@@ -240,10 +273,21 @@ pub fn resolve_rate(
     }
     let fetched = fetch_ecb_rate(currency, date)?;
     match fetched {
-        None => Err(fx_error("ECB_RATE_NOT_AVAILABLE", format!("no ECB reference rate for {currency} on/before {date}"))),
+        None => Err(fx_error(
+            "ECB_RATE_NOT_AVAILABLE",
+            format!("no ECB reference rate for {currency} on/before {date}"),
+        )),
         Some((obs_date, rate_x10000)) => {
             // store for reuse (like the JS implementation)
-            set_fx_rate(db, currency, &obs_date, &rate_x10000.to_string(), "ECB", actor, false)?;
+            set_fx_rate(
+                db,
+                currency,
+                &obs_date,
+                &rate_x10000.to_string(),
+                "ECB",
+                actor,
+                false,
+            )?;
             Ok(rate_x10000)
         }
     }
@@ -260,7 +304,8 @@ mod tests {
 
     fn db() -> Connection {
         let db = open_db(":memory:").unwrap();
-        db.execute("INSERT INTO company (name) VALUES ('FX Co')", []).unwrap();
+        db.execute("INSERT INTO company (name) VALUES ('FX Co')", [])
+            .unwrap();
         db
     }
 
@@ -285,7 +330,16 @@ mod tests {
     #[test]
     fn set_and_get_rate() {
         let db = db();
-        set_fx_rate(&db, "USD", "2026-01-15", "1.0875", "manual", "human:erik", false).unwrap();
+        set_fx_rate(
+            &db,
+            "USD",
+            "2026-01-15",
+            "1.0875",
+            "manual",
+            "human:erik",
+            false,
+        )
+        .unwrap();
         let r = get_fx_rate(&db, "USD", "2026-01-15").unwrap();
         assert_eq!(r, Some(10875));
         // fallback to earlier rate
@@ -299,6 +353,15 @@ mod tests {
     #[test]
     fn invalid_currency() {
         let db = db();
-        assert!(set_fx_rate(&db, "usd", "2026-01-15", "1.0", "manual", "human:erik", false).is_err());
+        assert!(set_fx_rate(
+            &db,
+            "usd",
+            "2026-01-15",
+            "1.0",
+            "manual",
+            "human:erik",
+            false
+        )
+        .is_err());
     }
 }

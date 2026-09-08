@@ -19,18 +19,38 @@ fn month_end_error(code: &'static str, msg: impl Into<String>) -> BukioError {
 fn month_bounds(period: &str) -> Result<(String, String)> {
     let parts: Vec<&str> = period.split('-').collect();
     if parts.len() != 2 {
-        return Err(month_end_error("INVALID_PERIOD", format!("period '{period}' must be yyyy-mm")));
+        return Err(month_end_error(
+            "INVALID_PERIOD",
+            format!("period '{period}' must be yyyy-mm"),
+        ));
     }
-    let year: i32 = parts[0].parse().map_err(|_| month_end_error("INVALID_PERIOD", format!("period '{period}' must be yyyy-mm")))?;
-    let month: u32 = parts[1].parse().map_err(|_| month_end_error("INVALID_PERIOD", format!("period '{period}' must be yyyy-mm")))?;
+    let year: i32 = parts[0].parse().map_err(|_| {
+        month_end_error(
+            "INVALID_PERIOD",
+            format!("period '{period}' must be yyyy-mm"),
+        )
+    })?;
+    let month: u32 = parts[1].parse().map_err(|_| {
+        month_end_error(
+            "INVALID_PERIOD",
+            format!("period '{period}' must be yyyy-mm"),
+        )
+    })?;
     if month < 1 || month > 12 {
-        return Err(month_end_error("INVALID_PERIOD", format!("period '{period}' must be yyyy-mm")));
+        return Err(month_end_error(
+            "INVALID_PERIOD",
+            format!("period '{period}' must be yyyy-mm"),
+        ));
     }
     let from = format!("{period}-01");
     let last_day = {
         let d = chrono::NaiveDate::from_ymd_opt(year, month + 1, 1)
             .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(year + 1, 1, 1).unwrap());
-        (d - chrono::Duration::days(1)).format("%d").to_string().parse::<u32>().unwrap_or(30)
+        (d - chrono::Duration::days(1))
+            .format("%d")
+            .to_string()
+            .parse::<u32>()
+            .unwrap_or(30)
     };
     let to = format!("{period}-{last_day:02}");
     Ok((from, to))
@@ -38,12 +58,16 @@ fn month_bounds(period: &str) -> Result<(String, String)> {
 
 pub fn month_end(db: &Connection, period: &str) -> Result<Value> {
     if !period.contains('-') || period.len() != 7 {
-        return Err(month_end_error("INVALID_PERIOD", format!("period '{period}' must be yyyy-mm")));
+        return Err(month_end_error(
+            "INVALID_PERIOD",
+            format!("period '{period}' must be yyyy-mm"),
+        ));
     }
     let (from, to) = month_bounds(period)?;
 
     // draft entries
-    let draft_sql = "SELECT id FROM journal_entries WHERE state = 'draft' AND date >= ?1 AND date <= ?2";
+    let draft_sql =
+        "SELECT id FROM journal_entries WHERE state = 'draft' AND date >= ?1 AND date <= ?2";
     let draft_ids: Vec<i64> = db
         .prepare(draft_sql)
         .map_err(sql_err)?
@@ -56,7 +80,11 @@ pub fn month_end(db: &Connection, period: &str) -> Result<Value> {
     let bank_txs = list_transactions(db, Some("unmatched"), None, 100_000)?;
     let bank_unmatched: Vec<Value> = bank_txs
         .iter()
-        .filter(|t| t["date"].as_str().map_or(false, |d| d >= from.as_str() && d <= to.as_str()))
+        .filter(|t| {
+            t["date"]
+                .as_str()
+                .map_or(false, |d| d >= from.as_str() && d <= to.as_str())
+        })
         .cloned()
         .collect();
 
@@ -98,12 +126,22 @@ pub fn month_end(db: &Connection, period: &str) -> Result<Value> {
     let rows: Vec<(String, String, i64)> = db
         .prepare(totals_sql)
         .map_err(sql_err)?
-        .query_map(rusqlite::params![from, to], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .query_map(rusqlite::params![from, to], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
         .map_err(sql_err)?
         .filter_map(|r| r.ok())
         .collect();
-    let debit: i64 = rows.iter().filter(|(_, _, net)| *net > 0).map(|(_, _, net)| net).sum();
-    let credit: i64 = rows.iter().filter(|(_, _, net)| *net < 0).map(|(_, _, net)| -net).sum();
+    let debit: i64 = rows
+        .iter()
+        .filter(|(_, _, net)| *net > 0)
+        .map(|(_, _, net)| net)
+        .sum();
+    let credit: i64 = rows
+        .iter()
+        .filter(|(_, _, net)| *net < 0)
+        .map(|(_, _, net)| -net)
+        .sum();
     let profit_cents: i64 = rows
         .iter()
         .filter(|(_, t, _)| t == "income" || t == "expense")
@@ -113,18 +151,39 @@ pub fn month_end(db: &Connection, period: &str) -> Result<Value> {
     // warnings
     let mut warnings = Vec::new();
     if !draft_ids.is_empty() {
-        warnings.push(format!("{} draft entr{} not posted", draft_ids.len(), if draft_ids.len() == 1 { "y" } else { "ies" }));
+        warnings.push(format!(
+            "{} draft entr{} not posted",
+            draft_ids.len(),
+            if draft_ids.len() == 1 { "y" } else { "ies" }
+        ));
     }
     if !bank_unmatched.is_empty() {
-        warnings.push(format!("{} unmatched bank transaction{}", bank_unmatched.len(), if bank_unmatched.len() == 1 { "" } else { "s" }));
+        warnings.push(format!(
+            "{} unmatched bank transaction{}",
+            bank_unmatched.len(),
+            if bank_unmatched.len() == 1 { "" } else { "s" }
+        ));
     }
     if !overdue_invoices.is_empty() {
-        warnings.push(format!("{} overdue invoice{}", overdue_invoices.len(), if overdue_invoices.len() == 1 { "" } else { "s" }));
+        warnings.push(format!(
+            "{} overdue invoice{}",
+            overdue_invoices.len(),
+            if overdue_invoices.len() == 1 { "" } else { "s" }
+        ));
     }
     if !recurring_due.is_empty() {
-        warnings.push(format!("{} recurring template{} due by {to}", recurring_due.len(), if recurring_due.len() == 1 { "" } else { "s" }));
+        warnings.push(format!(
+            "{} recurring template{} due by {to}",
+            recurring_due.len(),
+            if recurring_due.len() == 1 { "" } else { "s" }
+        ));
     }
-    if !draft_ids.is_empty() || !bank_unmatched.is_empty() || !overdue_invoices.is_empty() || !recurring_due.is_empty() || assets_due > 0 {
+    if !draft_ids.is_empty()
+        || !bank_unmatched.is_empty()
+        || !overdue_invoices.is_empty()
+        || !recurring_due.is_empty()
+        || assets_due > 0
+    {
         // warnings exist
     } else {
         warnings.push("all clear — the month can be closed".into());
