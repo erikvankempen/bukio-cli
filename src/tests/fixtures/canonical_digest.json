@@ -1,0 +1,34 @@
+{
+  "actor": "agent:bartholomeus",
+  "cmd": "entry add",
+  "args": {
+    "date": "2026-09-08",
+    "desc": "Koffie and quotes",
+    "postings": [
+      "1100:4.50",
+      "8000:-4.50"
+    ],
+    "n": 3,
+    "neg": -12.5,
+    "arr": [
+      {
+        "b": 1,
+        "a": 2
+      },
+      {
+        "a": 1
+      }
+    ],
+    "nested": {
+      "z": null,
+      "y": true,
+      "x": [
+        "unicode-str",
+        "ascii"
+      ]
+    }
+  },
+  "ts": "2026-09-08T12:00:00.000Z",
+  "nonce": "f4b1c2d3-1111-2222-3333-444455556666",
+  "digest": "7338c4849144c719648f7dd3bfac2288fc03583757b2696c8a1178f2164754ab"
+}

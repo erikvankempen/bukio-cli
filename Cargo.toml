@@ -1,0 +1,18 @@
+[package]
+name = "bukio"
+version = "0.17.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Agent-first, local-first double-entry bookkeeping for SMEs across eleven jurisdictions. SQLite backend, VAT-optional, Peppol BIS 3.0 e-invoicing, MCP-native. No cloud, no lock-in. (Rust port)"
+publish = false
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core"] }
+rand = "0.8"
+base64 = "0.22"
+hex = "0.4"
+chrono = "0.4"

@@ -1,0 +1,7 @@
+{
+  "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAMhBo3SVaq8hCQvY6ejfWKKhOimfqMXegyH8X4IH97EU=\n-----END PUBLIC KEY-----\n",
+  "privateKey": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIEznQe04qBHp+1r8xvziskJMchv6n3XlKNwjSimQ1WJO\n-----END PRIVATE KEY-----\n",
+  "keyid": "2bd6dc2a6b32b1f7c50664bae62f76b5",
+  "data": "cross-check digest 123",
+  "signature": "M+8rxFHPrVbommuNha+ZtJb73dzHSH+7uZr6e5vwXwVn/7N+T+nOUn4OlzdJEHHr94/ZH4zHcW6Bdi2W/THEDg=="
+}

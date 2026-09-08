@@ -11,3 +11,5 @@ data/
 .env
 .DS_Store
 docs-research/faia-src/
+/target
+/src/migrations_data.rs
