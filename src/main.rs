@@ -27,6 +27,7 @@ mod items;
 mod recurring;
 mod assets;
 mod compliance;
+mod contacts;
 mod authz;
 
 use money::{BukioError, Result};
