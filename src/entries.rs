@@ -93,6 +93,7 @@ pub struct PostingSpec {
 
 /// Entry as returned by get_entry — the JSON shape matches serializeEntry.
 #[derive(Debug, Clone)]
+#[derive(serde::Serialize)]
 pub struct Entry {
     pub id: i64,
     pub date: String,
@@ -108,6 +109,7 @@ pub struct Entry {
 }
 
 #[derive(Debug, Clone)]
+#[derive(serde::Serialize)]
 pub struct Posting {
     pub id: i64,
     pub account_code: String,
