@@ -30,6 +30,7 @@ mod compliance;
 mod contacts;
 mod invoice;
 mod payments;
+mod export;
 mod attachments;
 mod authz;
 
