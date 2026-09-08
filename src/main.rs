@@ -20,6 +20,7 @@ mod reports;
 mod vat;
 mod fx;
 mod bank;
+mod company;
 
 use money::{BukioError, Result};
 use serde_json::{json, Value};
@@ -164,6 +165,8 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         ["vat", "codes"] => cmd_vat_codes(db_path),
         ["vat", "book"] => cmd_vat_book(argv, db_path, actor, dry_run),
         ["vat", "readout"] => cmd_vat_readout(argv, db_path, actor),
+        ["company", "show"] => cmd_company_show(db_path),
+        ["company", "update"] => cmd_company_update(argv, db_path, actor, dry_run),
         ["bank", "add"] => cmd_bank_add(argv, db_path, actor, dry_run),
         ["bank", "list"] => cmd_bank_list(db_path),
         ["bank", "import"] => cmd_bank_import(argv, db_path, actor, dry_run),
@@ -917,4 +920,36 @@ fn cmd_bank_unignore(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
     let tx_id: i64 = arg(argv, "--tx").and_then(|v| v.parse().ok())
         .ok_or_else(|| BukioError::new("MISSING_ARG", "--tx is required"))?;
     bank::set_transaction_state(&db, tx_id, "unmatched", actor, dry_run)
+}
+
+fn cmd_company_show(db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let c = company::get_company(&db)?;
+    Ok(json!({ "company": c }))
+}
+
+fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    // build changes from flags
+    let fields = [("name", "name"), ("registration-id", "registration_id"), ("tax-id", "tax_id"),
+                  ("iban", "iban"), ("address", "address"), ("postal-code", "postal_code"), ("city", "city")];
+    let mut changes = Vec::new();
+    for (opt, col) in fields {
+        if let Some(v) = arg(argv, opt) {
+            changes.push((col.to_string(), v));
+        }
+    }
+    if changes.is_empty() {
+        return Err(BukioError::new("NOTHING_TO_UPDATE", "nothing to update — pass at least one of --name/--registration-id/--tax-id/--iban/--address/--postal-code/--city"));
+    }
+    if dry_run {
+        return Ok(json!({
+            "company": company::get_company(&db)?,
+            "changes": serde_json::Map::from_iter(changes.iter().map(|(k,v)| (k.clone(), Value::String(v.clone())))),
+            "dryRun": true,
+        }));
+    }
+    let (updated, changes_map) = company::update_company(&db, &changes, None, None, actor)?;
+    Ok(json!({ "company": updated, "changes": changes_map }))
 }
