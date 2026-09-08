@@ -18,6 +18,7 @@ mod entries;
 mod accounts;
 mod reports;
 mod vat;
+mod fx;
 
 use money::{BukioError, Result};
 use serde_json::{json, Value};
@@ -162,6 +163,9 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         ["vat", "codes"] => cmd_vat_codes(db_path),
         ["vat", "book"] => cmd_vat_book(argv, db_path, actor, dry_run),
         ["vat", "readout"] => cmd_vat_readout(argv, db_path, actor),
+        ["fx", "set"] => cmd_fx_set(argv, db_path, actor, dry_run),
+        ["fx", "show"] => cmd_fx_show(argv, db_path),
+        ["fx", "list"] => cmd_fx_list(argv, db_path),
         ["vat", "file"] => cmd_vat_file(argv, db_path, actor, dry_run),
         ["vat", "settle"] => cmd_vat_settle(argv, db_path, actor, dry_run),
         ["audit", "verify"] => cmd_audit_verify(db_path),
@@ -755,4 +759,37 @@ fn cmd_vat_settle(argv: &[String], db_path: &str, actor: &str, dry_run: bool) ->
         }
     }
     Ok(result)
+}
+
+fn cmd_fx_set(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let currency = arg(argv, "--currency").ok_or_else(|| BukioError::new("MISSING_ARG", "--currency is required"))?;
+    let date = arg(argv, "--date").unwrap_or_else(dates::today_iso);
+    let rate = arg(argv, "--rate").ok_or_else(|| BukioError::new("MISSING_ARG", "--rate is required"))?;
+    let source = arg(argv, "--source").unwrap_or_else(|| "manual".into());
+    let r = fx::set_fx_rate(&db, &currency, &date, &rate, &source, actor, dry_run)?;
+    if dry_run {
+        Ok(json!({
+            "rate": r,
+            "dryRun": true,
+        }))
+    } else {
+        Ok(json!({ "rate": r }))
+    }
+}
+
+fn cmd_fx_show(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let currency = arg(argv, "--currency").ok_or_else(|| BukioError::new("MISSING_ARG", "--currency is required"))?;
+    let limit: i64 = arg(argv, "--limit").and_then(|v| v.parse().ok()).unwrap_or(50);
+    let rates = fx::list_fx_rates(&db, Some(&currency), limit)?;
+    Ok(json!({ "currency": currency, "rates": rates }))
+}
+
+fn cmd_fx_list(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let limit: i64 = arg(argv, "--limit").and_then(|v| v.parse().ok()).unwrap_or(50);
+    let rates = fx::list_fx_rates(&db, None, limit)?;
+    Ok(json!({ "rates": rates }))
 }

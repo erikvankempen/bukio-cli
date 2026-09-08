@@ -109,6 +109,17 @@ const CASES = [
     ],
   },
   {
+    name: 'fx',
+    steps: [
+      ['fx', 'set', '--currency', 'USD', '--date', '2026-01-15', '--rate', '1.0875'],
+      ['fx', 'set', '--currency', 'GBP', '--date', '2026-01-15', '--rate', '0.8590'],
+      ['fx', 'show', '--currency', 'USD'],
+      ['fx', 'list'],
+      ['fx', 'set', '--currency', 'USD', '--date', '2026-01-15', '--rate', '1.0875', '--dry-run'],
+      ['fx', 'set', '--currency', 'usd', '--date', '2026-01-15', '--rate', '1.0'],
+    ],
+  },
+  {
     name: 'vat',
     setup: [
       ['init', '--name', 'VAT BV', '--vat', 'on'],

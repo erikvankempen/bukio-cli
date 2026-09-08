@@ -5,7 +5,6 @@
 // Actor identity (mirrors src/core/actor.js) + DB-backed key/role registry
 // (mirrors src/core/actor-registry.js).
 
-use crate::db;
 use crate::money::BukioError;
 use rusqlite::Connection;
 use std::time::Duration;
