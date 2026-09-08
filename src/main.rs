@@ -25,6 +25,8 @@ mod year_end;
 mod month_end;
 mod items;
 mod recurring;
+mod assets;
+mod compliance;
 
 use money::{BukioError, Result};
 use serde_json::{json, Value};
