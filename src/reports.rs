@@ -311,11 +311,11 @@ pub fn balans(db: &Connection, as_of: &str) -> Result<Value> {
 
     Ok(json!({
         "as_of": as_of,
-        "assets": { "total_cents": total_assets, "sections": asset_sections },
+        "assets": { "total_cents": total_assets, "total": crate::money::format_amount(total_assets), "sections": asset_sections },
         "liabilities_and_equity": {
-            "total_cents": total_passiva,
+            "total_cents": total_passiva, "total": crate::money::format_amount(total_passiva),
             "sections": passiva_sections,
-            "result_cents": result_cents,
+            "result_cents": result_cents, "result": crate::money::format_amount(result_cents),
         },
         "balanced": total_assets == total_passiva,
     }))
@@ -373,9 +373,9 @@ pub fn pnl(db: &Connection, from: &str, to: &str) -> Result<Value> {
     Ok(json!({
         "from": from, "to": to,
         "sections": sections,
-        "revenue_cents": revenue,
-        "costs_cents": costs,
-        "result_cents": revenue - costs,
+        "revenue_cents": revenue, "revenue": crate::money::format_amount(revenue),
+        "costs_cents": costs, "costs": crate::money::format_amount(costs),
+        "result_cents": revenue - costs, "result": crate::money::format_amount(revenue - costs),
     }))
 }
 

@@ -18,7 +18,14 @@ const DEFAULT_TTL_HOURS: u64 = 12;
 const MAX_TTL_HOURS: u64 = 72;
 
 fn config_dir() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())).join(".bukio")
+    std::env::var("BUKIO_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(
+                std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
+            )
+            .join(".bukio")
+        })
 }
 
 fn key_file_path(actor: &str) -> PathBuf {

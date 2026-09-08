@@ -452,9 +452,8 @@ pub fn reverse_entry(db: &Connection, id: i64, actor: &str, reason: Option<&str>
         )
         .map_err(sql_err)?;
         let rid = tx.last_insert_rowid();
-        // negated postings (VAT/FX negated, cost center carried over)
-        for p in &entry.postings {
-            tx.execute(
+        // negated postings (VAT/FX negated, cost center carried over) — single INSERT…SELECT, no loop
+        tx.execute(
                 "INSERT INTO postings (entry_id, account_id, amount_cents, vat_code_id, vat_amount_cents, fx_currency, fx_amount_cents, cost_center_id)
                  SELECT ?1, account_id, -amount_cents, vat_code_id,
                         CASE WHEN vat_amount_cents IS NULL THEN NULL ELSE -vat_amount_cents END,
@@ -465,7 +464,6 @@ pub fn reverse_entry(db: &Connection, id: i64, actor: &str, reason: Option<&str>
                 rusqlite::params![rid, id],
             )
             .map_err(sql_err)?;
-        }
         tx.execute(
             "UPDATE journal_entries SET state = 'posted', posted_at = ?1 WHERE id = ?2",
             rusqlite::params![now_iso(), rid],
