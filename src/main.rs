@@ -27,6 +27,7 @@ mod items;
 mod recurring;
 mod assets;
 mod compliance;
+mod authz;
 
 use money::{BukioError, Result};
 use serde_json::{json, Value};
