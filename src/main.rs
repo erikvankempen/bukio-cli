@@ -29,6 +29,7 @@ mod assets;
 mod compliance;
 mod contacts;
 mod invoice;
+mod payments;
 mod attachments;
 mod authz;
 
