@@ -23,6 +23,7 @@ mod bank;
 mod company;
 mod year_end;
 mod month_end;
+mod items;
 
 use money::{BukioError, Result};
 use serde_json::{json, Value};
