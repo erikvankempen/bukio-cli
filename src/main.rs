@@ -34,6 +34,7 @@ mod sign;
 mod ubl;
 mod import_mod;
 mod mcp;
+mod actor_cli;
 mod vat;
 mod year_end;
 

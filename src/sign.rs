@@ -66,6 +66,21 @@ pub fn is_encrypted(private_pem: &str) -> bool {
     private_pem.contains("BEGIN ENCRYPTED PRIVATE KEY")
 }
 
+/// Extract public PEM from a private PEM (unencrypted only).
+pub fn public_key_from_private(
+    private_pem: &str,
+    _passphrase: Option<&str>,
+) -> std::result::Result<String, String> {
+    if is_encrypted(private_pem) {
+        return Err(
+            "encrypted keys require session — run 'bukio actor unlock' first".into(),
+        );
+    }
+    let der = pem_decode(private_pem).ok_or("not a valid PEM")?;
+    let signing = SigningKey::from_pkcs8_der(&der).map_err(|e| e.to_string())?;
+    Ok(public_pem_of(&signing))
+}
+
 // --- tiny PEM codec (std only) ---------------------------------------------
 
 fn pem_encode(label: &str, der: &[u8]) -> String {

@@ -157,6 +157,26 @@ pub fn can_act_enrolled(db: &Connection, actor: &str) -> bool {
     get_actor_key(db, actor).is_some()
 }
 
+/// Enrol an actor key into the company registry.
+pub fn enrol_actor(db: &Connection, actor: &str, keyid: &str, public_pem: &str) -> Result<Value> {
+    let now = now_iso();
+    db.execute(
+        "INSERT OR REPLACE INTO actor_keys (actor, keyid, public_pem, enrolled_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![actor, keyid, public_pem, now],
+    ).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
+    Ok(json!({"actor": actor, "keyid": keyid, "enrolled_at": now}))
+}
+
+/// Revoke an actor key.
+pub fn revoke_actor(db: &Connection, actor: &str) -> Result<()> {
+    let now = now_iso();
+    db.execute(
+        "UPDATE actor_keys SET revoked_at = ?1 WHERE actor = ?2 AND revoked_at IS NULL",
+        rusqlite::params![now, actor],
+    ).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
+    Ok(())
+}
+
 pub fn list_actors(db: &Connection) -> Result<Vec<Value>> {
     let mut stmt = db.prepare("SELECT actor, keyid, enrolled_at, revoked_at, revoked_reason FROM actor_keys ORDER BY enrolled_at, actor").map_err(sql_err)?;
     let rows = stmt.query_map([], |r| {
