@@ -258,7 +258,7 @@ fn try_match_cmd(pos: &[&str], argv: &[String], db_path: &str, actor: &str, dry_
         ["contact", "add"] => cmd_contact_add(argv, db_path, actor, dry_run),
         ["contact", "update"] => cmd_contact_update(argv, db_path, actor, dry_run),
         ["contact", "list"] => cmd_contact_list(db_path),
-        ["contact", "statement"] => Err(not_ported("contact statement")),
+        ["contact", "statement"] => cmd_contact_statement(argv, db_path),
 
         // ── invoice ───────────────────────────────────────────────────
         ["invoice", "create"] => cmd_invoice_create(argv, db_path, actor, dry_run),
@@ -319,14 +319,14 @@ fn try_match_cmd(pos: &[&str], argv: &[String], db_path: &str, actor: &str, dry_
         // ── assets ────────────────────────────────────────────────────
         ["assets", "scheme", "add"] => cmd_asset_scheme_add(argv, db_path, actor, dry_run),
         ["assets", "scheme", "list"] => cmd_asset_scheme_list(db_path),
-        ["assets", "add"] => Err(not_ported("assets add")),
+        ["assets", "add"] => cmd_asset_add(argv, db_path, actor, dry_run),
         ["assets", "list"] => cmd_asset_list(argv, db_path),
         ["assets", "show"] => cmd_asset_show(argv, db_path),
         ["assets", "run"] => cmd_asset_run(argv, db_path, actor, dry_run),
-        ["assets", "register"] => Err(not_ported("assets register")),
-        ["assets", "dispose"] => Err(not_ported("assets dispose")),
-        ["assets", "pause"] => Err(not_ported("assets pause")),
-        ["assets", "resume"] => Err(not_ported("assets resume")),
+        ["assets", "register"] => cmd_asset_register(argv, db_path, actor),
+        ["assets", "dispose"] => cmd_asset_dispose(argv, db_path, actor, dry_run),
+        ["assets", "pause"] => cmd_asset_pause(argv, db_path, actor, dry_run),
+        ["assets", "resume"] => cmd_asset_resume(argv, db_path, actor, dry_run),
 
         // ── payments ──────────────────────────────────────────────────
         ["payments", "payables", "add"] => cmd_payable_add(argv, db_path, actor, dry_run),
@@ -1499,6 +1499,13 @@ fn cmd_contact_list(db_path: &str) -> Result<Value> {
     Ok(json!({ "contacts": rows }))
 }
 
+fn cmd_contact_statement(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
+    let as_of = arg(argv, "--as-of");
+    bukio::contacts::contact_statement(&db, id, as_of.as_deref())
+}
+
 // ── invoice ────────────────────────────────────────────────────────────────
 
 fn cmd_invoice_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
@@ -1809,6 +1816,76 @@ fn cmd_asset_run(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> 
     let db = open_existing(db_path)?;
     let period = arg(argv, "--period").or_else(|| arg(argv, "--as-of")).unwrap_or_else(bukio::dates::today_iso);
     bukio::assets::run_due(&db, &period, actor, dry_run)
+}
+
+fn cmd_asset_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let name = arg(argv, "--name").ok_or_else(|| missing_arg("--name"))?;
+    let purchase_date = arg(argv, "--purchase-date").ok_or_else(|| missing_arg("--purchase-date"))?;
+    let purchase_price_str = arg(argv, "--purchase-price").ok_or_else(|| missing_arg("--purchase-price"))?;
+    let purchase_price_cents = bukio::money::parse_amount(&purchase_price_str)?;
+    let dep_start = arg(argv, "--depreciation-start").ok_or_else(|| missing_arg("--depreciation-start"))?;
+    let recognition = arg(argv, "--recognition-date").ok_or_else(|| missing_arg("--recognition-date"))?;
+    let asset_account = arg(argv, "--asset-account").unwrap_or_else(|| "1800".into());
+    let expense_account = arg(argv, "--expense-account").unwrap_or_else(|| "4600".into());
+    let cum_dep_str = arg(argv, "--cum-dep").unwrap_or_else(|| "0".into());
+    let cum_dep_cents = bukio::money::parse_amount(&cum_dep_str)?;
+    let residual_str = arg(argv, "--residual");
+    let residual_cents = residual_str.as_ref().map(|s| bukio::money::parse_amount(s)).transpose()?;
+    let scheme_id = parse_i64(argv, "--scheme");
+    let method = arg(argv, "--method");
+    let life_months = parse_i64(argv, "--life-months");
+    let residual_bp = parse_i64(argv, "--residual-bp");
+    let entry_id = parse_i64(argv, "--entry-id");
+    bukio::assets::create_asset(
+        &db, &name,
+        arg(argv, "--category").as_deref(),
+        arg(argv, "--serial").as_deref(),
+        scheme_id, method.as_deref(), life_months, residual_bp, residual_cents,
+        &purchase_date, purchase_price_cents,
+        &dep_start, &recognition, cum_dep_cents,
+        &asset_account, arg(argv, "--cum-dep-account").as_deref(),
+        &expense_account, entry_id,
+        arg(argv, "--note").as_deref(),
+        actor, dry_run,
+    )
+}
+
+fn cmd_asset_register(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let as_of = arg(argv, "--as-of");
+    bukio::assets::register(&db, as_of.as_deref(), actor)
+}
+
+fn cmd_asset_dispose(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
+    let date = arg(argv, "--date").ok_or_else(|| missing_arg("--date"))?;
+    let proceeds_str = arg(argv, "--proceeds").unwrap_or_else(|| "0".into());
+    let proceeds_cents = bukio::money::parse_amount(&proceeds_str)?;
+    bukio::assets::dispose_asset(
+        &db, id, &date, proceeds_cents,
+        arg(argv, "--bank-account").as_deref(),
+        arg(argv, "--result-account").as_deref(),
+        arg(argv, "--note").as_deref(),
+        actor, dry_run,
+    )
+}
+
+fn cmd_asset_pause(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
+    bukio::assets::pause_asset(&db, id, actor, dry_run)
+}
+
+fn cmd_asset_resume(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
+    bukio::assets::resume_asset(&db, id, actor, dry_run)
 }
 
 // ── payments ───────────────────────────────────────────────────────────────

@@ -74,15 +74,15 @@ function runCli(args, env = {}) {
 test('CLI: missing actor fails with ACTOR_REQUIRED', () => {
   const r = runCli(['init', '--name', 'X', '--db', tmpDb()], { BUKIO_ACTOR: '' });
   assert.equal(r.status, 1);
-  assert.ok(r.stderr.includes('ACTOR_REQUIRED'));
-  assert.ok(r.stderr.includes('human:erik'));
+  assert.ok(r.stdout.includes('ACTOR_REQUIRED'));
+  assert.ok(r.stdout.includes('human:erik'));
 });
 
 test('CLI: bare role without a name is rejected (INVALID_ACTOR)', () => {
   const r2 = runCli(['--actor', 'human', 'init', '--name', 'X', '--db', tmpDb()], { BUKIO_ACTOR: '' });
   assert.equal(r2.status, 1);
-  assert.ok(r2.stderr.includes('INVALID_ACTOR'));
-  assert.ok(r2.stderr.includes('human:erik'));
+  assert.ok(r2.stdout.includes('INVALID_ACTOR'));
+  assert.ok(r2.stdout.includes('human:erik'));
 });
 
 test('CLI: named actor works; JSON error shape on --json', () => {

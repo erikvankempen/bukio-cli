@@ -1321,6 +1321,479 @@ fn sql_err(e: rusqlite::Error) -> BukioError {
     BukioError::new("DB_ERROR", e.to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Financial statements (jaarrekening) — statutory annual accounts
+// ---------------------------------------------------------------------------
+
+/// Group balans/P&L sections by statutory lines from the profile.
+/// For "auto" format: match `taxonomy_code` to line's `rgs`.
+/// Returns Vec<(label, taxonomy_code, total_cents, accounts_json)>.
+fn group_by_statutory_lines(
+    sections: &[Value],
+    lines: &[Value],
+) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut known_codes: Vec<String> = Vec::new();
+    for line in lines {
+        let rgs = line["rgs"].as_str().unwrap_or("");
+        let label = line["label"].as_str().unwrap_or(rgs).to_string();
+        known_codes.push(rgs.to_string());
+        let hits: Vec<&Value> = sections
+            .iter()
+            .filter(|s| s["taxonomy_code"].as_str().unwrap_or("") == rgs)
+            .collect();
+        if hits.is_empty() {
+            continue;
+        }
+        let total_cents: i64 = hits.iter().map(|s| s["total_cents"].as_i64().unwrap_or(0)).sum();
+        let accounts: Vec<Value> = hits
+            .iter()
+            .flat_map(|s| s["accounts"].as_array().map(|a| a.iter()).unwrap_or_default())
+            .cloned()
+            .collect();
+        out.push(json!({
+            "label": label,
+            "taxonomy_code": rgs,
+            "accounts": accounts,
+            "total_cents": total_cents,
+        }));
+    }
+    // leftover
+    let leftover: Vec<&Value> = sections
+        .iter()
+        .filter(|s| !known_codes.contains(&s["taxonomy_code"].as_str().unwrap_or("").to_string()))
+        .collect();
+    if !leftover.is_empty() {
+        let total_cents: i64 = leftover.iter().map(|s| s["total_cents"].as_i64().unwrap_or(0)).sum();
+        let accounts: Vec<Value> = leftover
+            .iter()
+            .flat_map(|s| s["accounts"].as_array().map(|a| a.iter()).unwrap_or_default())
+            .cloned()
+            .collect();
+        out.push(json!({
+            "label": "Overig",
+            "taxonomy_code": null,
+            "accounts": accounts,
+            "total_cents": total_cents,
+        }));
+    }
+    out
+}
+
+/// Group balans/P&L sections by PCN prefix lines (LU format).
+fn group_by_prefix_lines(
+    sections: &[Value],
+    lines: &[Value],
+) -> Vec<Value> {
+    // flatten all accounts from sections
+    let all_accounts: Vec<Value> = sections
+        .iter()
+        .flat_map(|s| s["accounts"].as_array().map(|a| a.iter()).unwrap_or_default())
+        .cloned()
+        .collect();
+    let mut out = Vec::new();
+    let mut known_prefixes: Vec<String> = Vec::new();
+    for line in lines {
+        let prefixes: Vec<String> = line["prefixes"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .unwrap_or_default();
+        let label = line["label"].as_str().unwrap_or("").to_string();
+        for p in &prefixes {
+            known_prefixes.push(p.clone());
+        }
+        let hits: Vec<&Value> = all_accounts
+            .iter()
+            .filter(|a| {
+                let code = a["code"].as_str().unwrap_or("");
+                prefixes.iter().any(|p| code.starts_with(p.as_str()))
+            })
+            .collect();
+        if hits.is_empty() {
+            continue;
+        }
+        let total_cents: i64 = hits.iter().map(|a| a["balance_cents"].as_i64().unwrap_or(0)).sum();
+        let accounts: Vec<Value> = hits
+            .iter()
+            .map(|a| json!({
+                "code": a["code"],
+                "name": a["name"],
+                "amount_cents": a["balance_cents"],
+            }))
+            .collect();
+        out.push(json!({
+            "label": label,
+            "prefixes": prefixes,
+            "accounts": accounts,
+            "total_cents": total_cents,
+        }));
+    }
+    // leftover
+    let leftover: Vec<&Value> = all_accounts
+        .iter()
+        .filter(|a| {
+            let code = a["code"].as_str().unwrap_or("");
+            !known_prefixes.iter().any(|p| code.starts_with(p.as_str()))
+        })
+        .collect();
+    if !leftover.is_empty() {
+        let total_cents: i64 = leftover.iter().map(|a| a["balance_cents"].as_i64().unwrap_or(0)).sum();
+        let accounts: Vec<Value> = leftover
+            .iter()
+            .map(|a| json!({
+                "code": a["code"],
+                "name": a["name"],
+                "amount_cents": a["balance_cents"],
+            }))
+            .collect();
+        out.push(json!({
+            "label": "Autres",
+            "prefixes": [],
+            "accounts": accounts,
+            "total_cents": total_cents,
+        }));
+    }
+    out
+}
+
+/// Flatten balans sections into a flat list of accounts with balance_cents.
+fn flatten_sections(sections: &[Value]) -> Vec<Value> {
+    sections
+        .iter()
+        .flat_map(|s| s["accounts"].as_array().map(|a| a.iter()).unwrap_or_default())
+        .cloned()
+        .collect()
+}
+
+/// Statutory annual accounts (jaarrekening) — mirrors src/report/jaarrekening.js.
+pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<Value> {
+    let profile = crate::accounts::resolve_profile(db)?;
+    let reporting = &profile["reporting"];
+    let format = reporting["format"].as_str().unwrap_or("");
+    let sa = &reporting["statutoryAccounts"];
+    let models: Vec<String> = sa["models"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let default_model = models.last().cloned().unwrap_or_default();
+    let model = model.unwrap_or(&default_model);
+
+    if !models.contains(&model.to_string()) {
+        return Err(BukioError::new(
+            "INVALID_MODEL",
+            format!("model must be one of {}", models.join(", ")),
+        ));
+    }
+    if !year.bytes().all(|b| b.is_ascii_digit()) || year.len() != 4 {
+        return Err(BukioError::new(
+            "INVALID_YEAR",
+            format!("year '{year}' must be YYYY"),
+        ));
+    }
+
+    let company: Value = db
+        .query_row("SELECT * FROM company WHERE id = 1", [], |r| {
+            Ok(json!({
+                "name": r.get::<_, Option<String>>(0)?,
+                "registration_id": r.get::<_, Option<String>>(1)?,
+                "tax_id": r.get::<_, Option<String>>(2)?,
+                "legal_form": r.get::<_, Option<String>>(3)?,
+                "address": r.get::<_, Option<String>>(4)?,
+                "postal_code": r.get::<_, Option<String>>(5)?,
+                "city": r.get::<_, Option<String>>(6)?,
+                "fiscal_year_end": r.get::<_, Option<String>>(7)?,
+            }))
+        })
+        .map_err(|e| BukioError::new("NOT_INITIALISED", e.to_string()))?;
+
+    let fye = company["fiscal_year_end"].as_str().unwrap_or("12-31");
+    let fye_parts: Vec<&str> = fye.split('-').collect();
+    let fye_month = fye_parts[fye_parts.len().saturating_sub(2)].parse::<u32>().unwrap_or(12);
+    let fye_day = fye_parts.last().and_then(|s| s.parse::<u32>().ok()).unwrap_or(31);
+    let as_of = format!("{year}-{fye_month:02}-{fye_day:02}");
+
+    let b = balans(db, &as_of)?;
+    let lines_activa = sa["lines"]["activa"].as_array().cloned().unwrap_or_default();
+    let lines_passiva = sa["lines"]["passiva"].as_array().cloned().unwrap_or_default();
+
+    let (activa, passiva) = match format {
+        "auto" => {
+            let activa_sections = b["assets"]["sections"].as_array().cloned().unwrap_or_default();
+            let passiva_sections = b["liabilities_and_equity"]["sections"].as_array().cloned().unwrap_or_default();
+            (group_by_statutory_lines(&activa_sections, &lines_activa),
+             group_by_statutory_lines(&passiva_sections, &lines_passiva))
+        }
+        "lu-lsc" => {
+            let activa_sections = b["assets"]["sections"].as_array().cloned().unwrap_or_default();
+            let passiva_sections = b["liabilities_and_equity"]["sections"].as_array().cloned().unwrap_or_default();
+            (group_by_prefix_lines(&activa_sections, &lines_activa),
+             group_by_prefix_lines(&passiva_sections, &lines_passiva))
+        }
+        _ => {
+            return Err(BukioError::new(
+                "FORMAT_NOT_SUPPORTED",
+                format!("financial statements format '{format}' has no builder"),
+            ));
+        }
+    };
+
+    // onverdeeld resultaat folds into equity
+    let result_cents = b["liabilities_and_equity"]["result_cents"].as_i64().unwrap_or(0);
+    let mut passiva = passiva;
+    if result_cents != 0 {
+        // try to find the equity line
+        let ev_idx = passiva.iter().position(|s| {
+            s["taxonomy_code"].as_str() == Some("BEIV.05") || s["label"].as_str() == Some("Capitaux propres")
+        });
+        if let Some(idx) = ev_idx {
+            passiva[idx]["total_cents"] = json!(passiva[idx]["total_cents"].as_i64().unwrap_or(0) + result_cents);
+            if let Some(arr) = passiva[idx].get_mut("sections").and_then(|v| v.as_array_mut()) {
+                arr.push(json!({
+                    "taxonomy_code": null,
+                    "label": "Onverdeeld resultaat",
+                    "accounts": [{ "code": "—", "name": "Resultaat boekjaar", "amount_cents": result_cents }],
+                    "total_cents": result_cents,
+                }));
+            }
+        } else {
+            passiva.push(json!({
+                "label": if format == "lu-lsc" { "Capitaux propres" } else { "Eigen vermogen" },
+                "taxonomy_code": "BEIV.05",
+                "sections": [{
+                    "taxonomy_code": null,
+                    "label": "Onverdeeld resultaat",
+                    "accounts": [{ "code": "—", "name": "Resultaat boekjaar", "amount_cents": result_cents }],
+                    "total_cents": result_cents,
+                }],
+                "total_cents": result_cents,
+            }));
+        }
+    }
+
+    let total_activa: i64 = activa.iter().map(|g| g["total_cents"].as_i64().unwrap_or(0)).sum();
+    let total_passiva: i64 = passiva.iter().map(|g| g["total_cents"].as_i64().unwrap_or(0)).sum();
+
+    let mut report = json!({
+        "year": year,
+        "model": model,
+        "company": {
+            "name": company["name"],
+            "kvk": company["registration_id"],
+            "btw_id": company["tax_id"],
+            "legal_form": company["legal_form"],
+            "address": company["address"],
+            "postal_code": company["postal_code"],
+            "city": company["city"],
+        },
+        "as_of": as_of,
+        "balans": {
+            "activa": activa,
+            "passiva": passiva,
+            "total_activa_cents": total_activa,
+            "total_passiva_cents": total_passiva,
+            "balanced": total_activa == total_passiva,
+        },
+    });
+
+    // P&L section (for klein micro, always; for lu-lsc always)
+    let lines_pnl = sa["lines"]["pnl"].as_array().cloned().unwrap_or_default();
+    if !lines_pnl.is_empty() {
+        let (pnl_from, pnl_to) = fiscal_year_window(db, year);
+        let p = pnl(db, &pnl_from, &pnl_to)?;
+        let pnl_sections = p["sections"].as_array().cloned().unwrap_or_default();
+
+        let pnl_lines = match format {
+            "lu-lsc" => {
+                // LU P&L: group by prefix with sign
+                let sign_map: std::collections::HashMap<String, i64> = lines_pnl
+                    .iter()
+                    .filter_map(|l| {
+                        let label = l["label"].as_str()?.to_string();
+                        let sign = l["sign"].as_i64().unwrap_or(1);
+                        Some((label, sign))
+                    })
+                    .collect();
+                let grouped = group_by_prefix_lines(&pnl_sections, &lines_pnl);
+                let mut result = Vec::new();
+                for mut line in grouped {
+                    let label = line["label"].as_str().unwrap_or("").to_string();
+                    let sign = sign_map.get(&label).copied().unwrap_or(1);
+                    line["sign"] = json!(sign);
+                    result.push(line);
+                }
+                result
+            }
+            _ => {
+                // NL P&L: group by taxonomy_code
+                group_by_statutory_lines(&pnl_sections, &lines_pnl)
+            }
+        };
+
+        // compute resultaat
+        let resultaat_cents: i64 = pnl_lines
+            .iter()
+            .map(|l| {
+                let tc = l["taxonomy_code"].as_str();
+                let total = l["total_cents"].as_i64().unwrap_or(0);
+                if format == "lu-lsc" {
+                    let sign = l["sign"].as_i64().unwrap_or(1);
+                    sign * total
+                } else {
+                    // NL: income (WOMZ.80, WOVB.82) positive, costs negative
+                    match tc {
+                        Some("WOMZ.80") | Some("WOVB.82") => total,
+                        Some("WKPR.70") => -total,
+                        _ => -total, // costs
+                    }
+                }
+            })
+            .sum();
+
+        report["pnl"] = json!({
+            "lines": pnl_lines,
+            "resultaat_cents": resultaat_cents,
+            "resultaat": crate::money::format_amount(resultaat_cents),
+        });
+    }
+
+    Ok(report)
+}
+
+// ---------------------------------------------------------------------------
+// ICP readout — Intra-community supply listing
+// ---------------------------------------------------------------------------
+
+/// ICP readout: EU reverse-charge supplies per customer for a period.
+pub fn icp_readout(db: &Connection, period: &str) -> Result<Value> {
+    let (from, to) = crate::vat::parse_period(period)?;
+    let label = period.to_string();
+
+    let mut stmt = db
+        .prepare(
+            "SELECT DISTINCT i.id, i.invoice_type, i.invoice_number, i.date, i.contact_id,
+                   c.name, c.vat_id, c.country
+            FROM invoices i
+            JOIN invoice_lines l ON l.invoice_id = i.id
+            JOIN contacts c ON c.id = i.contact_id
+            WHERE i.invoice_number IS NOT NULL
+              AND i.status IN ('sent', 'paid', 'overdue')
+              AND i.date >= ?1 AND i.date <= ?2
+              AND l.vat_code = 'RE'
+            ORDER BY c.name, i.id",
+        )
+        .map_err(sql_err)?;
+
+    struct IcpRow {
+        id: i64,
+        invoice_type: String,
+        invoice_number: String,
+        contact_id: i64,
+        name: String,
+        vat_id: Option<String>,
+        country: Option<String>,
+    }
+
+    let rows: Vec<IcpRow> = stmt
+        .query_map(rusqlite::params![from, to], |r| {
+            Ok(IcpRow {
+                id: r.get(0)?,
+                invoice_type: r.get(1)?,
+                invoice_number: r.get(2)?,
+                contact_id: r.get(4)?,
+                name: r.get(5)?,
+                vat_id: r.get(6)?,
+                country: r.get(7)?,
+            })
+        })
+        .map_err(sql_err)?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    use std::collections::HashMap;
+    struct ContactAgg {
+        name: String,
+        vat_id: Option<String>,
+        country: Option<String>,
+        amount_cents: i64,
+        invoice_numbers: Vec<String>,
+    }
+    let mut per_contact: HashMap<i64, ContactAgg> = HashMap::new();
+
+    for row in &rows {
+        if let Some(inv) = crate::invoice::get_invoice(db, row.id)? {
+            if let Some(lines) = inv["lines"].as_array() {
+                let totals = crate::invoice::compute_invoice_totals(lines, inv.get("discount_type").and_then(|v| v.as_str()), inv.get("discount_value").and_then(|v| v.as_i64()));
+                if let Some(groups) = totals.get("groups").and_then(|v| v.as_array()) {
+                    let re_net: i64 = groups
+                        .iter()
+                        .find(|g| g["code"].as_str() == Some("RE"))
+                        .and_then(|g| g["discounted_net"].as_i64())
+                        .unwrap_or(0);
+                    if re_net == 0 {
+                        continue;
+                    }
+                    let signed = if row.invoice_type == "credit" { -re_net } else { re_net };
+                    let entry = per_contact.entry(row.contact_id).or_insert_with(|| ContactAgg {
+                        name: row.name.clone(),
+                        vat_id: row.vat_id.clone(),
+                        country: row.country.clone(),
+                        amount_cents: 0,
+                        invoice_numbers: Vec::new(),
+                    });
+                    entry.amount_cents += signed;
+                    if !entry.invoice_numbers.contains(&row.invoice_number) {
+                        entry.invoice_numbers.push(row.invoice_number.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    let mut customers: Vec<Value> = per_contact
+        .values()
+        .map(|c| {
+            json!({
+                "contact_id": serde_json::Value::Null,
+                "name": c.name,
+                "vat_id": c.vat_id,
+                "country": c.country,
+                "amount_cents": c.amount_cents,
+                "amount": crate::money::format_amount(c.amount_cents),
+                "invoice_numbers": c.invoice_numbers,
+            })
+        })
+        .collect();
+    customers.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+
+    let total_cents: i64 = customers.iter().map(|c| c["amount_cents"].as_i64().unwrap_or(0)).sum();
+
+    // check for missing VAT IDs
+    let missing: Vec<&str> = customers
+        .iter()
+        .filter(|c| c["vat_id"].as_str().is_none() || c["vat_id"].as_str() == Some(""))
+        .filter_map(|c| c["name"].as_str())
+        .collect();
+    if !missing.is_empty() {
+        return Err(BukioError::new(
+            "ICP_VAT_ID_MISSING",
+            format!(
+                "EU customers without a btw-id (required for the ICP listing): {} — add it with contact add / an update",
+                missing.join(", ")
+            ),
+        ));
+    }
+
+    Ok(json!({
+        "period": label,
+        "from": from,
+        "to": to,
+        "customers": customers,
+        "total_cents": total_cents,
+        "total": crate::money::format_amount(total_cents),
+        "note": "Manual filing aid only — bukio never submits the ICP listing.",
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

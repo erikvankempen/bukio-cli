@@ -193,6 +193,169 @@ pub fn update_contact(
     get_contact(db, id)?.ok_or_else(|| contact_error("DB_ERROR", "contact not found after update"))
 }
 
+// ── contact statement (opgave) ────────────────────────────────────────────
+
+pub fn contact_statement(
+    db: &Connection,
+    contact_id: i64,
+    as_of: Option<&str>,
+) -> Result<Value> {
+    let contact = get_contact(db, contact_id)?
+        .ok_or_else(|| contact_error("CONTACT_NOT_FOUND", format!("contact {contact_id} does not exist")))?;
+    let as_of_date = match as_of {
+        Some(d) => d.to_string(),
+        None => chrono::Utc::now().format("%Y-%m-%d").to_string(),
+    };
+    if !as_of_date.chars().all(|c| c.is_ascii_digit() || c == '-') || as_of_date.len() != 10 {
+        return Err(contact_error("INVALID_DATE", format!("as-of '{as_of_date}' must be YYYY-MM-DD")));
+    }
+
+    let mut rows: Vec<Value> = Vec::new();
+
+    // Invoices for this contact (sales + credit, non-draft, non-void, date <= as_of)
+    {
+        let mut stmt = db
+            .prepare(
+                "SELECT id, invoice_number, invoice_type, date, description, status \
+                 FROM invoices WHERE contact_id = ?1 \
+                 AND invoice_type IN ('sales','credit') \
+                 AND status NOT IN ('draft','void') AND date <= ?2 \
+                 ORDER BY date, id",
+            )
+            .map_err(|e| contact_error("DB_ERROR", e.to_string()))?;
+        let inv_rows = stmt
+            .query_map(rusqlite::params![contact_id, as_of_date], |r| {
+                Ok(json!({
+                    "id": r.get::<_, i64>(0)?,
+                    "invoice_number": r.get::<_, Option<String>>(1)?,
+                    "invoice_type": r.get::<_, String>(2)?,
+                    "date": r.get::<_, String>(3)?,
+                    "description": r.get::<_, Option<String>>(4)?,
+                    "status": r.get::<_, String>(5)?,
+                }))
+            })
+            .map_err(|e| contact_error("DB_ERROR", e.to_string()))?;
+        for inv in inv_rows.filter_map(|r| r.ok()) {
+            let iid = inv["id"].as_i64().unwrap();
+            let is_credit = inv["invoice_type"].as_str() == Some("credit");
+            // Get payments for this invoice
+            let payments = get_invoice_payments(db, iid)?;
+            // Compute gross from line items
+            let gross = compute_gross(db, iid)?;
+            let inv_num = inv["invoice_number"].as_str().unwrap_or("");
+            let desc = if is_credit {
+                format!("Credit note {inv_num}").trim().to_string()
+            } else {
+                inv["description"]
+                    .as_str()
+                    .unwrap_or(&format!("Invoice {inv_num}"))
+                    .to_string()
+            };
+            rows.push(json!({
+                "date": inv["date"],
+                "kind": if is_credit { "credit" } else { "invoice" },
+                "ref": inv_num,
+                "description": desc,
+                "debit_cents": if is_credit { 0 } else { gross },
+                "credit_cents": if is_credit { gross } else { 0 },
+                "balance_cents": 0,
+            }));
+            for p in payments {
+                let pdate = p["date"].as_str().unwrap_or("");
+                if pdate <= as_of_date.as_str() {
+                    let pamt = p["amount_cents"].as_i64().unwrap_or(0);
+                    let pdesc = if is_credit {
+                        format!("Refund {inv_num}")
+                    } else {
+                        format!("Payment {inv_num}")
+                    };
+                    rows.push(json!({
+                        "date": pdate, "kind": "payment", "ref": inv_num,
+                        "description": pdesc,
+                        "debit_cents": if is_credit { pamt } else { 0 },
+                        "credit_cents": if is_credit { 0 } else { pamt },
+                        "balance_cents": 0,
+                    }));
+                }
+            }
+        }
+    }
+
+    // Payables for this contact
+    {
+        let mut stmt = db
+            .prepare(
+                "SELECT id, invoice_ref, date, amount_cents FROM payables \
+                 WHERE contact_id = ?1 AND date <= ?2 ORDER BY date, id",
+            )
+            .map_err(|e| contact_error("DB_ERROR", e.to_string()))?;
+        let pay_rows = stmt
+            .query_map(rusqlite::params![contact_id, as_of_date], |r| {
+                Ok(json!({
+                    "id": r.get::<_, i64>(0)?,
+                    "invoice_ref": r.get::<_, String>(1)?,
+                    "date": r.get::<_, String>(2)?,
+                    "amount_cents": r.get::<_, i64>(3)?,
+                }))
+            })
+            .map_err(|e| contact_error("DB_ERROR", e.to_string()))?;
+        for p in pay_rows.filter_map(|r| r.ok()) {
+            let pref = p["invoice_ref"].as_str().unwrap_or("");
+            rows.push(json!({
+                "date": p["date"], "kind": "payable", "ref": pref,
+                "description": format!("Purchase invoice {pref}"),
+                "debit_cents": 0, "credit_cents": p["amount_cents"],
+                "balance_cents": 0,
+            }));
+        }
+    }
+
+    rows.sort_by(|a, b| {
+        a["date"]
+            .as_str()
+            .unwrap_or("")
+            .cmp(b["date"].as_str().unwrap_or(""))
+            .then(a["kind"].as_str().unwrap_or("").cmp(b["kind"].as_str().unwrap_or("")))
+    });
+    let mut balance: i64 = 0;
+    for r in rows.iter_mut() {
+        balance += r["debit_cents"].as_i64().unwrap_or(0) - r["credit_cents"].as_i64().unwrap_or(0);
+        r["balance_cents"] = json!(balance);
+    }
+
+    let cname = contact["name"].as_str().unwrap_or("");
+    let cid = contact["id"].as_i64().unwrap_or(contact_id);
+    Ok(json!({
+        "contact": {"id": cid, "name": cname},
+        "as_of": as_of_date, "rows": rows, "balance_cents": balance,
+    }))
+}
+
+fn get_invoice_payments(db: &Connection, invoice_id: i64) -> Result<Vec<Value>> {
+    let mut stmt = db
+        .prepare(
+            "SELECT date, amount_cents FROM invoice_payments \
+             WHERE invoice_id = ?1 ORDER BY date, id",
+        )
+        .map_err(|e| contact_error("DB_ERROR", e.to_string()))?;
+    let rows = stmt
+        .query_map([invoice_id], |r| {
+            Ok(json!({
+                "date": r.get::<_, String>(0)?,
+                "amount_cents": r.get::<_, i64>(1)?,
+            }))
+        })
+        .map_err(|e| contact_error("DB_ERROR", e.to_string()))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+fn compute_gross(db: &Connection, invoice_id: i64) -> Result<i64> {
+    // Reuse invoice totals computation — get the invoice and compute
+    let inv = crate::invoice::get_invoice(db, invoice_id)?
+        .ok_or_else(|| contact_error("DB_ERROR", format!("invoice {invoice_id} not found")))?;
+    Ok(inv["gross_cents"].as_i64().unwrap_or(0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
