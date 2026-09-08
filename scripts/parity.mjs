@@ -109,6 +109,28 @@ const CASES = [
     ],
   },
   {
+    name: 'vat',
+    setup: [
+      ['init', '--name', 'VAT BV', '--vat', 'on'],
+    ],
+    steps: [
+      ['vat', 'codes'],
+      ['vat', 'book', '--date', '2026-04-10', '--desc', 'Verkoop', '--postings', '1100:121.00,8000:-100.00@21', '--post'],
+      ['vat', 'book', '--date', '2026-04-11', '--desc', 'Inkoop', '--postings', '4000:60.50,1100:-60.50@21', '--post'],
+      ['vat', 'book', '--date', '2026-04-12', '--desc', 'Verlegd', '--postings', '1100:100.00,8000:-100.00@R', '--post'],
+      ['vat', 'book', '--date', '2026-04-13', '--desc', 'Vrij', '--postings', '1100:100.00,8000:-100.00@V', '--post'],
+      ['vat', 'book', '--date', '2026-04-14', '--desc', 'Bad code', '--postings', '1100:100.00,8000:-100.00@99'],
+      ['vat', 'book', '--date', '2026-04-15', '--desc', 'Privé', '--postings', '1100:21.00,3000:-21.00@P', '--post'],
+      ['vat', 'readout', '--period', '2026-Q2'],
+      ['vat', 'readout', '--period', '2026-04'],
+      ['vat', 'readout', '--period', 'garbage'],
+      ['vat', 'file', '--period', '2026-Q2', '--dry-run'],
+      ['vat', 'file', '--period', '2026-Q2'],
+      ['vat', 'file', '--period', '2026-Q2'],
+      ['report', 'trial-balance', '--year', '2026'],
+    ],
+  },
+  {
     name: 'audit',
     setup: [
       ['init', '--name', 'Audit BV'],

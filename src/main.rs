@@ -17,6 +17,7 @@ mod dates;
 mod entries;
 mod accounts;
 mod reports;
+mod vat;
 
 use money::{BukioError, Result};
 use serde_json::{json, Value};
@@ -157,6 +158,12 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         ["report", "pnl"] => cmd_pnl(argv, db_path),
         ["report", "journal"] => cmd_journal(argv, db_path),
         ["audit"] | ["audit", "list"] => cmd_audit_list(argv, db_path),
+        ["vat", "enable"] => cmd_vat_enable(db_path, actor),
+        ["vat", "codes"] => cmd_vat_codes(db_path),
+        ["vat", "book"] => cmd_vat_book(argv, db_path, actor, dry_run),
+        ["vat", "readout"] => cmd_vat_readout(argv, db_path, actor),
+        ["vat", "file"] => cmd_vat_file(argv, db_path, actor, dry_run),
+        ["vat", "settle"] => cmd_vat_settle(argv, db_path, actor, dry_run),
         ["audit", "verify"] => cmd_audit_verify(db_path),
         _ => Err(BukioError::new(
             "UNKNOWN_COMMAND",
@@ -256,6 +263,11 @@ fn cmd_init(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
     )
     .map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
     let created = accounts::seed_default_chart(&db)?;
+    let mut vat_created = 0;
+    if company["vat_module"] == 1 {
+        let vat_result = vat::enable_vat_module(&db, actor)?;
+        vat_created = vat_result["accounts"].as_array().map(|a| a.len()).unwrap_or(0);
+    }
     audit::record(&db, audit::RecordArgs {
         actor,
         action: "company.init",
@@ -265,7 +277,7 @@ fn cmd_init(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         entry_ids: vec![],
     })?;
     let total = accounts::list_accounts(&db, None, true)?.len();
-    Ok(json!({ "company": company, "db": db_path, "chart": { "accounts": total, "created": created }, "dryRun": false }))
+    Ok(json!({ "company": company, "db": db_path, "chart": { "accounts": total, "created": created + vat_created }, "dryRun": false }))
 }
 
 fn open_existing(db_path: &str) -> Result<rusqlite::Connection> {
@@ -606,4 +618,141 @@ fn _touch() {
     let _ = canonical::canonical_json(&serde_json::json!({}));
     let _ = sign::is_encrypted("");
     let _ = std::io::stdout().flush();
+}
+
+fn cmd_vat_enable(db_path: &str, actor: &str) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    vat::enable_vat_module(&db, actor)
+}
+
+fn cmd_vat_codes(db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let codes = vat::list_vat_codes(&db)?;
+    let mapped: Vec<Value> = codes
+        .iter()
+        .map(|c| {
+            json!({
+                "code": c["code"], "rate_bp": c["rate_bp"],
+                "rate": format!("{:.1}%", c["rate_bp"].as_i64().unwrap_or(0) as f64 / 100.0),
+                "type": c["type"], "eu_reverse": c["eu_reverse"], "description": c["description"],
+            })
+        })
+        .collect();
+    Ok(json!({ "codes": mapped }))
+}
+
+fn cmd_vat_book(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let date = arg(argv, "--date").unwrap_or_else(|| dates::today_iso());
+    let desc = arg(argv, "--desc").ok_or_else(|| BukioError::new("MISSING_ARG", "--desc is required"))?;
+    let postings_raw = repeated(argv, "--postings");
+    let specs = vat::parse_vat_posting_specs(&postings_raw)?;
+    if dry_run {
+        dates::validate_date(&date)?;
+        return Ok(json!({
+            "action": "create vat-aware journal entry", "date": date, "description": desc,
+            "postings": specs.iter().map(|s| json!({ "code": s.code, "amount_cents": s.amount_cents, "amount": money::format_amount(s.amount_cents), "vat_code": s.vat_code })).collect::<Vec<_>>(),
+            "post": has_flag(argv, "--post"), "dry_run": true,
+        }));
+    }
+    let db = open_existing(db_path)?;
+    let entry = vat::book_vat_entry(
+        &db, &date, &desc, &specs, "manual", arg(argv, "--source-ref").as_deref(), actor,
+        has_flag(argv, "--post"),
+    )?;
+    // expanded mirrors the JS CLI: every expanded leg incl. auto VAT legs
+    let db = open_existing(db_path)?;
+    let (all_legs, _) = vat::expand_vat_postings(&db, &specs)?;
+    let expanded: Vec<Value> = {
+        let mut out: Vec<Value> = Vec::new();
+        for (i, sp) in specs.iter().enumerate() {
+            out.push(json!({ "code": sp.code, "vat_code": sp.vat_code }));
+        }
+        for leg in all_legs.iter().skip(specs.len()) {
+            out.push(json!({ "code": leg.code }));
+        }
+        out
+    };
+    Ok(json!({ "entry": entry, "expanded": expanded }))
+}
+
+fn cmd_vat_readout(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let period = arg(argv, "--period").ok_or_else(|| BukioError::new("MISSING_ARG", "--period is required"))?;
+    if has_flag(argv, "--mark-filed") {
+        require_actor(actor)?;
+        let result = vat::mark_filed(&db, &period, actor)?;
+        let mut out = result.clone();
+        out["dryRun"] = json!(false);
+        return Ok(out);
+    }
+    let readout = vat::ob_readout(&db, &period)?;
+    let mut fields = serde_json::Map::new();
+    if let Some(obj) = readout["fields"].as_object() {
+        for (k, v) in obj {
+            let cents = v.as_i64().unwrap_or(0);
+            fields.insert(k.clone(), json!({ "cents": cents, "amount": money::format_amount(cents) }));
+        }
+    }
+    Ok(json!({
+        "period": readout["period"], "from": readout["from"], "to": readout["to"],
+        "fields": Value::Object(fields),
+        "to_pay_cents": readout["to_pay_cents"], "to_pay": readout["to_pay"],
+        "note": readout["note"],
+    }))
+}
+
+fn cmd_vat_file(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    vat::vat_file(
+        &db,
+        arg(argv, "--account").as_deref(),
+        arg(argv, "--period").as_deref(),
+        arg(argv, "--desc").as_deref(),
+        actor,
+        dry_run,
+    )
+}
+
+fn cmd_vat_settle(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    require_actor(actor)?;
+    let tx: i64 = arg(argv, "--tx").and_then(|v| v.parse().ok())
+        .ok_or_else(|| BukioError::new("MISSING_ARG", "--tx is required (bank transaction id)"))?;
+    let db = open_existing(db_path)?;
+    // fetch the bank transaction (amount + account) like the JS CLI
+    let row: Option<(i64, String)> = db
+        .query_row(
+            "SELECT t.amount_cents, a.code FROM bank_transactions t
+             JOIN bank_accounts a ON a.id = t.account_id WHERE t.id = ?1",
+            [tx],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .ok();
+    let Some((tx_amount, bank_code)) = row else {
+        return Err(BukioError::new("NOT_FOUND", format!("bank transaction {tx} does not exist")));
+    };
+    let result = vat::vat_settle(
+        &db,
+        tx_amount,
+        arg(argv, "--date").as_deref(),
+        &bank_code,
+        arg(argv, "--account").as_deref(),
+        arg(argv, "--difference-account").as_deref(),
+        arg(argv, "--period").as_deref(),
+        arg(argv, "--desc").as_deref(),
+        actor,
+        dry_run,
+    )?;
+    if !dry_run {
+        // link the transaction to the booked entry (like the JS CLI)
+        if let Some(entry_id) = result["entry_id"].as_i64() {
+            let _ = db.execute(
+                "UPDATE bank_transactions SET state = 'matched', matched_entry_id = ?1 WHERE id = ?2",
+                rusqlite::params![entry_id, tx],
+            );
+        }
+    }
+    Ok(result)
 }

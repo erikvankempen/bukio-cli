@@ -78,6 +78,7 @@ pub fn trial_balance(db: &Connection, year: Option<&str>) -> Result<Value> {
     if let Some(y) = year {
         valid_year(y)?;
     }
+    let year_out = year.map(|y| y.to_string());
     let (from, to) = match year {
         Some(y) => {
             let (f, t) = fiscal_year_window(db, y);
@@ -103,13 +104,19 @@ pub fn trial_balance(db: &Connection, year: Option<&str>) -> Result<Value> {
         .map_err(sql_err)?;
     let rows: Vec<Value> = stmt
         .query_map(rusqlite::params![from, to], |r| {
+            let debit = r.get::<_, Option<i64>>(3)?.unwrap_or(0);
+            let credit = r.get::<_, Option<i64>>(4)?.unwrap_or(0);
+            let net = r.get::<_, Option<i64>>(5)?.unwrap_or(0);
             Ok(json!({
                 "code": r.get::<_, String>(0)?,
                 "name": r.get::<_, String>(1)?,
                 "type": r.get::<_, String>(2)?,
-                "debit_cents": r.get::<_, Option<i64>>(3)?.unwrap_or(0),
-                "credit_cents": r.get::<_, Option<i64>>(4)?.unwrap_or(0),
-                "net_cents": r.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                "debit_cents": debit,
+                "credit_cents": credit,
+                "net_cents": net,
+                "debit": crate::money::format_amount(debit),
+                "credit": crate::money::format_amount(credit),
+                "net": crate::money::format_amount(net),
             }))
         })
         .map_err(sql_err)?
@@ -118,9 +125,12 @@ pub fn trial_balance(db: &Connection, year: Option<&str>) -> Result<Value> {
     let total_debit: i64 = rows.iter().map(|r| r["debit_cents"].as_i64().unwrap_or(0)).sum();
     let total_credit: i64 = rows.iter().map(|r| r["credit_cents"].as_i64().unwrap_or(0)).sum();
     Ok(json!({
+        "year": year_out,
         "accounts": rows,
         "total_debit_cents": total_debit,
         "total_credit_cents": total_credit,
+        "total_debit": crate::money::format_amount(total_debit),
+        "total_credit": crate::money::format_amount(total_credit),
         "balanced": total_debit == total_credit,
     }))
 }
