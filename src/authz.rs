@@ -56,7 +56,7 @@ pub const ROLE_CAPABILITIES: &[(&str, &[&str])] = &[
     ("readonly", &["report.read"]),
 ];
 
-const CLI_CAPABILITIES: &[(&str, &str)] = &[
+pub const CLI_CAPABILITIES: &[(&str, &str)] = &[
     ("init", "admin.company"),
     ("company update", "admin.company"),
     ("company logo", "admin.company"),

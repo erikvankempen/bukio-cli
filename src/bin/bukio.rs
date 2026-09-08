@@ -167,7 +167,6 @@ fn main() {
             if json_mode {
                 fail_json(&e);
             } else {
-                eprintln!("error [{}]: {}", e.code, e.message);
                 std::process::exit(1);
             }
         }
@@ -178,33 +177,8 @@ fn main() {
 // Dispatch
 // ---------------------------------------------------------------------------
 
-fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
-    // Extract positional args (skip flags and their values)
-    let mut positional: Vec<&str> = Vec::new();
-    let mut i = 0;
-    while i < argv.len() {
-        let a = &argv[i];
-        if a.starts_with('-') && a != "-" {
-            let takes_value = !matches!(
-                a.as_str(),
-                "--json" | "--dry-run" | "--post" | "--kor" | "--include-inactive"
-                    | "--force" | "--encrypt" | "--yes" | "--trust-remote"
-                    | "--create-missing" | "--reverse-previous" | "--no-pdf"
-                    | "--draft-emails" | "--all" | "--from-invoices"
-                    | "--on" | "--off" | "--mark-filed" | "--peppol"
-            );
-            if takes_value && i + 1 < argv.len() && !argv[i + 1].starts_with('-') {
-                i += 2;
-            } else {
-                i += 1;
-            }
-        } else {
-            positional.push(a);
-            i += 1;
-        }
-    }
-
-    match positional.as_slice() {
+fn try_match_cmd(pos: &[&str], argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Option<Result<Value>> {
+    let r = match pos {
         // ── init ──────────────────────────────────────────────────────
         ["init"] => cmd_init(argv, db_path, actor, dry_run),
 
@@ -236,9 +210,9 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         ["report", "balance-sheet"] | ["report", "balans"] => cmd_balans(argv, db_path),
         ["report", "pnl"] => cmd_pnl(argv, db_path),
         ["report", "journal"] => cmd_journal(argv, db_path),
-        ["report", "aging"] => Err(not_ported("report aging")),
-        ["report", "sales"] => Err(not_ported("report sales")),
-        ["report", "cost-center"] => Err(not_ported("report cost-center")),
+        ["report", "aging"] => cmd_report_aging(argv, db_path),
+        ["report", "sales"] => cmd_report_sales(argv, db_path),
+        ["report", "cost-center"] => cmd_report_cost_center(argv, db_path),
 
         // ── audit ─────────────────────────────────────────────────────
         ["audit"] | ["audit", "list"] => cmd_audit_list(argv, db_path),
@@ -313,7 +287,7 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         ["fx", "set"] => cmd_fx_set(argv, db_path, actor, dry_run),
         ["fx", "show"] => cmd_fx_show(argv, db_path),
         ["fx", "list"] => cmd_fx_list(argv, db_path),
-        ["fx", "fetch"] => Err(not_ported("fx fetch")),
+        ["fx", "fetch"] => cmd_fx_fetch(argv),
 
         // ── mcp ───────────────────────────────────────────────────────
         ["mcp"] => cmd_mcp(db_path, actor),
@@ -340,7 +314,7 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         // ── company ───────────────────────────────────────────────────
         ["company", "show"] => cmd_company_show(db_path),
         ["company", "update"] => cmd_company_update(argv, db_path, actor, dry_run),
-        ["company", "logo"] => Err(not_ported("company logo")),
+        ["company", "logo"] => cmd_company_logo(argv, db_path),
 
         // ── assets ────────────────────────────────────────────────────
         ["assets", "scheme", "add"] => cmd_asset_scheme_add(argv, db_path, actor, dry_run),
@@ -376,11 +350,11 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         // ── attach ────────────────────────────────────────────────────
         ["attach", "add"] => cmd_attach_add(argv, db_path, actor, dry_run),
         ["attach", "list"] => cmd_attach_list(argv, db_path),
-        ["attach", "show"] => Err(not_ported("attach show")),
+        ["attach", "show"] => cmd_attach_show(argv, db_path),
         ["attach", "remove"] => cmd_attach_remove(argv, db_path, actor, dry_run),
 
         // ── update ────────────────────────────────────────────────────
-        ["update"] => Err(not_ported("update")),
+        ["update"] => cmd_update(argv),
 
         // ── actor ─────────────────────────────────────────────────────
         ["actor"] | ["actor", "--help"] | ["actor", "-h"] => {
@@ -399,18 +373,59 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         ["actor", "grant"] => cmd_actor_grant(argv, db_path, actor),
         ["actor", "revoke-role"] => cmd_actor_revoke_role(argv, db_path, actor),
         ["actor", "can"] => cmd_actor_can(argv, db_path, actor),
-        ["actor", "who-can"] => Err(not_ported("actor who-can")),
-        ["actor", "verify"] => Err(not_ported("actor verify")),
+        ["actor", "who-can"] => cmd_actor_who_can(argv, db_path, actor),
+        ["actor", "verify"] => cmd_actor_verify(db_path),
 
         // ── server ────────────────────────────────────────────────────
         ["server", "start"] => cmd_server_start(argv, db_path),
         ["server", "token"] => cmd_server_token(argv, actor),
 
-        _ => Err(BukioError::new(
-            "UNKNOWN_COMMAND",
-            format!("unknown command: {}", positional.join(" ")),
-        )),
+        _ => return None,
+    };
+    Some(r)
+}
+
+fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    // Extract positional args (skip flags and their values)
+    let mut positional: Vec<&str> = Vec::new();
+    let mut i = 0;
+    while i < argv.len() {
+        let a = &argv[i];
+        if a.starts_with('-') && a != "-" {
+            let takes_value = !matches!(
+                a.as_str(),
+                "--json" | "--dry-run" | "--post" | "--kor" | "--include-inactive"
+                    | "--force" | "--encrypt" | "--yes" | "--trust-remote"
+                    | "--create-missing" | "--reverse-previous" | "--no-pdf"
+                    | "--draft-emails" | "--all" | "--from-invoices"
+                    | "--on" | "--off" | "--mark-filed" | "--peppol"
+            );
+            if takes_value && i + 1 < argv.len() && !argv[i + 1].starts_with('-') {
+                i += 2;
+            } else {
+                i += 1;
+            }
+        } else {
+            positional.push(a);
+            i += 1;
+        }
     }
+
+    // Try full match first, then try dropping trailing positional tokens
+    // (extra tokens from multi-word flag values like --postal-code '1000 AA')
+    if let Some(result) = try_match_cmd(&positional, argv.clone(), db_path, actor, dry_run) {
+        return result;
+    }
+    for trim in (1..positional.len()).rev() {
+        let shorter = &positional[..positional.len() - trim];
+        if let Some(result) = try_match_cmd(shorter, argv.clone(), db_path, actor, dry_run) {
+            return result;
+        }
+    }
+    Err(BukioError::new(
+        "UNKNOWN_COMMAND",
+        format!("unknown command: {}", positional.join(" ")),
+    ))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1622,6 +1637,13 @@ fn cmd_fx_list(argv: &[String], db_path: &str) -> Result<Value> {
     Ok(json!({ "rates": rates }))
 }
 
+fn cmd_fx_fetch(argv: &[String]) -> Result<Value> {
+    let currency = arg(argv, "--currency").ok_or_else(|| missing_arg("--currency"))?;
+    let date = arg(argv, "--date").ok_or_else(|| missing_arg("--date"))?;
+    let rate = bukio::fx::fetch_ecb_rate(&currency, &date)?;
+    Ok(json!({ "currency": currency, "date": date, "rate": rate }))
+}
+
 // ── mcp ────────────────────────────────────────────────────────────────────
 
 fn cmd_mcp(db_path: &str, actor: &str) -> Result<Value> {
@@ -1707,13 +1729,13 @@ fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
     require_actor(actor)?;
     let db = open_existing(db_path)?;
     let fields = [
-        ("name", "name"),
-        ("registration-id", "registration_id"),
-        ("tax-id", "tax_id"),
-        ("iban", "iban"),
-        ("address", "address"),
-        ("postal-code", "postal_code"),
-        ("city", "city"),
+        ("--name", "name"),
+        ("--registration-id", "registration_id"),
+        ("--tax-id", "tax_id"),
+        ("--iban", "iban"),
+        ("--address", "address"),
+        ("--postal-code", "postal_code"),
+        ("--city", "city"),
     ];
     let mut changes = Vec::new();
     for (opt, col) in fields {
@@ -1733,6 +1755,20 @@ fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
     }
     let (updated, changes_map) = bukio::company::update_company(&db, &changes, None, None, actor)?;
     Ok(json!({ "company": updated, "changes": changes_map }))
+}
+
+fn cmd_company_logo(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let (bytes, mime) = bukio::company::get_logo(&db)?;
+    if let Some(path) = arg(argv, "--out") {
+        std::fs::write(&path, &bytes)
+            .map_err(|e| BukioError::new("IO_ERROR", format!("cannot write {path}: {e}")))?;
+        Ok(json!({ "path": path, "mime": mime, "length": bytes.len() }))
+    } else {
+        std::io::stdout().write_all(&bytes)
+            .map_err(|e| BukioError::new("IO_ERROR", e.to_string()))?;
+        Ok(json!({ "mime": mime, "length": bytes.len() }))
+    }
 }
 
 // ── assets ─────────────────────────────────────────────────────────────────
@@ -1951,6 +1987,40 @@ fn cmd_item_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
     )
 }
 
+fn cmd_update(argv: &[String]) -> Result<Value> {
+    let repo = arg(argv, "--repo").unwrap_or_else(|| ".".into());
+    let yes = has_flag(argv, "--yes");
+    let dry_run = has_flag(argv, "--dry-run");
+    let trust_remote = has_flag(argv, "--trust-remote");
+    // Validate remote URL
+    let output = std::process::Command::new("git")
+        .args(["-C", &repo, "remote", "get-url", "origin"])
+        .output()
+        .map_err(|e| BukioError::new("GIT_ERROR", format!("git failed: {e}")))?;
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !url.contains("github.com/erikvankempen/bukio-cli") && !trust_remote {
+        return Err(BukioError::new("UNTRUSTED_REMOTE", format!("remote URL {url} does not match expected repository")));
+    }
+    if dry_run || !yes {
+        return Ok(json!({ "repo": repo, "url": url, "dryRun": true, "message": "pass --yes to apply update" }));
+    }
+    let fetch = std::process::Command::new("git")
+        .args(["-C", &repo, "fetch", "origin"])
+        .output()
+        .map_err(|e| BukioError::new("GIT_ERROR", format!("git fetch failed: {e}")))?;
+    if !fetch.status.success() {
+        return Err(BukioError::new("GIT_ERROR", format!("git fetch failed: {}", String::from_utf8_lossy(&fetch.stderr))));
+    }
+    let reset = std::process::Command::new("git")
+        .args(["-C", &repo, "reset", "--hard", "origin/main"])
+        .output()
+        .map_err(|e| BukioError::new("GIT_ERROR", format!("git reset failed: {e}")))?;
+    if !reset.status.success() {
+        return Err(BukioError::new("GIT_ERROR", format!("git reset failed: {}", String::from_utf8_lossy(&reset.stderr))));
+    }
+    Ok(json!({ "repo": repo, "url": url, "updated": true }))
+}
+
 // ── attach ─────────────────────────────────────────────────────────────────
 
 fn cmd_attach_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
@@ -1980,6 +2050,12 @@ fn cmd_attach_list(argv: &[String], db_path: &str) -> Result<Value> {
     };
     let rows = bukio::attachments::list_attachments(&db, kind, ref_id)?;
     Ok(json!({ "attachments": rows }))
+}
+
+fn cmd_attach_show(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
+    bukio::attachments::get_attachment(&db, id)
 }
 
 fn cmd_attach_remove(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
@@ -2065,6 +2141,22 @@ fn cmd_actor_can(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     bukio::actor_cli::cmd_can(db_path, actor, &action)
 }
 
+fn cmd_actor_verify(db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    bukio::audit::verify_trail(&db)
+}
+
+fn cmd_actor_who_can(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
+    require_actor(actor)?;
+    let db = open_existing(db_path)?;
+    let mut results = Vec::new();
+    for &(cmd, cap) in bukio::authz::CLI_CAPABILITIES {
+        let allowed = bukio::authz::can_act(&db, actor, cap);
+        results.push(json!({ "command": cmd, "capability": cap, "allowed": allowed }));
+    }
+    Ok(json!({ "actor": actor, "commands": results }))
+}
+
 /// Get the positional argument that comes right after a given command token.
 fn positional_after(argv: &[String], after: &str) -> Option<String> {
     let mut found = false;
@@ -2097,4 +2189,30 @@ fn cmd_server_token(argv: &[String], actor: &str) -> Result<Value> {
     let target_actor = positional_after(argv, "token").ok_or_else(|| missing_arg("actor"))?;
     let token = bukio::server::mint_enrol_token(&target_actor, ttl)?;
     Ok(json!({ "token": token, "actor": target_actor, "ttl_hours": ttl }))
+}
+
+// ── report aging ───────────────────────────────────────────────────
+fn cmd_report_aging(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let as_of = arg(argv, "--as-of").unwrap_or_else(bukio::dates::today_iso);
+    let kind = arg(argv, "--kind").unwrap_or_else(|| "both".into());
+    bukio::reports::aging(&db, &as_of, &kind)
+}
+
+// ── report sales ───────────────────────────────────────────────────
+fn cmd_report_sales(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let year = arg(argv, "--year").unwrap_or_else(|| bukio::dates::today_iso()[0..4].to_string());
+    let by = arg(argv, "--by").unwrap_or_else(|| "contact".into());
+    bukio::reports::sales(&db, &year, &by)
+}
+
+// ── report cost-center ─────────────────────────────────────────────
+fn cmd_report_cost_center(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let year = arg(argv, "--year");
+    let from = arg(argv, "--from");
+    let to = arg(argv, "--to");
+    let cc = arg(argv, "--cost-center");
+    bukio::reports::cost_center_report(&db, year.as_deref(), from.as_deref(), to.as_deref(), cc.as_deref())
 }

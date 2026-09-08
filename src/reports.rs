@@ -471,6 +471,852 @@ pub fn journal(db: &Connection, from: &str, to: &str, limit: Option<i64>) -> Res
     Ok(rows)
 }
 
+// ---------------------------------------------------------------------------
+// Aging report (mirrors src/report/aging.js)
+// ---------------------------------------------------------------------------
+
+fn bucket_label(days: i64) -> &'static str {
+    if days <= 0 {
+        "current"
+    } else if days <= 30 {
+        "d30"
+    } else if days <= 60 {
+        "d60"
+    } else if days <= 90 {
+        "d90"
+    } else {
+        "d90plus"
+    }
+}
+
+fn empty_aging_totals() -> Value {
+    json!({
+        "current": 0, "d30": 0, "d60": 0, "d90": 0, "d90plus": 0,
+        "total_cents": 0,
+    })
+}
+
+/// Batch-fetch invoice_lines for a set of invoice ids.
+fn batch_lines(
+    db: &Connection,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, Vec<Value>>> {
+    use std::collections::HashMap;
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    // Build IN-clause (safe: ids are i64, never user strings)
+    let ph: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+    let sql = format!(
+        "SELECT invoice_id, description, quantity, unit_price_cents, vat_code, vat_rate_bp,
+                amount_cents, vat_amount_cents, item_id, gl_account, discount_type, discount_value
+         FROM invoice_lines WHERE invoice_id IN ({}) ORDER BY invoice_id, line_no",
+        ph.join(",")
+    );
+    let mut stmt = db.prepare(&sql).map_err(sql_err)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(json!({
+                "invoice_id": r.get::<_, i64>(0)?,
+                "description": r.get::<_, String>(1)?,
+                "quantity": r.get::<_, i64>(2)?,
+                "unit_price_cents": r.get::<_, i64>(3)?,
+                "vat_code": r.get::<_, Option<String>>(4)?,
+                "vat_rate_bp": r.get::<_, i64>(5)?,
+                "amount_cents": r.get::<_, i64>(6)?,
+                "vat_amount_cents": r.get::<_, i64>(7)?,
+                "item_id": r.get::<_, Option<i64>>(8)?,
+                "gl_account": r.get::<_, Option<String>>(9)?,
+                "discount_type": r.get::<_, Option<String>>(10)?,
+                "discount_value": r.get::<_, Option<i64>>(11)?,
+            }))
+        })
+        .map_err(sql_err)?;
+    let mut map: HashMap<i64, Vec<Value>> = HashMap::new();
+    for row in rows.filter_map(|r| r.ok()) {
+        let iid = row["invoice_id"].as_i64().unwrap_or(0);
+        map.entry(iid).or_default().push(row);
+    }
+    Ok(map)
+}
+
+/// Batch-fetch SUM(amount_cents) per invoice from invoice_payments.
+fn batch_payment_totals(
+    db: &Connection,
+    ids: &[i64],
+) -> Result<std::collections::HashMap<i64, i64>> {
+    use std::collections::HashMap;
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let ph: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+    let sql = format!(
+        "SELECT invoice_id, SUM(amount_cents) FROM invoice_payments WHERE invoice_id IN ({}) GROUP BY invoice_id",
+        ph.join(",")
+    );
+    let mut stmt = db.prepare(&sql).map_err(sql_err)?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+            ))
+        })
+        .map_err(sql_err)?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+fn parse_date(s: &str) -> Result<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map_err(|_| BukioError::new("INVALID_DATE", format!("invalid date '{s}'")))
+}
+
+/// Debtors aging: outstanding sales invoices per contact, bucketed by days
+/// past due. Credit notes offset oldest debt first (FIFO).
+fn debtors_aging(db: &Connection, as_of: &str) -> Result<Value> {
+    use std::collections::HashMap;
+
+    let mut stmt_inv = db
+        .prepare(
+            "SELECT i.id, i.invoice_number, i.contact_id, i.date, i.due_date,
+                    i.discount_type, i.discount_value, c.name
+             FROM invoices i
+             LEFT JOIN contacts c ON c.id = i.contact_id
+             WHERE i.invoice_type = 'sales'
+               AND i.status IN ('sent', 'overdue')
+               AND i.date <= ?1
+             ORDER BY i.date, i.id",
+        )
+        .map_err(sql_err)?;
+    let invoices: Vec<Value> = stmt_inv
+        .query_map([as_of], |r| {
+            Ok(json!({
+                "id": r.get::<_, i64>(0)?,
+                "invoice_number": r.get::<_, Option<String>>(1)?,
+                "contact_id": r.get::<_, i64>(2)?,
+                "date": r.get::<_, String>(3)?,
+                "due_date": r.get::<_, Option<String>>(4)?,
+                "discount_type": r.get::<_, Option<String>>(5)?,
+                "discount_value": r.get::<_, Option<i64>>(6)?,
+                "contact_name": r.get::<_, Option<String>>(7)?,
+            }))
+        })
+        .map_err(sql_err)?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if invoices.is_empty() {
+        return Ok(json!({ "contacts": [], "totals": empty_aging_totals() }));
+    }
+
+    let inv_ids: Vec<i64> = invoices.iter().map(|i| i["id"].as_i64().unwrap()).collect();
+    let lines_map = batch_lines(db, &inv_ids)?;
+    let pay_map = batch_payment_totals(db, &inv_ids)?;
+
+    let as_of_date = parse_date(as_of)?;
+
+    // Per-contact aging buckets
+    struct AgingContact {
+        contact_id: i64,
+        name: String,
+        buckets: [i64; 5], // current, d30, d60, d90, d90plus
+        total_cents: i64,
+        items: Vec<Value>,
+    }
+    impl AgingContact {
+        fn new(contact_id: i64, name: String) -> Self {
+            Self {
+                contact_id,
+                name,
+                buckets: [0; 5],
+                total_cents: 0,
+                items: Vec::new(),
+            }
+        }
+        fn add(&mut self, bucket_idx: usize, cents: i64) {
+            self.buckets[bucket_idx] += cents;
+            self.total_cents += cents;
+        }
+        fn to_json(&self) -> Value {
+            json!({
+                "contact_id": self.contact_id,
+                "name": self.name,
+                "buckets": {
+                    "current": self.buckets[0], "d30": self.buckets[1],
+                    "d60": self.buckets[2], "d90": self.buckets[3],
+                    "d90plus": self.buckets[4],
+                },
+                "total_cents": self.total_cents,
+                "items": self.items,
+            })
+        }
+    }
+
+    let bucket_idx = |b: &str| match b {
+        "current" => 0,
+        "d30" => 1,
+        "d60" => 2,
+        "d90" => 3,
+        _ => 4,
+    };
+
+    let mut by_contact: HashMap<i64, AgingContact> = HashMap::new();
+
+    for inv in &invoices {
+        let iid = inv["id"].as_i64().unwrap();
+        let lines = lines_map.get(&iid).cloned().unwrap_or_default();
+        let t = crate::invoice::compute_invoice_totals(
+            &lines,
+            inv["discount_type"].as_str(),
+            inv["discount_value"].as_i64(),
+        );
+        let gross = t["gross_cents"].as_i64().unwrap_or(0);
+        let paid = pay_map.get(&iid).copied().unwrap_or(0);
+        let outstanding = gross - paid;
+        if outstanding <= 0 {
+            continue;
+        }
+
+        let due_str = inv["due_date"].as_str().or(inv["date"].as_str()).unwrap_or("");
+        let due_date = chrono::NaiveDate::parse_from_str(due_str, "%Y-%m-%d")
+            .unwrap_or(as_of_date);
+        let days = (as_of_date - due_date).num_days().max(0);
+        let bl = bucket_label(days);
+
+        let cid = inv["contact_id"].as_i64().unwrap();
+        let contact = by_contact.entry(cid).or_insert_with(|| {
+            AgingContact::new(cid, inv["contact_name"].as_str().unwrap_or("").to_string())
+        });
+        contact.add(bucket_idx(bl), outstanding);
+        contact.items.push(json!({
+            "ref": inv["invoice_number"],
+            "date": inv["date"],
+            "due_date": due_str,
+            "days_past_due": days,
+            "outstanding_cents": outstanding,
+        }));
+    }
+
+    // Credit notes FIFO: offset oldest debt first
+    let mut stmt_cr = db
+        .prepare(
+            "SELECT id, contact_id, date, discount_type, discount_value
+             FROM invoices
+             WHERE invoice_type = 'credit'
+               AND status NOT IN ('draft', 'void')
+               AND date <= ?1
+             ORDER BY date, id",
+        )
+        .map_err(sql_err)?;
+    let credits: Vec<Value> = stmt_cr
+        .query_map([as_of], |r| {
+            Ok(json!({
+                "id": r.get::<_, i64>(0)?,
+                "contact_id": r.get::<_, i64>(1)?,
+                "date": r.get::<_, String>(2)?,
+                "discount_type": r.get::<_, Option<String>>(3)?,
+                "discount_value": r.get::<_, Option<i64>>(4)?,
+            }))
+        })
+        .map_err(sql_err)?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if !credits.is_empty() {
+        let cr_ids: Vec<i64> = credits.iter().map(|c| c["id"].as_i64().unwrap()).collect();
+        let cr_lines = batch_lines(db, &cr_ids)?;
+
+        for cr in &credits {
+            let cid = cr["contact_id"].as_i64().unwrap();
+            let contact = match by_contact.get_mut(&cid) {
+                Some(c) if c.total_cents > 0 => c,
+                _ => continue,
+            };
+            let cr_iid = cr["id"].as_i64().unwrap();
+            let lines = cr_lines.get(&cr_iid).cloned().unwrap_or_default();
+            let t = crate::invoice::compute_invoice_totals(
+                &lines,
+                cr["discount_type"].as_str(),
+                cr["discount_value"].as_i64(),
+            );
+            let cr_gross = t["gross_cents"].as_i64().unwrap_or(0);
+            if cr_gross <= 0 {
+                continue;
+            }
+
+            // FIFO offset items (items are oldest-first due to ORDER BY date)
+            let mut remaining = cr_gross;
+            for item in contact.items.iter_mut().rev() {
+                if remaining <= 0 {
+                    break;
+                }
+                let take = std::cmp::min(
+                    item["outstanding_cents"].as_i64().unwrap_or(0),
+                    remaining,
+                );
+                *item.get_mut("outstanding_cents").unwrap() =
+                    json!(item["outstanding_cents"].as_i64().unwrap_or(0) - take);
+                remaining -= take;
+            }
+
+            // FIFO offset buckets (oldest first: d90plus → d90 → d60 → d30 → current)
+            let mut remaining = cr_gross;
+            for bi in [4, 3, 2, 1, 0] {
+                if remaining <= 0 {
+                    break;
+                }
+                let take = std::cmp::min(contact.buckets[bi], remaining);
+                contact.buckets[bi] -= take;
+                remaining -= take;
+            }
+            contact.total_cents = contact.buckets.iter().sum();
+        }
+    }
+
+    // Sort contacts by total descending, build JSON
+    let mut contacts_vec: Vec<&AgingContact> = by_contact.values().collect();
+    contacts_vec.sort_by(|a, b| b.total_cents.cmp(&a.total_cents));
+
+    let mut totals = empty_aging_totals();
+    let mut total_sum: i64 = 0;
+    let mut total_buckets = [0i64; 5];
+    let result_contacts: Vec<Value> = contacts_vec
+        .iter()
+        .map(|c| {
+            for bi in 0..5 {
+                total_buckets[bi] += c.buckets[bi];
+            }
+            total_sum += c.total_cents;
+            c.to_json()
+        })
+        .collect();
+    *totals.get_mut("current").unwrap() = json!(total_buckets[0]);
+    *totals.get_mut("d30").unwrap() = json!(total_buckets[1]);
+    *totals.get_mut("d60").unwrap() = json!(total_buckets[2]);
+    *totals.get_mut("d90").unwrap() = json!(total_buckets[3]);
+    *totals.get_mut("d90plus").unwrap() = json!(total_buckets[4]);
+    *totals.get_mut("total_cents").unwrap() = json!(total_sum);
+
+    Ok(json!({ "contacts": result_contacts, "totals": totals }))
+}
+
+/// Creditors aging: unpaid payables per contact, bucketed by days past due.
+fn creditors_aging(db: &Connection, as_of: &str) -> Result<Value> {
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct CredContact {
+        contact_id: i64,
+        name: String,
+        buckets: [i64; 5],
+        in_batch_cents: i64,
+        total_cents: i64,
+        items: Vec<Value>,
+    }
+
+    let mut by_contact: HashMap<i64, CredContact> = HashMap::new();
+    let as_of_date = parse_date(as_of)?;
+
+    let mut stmt_pay = db
+        .prepare(
+            "SELECT p.id, p.contact_id, p.invoice_ref, p.date, p.due_date,
+                    p.amount_cents, p.status, c.name
+             FROM payables p
+             LEFT JOIN contacts c ON c.id = p.contact_id
+             WHERE p.status IN ('unpaid', 'in_batch')
+               AND p.date <= ?1
+             ORDER BY p.due_date, p.id",
+        )
+        .map_err(sql_err)?;
+    let rows: Vec<Value> = stmt_pay
+        .query_map([as_of], |r| {
+            Ok(json!({
+                "id": r.get::<_, i64>(0)?,
+                "contact_id": r.get::<_, i64>(1)?,
+                "invoice_ref": r.get::<_, String>(2)?,
+                "date": r.get::<_, String>(3)?,
+                "due_date": r.get::<_, Option<String>>(4)?,
+                "amount_cents": r.get::<_, i64>(5)?,
+                "status": r.get::<_, String>(6)?,
+                "contact_name": r.get::<_, Option<String>>(7)?,
+            }))
+        })
+        .map_err(sql_err)?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    for p in &rows {
+        let cid = p["contact_id"].as_i64().unwrap();
+        let entry = by_contact.entry(cid).or_insert_with(|| CredContact {
+            contact_id: cid,
+            name: p["contact_name"].as_str().unwrap_or("").to_string(),
+            ..Default::default()
+        });
+        let due_str = p["due_date"].as_str().or(p["date"].as_str()).unwrap_or("");
+        let due_date =
+            chrono::NaiveDate::parse_from_str(due_str, "%Y-%m-%d").unwrap_or(as_of_date);
+        let days = (as_of_date - due_date).num_days().max(0);
+        let bl = bucket_label(days);
+        let bi = match bl {
+            "current" => 0,
+            "d30" => 1,
+            "d60" => 2,
+            "d90" => 3,
+            _ => 4,
+        };
+        let amt = p["amount_cents"].as_i64().unwrap_or(0);
+        if p["status"].as_str() == Some("in_batch") {
+            entry.in_batch_cents += amt;
+        } else {
+            entry.buckets[bi] += amt;
+        }
+        entry.total_cents += amt;
+        entry.items.push(json!({
+            "payable_id": p["id"],
+            "ref": p["invoice_ref"],
+            "date": p["date"],
+            "due_date": due_str,
+            "days_past_due": days,
+            "amount_cents": amt,
+            "status": p["status"],
+        }));
+    }
+
+    let mut contacts_vec: Vec<&CredContact> = by_contact.values().collect();
+    contacts_vec.sort_by(|a, b| b.total_cents.cmp(&a.total_cents));
+
+    let mut totals = empty_aging_totals();
+    let mut total_sum: i64 = 0;
+    let mut total_buckets = [0i64; 5];
+    let result_contacts: Vec<Value> = contacts_vec
+        .iter()
+        .map(|c| {
+            for bi in 0..5 {
+                total_buckets[bi] += c.buckets[bi];
+            }
+            total_sum += c.total_cents;
+            json!({
+                "contact_id": c.contact_id,
+                "name": c.name,
+                "buckets": {
+                    "current": c.buckets[0], "d30": c.buckets[1],
+                    "d60": c.buckets[2], "d90": c.buckets[3],
+                    "d90plus": c.buckets[4],
+                },
+                "in_batch_cents": c.in_batch_cents,
+                "total_cents": c.total_cents,
+                "items": c.items,
+            })
+        })
+        .collect();
+    *totals.get_mut("current").unwrap() = json!(total_buckets[0]);
+    *totals.get_mut("d30").unwrap() = json!(total_buckets[1]);
+    *totals.get_mut("d60").unwrap() = json!(total_buckets[2]);
+    *totals.get_mut("d90").unwrap() = json!(total_buckets[3]);
+    *totals.get_mut("d90plus").unwrap() = json!(total_buckets[4]);
+    *totals.get_mut("total_cents").unwrap() = json!(total_sum);
+
+    Ok(json!({ "contacts": result_contacts, "totals": totals }))
+}
+
+pub fn aging(db: &Connection, as_of: &str, kind: &str) -> Result<Value> {
+    validate_labeled(as_of, "as-of")?;
+    if !matches!(kind, "debtors" | "creditors" | "both") {
+        return Err(BukioError::new(
+            "INVALID_KIND",
+            format!("kind must be 'debtors', 'creditors' or 'both', got '{kind}'"),
+        ));
+    }
+    let mut result = json!({ "as_of": as_of, "kind": kind });
+    if kind == "debtors" || kind == "both" {
+        result["debtors"] = debtors_aging(db, as_of)?;
+    }
+    if kind == "creditors" || kind == "both" {
+        result["creditors"] = creditors_aging(db, as_of)?;
+    }
+    Ok(result)
+}
+
+// ---------------------------------------------------------------------------
+// Sales report (mirrors src/report/sales.js)
+// ---------------------------------------------------------------------------
+
+/// Per-line discount in cents (matches JS lineDiscountCents).
+fn line_discount_cents(line: &Value) -> i64 {
+    let amt = line["amount_cents"].as_i64().unwrap_or(0);
+    match line["discount_type"].as_str() {
+        Some("pct") => {
+            let dv = line["discount_value"].as_i64().unwrap_or(0);
+            ((amt as f64 * dv as f64 / 10000.0).round()) as i64
+        }
+        Some("amount") => {
+            let dv = line["discount_value"].as_i64().unwrap_or(0);
+            std::cmp::min(dv, amt)
+        }
+        _ => 0,
+    }
+}
+
+pub fn sales(db: &Connection, year: &str, by: &str) -> Result<Value> {
+    valid_year(year)?;
+    if !matches!(by, "contact" | "item") {
+        return Err(BukioError::new(
+            "INVALID_KIND",
+            format!("by must be 'contact' or 'item', got '{by}'"),
+        ));
+    }
+
+    let (from, to) = fiscal_year_window(db, year);
+
+    // Posted sales invoices in the fiscal year
+    let mut stmt = db
+        .prepare(
+            "SELECT i.id, i.contact_id, i.discount_type, i.discount_value, c.name
+             FROM invoices i
+             LEFT JOIN contacts c ON c.id = i.contact_id
+             WHERE i.invoice_type = 'sales'
+               AND i.status NOT IN ('draft', 'void')
+               AND i.date >= ?1 AND i.date <= ?2
+             ORDER BY i.id",
+        )
+        .map_err(sql_err)?;
+    let invoices: Vec<Value> = stmt
+        .query_map(rusqlite::params![from, to], |r| {
+            Ok(json!({
+                "id": r.get::<_, i64>(0)?,
+                "contact_id": r.get::<_, i64>(1)?,
+                "discount_type": r.get::<_, Option<String>>(2)?,
+                "discount_value": r.get::<_, Option<i64>>(3)?,
+                "contact_name": r.get::<_, Option<String>>(4)?,
+            }))
+        })
+        .map_err(sql_err)?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    if invoices.is_empty() {
+        return Ok(json!({
+            "year": year, "by": by, "groups": [],
+            "totals": if by == "contact" {
+                json!({ "invoice_count": 0, "net_cents": 0, "vat_cents": 0, "gross_cents": 0 })
+            } else {
+                json!({ "line_count": 0, "net_cents": 0 })
+            },
+        }));
+    }
+
+    let inv_ids: Vec<i64> = invoices.iter().map(|i| i["id"].as_i64().unwrap()).collect();
+    let lines_map = batch_lines(db, &inv_ids)?;
+
+    if by == "contact" {
+        use std::collections::HashMap;
+        #[derive(Default)]
+        struct ContactSales {
+            contact_id: i64,
+            name: String,
+            invoice_count: i64,
+            net_cents: i64,
+            vat_cents: i64,
+            gross_cents: i64,
+        }
+        let mut map: HashMap<i64, ContactSales> = HashMap::new();
+        for inv in &invoices {
+            let cid = inv["contact_id"].as_i64().unwrap();
+            let entry = map.entry(cid).or_insert_with(|| ContactSales {
+                contact_id: cid,
+                name: inv["contact_name"].as_str().unwrap_or("").to_string(),
+                ..Default::default()
+            });
+            entry.invoice_count += 1;
+            let lines = lines_map
+                .get(&inv["id"].as_i64().unwrap())
+                .cloned()
+                .unwrap_or_default();
+            let t = crate::invoice::compute_invoice_totals(
+                &lines,
+                inv["discount_type"].as_str(),
+                inv["discount_value"].as_i64(),
+            );
+            entry.net_cents += t["net_cents"].as_i64().unwrap_or(0);
+            entry.vat_cents += t["vat_cents"].as_i64().unwrap_or(0);
+            entry.gross_cents += t["gross_cents"].as_i64().unwrap_or(0);
+        }
+        let mut groups: Vec<Value> = map
+            .values()
+            .map(|g| {
+                json!({
+                    "contact_id": g.contact_id, "name": g.name,
+                    "invoice_count": g.invoice_count,
+                    "net_cents": g.net_cents, "vat_cents": g.vat_cents,
+                    "gross_cents": g.gross_cents,
+                })
+            })
+            .collect();
+        groups.sort_by(|a, b| {
+            b["gross_cents"]
+                .as_i64()
+                .unwrap_or(0)
+                .cmp(&a["gross_cents"].as_i64().unwrap_or(0))
+        });
+        let totals = groups.iter().fold(
+            json!({ "invoice_count": 0, "net_cents": 0, "vat_cents": 0, "gross_cents": 0 }),
+            |mut t, g| {
+                *t.get_mut("invoice_count").unwrap() = json!(
+                    t["invoice_count"].as_i64().unwrap_or(0) + g["invoice_count"].as_i64().unwrap_or(0)
+                );
+                *t.get_mut("net_cents").unwrap() = json!(
+                    t["net_cents"].as_i64().unwrap_or(0) + g["net_cents"].as_i64().unwrap_or(0)
+                );
+                *t.get_mut("vat_cents").unwrap() = json!(
+                    t["vat_cents"].as_i64().unwrap_or(0) + g["vat_cents"].as_i64().unwrap_or(0)
+                );
+                *t.get_mut("gross_cents").unwrap() = json!(
+                    t["gross_cents"].as_i64().unwrap_or(0) + g["gross_cents"].as_i64().unwrap_or(0)
+                );
+                t
+            },
+        );
+        return Ok(json!({ "year": year, "by": by, "groups": groups, "totals": totals }));
+    }
+
+    // by item: net after per-line discounts
+    use std::collections::HashMap;
+    #[derive(Default)]
+    struct ItemSales {
+        key: String,
+        item_id: Option<i64>,
+        name: String,
+        line_count: i64,
+        net_cents: i64,
+    }
+    let mut map: HashMap<String, ItemSales> = HashMap::new();
+
+    // Cache item names
+    let mut item_names: HashMap<i64, String> = HashMap::new();
+
+    for inv in &invoices {
+        let lines = lines_map
+            .get(&inv["id"].as_i64().unwrap())
+            .cloned()
+            .unwrap_or_default();
+        for l in &lines {
+            let item_id = l["item_id"].as_i64();
+            let key = if let Some(iid) = item_id {
+                format!("item:{iid}")
+            } else {
+                format!("desc:{}", l["description"].as_str().unwrap_or(""))
+            };
+            let entry = map.entry(key.clone()).or_insert_with(|| {
+                let name = if let Some(iid) = item_id {
+                    item_names
+                        .entry(iid)
+                        .or_insert_with(|| {
+                            crate::items::get_item(db, iid)
+                                .ok()
+                                .flatten()
+                                .and_then(|v| v["name"].as_str().map(String::from))
+                                .unwrap_or_else(|| l["description"].as_str().unwrap_or("").to_string())
+                        })
+                        .clone()
+                } else {
+                    l["description"].as_str().unwrap_or("").to_string()
+                };
+                ItemSales {
+                    key,
+                    item_id,
+                    name,
+                    ..Default::default()
+                }
+            });
+            entry.line_count += 1;
+            entry.net_cents += l["amount_cents"].as_i64().unwrap_or(0) - line_discount_cents(l);
+        }
+    }
+    let mut groups: Vec<Value> = map
+        .values()
+        .map(|g| {
+            json!({
+                "key": g.key, "item_id": g.item_id, "name": g.name,
+                "line_count": g.line_count, "net_cents": g.net_cents,
+            })
+        })
+        .collect();
+    groups.sort_by(|a, b| {
+        b["net_cents"]
+            .as_i64()
+            .unwrap_or(0)
+            .cmp(&a["net_cents"].as_i64().unwrap_or(0))
+    });
+    let totals = groups.iter().fold(
+        json!({ "line_count": 0, "net_cents": 0 }),
+        |mut t, g| {
+            *t.get_mut("line_count").unwrap() = json!(
+                t["line_count"].as_i64().unwrap_or(0) + g["line_count"].as_i64().unwrap_or(0)
+            );
+            *t.get_mut("net_cents").unwrap() = json!(
+                t["net_cents"].as_i64().unwrap_or(0) + g["net_cents"].as_i64().unwrap_or(0)
+            );
+            t
+        },
+    );
+    Ok(json!({ "year": year, "by": by, "groups": groups, "totals": totals }))
+}
+
+// ---------------------------------------------------------------------------
+// Cost-center report (mirrors src/report/cost-center.js)
+// ---------------------------------------------------------------------------
+
+pub fn cost_center_report(
+    db: &Connection,
+    year: Option<&str>,
+    from: Option<&str>,
+    to: Option<&str>,
+    cost_center: Option<&str>,
+) -> Result<Value> {
+    if let Some(y) = year {
+        valid_year(y)?;
+    }
+    let (fy_from, fy_to) = match year {
+        Some(y) => {
+            let (f, t) = fiscal_year_window(db, y);
+            (Some(f), Some(t))
+        }
+        None => (None, None),
+    };
+    let eff_from = from.or(fy_from.as_deref());
+    let eff_to = to.or(fy_to.as_deref());
+
+    // One query: posted income/expense postings with cost center
+    let mut stmt = db
+        .prepare(
+            "SELECT p.account_id, p.amount_cents,
+                    a.code AS account_code, a.name AS account_name, a.type AS account_type,
+                    cc.code AS cost_center_code, cc.name AS cost_center_name
+             FROM postings p
+             JOIN journal_entries e ON e.id = p.entry_id
+             JOIN accounts a ON a.id = p.account_id
+             LEFT JOIN cost_centers cc ON cc.id = p.cost_center_id
+             WHERE e.state = 'posted'
+               AND e.source != 'closing'
+               AND a.type IN ('income', 'expense')
+               AND (?1 IS NULL OR e.date >= ?1)
+               AND (?2 IS NULL OR e.date <= ?2)
+               AND (?3 IS NULL OR cc.code = ?3)",
+        )
+        .map_err(sql_err)?;
+
+    use std::collections::HashMap;
+    struct CcBucket {
+        code: Option<String>,
+        name: Option<String>,
+        accounts: HashMap<i64, Value>, // account_id -> {code, name, type, net_cents}
+    }
+
+    let mut by_cc: HashMap<String, CcBucket> = HashMap::new();
+    let rows = stmt
+        .query_map(rusqlite::params![eff_from, eff_to, cost_center], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, Option<String>>(5)?,
+                r.get::<_, Option<String>>(6)?,
+            ))
+        })
+        .map_err(sql_err)?;
+
+    for row in rows.filter_map(|r| r.ok()) {
+        let (acc_id, amt, acc_code, acc_name, acc_type, cc_code, cc_name) = row;
+        let key = cc_code.clone().unwrap_or_else(|| "__unassigned__".to_string());
+        let bucket = by_cc.entry(key).or_insert_with(|| CcBucket {
+            code: cc_code.clone(),
+            name: cc_name.clone(),
+            accounts: HashMap::new(),
+        });
+        let acc = bucket
+            .accounts
+            .entry(acc_id)
+            .or_insert_with(|| {
+                json!({
+                    "code": acc_code, "name": acc_name, "type": acc_type, "net_cents": 0i64,
+                })
+            });
+        *acc.get_mut("net_cents").unwrap() =
+            json!(acc["net_cents"].as_i64().unwrap_or(0) + amt);
+    }
+
+    // Build result: per cost center with accounts, revenue, costs, result
+    let mut centers: Vec<Value> = by_cc
+        .values()
+        .map(|bucket| {
+            let mut accs: Vec<Value> = bucket
+                .accounts
+                .values()
+                .map(|a| {
+                    let net = a["net_cents"].as_i64().unwrap_or(0);
+                    let amount = if a["type"].as_str() == Some("income") {
+                        -net
+                    } else {
+                        net
+                    };
+                    json!({
+                        "code": a["code"], "name": a["name"], "type": a["type"],
+                        "net_cents": net,
+                        "net": crate::money::format_amount(net),
+                        "amount_cents": amount,
+                    })
+                })
+                .filter(|a| a["amount_cents"].as_i64().unwrap_or(0) != 0)
+                .collect();
+            accs.sort_by(|a, b| a["code"].as_str().cmp(&b["code"].as_str()));
+
+            let revenue: i64 = accs
+                .iter()
+                .filter(|a| a["type"].as_str() == Some("income"))
+                .map(|a| a["amount_cents"].as_i64().unwrap_or(0))
+                .sum();
+            let costs: i64 = accs
+                .iter()
+                .filter(|a| a["type"].as_str() == Some("expense"))
+                .map(|a| a["amount_cents"].as_i64().unwrap_or(0))
+                .sum();
+
+            json!({
+                "cost_center_code": bucket.code,
+                "cost_center_name": bucket.name
+                    .clone()
+                    .or_else(|| if bucket.code.is_none() { Some("Unassigned".into()) } else { None }),
+                "accounts": accs,
+                "revenue_cents": revenue,
+                "costs_cents": costs,
+                "result_cents": revenue - costs,
+            })
+        })
+        .collect();
+
+    // Sort: named centers first, unassigned last
+    centers.sort_by(|a, b| {
+        if a["cost_center_code"].is_null() {
+            return std::cmp::Ordering::Greater;
+        }
+        if b["cost_center_code"].is_null() {
+            return std::cmp::Ordering::Less;
+        }
+        a["cost_center_code"]
+            .as_str()
+            .cmp(&b["cost_center_code"].as_str())
+    });
+
+    Ok(json!({
+        "year": year,
+        "from": eff_from,
+        "to": eff_to,
+        "centers": centers,
+    }))
+}
+
 fn sql_err(e: rusqlite::Error) -> BukioError {
     BukioError::new("DB_ERROR", e.to_string())
 }
