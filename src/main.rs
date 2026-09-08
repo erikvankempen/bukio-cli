@@ -28,6 +28,7 @@ mod recurring;
 mod assets;
 mod compliance;
 mod contacts;
+mod invoice;
 mod attachments;
 mod authz;
 
