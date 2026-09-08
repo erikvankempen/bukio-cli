@@ -31,6 +31,7 @@ mod contacts;
 mod invoice;
 mod payments;
 mod export;
+mod ubl;
 mod attachments;
 mod authz;
 

@@ -238,6 +238,10 @@ pub fn allocate_largest_remainder(total: i64, weights: &[i64]) -> Vec<i64> {
 }
 
 /// Per-line discount in cents
+pub fn format_qty(qty: i64) -> String {
+    if qty % 1000 == 0 { format!("{}", qty / 1000) } else { format!("{:.3}", qty as f64 / 1000.0) }
+}
+
 pub fn line_discount_cents(line: &Value) -> i64 {
     let amount = line["amount_cents"].as_i64().unwrap_or(0);
     match line["discount_type"].as_str() {
