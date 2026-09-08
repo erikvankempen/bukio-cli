@@ -4,12 +4,17 @@
 //
 // MCP server — JSON-RPC 2.0 over stdio (newline-delimited).
 
-use crate::accounts::{create_account, deactivate_account, get_account_by_code, list_accounts, reactivate_account, resolve_profile, NewAccount};
+use crate::accounts::{
+    create_account, deactivate_account, get_account_by_code, list_accounts, reactivate_account,
+    resolve_profile, NewAccount,
+};
 use crate::audit;
 use crate::company::get_company;
 use crate::contacts::{create_contact, list_contacts};
 use crate::db::open_db;
-use crate::entries::{create_entry, list_entries, post_entry, reverse_entry, CreateEntry, PostingSpec};
+use crate::entries::{
+    create_entry, list_entries, post_entry, reverse_entry, CreateEntry, PostingSpec,
+};
 use crate::import_mod;
 use crate::money::{format_amount, BukioError, Result};
 use rusqlite::Connection;
@@ -61,7 +66,9 @@ fn tool_defs() -> Vec<Value> {
 }
 
 fn arg_str(args: &Value, key: &str) -> Option<String> {
-    args.get(key).and_then(|v| v.as_str()).map(|s| s.to_string())
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 fn arg_i64(args: &Value, key: &str) -> Option<i64> {
@@ -78,11 +85,14 @@ fn dispatch(db: &Connection, actor: &str, msg: &Value) -> Result<String> {
     let params = msg.get("params").unwrap_or(&Value::Null);
 
     match method {
-        "initialize" => Ok(rpc_response(id.clone(), json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {"tools": {}},
-            "serverInfo": {"name": "bukio-cli", "version": env!("CARGO_PKG_VERSION")}
-        }))),
+        "initialize" => Ok(rpc_response(
+            id.clone(),
+            json!({
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "bukio-cli", "version": env!("CARGO_PKG_VERSION")}
+            }),
+        )),
         "initialized" => Ok(String::new()), // no response
         "ping" => Ok(rpc_response(id.clone(), json!({}))),
         "tools/list" => Ok(rpc_response(id.clone(), json!({"tools": tool_defs()}))),
@@ -91,10 +101,17 @@ fn dispatch(db: &Connection, actor: &str, msg: &Value) -> Result<String> {
             let args = params.get("arguments").unwrap_or(&Value::Null);
             match call_tool(db, actor, tool_name, args) {
                 Ok(result) => Ok(rpc_response(id.clone(), rpc_content(result))),
-                Err(e) => Ok(rpc_response(id.clone(), rpc_error_content(&e.code, &e.message))),
+                Err(e) => Ok(rpc_response(
+                    id.clone(),
+                    rpc_error_content(&e.code, &e.message),
+                )),
             }
         }
-        _ => Ok(rpc_error(id.clone(), -32601, &format!("method not found: {method}"))),
+        _ => Ok(rpc_error(
+            id.clone(),
+            -32601,
+            &format!("method not found: {method}"),
+        )),
     }
 }
 
@@ -115,14 +132,16 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             Ok(json!({"ok": true, "data": r}))
         }
         "pnl" => {
-            let year = arg_str(args, "year").unwrap_or_else(|| crate::dates::today_iso()[..4].to_string());
+            let year =
+                arg_str(args, "year").unwrap_or_else(|| crate::dates::today_iso()[..4].to_string());
             let from = format!("{year}-01-01");
             let to = format!("{year}-12-31");
             let r = crate::reports::pnl(db, &from, &to)?;
             Ok(json!({"ok": true, "data": r}))
         }
         "journal" => {
-            let year = arg_str(args, "year").unwrap_or_else(|| crate::dates::today_iso()[..4].to_string());
+            let year =
+                arg_str(args, "year").unwrap_or_else(|| crate::dates::today_iso()[..4].to_string());
             let from = format!("{year}-01-01");
             let to = format!("{year}-12-31");
             let limit = arg_i64(args, "limit");
@@ -135,29 +154,42 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             Ok(json!({"ok": true, "data": r}))
         }
         "entry_add" => {
-            let date = arg_str(args, "date").ok_or_else(|| BukioError::new("MISSING_ARG", "date required"))?;
+            let date = arg_str(args, "date")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "date required"))?;
             let description = arg_str(args, "description").unwrap_or_default();
-            let postings_arr = args.get("postings").and_then(|v| v.as_array()).ok_or_else(|| BukioError::new("MISSING_ARG", "postings required"))?;
+            let postings_arr = args
+                .get("postings")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "postings required"))?;
             let mut postings = Vec::new();
             for p in postings_arr {
                 if let Some(s) = p.as_str() {
                     let parts: Vec<&str> = s.splitn(2, ':').collect();
                     if parts.len() == 2 {
                         let code = parts[0].to_string();
-                        let amount: i64 = parts[1].parse().map_err(|_| BukioError::new("INVALID_AMOUNT", format!("bad amount in '{s}'")))?;
-                        postings.push(PostingSpec { code, amount_cents: amount, cost_center_code: None });
+                        let amount: i64 = parts[1].parse().map_err(|_| {
+                            BukioError::new("INVALID_AMOUNT", format!("bad amount in '{s}'"))
+                        })?;
+                        postings.push(PostingSpec {
+                            code,
+                            amount_cents: amount,
+                            cost_center_code: None,
+                        });
                     }
                 }
             }
             let post = arg_bool(args, "post", false);
-            let entry = create_entry(db, CreateEntry {
-                date: &date,
-                description: &description,
-                postings,
-                source: "mcp",
-                source_ref: None,
-                actor,
-            })?;
+            let entry = create_entry(
+                db,
+                CreateEntry {
+                    date: &date,
+                    description: &description,
+                    postings,
+                    source: "mcp",
+                    source_ref: None,
+                    actor,
+                },
+            )?;
             if post {
                 let posted = post_entry(db, entry.id, actor)?;
                 Ok(json!({"ok": true, "entry": posted}))
@@ -166,12 +198,14 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             }
         }
         "entry_post" => {
-            let id = arg_i64(args, "id").ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
+            let id =
+                arg_i64(args, "id").ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
             let posted = post_entry(db, id, actor)?;
             Ok(json!({"ok": true, "entry": posted}))
         }
         "entry_reverse" => {
-            let id = arg_i64(args, "id").ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
+            let id =
+                arg_i64(args, "id").ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
             let reason = arg_str(args, "reason").unwrap_or_default();
             let entry = reverse_entry(db, id, actor, Some(&reason))?;
             Ok(json!({"ok": true, "entry": entry}))
@@ -188,7 +222,8 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             Ok(json!({"ok": true, "data": r}))
         }
         "contact_add" => {
-            let name = arg_str(args, "name").ok_or_else(|| BukioError::new("MISSING_ARG", "name required"))?;
+            let name = arg_str(args, "name")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "name required"))?;
             let address = arg_str(args, "address");
             let postal_code = arg_str(args, "postal_code");
             let city = arg_str(args, "city");
@@ -198,10 +233,18 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             let kvk = arg_str(args, "kvk");
             let iban = arg_str(args, "iban");
             let r = create_contact(
-                db, &name,
-                address.as_deref(), postal_code.as_deref(), city.as_deref(), country.as_deref(),
-                email.as_deref(), vat_id.as_deref(), kvk.as_deref(), iban.as_deref(),
-                actor, false,
+                db,
+                &name,
+                address.as_deref(),
+                postal_code.as_deref(),
+                city.as_deref(),
+                country.as_deref(),
+                email.as_deref(),
+                vat_id.as_deref(),
+                kvk.as_deref(),
+                iban.as_deref(),
+                actor,
+                false,
             )?;
             Ok(json!({"ok": true, "contact": r}))
         }
@@ -211,37 +254,54 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             Ok(json!({"ok": true, "data": r}))
         }
         "vat_readout" => {
-            let period = arg_str(args, "period").ok_or_else(|| BukioError::new("MISSING_ARG", "period required"))?;
+            let period = arg_str(args, "period")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "period required"))?;
             let r = crate::vat::ob_readout(db, &period)?;
             Ok(json!({"ok": true, "data": r}))
         }
         "import_file" => {
-            let file = arg_str(args, "file").ok_or_else(|| BukioError::new("MISSING_ARG", "file required"))?;
-            let kind = arg_str(args, "kind").ok_or_else(|| BukioError::new("MISSING_ARG", "kind required"))?;
+            let file = arg_str(args, "file")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "file required"))?;
+            let kind = arg_str(args, "kind")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "kind required"))?;
             let text = import_mod::read_import_file(&file)?;
             let dry_run = arg_bool(args, "mode", false);
             match kind.as_str() {
                 "opening-balances" => {
                     let date = arg_str(args, "date");
-                    let r = import_mod::import_opening_balances(db, &text, date.as_deref(), actor, dry_run)?;
+                    let r = import_mod::import_opening_balances(
+                        db,
+                        &text,
+                        date.as_deref(),
+                        actor,
+                        dry_run,
+                    )?;
                     Ok(json!({"ok": true, "data": r}))
                 }
                 "journal" => {
                     let create_missing = arg_bool(args, "create_missing", false);
-                    let r = import_mod::import_journal_csv(db, &text, create_missing, actor, dry_run)?;
+                    let r =
+                        import_mod::import_journal_csv(db, &text, create_missing, actor, dry_run)?;
                     Ok(json!({"ok": true, "data": r}))
                 }
-                _ => Err(BukioError::new("INVALID_KIND", format!("unknown import kind '{kind}'"))),
+                _ => Err(BukioError::new(
+                    "INVALID_KIND",
+                    format!("unknown import kind '{kind}'"),
+                )),
             }
         }
         "import_contacts" => {
-            let file = arg_str(args, "file").ok_or_else(|| BukioError::new("MISSING_ARG", "file required"))?;
+            let file = arg_str(args, "file")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "file required"))?;
             let text = import_mod::read_import_file(&file)?;
             let dry_run = arg_bool(args, "mode", false);
             let r = import_mod::import_contacts(db, &text, actor, dry_run)?;
             Ok(json!({"ok": true, "data": r}))
         }
-        _ => Err(BukioError::new("UNKNOWN_TOOL", format!("tool '{tool}' not found"))),
+        _ => Err(BukioError::new(
+            "UNKNOWN_TOOL",
+            format!("tool '{tool}' not found"),
+        )),
     }
 }
 
@@ -274,12 +334,18 @@ pub fn run(db_path: &str, actor: &str) -> Result<()> {
         }
         match dispatch(&db, actor, &msg) {
             Ok(resp) => {
-                if resp.is_empty() { continue; } // initialized
+                if resp.is_empty() {
+                    continue;
+                } // initialized
                 let mut out = stdout.lock();
                 writeln!(out, "{resp}").ok();
             }
             Err(e) => {
-                let resp = rpc_error(msg.get("id").cloned(), -32603, &format!("internal error: {}", e.message));
+                let resp = rpc_error(
+                    msg.get("id").cloned(),
+                    -32603,
+                    &format!("internal error: {}", e.message),
+                );
                 let mut out = stdout.lock();
                 writeln!(out, "{resp}").ok();
             }

@@ -72,9 +72,7 @@ pub fn public_key_from_private(
     _passphrase: Option<&str>,
 ) -> std::result::Result<String, String> {
     if is_encrypted(private_pem) {
-        return Err(
-            "encrypted keys require session — run 'bukio actor unlock' first".into(),
-        );
+        return Err("encrypted keys require session — run 'bukio actor unlock' first".into());
     }
     let der = pem_decode(private_pem).ok_or("not a valid PEM")?;
     let signing = SigningKey::from_pkcs8_der(&der).map_err(|e| e.to_string())?;

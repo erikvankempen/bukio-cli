@@ -9,10 +9,12 @@
 
 mod accounts;
 mod actor;
+mod actor_cli;
 mod assets;
 mod attachments;
 mod audit;
 mod authz;
+mod backup;
 mod bank;
 mod canonical;
 mod company;
@@ -23,19 +25,18 @@ mod db;
 mod entries;
 mod export;
 mod fx;
+mod import_mod;
 mod invoice;
 mod items;
+mod mcp;
 mod money;
 mod month_end;
 mod payments;
 mod recurring;
 mod reports;
 mod sign;
+mod smtp;
 mod ubl;
-mod import_mod;
-mod mcp;
-mod actor_cli;
-mod backup;
 mod vat;
 mod year_end;
 

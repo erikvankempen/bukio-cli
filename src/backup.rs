@@ -13,17 +13,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 fn backup_dir() -> PathBuf {
-    PathBuf::from(
-        std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
-    )
-    .join(".bukio")
-    .join("backups")
+    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()))
+        .join(".bukio")
+        .join("backups")
 }
 
 fn default_backup_path() -> PathBuf {
-    let ts = chrono::Utc::now()
-        .format("%Y-%m-%dT%H-%M-%S")
-        .to_string();
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%S").to_string();
     backup_dir().join(format!("bukio-{ts}.db"))
 }
 
@@ -128,17 +124,13 @@ pub fn cmd_backup(
     } else {
         vec![]
     };
-    Ok(json!({"path": dest.display().to_string(), "bytes": bytes, "source": db_path, "pruned": pruned}))
+    Ok(
+        json!({"path": dest.display().to_string(), "bytes": bytes, "source": db_path, "pruned": pruned}),
+    )
 }
 
 /// Restore from a backup file.
-pub fn cmd_restore(
-    from: &str,
-    to: &str,
-    force: bool,
-    actor: &str,
-    dry_run: bool,
-) -> Result<Value> {
+pub fn cmd_restore(from: &str, to: &str, force: bool, actor: &str, dry_run: bool) -> Result<Value> {
     let src_path = Path::new(from);
     if !src_path.exists() {
         return Err(BukioError::new(
@@ -155,19 +147,21 @@ pub fn cmd_restore(
         }));
     }
 
-    fs::copy(src_path, to)
-        .map_err(|e| BukioError::new("IO_ERROR", format!("copy failed: {e}")))?;
+    fs::copy(src_path, to).map_err(|e| BukioError::new("IO_ERROR", format!("copy failed: {e}")))?;
 
     let restored = Connection::open(to)
         .map_err(|e| BukioError::new("DB_ERROR", format!("open restored db: {e}")))?;
-    record(&restored, RecordArgs {
-        actor,
-        action: "restore",
-        command: Some("restore"),
-        args: Some(json!({"from": from, "to": to})),
-        outcome: "ok",
-        entry_ids: vec![],
-    })?;
+    record(
+        &restored,
+        RecordArgs {
+            actor,
+            action: "restore",
+            command: Some("restore"),
+            args: Some(json!({"from": from, "to": to})),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
 
     Ok(json!({"to": to, "from": from, "restored": true}))
 }

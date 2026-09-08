@@ -19,3 +19,5 @@ chrono = "0.4"
 ureq = "3"
 quick-xml = "0.37"
 ring = "0.17"
+lettre = { version = "0.11", features = ["builder", "hostname"] }
+mime_guess = "2"

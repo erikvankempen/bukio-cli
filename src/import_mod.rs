@@ -145,9 +145,9 @@ pub fn parse_import_amount(input: &str) -> Result<i64> {
             format!("invalid amount '{input}' — use e.g. 1234.56, 1234,56 or 1.234,56"),
         ));
     }
-    let val: f64 = normalized.parse().map_err(|_| {
-        import_err("INVALID_AMOUNT", format!("bad amount '{input}'"))
-    })?;
+    let val: f64 = normalized
+        .parse()
+        .map_err(|_| import_err("INVALID_AMOUNT", format!("bad amount '{input}'")))?;
     Ok((val * 100.0).round() as i64)
 }
 
@@ -253,7 +253,9 @@ pub fn import_opening_balances(
         ));
     }
     if dry_run {
-        return Ok(json!({"action": "import opening balances", "rows": parsed.len(), "date": the_date, "dryRun": true}));
+        return Ok(
+            json!({"action": "import opening balances", "rows": parsed.len(), "date": the_date, "dryRun": true}),
+        );
     }
 
     let postings: Vec<PostingSpec> = parsed
@@ -287,7 +289,9 @@ pub fn import_opening_balances(
             entry_ids: vec![posted.id],
         },
     )?;
-    Ok(json!({"ok": true, "imported": true, "entry_id": posted.id, "date": the_date, "rows": parsed.len()}))
+    Ok(
+        json!({"ok": true, "imported": true, "entry_id": posted.id, "date": the_date, "rows": parsed.len()}),
+    )
 }
 
 /// Import journal CSV (boekstuk-based double-entry).
@@ -304,12 +308,10 @@ pub fn import_journal_csv(
     }
     let header = &rows[0].1;
     let find = |aliases: &[&str]| {
-        header
-            .iter()
-            .position(|h| {
-                let lc = h.to_lowercase();
-                aliases.iter().any(|a| lc == *a)
-            })
+        header.iter().position(|h| {
+            let lc = h.to_lowercase();
+            aliases.iter().any(|a| lc == *a)
+        })
     };
     let cd = find(&["date", "datum"]);
     let cb = find(&["boekstuk", "boekstuknummer", "reference", "ref"]);
@@ -339,8 +341,7 @@ pub fn import_journal_csv(
     }
 
     let g = |cells: &[String], col: Option<usize>| {
-        col.and_then(|c| cells.get(c).cloned())
-            .unwrap_or_default()
+        col.and_then(|c| cells.get(c).cloned()).unwrap_or_default()
     };
     let mut errors = Vec::new();
     let mut parsed: Vec<Value> = Vec::new();
@@ -419,7 +420,9 @@ pub fn import_journal_csv(
         .filter(|b| existing.contains(&format!("journal:{b}")))
         .count();
     if dry_run {
-        return Ok(json!({"action": "import journal", "boekstukken": groups.len(), "lines": parsed.len(), "duplicates": dupes, "dryRun": true}));
+        return Ok(
+            json!({"action": "import journal", "boekstukken": groups.len(), "lines": parsed.len(), "duplicates": dupes, "dryRun": true}),
+        );
     }
 
     let mut imported = Vec::new();
@@ -472,13 +475,12 @@ pub fn import_journal_csv(
             command: Some("import journal"),
             args: Some(json!({"boekstukken": imported.len(), "duplicates": dupes})),
             outcome: "ok",
-            entry_ids: imported
-                .iter()
-                .filter_map(|e| e["id"].as_i64())
-                .collect(),
+            entry_ids: imported.iter().filter_map(|e| e["id"].as_i64()).collect(),
         },
     )?;
-    Ok(json!({"ok": true, "imported": imported.len(), "duplicates": dupes, "entries": imported, "dryRun": false}))
+    Ok(
+        json!({"ok": true, "imported": imported.len(), "duplicates": dupes, "entries": imported, "dryRun": false}),
+    )
 }
 
 /// Import contacts from UBL XML.
@@ -502,18 +504,15 @@ pub fn import_contacts(
                     "Supplier" | "Customer" | "Party" => {
                         cur.clear();
                     }
-                    "Name" | "StreetName" | "CityName" | "PostalZone" | "Country"
-                    | "CompanyID" | "EndpointID" | "Telephone" => {
+                    "Name" | "StreetName" | "CityName" | "PostalZone" | "Country" | "CompanyID"
+                    | "EndpointID" | "Telephone" => {
                         field = t;
                     }
                     _ => {}
                 }
             }
             Ok(Event::Text(e)) => {
-                let txt = e
-                    .unescape()
-                    .map(|u| u.to_string())
-                    .unwrap_or_default();
+                let txt = e.unescape().map(|u| u.to_string()).unwrap_or_default();
                 if !field.is_empty() && !txt.trim().is_empty() {
                     cur.insert(field.clone(), txt.trim().to_string());
                 }
@@ -549,13 +548,13 @@ pub fn import_contacts(
         .collect();
     let dupes = contacts
         .iter()
-        .filter(|c| {
-            existing.contains(&c.get("Name").unwrap_or(&String::new()).to_lowercase())
-        })
+        .filter(|c| existing.contains(&c.get("Name").unwrap_or(&String::new()).to_lowercase()))
         .count();
 
     if dry_run {
-        return Ok(json!({"action": "import contacts", "contacts": contacts.len(), "duplicates": dupes, "dryRun": true}));
+        return Ok(
+            json!({"action": "import contacts", "contacts": contacts.len(), "duplicates": dupes, "dryRun": true}),
+        );
     }
 
     let mut count = 0;
@@ -569,10 +568,7 @@ pub fn import_contacts(
         let street = c.get("StreetName").cloned();
         let city = c.get("CityName").cloned();
         let country = c.get("Country").cloned();
-        let kvk = c
-            .get("CompanyID")
-            .or_else(|| c.get("EndpointID"))
-            .cloned();
+        let kvk = c.get("CompanyID").or_else(|| c.get("EndpointID")).cloned();
         create_contact(
             db,
             name,

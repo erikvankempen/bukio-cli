@@ -18,10 +18,7 @@ const DEFAULT_TTL_HOURS: u64 = 12;
 const MAX_TTL_HOURS: u64 = 72;
 
 fn config_dir() -> PathBuf {
-    PathBuf::from(
-        std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
-    )
-    .join(".bukio")
+    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())).join(".bukio")
 }
 
 fn key_file_path(actor: &str) -> PathBuf {
@@ -29,7 +26,9 @@ fn key_file_path(actor: &str) -> PathBuf {
 }
 
 fn session_file_path(actor: &str) -> PathBuf {
-    config_dir().join("sessions").join(format!("{actor}.session"))
+    config_dir()
+        .join("sessions")
+        .join(format!("{actor}.session"))
 }
 
 fn read_key_file(actor: &str) -> Result<String> {
@@ -37,7 +36,10 @@ fn read_key_file(actor: &str) -> Result<String> {
     fs::read_to_string(&path).map_err(|_| {
         BukioError::new(
             "KEY_NOT_FOUND",
-            format!("no key for {actor} at {} — run 'actor keygen'", path.display()),
+            format!(
+                "no key for {actor} at {} — run 'actor keygen'",
+                path.display()
+            ),
         )
     })
 }
@@ -47,9 +49,8 @@ fn write_key_file(actor: &str, pem: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).ok();
     }
-    fs::write(&path, format!("{pem}\n")).map_err(|e| {
-        BukioError::new("IO_ERROR", format!("cannot write {}: {e}", path.display()))
-    })
+    fs::write(&path, format!("{pem}\n"))
+        .map_err(|e| BukioError::new("IO_ERROR", format!("cannot write {}: {e}", path.display())))
 }
 
 fn read_passphrase(actor: &str) -> Result<String> {
@@ -67,14 +68,20 @@ fn read_passphrase(actor: &str) -> Result<String> {
 /// Keygen: generate Ed25519 keypair.
 pub fn cmd_keygen(actor: &str, force: bool, dry_run: bool) -> Result<Value> {
     if !is_valid_actor(actor) {
-        return Err(BukioError::new("INVALID_ACTOR", format!("'{actor}' is not a valid '<role>:<name>' actor")));
+        return Err(BukioError::new(
+            "INVALID_ACTOR",
+            format!("'{actor}' is not a valid '<role>:<name>' actor"),
+        ));
     }
     let path = key_file_path(actor);
     let exists = path.exists();
     if !dry_run && exists && !force {
         return Err(BukioError::new(
             "KEY_ALREADY_EXISTS",
-            format!("key file {} exists — pass --force to replace (rotation)", path.display()),
+            format!(
+                "key file {} exists — pass --force to replace (rotation)",
+                path.display()
+            ),
         ));
     }
     let is_human = actor.starts_with("human:");
@@ -109,18 +116,23 @@ pub fn cmd_register(db_path: &str, actor: &str, dry_run: bool) -> Result<Value> 
     };
     let public_pem = sign::public_key_from_private(&pem, passphrase.as_deref())
         .map_err(|e| BukioError::new("PASSPHRASE_INVALID", format!("could not read key: {e}")))?;
-    let keyid = sign::keyid_of(&public_pem)
-        .map_err(|e| BukioError::new("KEY_ERROR", e))?;
+    let keyid = sign::keyid_of(&public_pem).map_err(|e| BukioError::new("KEY_ERROR", e))?;
     if dry_run {
         return Ok(json!({"actor": actor, "keyid": keyid, "dryRun": true}));
     }
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
     let row = enrol_actor(&db, actor, &keyid, &public_pem)?;
-    record(&db, RecordArgs {
-        actor, action: "actor.register", command: Some("actor register"),
-        args: Some(json!({"actor": actor, "keyid": keyid})),
-        outcome: "ok", entry_ids: vec![],
-    })?;
+    record(
+        &db,
+        RecordArgs {
+            actor,
+            action: "actor.register",
+            command: Some("actor register"),
+            args: Some(json!({"actor": actor, "keyid": keyid})),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     Ok(json!({"actor": actor, "keyid": keyid, "enrolled": true, "row": row}))
 }
 
@@ -138,11 +150,17 @@ pub fn cmd_revoke(db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     }
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
     revoke_actor(&db, actor)?;
-    record(&db, RecordArgs {
-        actor, action: "actor.revoke", command: Some("actor revoke"),
-        args: Some(json!({"actor": actor})),
-        outcome: "ok", entry_ids: vec![],
-    })?;
+    record(
+        &db,
+        RecordArgs {
+            actor,
+            action: "actor.revoke",
+            command: Some("actor revoke"),
+            args: Some(json!({"actor": actor})),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     Ok(json!({"ok": true, "actor": actor, "revoked": true}))
 }
 
@@ -164,7 +182,10 @@ pub fn cmd_authz(db_path: &str, on: bool) -> Result<Value> {
 pub fn cmd_unlock(actor: &str, ttl_hours: Option<u64>) -> Result<Value> {
     let ttl = ttl_hours.unwrap_or(DEFAULT_TTL_HOURS);
     if ttl < 1 || ttl > MAX_TTL_HOURS {
-        return Err(BukioError::new("INVALID_TTL", format!("--ttl-hours must be 1–{MAX_TTL_HOURS}")));
+        return Err(BukioError::new(
+            "INVALID_TTL",
+            format!("--ttl-hours must be 1–{MAX_TTL_HOURS}"),
+        ));
     }
     let passphrase = read_passphrase(actor)?;
     let path = session_file_path(actor);
@@ -173,14 +194,16 @@ pub fn cmd_unlock(actor: &str, ttl_hours: Option<u64>) -> Result<Value> {
     }
     let pem = read_key_file(actor)?;
     if !sign::is_encrypted(&pem) {
-        return Err(BukioError::new("KEY_NOT_ENCRYPTED", format!("{actor} key is not passphrase-encrypted")));
+        return Err(BukioError::new(
+            "KEY_NOT_ENCRYPTED",
+            format!("{actor} key is not passphrase-encrypted"),
+        ));
     }
     // Store session: passphrase + expiry timestamp
     let expires = chrono::Utc::now() + chrono::Duration::hours(ttl as i64);
     let session = json!({"passphrase": passphrase, "expires": expires.to_rfc3339()});
-    fs::write(&path, session.to_string()).map_err(|e| {
-        BukioError::new("IO_ERROR", format!("cannot write session: {e}"))
-    })?;
+    fs::write(&path, session.to_string())
+        .map_err(|e| BukioError::new("IO_ERROR", format!("cannot write session: {e}")))?;
     Ok(json!({"ok": true, "actor": actor, "ttl_hours": ttl, "expires": expires.to_rfc3339()}))
 }
 
