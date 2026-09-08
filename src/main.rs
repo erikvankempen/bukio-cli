@@ -37,6 +37,7 @@ mod reports;
 mod sign;
 mod smtp;
 mod server;
+mod i18n;
 mod ubl;
 mod vat;
 mod year_end;
