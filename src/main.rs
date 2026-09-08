@@ -36,6 +36,7 @@ mod recurring;
 mod reports;
 mod sign;
 mod smtp;
+mod server;
 mod ubl;
 mod vat;
 mod year_end;
