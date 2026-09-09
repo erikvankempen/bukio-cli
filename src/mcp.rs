@@ -73,6 +73,7 @@ fn tool_defs() -> Vec<Value> {
         json!({"name": "fx_set", "description": "set an FX exchange rate", "inputSchema": {"type": "object", "properties": {"currency": {"type": "string"}, "date": {"type": "string"}, "rate": {"type": "string"}, "actor": {"type": "string"}}, "required": ["currency", "date", "rate"]}}),
         json!({"name": "import_file", "description": "import opening balances or journal CSV", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}, "kind": {"type": "string"}, "date": {"type": "string"}, "create_missing": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["file", "kind"]}}),
         json!({"name": "import_contacts", "description": "import contacts from UBL XML", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}, "mode": {"type": "string"}}, "required": ["file"]}}),
+        json!({"name": "invoice_import", "description": "import a UBL invoice as a payable", "inputSchema": {"type": "object", "properties": {"file_path": {"type": "string"}, "create_missing": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["file_path"]}}),
     ]
 }
 
@@ -558,6 +559,20 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             let dry_run = arg_bool(args, "mode", false);
             let r = import_mod::import_contacts(db, &text, actor, dry_run)?;
             Ok(r)
+        }
+        "invoice_import" => {
+            let file_path = arg_str(args, "file_path")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "file_path required"))?;
+            let text = import_mod::read_import_file(&file_path)?;
+            let create_missing = arg_bool(args, "create_missing", false);
+            let dry_run = arg_str(args, "mode").as_deref() != Some("execute");
+            let mode_str = if dry_run { "dry-run" } else { "execute" };
+            let r = import_mod::import_invoice(db, &text, None, create_missing, actor, dry_run)?;
+            let mut result = r;
+            if let Some(obj) = result.as_object_mut() {
+                obj.insert("mode".into(), json!(mode_str));
+            }
+            Ok(result)
         }
         _ => Err(BukioError::new(
             "UNKNOWN_TOOL",

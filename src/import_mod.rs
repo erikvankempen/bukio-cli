@@ -985,7 +985,7 @@ pub fn import_invoice(
                     "Invoice" | "CreditNote" => {
                         in_tag = "root".to_string();
                     }
-                    "cbc:ID" if depth <= 4 => {
+                    "cbc:ID" if depth == 2 => {
                         in_tag = "id".to_string();
                     }
                     "cbc:IssueDate" => {
@@ -1034,9 +1034,7 @@ pub fn import_invoice(
             }
             Ok(Event::End(_)) => {
                 depth -= 1;
-                if depth <= 1 {
-                    in_tag.clear();
-                }
+                in_tag.clear();
             }
             Ok(Event::Eof) => break,
             Err(_) => break,
@@ -1052,6 +1050,114 @@ pub fn import_invoice(
     };
     let amount_cents = parse_import_amount(amount_str).unwrap_or(0);
 
+    // Default due_date to issue_date + 30 days (EN 16931 BT-9)
+    if due_date.is_empty() {
+        if let Ok(d) = chrono::NaiveDate::parse_from_str(&invoice_date, "%Y-%m-%d") {
+            due_date = (d + chrono::Duration::days(30)).format("%Y-%m-%d").to_string();
+        }
+    }
+
+    // --- contact resolution -------------------------------------------------
+    use crate::contacts::{get_contact, list_contacts};
+
+    let supplier_lower = supplier_name.trim().to_lowercase();
+    let vat_lower = if supplier_vat_id.is_empty() {
+        String::new()
+    } else {
+        supplier_vat_id.trim().to_lowercase()
+    };
+
+    let mut resolved_contact: Option<Value> = None;
+    let mut contact_created = false;
+
+    if let Some(cid) = contact_id {
+        resolved_contact = get_contact(db, cid)?;
+        if resolved_contact.is_none() {
+            return Err(import_err(
+                "CONTACT_NOT_FOUND",
+                format!("contact {cid} does not exist"),
+            ));
+        }
+    } else {
+        // match by VAT ID first
+        if !vat_lower.is_empty() {
+            for c in list_contacts(db)? {
+                if c["vat_id"].as_str().unwrap_or("").trim().to_lowercase() == vat_lower {
+                    resolved_contact = Some(c);
+                    break;
+                }
+            }
+        }
+        // fallback: match by normalized name
+        if resolved_contact.is_none() {
+            for c in list_contacts(db)? {
+                if c["name"].as_str().unwrap_or("").trim().to_lowercase() == supplier_lower {
+                    resolved_contact = Some(c);
+                    break;
+                }
+            }
+        }
+        if resolved_contact.is_none() && create_missing {
+            contact_created = true;
+            if !dry_run {
+                let r = create_contact(
+                    db,
+                    &supplier_name,
+                    None,    // address
+                    None,    // postal_code
+                    None,    // city
+                    None,    // country
+                    None,    // email
+                    if supplier_vat_id.is_empty() {
+                        None
+                    } else {
+                        Some(&supplier_vat_id)
+                    },
+                    None, // kvk
+                    None, // iban
+                    actor,
+                    false,
+                )?;
+                resolved_contact = Some(r);
+            }
+        }
+        if resolved_contact.is_none() && !(create_missing && dry_run) {
+            return Err(import_err(
+                "CONTACT_NOT_FOUND",
+                format!(
+                    "no contact matches supplier '{supplier_name}' — pass --contact <id> or --create-missing to create it"
+                ),
+            ));
+        }
+    }
+
+    let contact_id_resolved = resolved_contact
+        .as_ref()
+        .and_then(|c| c["id"].as_i64())
+        .unwrap_or(0);
+    let contact_name = resolved_contact
+        .as_ref()
+        .and_then(|c| c["name"].as_str())
+        .unwrap_or(&supplier_name)
+        .to_string();
+    let contacts_created_count: i64 = if contact_created { 1 } else { 0 };
+
+    // --- idempotency: source_ref dedup -------------------------------------
+    let supplier_key = if !vat_lower.is_empty() {
+        vat_lower.clone()
+    } else {
+        supplier_lower.clone()
+    };
+    let source_ref = format!("{}:{}", supplier_key, invoice_ref);
+
+    let is_dup = db
+        .query_row(
+            "SELECT 1 FROM payables WHERE source = 'ubl' AND source_ref = ?1 AND status = 'unpaid'",
+            rusqlite::params![source_ref],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+
     if dry_run {
         return Ok(json!({
             "dryRun": true,
@@ -1062,13 +1168,48 @@ pub fn import_invoice(
             "amount_cents": amount_cents,
             "amount": crate::money::format_amount(amount_cents),
             "vat_by_rate": {},
-            "contact": { "name": supplier_name, "created": false },
-            "duplicates": 0,
-            "contacts_created": 0,
+            "contact": { "id": contact_id_resolved, "name": contact_name, "created": contact_created },
+            "duplicates": if is_dup { 1 } else { 0 },
+            "contacts_created": contacts_created_count,
+            "imported": 0,
         }));
     }
 
-    // For now, return basic structure — full import requires contact matching + payable creation
+    // --- execute: create payable -------------------------------------------
+    let mut imported: i64 = 0;
+    let mut duplicates: i64 = 0;
+
+    if is_dup {
+        duplicates = 1;
+    } else {
+        db.execute(
+            "INSERT INTO payables (contact_id, invoice_ref, date, due_date, amount_cents, payment_method, source, source_ref, created_by) VALUES (?1, ?2, ?3, ?4, ?5, 'transfer', 'ubl', ?6, ?7)",
+            rusqlite::params![contact_id_resolved, invoice_ref, invoice_date, due_date, amount_cents, source_ref, actor],
+        )
+        .map_err(sql_err)?;
+        let pid = db.last_insert_rowid();
+        record(
+            db,
+            RecordArgs {
+                actor,
+                action: "import.invoice",
+                command: Some("import invoice"),
+                args: Some(json!({
+                    "payable_id": pid,
+                    "supplier": supplier_name,
+                    "invoice_ref": invoice_ref,
+                    "date": invoice_date,
+                    "due_date": due_date,
+                    "amount_cents": amount_cents,
+                    "contact_id": contact_id_resolved,
+                })),
+                outcome: "ok",
+                entry_ids: vec![],
+            },
+        )?;
+        imported = 1;
+    }
+
     Ok(json!({
         "invoice_ref": invoice_ref,
         "supplier": supplier_name,
@@ -1076,9 +1217,10 @@ pub fn import_invoice(
         "due_date": due_date,
         "amount_cents": amount_cents,
         "amount": crate::money::format_amount(amount_cents),
-        "duplicates": 0,
-        "contacts_created": 0,
-        "contact": { "id": 0, "name": supplier_name, "created": false },
+        "imported": imported,
+        "duplicates": duplicates,
+        "contacts_created": contacts_created_count,
+        "contact": { "id": contact_id_resolved, "name": contact_name, "created": contact_created },
     }))
 }
 
