@@ -528,6 +528,31 @@ fn cmd_init(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
             ));
         }
     }
+    // Validate --fiscal-year-end (MM-DD format)
+    if let Some(fye) = arg(argv, "--fiscal-year-end") {
+        let parts: Option<(&str, &str)> = fye.split_once('-');
+        let valid = match parts {
+            Some((m, d)) => {
+                let month: u32 = m.parse().unwrap_or(0);
+                let day: u32 = d.parse().unwrap_or(0);
+                (1..=12).contains(&month) && {
+                    let max_day = match month {
+                        2 => 29,
+                        4 | 6 | 9 | 11 => 30,
+                        _ => 31,
+                    };
+                    (1..=max_day).contains(&day)
+                }
+            }
+            None => false,
+        };
+        if !valid {
+            return Err(BukioError::new(
+                "INVALID_FISCAL_YEAR_END",
+                format!("'{fye}' is not a valid fiscal year end — use MM-DD format"),
+            ));
+        }
+    }
     let chart_len = profile["reporting"]["defaultChart"]
         .as_array()
         .map(|a| a.len())
@@ -1371,7 +1396,15 @@ fn cmd_bank_match_auto(
 ) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
-    let window: i64 = parse_i64(argv, "--window-days").unwrap_or(5);
+    let window: i64 = match arg(argv, "--window-days") {
+        None => 5,
+        Some(v) => v.parse::<i64>().map_err(|_| {
+            BukioError::new("INVALID_WINDOW", format!("invalid --window-days '{v}' — must be a non-negative integer"))
+        })?,
+    };
+    if window < 0 {
+        return Err(BukioError::new("INVALID_WINDOW", "--window-days must not be negative"));
+    }
     bukio::bank::auto_match(&db, window, actor, dry_run)
 }
 
@@ -1602,7 +1635,15 @@ fn cmd_recurring_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
     let db = open_existing(db_path)?;
     let kind = arg(argv, "--kind").unwrap_or_else(|| "entry".into());
     let desc = arg(argv, "--desc");
-    let day: u32 = arg(argv, "--day").and_then(|v| v.parse().ok()).unwrap_or(1);
+    let day: u32 = match arg(argv, "--day") {
+        None => 1,
+        Some(v) => v.parse::<u32>().map_err(|_| {
+            BukioError::new("INVALID_DATE", format!("invalid --day '{v}' — must be 1-28"))
+        })?,
+    };
+    if day == 0 || day > 28 {
+        return Err(BukioError::new("INVALID_DATE", "--day must be between 1 and 28"));
+    }
     let end = arg(argv, "--end");
     let runs = parse_i64(argv, "--runs").map(|v| v as i64);
     let reverse_previous = has_flag(argv, "--reverse-previous");
@@ -1637,7 +1678,18 @@ fn cmd_recurring_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
         // invoice kind — need contact + lines
         let contact_id: i64 =
             parse_i64(argv, "--contact").ok_or_else(|| missing_arg("--contact"))?;
-        let due_days = parse_i64(argv, "--due-days").map(|v| v as i64);
+        let due_days = match arg(argv, "--due-days") {
+            None => None,
+            Some(v) => {
+                let val = v.parse::<i64>().map_err(|_| {
+                    BukioError::new("INVALID_DUE_DAYS", format!("invalid --due-days '{v}' — must be a non-negative integer"))
+                })?;
+                if val < 0 {
+                    return Err(BukioError::new("INVALID_DUE_DAYS", "--due-days must not be negative"));
+                }
+                Some(val)
+            }
+        };
         let lines_raw = repeated(argv, "--lines");
         let items_raw = repeated(argv, "--items");
         let name = desc.clone().unwrap_or_else(|| "recurring invoice".into());
@@ -2878,7 +2930,15 @@ fn cmd_invoice_reminders(
     _dry_run: bool,
 ) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let within = parse_i64(argv, "--within-days").unwrap_or(30);
+    let within = match arg(argv, "--within-days") {
+        None => 30,
+        Some(v) => v.parse::<i64>().map_err(|_| {
+            BukioError::new("INVALID_WINDOW", format!("invalid --within-days '{v}' — must be a non-negative integer"))
+        })?,
+    };
+    if within < 0 {
+        return Err(BukioError::new("INVALID_WINDOW", "--within-days must not be negative"));
+    }
     let rows = bukio::invoice::list_invoices(&db, None, None)?;
     let overdue: Vec<Value> = rows
         .into_iter()
