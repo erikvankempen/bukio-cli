@@ -65,6 +65,7 @@ fn tool_defs() -> Vec<Value> {
         json!({"name": "vat_readout", "description": "VAT return fields 1a-5d", "inputSchema": {"type": "object", "properties": {"period": {"type": "string"}}, "required": ["period"]}}),
         json!({"name": "vat_book", "description": "book a VAT entry with postings", "inputSchema": {"type": "object", "properties": {"date": {"type": "string"}, "description": {"type": "string"}, "postings": {"type": "array", "items": {"type": "string"}}, "post": {"type": "boolean"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["date", "description", "postings"]}}),
         json!({"name": "asset_add", "description": "register an asset", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "purchase_date": {"type": "string"}, "purchase_price": {"type": "string"}, "depreciation_start": {"type": "string"}, "recognition_date": {"type": "string"}, "category": {"type": "string"}, "asset_account": {"type": "string"}, "expense_account": {"type": "string"}, "cum_dep": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["name", "purchase_date", "purchase_price"]}}),
+        json!({"name": "assets_run", "description": "book depreciation due for a period", "inputSchema": {"type": "object", "properties": {"period": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}}}),
         json!({"name": "invoice_pay", "description": "mark an invoice as paid", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "date": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["id", "date"]}}),
         json!({"name": "invoice_credit", "description": "create a credit note for an invoice", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["id"]}}),
         json!({"name": "invoice_finalize", "description": "finalize a draft invoice", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["id"]}}),
@@ -111,7 +112,61 @@ fn dispatch(db: &Connection, actor: &str, msg: &Value) -> Result<String> {
         "tools/call" => {
             let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let args = params.get("arguments").unwrap_or(&Value::Null);
-            match call_tool(db, actor, tool_name, args) {
+            // Effective actor: the tool call's `actor` arg wins, else the session actor
+            let eff_actor = arg_str(args, "actor").unwrap_or_else(|| actor.to_string());
+            // Validate actor up front (INVALID_ACTOR, same as CLI)
+            if !crate::actor::is_valid_actor(&eff_actor) {
+                let err = crate::actor::actor_error(Some(&eff_actor)).unwrap_or_else(|| {
+                    BukioError::new(
+                        "INVALID_ACTOR",
+                        format!("invalid actor '{eff_actor}'"),
+                    )
+                });
+                return Ok(rpc_response(id.clone(), rpc_error_content(&err.code, &err.message)));
+            }
+            // Mutating tools are signed by their actor (gate + audit attribution);
+            // BUKIO_MCP_READONLY refuses every mutating tool before signing.
+            let mutating = is_mutating_tool(tool_name);
+            if mutating {
+                if std::env::var("BUKIO_MCP_READONLY").is_ok() {
+                    return Ok(rpc_response(
+                        id.clone(),
+                        rpc_error_content(
+                            "MCP_READONLY",
+                            "this bukio MCP session is read-only (BUKIO_MCP_READONLY) — mutating tools are refused",
+                        ),
+                    ));
+                }
+                // Tier 0 sign gate: sign before the handler runs so the audit
+                // rows it records carry sig_status=verified (enforce refuses
+                // when no key material exists — dry-run included).
+                match crate::sign_gate::sign_tool_call(db, &eff_actor, tool_name, args) {
+                    Ok(sr) => {
+                        if let Some(s) = sr {
+                            crate::audit::set_pending_signature(Some(crate::audit::PendingSignature {
+                                digest_hash: Some(s.digest_hash.clone()),
+                                sig_keyid: Some(s.sig_keyid.clone()),
+                                sig_nonce: Some(s.sig_nonce.clone()),
+                                sig_ts: Some(s.sig_ts.clone()),
+                                sig: Some(s.sig.clone()),
+                                sig_status: s.sig_status.clone(),
+                                signed_args: Some(s.signed_args.clone()),
+                                signed_command: Some(s.signed_command.clone()),
+                            }));
+                        } else {
+                            crate::audit::set_pending_signature(None);
+                        }
+                    }
+                    Err(e) => {
+                        return Ok(rpc_response(id.clone(), rpc_error_content(&e.code, &e.message)));
+                    }
+                }
+            }
+            let result = call_tool(db, &eff_actor, tool_name, args);
+            if mutating {
+                crate::audit::set_pending_signature(None);
+            }
+            match result {
                 Ok(result) => Ok(rpc_response(id.clone(), rpc_content(result))),
                 Err(e) => {
                     if e.code == "UNKNOWN_TOOL" {
@@ -129,6 +184,30 @@ fn dispatch(db: &Connection, actor: &str, msg: &Value) -> Result<String> {
             &format!("method not found: {method}"),
         )),
     }
+}
+
+/// Tools that mutate the books — these are signed and refused in read-only mode.
+fn is_mutating_tool(tool: &str) -> bool {
+    matches!(
+        tool,
+        "entry_add"
+            | "entry_post"
+            | "entry_reverse"
+            | "vat_book"
+            | "asset_add"
+            | "assets_run"
+            | "invoice_pay"
+            | "invoice_credit"
+            | "invoice_finalize"
+            | "year_end_close"
+            | "fx_set"
+            | "contact_add"
+            | "invoice_import"
+            | "import_file"
+            | "import_contacts"
+            | "journal_import"
+            | "import_journal"
+    )
 }
 
 fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<Value> {
@@ -251,7 +330,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 }
                 let balanced = sum == 0;
                 return Ok(
-                    json!({"ok": true, "dry_run": true, "balanced": balanced, "date": date, "description": description, "postings": postings.iter().map(|p| json!({"code": p.code, "amount_cents": p.amount_cents})).collect::<Vec<_>>()}),
+                    json!({"ok": true, "mode": "dry-run", "balanced": balanced, "date": date, "description": description, "postings": postings.iter().map(|p| json!({"code": p.code, "amount_cents": p.amount_cents})).collect::<Vec<_>>()}),
                 );
             }
             let post = arg_bool(args, "post", false);
@@ -268,9 +347,9 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             )?;
             if post {
                 let posted = post_entry(db, entry.id, actor)?;
-                Ok(json!({"ok": true, "entry": posted}))
+                Ok(json!({"ok": true, "mode": "execute", "state": "posted", "entry_id": posted.id, "entry": posted}))
             } else {
-                Ok(json!({"ok": true, "entry": entry}))
+                Ok(json!({"ok": true, "mode": "execute", "state": "draft", "entry_id": entry.id, "entry": entry}))
             }
         }
         "entry_post" => {
@@ -283,7 +362,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 ));
             }
             let posted = post_entry(db, id, actor)?;
-            Ok(json!({"ok": true, "entry": posted}))
+            Ok(json!({"ok": true, "state": "posted", "entry": posted}))
         }
         "entry_reverse" => {
             let id =
@@ -347,9 +426,9 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             )?;
             if post {
                 let posted = post_entry(db, entry.id, actor)?;
-                Ok(json!({"ok": true, "entry": posted}))
+                Ok(json!({"ok": true, "mode": "execute", "state": "posted", "entry_id": posted.id, "entry": posted}))
             } else {
-                Ok(json!({"ok": true, "entry": entry}))
+                Ok(json!({"ok": true, "mode": "execute", "state": "draft", "entry_id": entry.id, "entry": entry}))
             }
         }
         "asset_add" => {
@@ -394,6 +473,19 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 false,
             )?;
             Ok(json!({"ok": true, "action": "assets.add", "asset": action}))
+        }
+        "assets_run" => {
+            let period = arg_str(args, "period").unwrap_or_else(|| {
+                chrono::Utc::now().format("%Y-%m").to_string()
+            });
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            let dry_run = mode != "execute";
+            let r = crate::assets::run_due(db, &period, actor, dry_run)?;
+            let mut data = r;
+            if let Some(o) = data.as_object_mut() {
+                o.insert("mode".to_string(), json!(if dry_run { "dry-run" } else { "execute" }));
+            }
+            Ok(data)
         }
         "invoice_pay" => {
             let id =
@@ -461,6 +553,14 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
         }
         "invoices" => {
             let status = arg_str(args, "status");
+            if let Some(ref s) = status {
+                if !["draft", "sent", "paid", "overdue", "void"].contains(&s.as_str()) {
+                    return Err(BukioError::new(
+                        "INVALID_STATUS",
+                        format!("status must be one of draft|sent|paid|overdue|void, got '{}'", s),
+                    ));
+                }
+            }
             if let Some(l) = args.get("limit") {
                 if !l.is_i64() || l.as_i64().unwrap_or(-1) < 0 {
                     return Err(BukioError::new(
@@ -512,8 +612,10 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
         }
         "audit" => {
             let limit = arg_i64(args, "limit").map(|l| l as usize).unwrap_or(50);
-            let r = crate::audit::list(db, None, None, limit as i64)?;
-            Ok(json!({"rows": r}))
+            let by = arg_str(args, "by");
+            let since = arg_str(args, "since");
+            let r = crate::audit::list(db, since.as_deref(), by.as_deref(), limit as i64)?;
+            Ok(json!({"entries": r}))
         }
         "vat_readout" => {
             let period = arg_str(args, "period")

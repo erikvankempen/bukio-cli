@@ -528,6 +528,65 @@ pub fn sign_command(
     }))
 }
 
+/// Sign an MCP tool call (args already JSON, no argv parsing).
+/// Mirrors `sign_command` for the MCP surface: cmd = `mcp:<tool>`,
+/// args = tool args minus the identity flag `actor`.
+pub fn sign_tool_call(
+    db: &Connection,
+    actor: &str,
+    tool: &str,
+    tool_args: &Value,
+) -> Result<Option<SignResult>> {
+    let cmd = format!("mcp:{tool}");
+    if is_signing_exempt(&cmd) {
+        return Ok(None);
+    }
+
+    let ts = now_iso();
+    let nonce = uuid_v4();
+    // Tool args minus the identity flag — the exact signed payload
+    let mut args = Map::new();
+    if let Some(obj) = tool_args.as_object() {
+        for (k, v) in obj {
+            if k != "actor" {
+                args.insert(k.clone(), v.clone());
+            }
+        }
+    }
+    let args = Value::Object(args);
+    let digest = build_digest(actor, &cmd, &args, &ts, &nonce);
+    let enforce = get_enforce(db);
+
+    let key = resolve_signing_key(actor, None, enforce)?;
+    let key = match key {
+        Some(k) => k,
+        None => return Ok(None), // record mode, no key
+    };
+
+    // Sign the digest
+    let sig = sign::sign(digest.as_bytes(), &key.key_pem)
+        .map_err(|e| BukioError::new("SIGN_ERROR", e))?;
+
+    // Verify the bundle against the registry
+    let verify = verify_signature_bundle(db, actor, &digest, &sig, &key.keyid, &ts, &nonce, enforce);
+
+    if !verify.ok {
+        let code = verify.code.unwrap_or("SIGNATURE_FAILED");
+        return Err(BukioError::new(code, message_for(code, actor)));
+    }
+
+    Ok(Some(SignResult {
+        digest_hash: digest,
+        sig_keyid: key.keyid,
+        sig_nonce: nonce,
+        sig_ts: ts,
+        sig,
+        sig_status: verify.status.to_string(),
+        signed_args: args,
+        signed_command: cmd,
+    }))
+}
+
 // --- Helpers ---
 
 fn message_for(code: &str, actor: &str) -> String {
