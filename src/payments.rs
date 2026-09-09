@@ -660,6 +660,177 @@ pub fn build_pain001(
         esc(msg_id), esc(created_iso), lines.len(), ctrl, esc(debit_name), esc(msg_id), lines.len(), ctrl, esc(batch_date), esc(debit_name), esc(debit_iban), txs.join("\n"))
 }
 
+/// pain.008.001.02 direct-debit initiation. One PmtInf per mandate scheme.
+/// Lines carry the debtor's mandate snapshot (mirrors JS buildPain008).
+pub fn build_pain008(
+    msg_id: &str,
+    created_iso: &str,
+    debit_name: &str,
+    debit_iban: &str,
+    batch_date: &str,
+    lines: &[Value],
+) -> String {
+    let total: i64 = lines
+        .iter()
+        .map(|l| l["amount_cents"].as_i64().unwrap_or(0))
+        .sum();
+    let ctrl = format!("{:.2}", total as f64 / 100.0);
+    let by_scheme = |scheme: &str| -> Vec<&Value> {
+        lines
+            .iter()
+            .filter(|l| l["scheme"].as_str().unwrap_or("core") == scheme)
+            .collect()
+    };
+    let tx_inf = |l: &Value, i: usize| -> String {
+        let e2e = l["reference"]
+            .as_str()
+            .map(|r| r.chars().take(35).collect::<String>())
+            .unwrap_or_else(|| format!("BUKIO{}", i + 1));
+        let amt = format!("{:.2}", l["amount_cents"].as_i64().unwrap_or(0) as f64 / 100.0);
+        let mandate_ref = l["mandate_ref"].as_str().unwrap_or("");
+        let mandate_date = l["mandate_date"].as_str().unwrap_or("");
+        let rmt = l["reference"]
+            .as_str()
+            .map(|r| format!("        <RmtInf><Ustrd>{}</Ustrd></RmtInf>\n", esc(r)))
+            .unwrap_or_default();
+        format!(
+            "      <DrctDbtTxInf>\n        <PmtId><EndToEndId>{}</EndToEndId></PmtId>\n        <InstdAmt Ccy=\"EUR\">{}</InstdAmt>\n        <DrctDbtTx><MndtRltdInf>\n          <MndtId>{}</MndtId>\n          <DtOfSgntr>{}</DtOfSgntr>\n        </MndtRltdInf></DrctDbtTx>\n        <DbtrAgt><FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId></DbtrAgt>\n        <Dbtr><Nm>{}</Nm></Dbtr>\n        <DbtrAcct><Id><IBAN>{}</IBAN></Id></DbtrAcct>\n{}\n      </DrctDbtTxInf>",
+            esc(&e2e),
+            amt,
+            esc(mandate_ref),
+            esc(mandate_date),
+            esc(l["name"].as_str().unwrap_or("")),
+            esc(l["iban"].as_str().unwrap_or("")),
+            rmt,
+        )
+    };
+    let pmt_inf = |scheme: &str, scheme_lines: &[&Value], idx: usize| -> String {
+        let sub_total: i64 = scheme_lines
+            .iter()
+            .map(|l| l["amount_cents"].as_i64().unwrap_or(0))
+            .sum();
+        let sub_ctrl = format!("{:.2}", sub_total as f64 / 100.0);
+        let txs: Vec<String> = scheme_lines
+            .iter()
+            .enumerate()
+            .map(|(i, l)| tx_inf(l, i))
+            .collect();
+        let pmt_inf_id = format!("{}{}", &msg_id.chars().take(34).collect::<String>(), idx);
+        let instr = if scheme == "b2b" { "B2B" } else { "CORE" };
+        format!(
+            "    <PmtInf>\n      <PmtInfId>{}</PmtInfId>\n      <PmtMtd>DD</PmtMtd>\n      <BtchBookg>true</BtchBookg>\n      <NbOfTxs>{}</NbOfTxs>\n      <CtrlSum>{}</CtrlSum>\n      <PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl><LclInstrm><Cd>{}</Cd></LclInstrm></PmtTpInf>\n      <ReqdColltnDt>{}</ReqdColltnDt>\n      <Cdtr><Nm>{}</Nm></Cdtr>\n      <CdtrAcct><Id><IBAN>{}</IBAN></Id></CdtrAcct>\n      <CdtrAgt><FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId></CdtrAgt>\n      <ChrgBr>SLEV</ChrgBr>\n{}\n    </PmtInf>",
+            esc(&pmt_inf_id),
+            scheme_lines.len(),
+            sub_ctrl,
+            instr,
+            esc(batch_date),
+            esc(debit_name),
+            esc(debit_iban),
+            txs.join("\n"),
+        )
+    };
+    let schemes: Vec<&str> = ["core", "b2b"]
+        .iter()
+        .copied()
+        .filter(|s| !by_scheme(s).is_empty())
+        .collect();
+    let pmt_infs: Vec<String> = schemes
+        .iter()
+        .enumerate()
+        .map(|(i, s)| pmt_inf(s, &by_scheme(s), i + 1))
+        .collect();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:pain.008.001.02\">\n  <CstmrDrctDbtInitn>\n    <GrpHdr>\n      <MsgId>{}</MsgId>\n      <CreDtTm>{}</CreDtTm>\n      <NbOfTxs>{}</NbOfTxs>\n      <CtrlSum>{}</CtrlSum>\n      <InitgPty><Nm>{}</Nm></InitgPty>\n    </GrpHdr>\n{}\n  </CstmrDrctDbtInitn>\n</Document>\n",
+        esc(msg_id),
+        esc(created_iso),
+        lines.len(),
+        ctrl,
+        esc(debit_name),
+        pmt_infs.join("\n"),
+    )
+}
+
+/// Export a draft batch as SEPA XML: pain.001 for transfer, pain.008.001.02
+/// for direct-debit. Marks the batch exported (mirrors JS exportPaymentBatch).
+pub fn export_payment_batch(
+    db: &Connection,
+    id: i64,
+    actor: &str,
+    dry_run: bool,
+) -> Result<Value> {
+    let batch = serialize_batch(db, id)?;
+    if batch.get("status").and_then(|v| v.as_str()) != Some("draft") {
+        return Err(payments_error(
+            "BATCH_ALREADY_EXPORTED",
+            format!("batch {id} is already exported — exporting again could double-pay; create a new batch instead"),
+        ));
+    }
+    let is_dd = batch.get("batch_kind").and_then(|v| v.as_str()) == Some("direct_debit");
+    let lines = batch["lines"].as_array().cloned().unwrap_or_default();
+    let msg_id = format!(
+        "BUKIO{}{}",
+        chrono::Utc::now()
+            .format("%Y%m%d%H%M%S")
+            .to_string()
+            .chars()
+            .take(14)
+            .collect::<String>(),
+        id.to_string().chars().rev().take(16).collect::<String>().chars().rev().collect::<String>()
+    );
+    let created_iso = chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+    let debit_name = batch.get("debit_name").and_then(|v| v.as_str()).unwrap_or("");
+    let debit_iban = batch.get("debit_iban").and_then(|v| v.as_str()).unwrap_or("");
+    let batch_date = batch.get("batch_date").and_then(|v| v.as_str()).unwrap_or("");
+    let (schema, xml) = if is_dd {
+        (
+            "pain.008.001.02".to_string(),
+            build_pain008(&msg_id, &created_iso, debit_name, debit_iban, batch_date, &lines),
+        )
+    } else {
+        (
+            "pain.001.001.03".to_string(),
+            build_pain001(&msg_id, &created_iso, debit_name, debit_iban, batch_date, &lines, "001.03"),
+        )
+    };
+    let file_hash = format!("{:x}", {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        use std::io::Write;
+        h.write_all(xml.as_bytes()).ok();
+        h.finalize()
+    });
+    if dry_run {
+        return Ok(json!({
+            "action": "payments.batch.export", "batch_id": id, "batch_kind": batch.get("batch_kind"),
+            "schema": schema, "msg_id": msg_id, "lines": lines.len(), "total_cents": batch.get("total_cents"),
+            "file_hash": file_hash, "xml": xml, "dryRun": true,
+        }));
+    }
+    db.execute(
+        "UPDATE payment_batches SET status = 'exported', msg_id = ?1, file_hash = ?2, schema = ?3, exported_at = ?4 WHERE id = ?5",
+        rusqlite::params![msg_id, file_hash, schema, created_iso, id],
+    )
+    .map_err(sql_err)?;
+    record(
+        db,
+        RecordArgs {
+            actor,
+            action: "payments.batch.export",
+            command: Some("payments batch export"),
+            args: Some(json!({"batch_id": id, "kind": batch.get("batch_kind"), "msg_id": msg_id, "lines": lines.len(), "total_cents": batch.get("total_cents"), "file_hash": &file_hash[..12.min(file_hash.len())], "schema": schema})),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
+    Ok(json!({
+        "action": "payments.batch.export", "batch_id": id, "status": "exported",
+        "msg_id": msg_id, "file_hash": file_hash, "schema": schema,
+        "xml": xml, "lines": lines.len(), "total_cents": batch.get("total_cents"),
+    }))
+}
+
 pub fn delete_payment_batch(db: &Connection, id: i64, actor: &str, dry_run: bool) -> Result<Value> {
     let batch = db
         .query_row(

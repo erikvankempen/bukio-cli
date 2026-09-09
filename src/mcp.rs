@@ -75,6 +75,10 @@ fn tool_defs() -> Vec<Value> {
         json!({"name": "import_file", "description": "import opening balances or journal CSV", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}, "kind": {"type": "string"}, "date": {"type": "string"}, "create_missing": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["file", "kind"]}}),
         json!({"name": "import_contacts", "description": "import contacts from UBL XML", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}, "mode": {"type": "string"}}, "required": ["file"]}}),
         json!({"name": "invoice_import", "description": "import a UBL invoice as a payable", "inputSchema": {"type": "object", "properties": {"file_path": {"type": "string"}, "create_missing": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["file_path"]}}),
+        json!({"name": "payments_mandate_add", "description": "register a signed SEPA direct-debit mandate for a contact (core = 8-week refund right, b2b = none)", "inputSchema": {"type": "object", "properties": {"contact_id": {"type": "integer"}, "mandate_ref": {"type": "string"}, "mandate_date": {"type": "string"}, "scheme": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["contact_id", "mandate_ref"]}}),
+        json!({"name": "payments_mandate_list", "description": "list SEPA direct-debit mandates (optionally per contact)", "inputSchema": {"type": "object", "properties": {"contact_id": {"type": "integer"}}}}),
+        json!({"name": "payments_batch_create", "description": "create a SEPA batch: type transfer (pain.001) or direct_debit (pain.008, each line needs a contact mandate)", "inputSchema": {"type": "object", "properties": {"payable_ids": {"type": "array", "items": {"type": "integer"}}, "batch_date": {"type": "string"}, "type": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}}}),
+        json!({"name": "payments_batch_export", "description": "export a draft batch as SEPA XML (pain.001 for transfer, pain.008.001.02 for direct-debit) — one export per batch, marks it exported", "inputSchema": {"type": "object", "properties": {"batch_id": {"type": "integer"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["batch_id"]}}),
     ]
 }
 
@@ -202,6 +206,9 @@ fn is_mutating_tool(tool: &str) -> bool {
             | "year_end_close"
             | "fx_set"
             | "contact_add"
+            | "payments_mandate_add"
+            | "payments_batch_create"
+            | "payments_batch_export"
             | "invoice_import"
             | "import_file"
             | "import_contacts"
@@ -609,6 +616,89 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 false,
             )?;
             Ok(json!({"ok": true, "contact": r}))
+        }
+        "payments_mandate_add" => {
+            let contact_id = arg_i64(args, "contact_id")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "contact_id required"))?;
+            let mandate_ref = arg_str(args, "mandate_ref")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "mandate_ref required"))?;
+            let scheme = arg_str(args, "scheme").unwrap_or_else(|| "core".into());
+            let mandate_date = arg_str(args, "mandate_date");
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            let dry_run = mode != "execute";
+            let r = crate::payments::add_mandate(
+                db,
+                contact_id,
+                &mandate_ref,
+                mandate_date.as_deref(),
+                &scheme,
+                actor,
+                dry_run,
+            )?;
+            if dry_run {
+                return Ok(r);
+            }
+            Ok(json!({
+                "action": "payments.mandate.add", "mode": "execute",
+                "mandate_id": r["id"], "contact_id": r["contact_id"],
+                "mandate_ref": r["mandate_ref"], "scheme": r["scheme"],
+            }))
+        }
+        "payments_mandate_list" => {
+            let contact_id = arg_i64(args, "contact_id");
+            let rows = crate::payments::list_mandates(db, contact_id)?;
+            Ok(json!({"mandates": rows}))
+        }
+        "payments_batch_create" => {
+            let payable_ids: Vec<i64> = args
+                .get("payable_ids")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_i64()).collect())
+                .unwrap_or_default();
+            let batch_date = arg_str(args, "batch_date");
+            let kind_raw = arg_str(args, "type").unwrap_or_else(|| "transfer".into());
+            let kind = if kind_raw == "direct_debit" { "direct_debit".to_string() } else { "transfer".to_string() };
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            let dry_run = mode != "execute";
+            let r = crate::payments::create_payment_batch(
+                db,
+                batch_date.as_deref(),
+                None,
+                &[],
+                &payable_ids,
+                &kind,
+                actor,
+                dry_run,
+            )?;
+            if dry_run {
+                let mut plan = r;
+                if let Some(o) = plan.as_object_mut() {
+                    o.insert("mode".to_string(), json!("dry-run"));
+                }
+                return Ok(plan);
+            }
+            let batch_id = r["id"].as_i64().unwrap_or(0);
+            Ok(json!({
+                "action": "payments.batch.create", "mode": "execute",
+                "batch_id": batch_id, "batch_kind": r["batch_kind"],
+                "total_cents": r["total_cents"], "lines": r["lines"].as_array().map(|a| a.len()).unwrap_or(0),
+                "status": r["status"],
+            }))
+        }
+        "payments_batch_export" => {
+            let id = arg_i64(args, "batch_id")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "batch_id required"))?;
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            let dry_run = mode != "execute";
+            let r = crate::payments::export_payment_batch(db, id, actor, dry_run)?;
+            if dry_run {
+                return Ok(r);
+            }
+            Ok(json!({
+                "action": "payments.batch.export", "mode": "execute",
+                "batch_id": r["batch_id"], "schema": r["schema"],
+                "msg_id": r["msg_id"], "status": r["status"], "xml": r["xml"],
+            }))
         }
         "audit" => {
             let limit = arg_i64(args, "limit").map(|l| l as usize).unwrap_or(50);
