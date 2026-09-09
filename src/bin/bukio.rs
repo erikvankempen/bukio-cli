@@ -2191,7 +2191,8 @@ fn cmd_fx_fetch(argv: &[String]) -> Result<Value> {
 fn cmd_mcp(db_path: &str, actor: &str) -> Result<Value> {
     ensure_db_exists(db_path)?;
     bukio::mcp::run(db_path, actor)?;
-    Ok(json!({ "status": "ok" }))
+    // MCP server handles all I/O — no extra output after run() returns
+    std::process::exit(0);
 }
 
 // ── compliance ─────────────────────────────────────────────────────────────
