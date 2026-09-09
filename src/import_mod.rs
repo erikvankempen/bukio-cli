@@ -616,56 +616,225 @@ pub fn read_import_file(path: &str) -> Result<String> {
 // XAF import (XML Auditfile Financieel 4.0)
 // ---------------------------------------------------------------------------
 
+fn valid_version(s: &str) -> bool {
+    if s == "4" {
+        return true;
+    }
+    if let Some(rest) = s.strip_prefix("4.") {
+        return !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit());
+    }
+    false
+}
+
 /// Import an XAF 4.0 XML file — creates accounts and journal entries.
 pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -> Result<Value> {
     use quick_xml::events::Event;
     use quick_xml::Reader;
+    use std::collections::HashSet;
 
     let mut reader = Reader::from_str(xml_text);
     reader.config_mut().trim_text(true);
-
     let mut buf = Vec::new();
-    let mut in_tag = String::new();
+
+    // --- Streaming state ---
+    let mut root_element = String::new();
+    let mut version = String::new();
+    let mut company_id = String::new();
+    let mut company_name = String::new();
+    let mut fiscal_year = String::new();
+    let mut tag_stack: Vec<String> = Vec::new();
+    let mut in_header = false;
+    let mut in_rekeningen = false;
     let mut in_mutatie = false;
     let mut in_boeking = false;
-    let mut company_name = String::new();
-    let mut company_reg = String::new();
-    let mut fiscal_year = String::new();
+
+    // Rekeningen
+    let mut file_codes: HashSet<String> = HashSet::new();
+    let mut seen_rekening_codes: HashSet<String> = HashSet::new();
     let mut has_accounts = false;
+
+    // Current mutatie
+    let mut cur_boekstuk = String::new();
+    let mut cur_date = String::new();
+    let mut boekingen_in_mutation = 0i64;
+
+    // Current boeking
+    let mut cur_rekening = String::new();
+    let mut cur_tegenrekening = String::new();
+    let mut cur_bedrag = String::new();
+
+    // Counters
     let mut mutations_count = 0i64;
-    let mut boekingen_count = 0i64;
     let mut errors: Vec<String> = Vec::new();
+
+    // Post-validation
     let mut imported = 0i64;
     let mut accounts_created: Vec<Value> = Vec::new();
     let mut duplicates = 0i64;
     let mut ignored_btw_codes: Vec<String> = Vec::new();
+    let mut company_mismatch: Vec<String> = Vec::new();
 
+    // --- Phase 1: Stream-parse + in-stream validation ---
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                tag_stack.push(tag.clone());
                 match tag.as_str() {
-                    "Company" | "Header" => in_tag = tag,
-                    "Rekeningen" => has_accounts = true,
-                    "Mutatie" => { in_mutatie = true; mutations_count += 1; }
-                    "Boeking" => { in_boeking = true; boekingen_count += 1; }
+                    "Xaf" | "XAF" | "AuditFile" => {
+                        if root_element.is_empty() {
+                            root_element = tag;
+                        }
+                    }
+                    "XafHeader" | "Header" => in_header = true,
+                    "Rekeningen" => {
+                        in_rekeningen = true;
+                        has_accounts = true;
+                    }
+                    "Mutatie" => {
+                        in_mutatie = true;
+                        mutations_count += 1;
+                        cur_boekstuk.clear();
+                        cur_date.clear();
+                        boekingen_in_mutation = 0;
+                    }
+                    "Boeking" => {
+                        in_boeking = true;
+                        boekingen_in_mutation += 1;
+                        cur_rekening.clear();
+                        cur_tegenrekening.clear();
+                        cur_bedrag.clear();
+                    }
                     _ => {}
+                }
+            }
+            Ok(Event::Text(t)) => {
+                let text = t.unescape().unwrap_or_default().to_string();
+                if let Some(tag) = tag_stack.last() {
+                    match tag.as_str() {
+                        // Header fields
+                        "Version" if in_header => version = text,
+                        "CompanyID" if in_header => company_id = text,
+                        "CompanyName" if in_header => company_name = text,
+                        "FiscalYear" if in_header => fiscal_year = text,
+                        // Rekeningen section
+                        "RekeningCode" if in_rekeningen && !in_mutatie => {
+                            let code = text.trim().to_string();
+                            if !valid_code(&code) {
+                                errors.push(format!(
+                                    "INVALID_CODE: rekening code '{code}' must be 1-6 digits"
+                                ));
+                            } else if seen_rekening_codes.contains(&code) {
+                                errors.push(format!(
+                                    "DUPLICATE_CODE: rekening {code} appears twice in the audit file"
+                                ));
+                            } else {
+                                seen_rekening_codes.insert(code.clone());
+                                file_codes.insert(code);
+                            }
+                        }
+                        // Mutatie fields
+                        "Boekstuknummer" if in_mutatie && !in_boeking => {
+                            cur_boekstuk = text.trim().to_string();
+                        }
+                        "Datum" | "Factuurdatum" if in_mutatie && !in_boeking => {
+                            cur_date = text.trim().to_string();
+                        }
+                        // Boeking fields
+                        "RekeningCode" if in_boeking => {
+                            cur_rekening = text.trim().to_string();
+                        }
+                        "TegenrekeningCode" if in_boeking => {
+                            cur_tegenrekening = text.trim().to_string();
+                        }
+                        "Bedrag" if in_boeking => {
+                            cur_bedrag = text.trim().to_string();
+                        }
+                        _ => {}
+                    }
                 }
             }
             Ok(Event::End(e)) => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                tag_stack.pop();
                 match tag.as_str() {
+                    "XafHeader" | "Header" => in_header = false,
+                    "Rekeningen" => in_rekeningen = false,
+                    "Boeking" => {
+                        let boekstuk_label = if cur_boekstuk.is_empty() {
+                            "?"
+                        } else {
+                            &cur_boekstuk
+                        };
+                        // Validate RekeningCode
+                        for code in [&cur_rekening, &cur_tegenrekening] {
+                            let c = code.trim();
+                            if c.is_empty() {
+                                // TegenrekeningCode can be empty in some XAF files
+                                if code == &cur_rekening {
+                                    errors.push(format!(
+                                        "INVALID_CODE: '' must be 1-6 digits (mutatie '{boekstuk_label}')"
+                                    ));
+                                }
+                                continue;
+                            }
+                            if !valid_code(c) {
+                                errors.push(format!(
+                                    "INVALID_CODE: '{c}' must be 1-6 digits (mutatie '{boekstuk_label}')"
+                                ));
+                            } else if !file_codes.contains(c)
+                                && get_account_by_code(db, c).is_none()
+                            {
+                                errors.push(format!(
+                                    "RECORDING_NOT_FOUND: rekening {c} (mutatie '{boekstuk_label}') is not in <Rekeningen> nor in the chart"
+                                ));
+                            }
+                        }
+                        // Validate Bedrag
+                        match parse_import_amount(&cur_bedrag) {
+                            Ok(cents) if cents == 0 => {
+                                errors.push(format!(
+                                    "INVALID_AMOUNT: mutatie '{boekstuk_label}' bedrag must be non-zero"
+                                ));
+                            }
+                            Err(e) => {
+                                errors.push(format!(
+                                    "{}: mutatie '{boekstuk_label}' bedrag '{}'",
+                                    e.code, &cur_bedrag
+                                ));
+                            }
+                            _ => {}
+                        }
+                        in_boeking = false;
+                    }
                     "Mutatie" => {
-                        if in_mutatie && boekingen_count == 0 {
-                            errors.push("NO_BOEKINGEN: mutatie has no <Boeking> rows".into());
+                        let boekstuk_label = if cur_boekstuk.is_empty() {
+                            "?"
+                        } else {
+                            &cur_boekstuk
+                        };
+                        if cur_boekstuk.is_empty() {
+                            errors.push(
+                                "BOEKSTUK_REQUIRED: every <Mutatie> needs a <Boekstuknummer>"
+                                    .into(),
+                            );
+                        }
+                        if cur_date.is_empty() || !valid_date(&cur_date) {
+                            errors.push(format!(
+                                "INVALID_DATE: mutatie '{boekstuk_label}' date '{}' must be yyyy-mm-dd",
+                                if cur_date.is_empty() { "(missing)" } else { &cur_date }
+                            ));
+                        }
+                        if boekingen_in_mutation == 0 {
+                            errors.push(format!(
+                                "NO_BOEKINGEN: mutatie '{boekstuk_label}' has no <Boeking> rows"
+                            ));
                         }
                         in_mutatie = false;
-                        boekingen_count = 0;
+                        boekingen_in_mutation = 0;
                     }
-                    "Boeking" => in_boeking = false,
                     _ => {}
                 }
-                in_tag.clear();
             }
             Ok(Event::Eof) => break,
             Err(_) => break,
@@ -674,33 +843,88 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
         buf.clear();
     }
 
-    // Validate: basic XAF structure
+    // --- Phase 2: Post-stream validation ---
+    // Root element
+    if root_element.is_empty() {
+        errors.push(
+            "root element must be <Xaf> (Belastingdienst) or <AuditFile> (general-ledger export)"
+                .into(),
+        );
+    } else if root_element == "AuditFile" || root_element == "XAF" {
+        errors.push(format!(
+            "alternate root <{}> not yet supported — use <Xaf> format",
+            root_element
+        ));
+    }
+    // Version
+    if !valid_version(&version) {
+        errors.push(format!(
+            "unsupported audit file version '{}' — expected 4.x",
+            if version.is_empty() {
+                "(missing)"
+            } else {
+                &version
+            }
+        ));
+    }
+    // Company KVK cross-check
+    let company_row: Option<(String, String)> = db
+        .prepare("SELECT name, registration_id FROM company WHERE id = 1")
+        .ok()
+        .and_then(|mut stmt| {
+            stmt.query_row([], |row| {
+                Ok((
+                    row.get::<_, String>(0).unwrap_or_default(),
+                    row.get::<_, String>(1).unwrap_or_default(),
+                ))
+            })
+            .ok()
+        });
+    if let Some((db_name, db_reg)) = company_row {
+        let file_kvk = company_id.trim();
+        let file_name = company_name.trim();
+        if !file_kvk.is_empty() && !db_reg.is_empty() && file_kvk != db_reg {
+            errors.push(format!(
+                "COMPANY_MISMATCH: audit file is for {file_kvk} ({file_name}), database is for {db_reg} ({db_name})"
+            ));
+        }
+        if !file_kvk.is_empty() && db_reg.is_empty() {
+            company_mismatch.push(format!("database has no KVK; file is for {file_kvk}"));
+        }
+        if !file_name.is_empty() && !db_name.is_empty() && file_name != db_name {
+            company_mismatch.push(format!(
+                "company name differs: file '{file_name}' vs database '{db_name}'"
+            ));
+        }
+    }
+    // Section presence
+    if !has_accounts && mutations_count > 0 {
+        errors.push("XAF has mutations but no <Rekeningen> section — nothing imported".into());
+    }
+
+    // --- Phase 3: Report ---
     if !errors.is_empty() {
         return Err(import_err(
             "IMPORT_VALIDATION_FAILED",
-            format!("XAF validation: {} problem(s) — nothing imported", errors.len()),
-        ));
-    }
-    // Validate: must have accounts section
-    if !has_accounts && mutations_count > 0 {
-        return Err(import_err(
-            "IMPORT_VALIDATION_FAILED",
-            "XAF has mutations but no <Rekeningen> section — nothing imported",
+            format!(
+                "XAF validation: {} problem(s) — nothing imported",
+                errors.len()
+            ),
         ));
     }
 
     if dry_run {
         return Ok(json!({
             "dryRun": true,
-            "company": { "name": company_name, "registration_id": company_reg },
+            "company": { "name": company_name, "registration_id": company_id },
             "fiscal_year": fiscal_year,
-            "rekeningen": if has_accounts { mutations_count } else { 0 },
+            "rekeningen": file_codes.len() as i64,
             "mutaties": mutations_count,
             "accounts_to_create": 0,
             "accounts_to_rename": [],
             "duplicates": duplicates,
             "ignored_btw_codes": ignored_btw_codes,
-            "company_mismatch": [],
+            "company_mismatch": company_mismatch,
             "accounts_created": [],
             "accounts_updated": [],
             "accounts_rgs_backfilled": [],
@@ -708,7 +932,7 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
         }));
     }
 
-    // For now, return basic structure — full import is complex
+    // Full import (unchanged stub for now)
     Ok(json!({
         "imported": imported,
         "duplicates": duplicates,

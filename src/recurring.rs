@@ -1102,7 +1102,8 @@ mod tests {
             false,
         )
         .unwrap();
-        let item_spec = json!({ "contact_id": 1, "lines": [], "items": ["1:2@140.00"], "due_days": 14 });
+        let item_spec =
+            json!({ "contact_id": 1, "lines": [], "items": ["1:2@140.00"], "due_days": 14 });
         let tpl2 = create_template(
             &d,
             "SaaS items",

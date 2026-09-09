@@ -109,7 +109,10 @@ fn parse_life_months(argv: &[String]) -> Result<i64> {
     match arg(argv, "--life-months") {
         None => Ok(60),
         Some(v) => v.parse::<i64>().map_err(|_| {
-            BukioError::new("INVALID_LIFE", format!("invalid --life-months '{v}' — must be a positive integer"))
+            BukioError::new(
+                "INVALID_LIFE",
+                format!("invalid --life-months '{v}' — must be a positive integer"),
+            )
         }),
     }
 }
@@ -1866,8 +1869,17 @@ fn cmd_recurring_run(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
     // Text rendering for non-json mode (matches JS CLI output)
     let json_mode = has_flag(argv, "--json");
     if !json_mode {
-        let total: usize = result["templates"].as_array().map_or(0, |t| t.iter().map(|t| t["runs"].as_array().map_or(0, |r| r.len())).sum());
-        println!("recurring run: {} period(s) across {} template(s){}", total, result["templates"].as_array().map_or(0, |t| t.len()), if dry_run { " (dry run)" } else { "" });
+        let total: usize = result["templates"].as_array().map_or(0, |t| {
+            t.iter()
+                .map(|t| t["runs"].as_array().map_or(0, |r| r.len()))
+                .sum()
+        });
+        println!(
+            "recurring run: {} period(s) across {} template(s){}",
+            total,
+            result["templates"].as_array().map_or(0, |t| t.len()),
+            if dry_run { " (dry run)" } else { "" }
+        );
         for t in result["templates"].as_array().unwrap_or(&vec![]) {
             for run in t["runs"].as_array().unwrap_or(&vec![]) {
                 if let Some(invoice) = run.get("invoice") {
@@ -1880,7 +1892,10 @@ fn cmd_recurring_run(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
                         let kind = g["kind"].as_str().unwrap_or("entry");
                         if kind == "invoice" {
                             let date = g["invoice"]["date"].as_str().unwrap_or("?");
-                            println!("  {}  → draft invoice #{} (finalize to book & number)", date, g["invoice"]["id"]);
+                            println!(
+                                "  {}  → draft invoice #{} (finalize to book & number)",
+                                date, g["invoice"]["id"]
+                            );
                         } else {
                             let date = g["entry"]["date"].as_str().unwrap_or("?");
                             let id = g["entry"]["id"].as_i64().unwrap_or(0);
@@ -1891,7 +1906,10 @@ fn cmd_recurring_run(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
                 } else {
                     // dry-run plan entry
                     let kind = run["kind"].as_str().unwrap_or("entry");
-                    let date = run.get("entry").and_then(|e| e["date"].as_str()).unwrap_or("?");
+                    let date = run
+                        .get("entry")
+                        .and_then(|e| e["date"].as_str())
+                        .unwrap_or("?");
                     if kind == "reversal" {
                         println!("  {}  → reversal of previous entry (plan)", date);
                     } else {
@@ -2463,8 +2481,11 @@ fn cmd_asset_register(argv: &[String], db_path: &str, actor: &str) -> Result<Val
             for a in &assets {
                 lines.push(format!(
                     "{},{},{},{},{},{},{},{}",
-                    a["id"], a["name"], a.get("category").unwrap_or(&serde_json::Value::Null),
-                    a["status"], a["purchase_date"],
+                    a["id"],
+                    a["name"],
+                    a.get("category").unwrap_or(&serde_json::Value::Null),
+                    a["status"],
+                    a["purchase_date"],
                     bukio::money::format_amount(a["purchase_price_cents"].as_i64().unwrap_or(0)),
                     bukio::money::format_amount(a["total_cum_dep_cents"].as_i64().unwrap_or(0)),
                     bukio::money::format_amount(a["book_value_cents"].as_i64().unwrap_or(0)),

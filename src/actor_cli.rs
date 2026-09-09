@@ -300,7 +300,9 @@ pub fn cmd_unlock(actor: &str, ttl_hours: Option<u64>) -> Result<Value> {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
     }
-    Ok(json!({"ok": true, "actor": actor, "sessionFile": path.display().to_string(), "ttl_hours": ttl, "expires": expires.to_rfc3339()}))
+    Ok(
+        json!({"ok": true, "actor": actor, "sessionFile": path.display().to_string(), "ttl_hours": ttl, "expires": expires.to_rfc3339()}),
+    )
 }
 
 /// Lock: remove session.
