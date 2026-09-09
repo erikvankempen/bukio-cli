@@ -132,8 +132,11 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             Ok(json!({"ok": true, "data": r}))
         }
         "pnl" => {
-            let year =
-                arg_str(args, "year").unwrap_or_else(|| crate::dates::today_iso()[..4].to_string());
+            let year = arg_str(args, "year")
+                .unwrap_or_else(|| crate::dates::today_iso()[..4].to_string());
+            if year.len() != 4 || !year.chars().all(|c| c.is_ascii_digit()) {
+                return Err(BukioError::new("INVALID_YEAR", format!("year '{year}' must be YYYY")));
+            }
             let from = format!("{year}-01-01");
             let to = format!("{year}-12-31");
             let r = crate::reports::pnl(db, &from, &to)?;
@@ -147,13 +150,16 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             }
             let from = format!("{year}-01-01");
             let to = format!("{year}-12-31");
-            let limit_raw = args.get("limit").and_then(|v| v.as_i64());
-            if let Some(l) = limit_raw {
+            let limit_raw = args.get("limit");
+            if let Some(lr) = limit_raw {
+                let l = lr.as_i64().ok_or_else(|| {
+                    BukioError::new("INVALID_LIMIT", format!("limit must be a non-negative integer, got '{}'", lr))
+                })?;
                 if l < 0 {
                     return Err(BukioError::new("INVALID_LIMIT", format!("limit must be non-negative, got '{l}'")));
                 }
             }
-            let limit = limit_raw.unwrap_or(500);
+            let limit = limit_raw.and_then(|v| v.as_i64()).unwrap_or(500);
             // fetch limit+1 to detect truncation
             let all_rows = crate::reports::journal(db, &from, &to, Some(limit + 1))?;
             let truncated = all_rows.len() as i64 > limit;
@@ -179,12 +185,10 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                     let parts: Vec<&str> = s.splitn(2, ':').collect();
                     if parts.len() == 2 {
                         let code = parts[0].to_string();
-                        let amount: i64 = parts[1].parse().map_err(|_| {
-                            BukioError::new("INVALID_AMOUNT", format!("bad amount in '{s}'"))
-                        })?;
+                        let amount_cents = crate::money::parse_amount(parts[1])?;
                         postings.push(PostingSpec {
                             code,
-                            amount_cents: amount,
+                            amount_cents,
                             cost_center_code: None,
                         });
                     }
@@ -195,7 +199,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 return Err(BukioError::new("INVALID_DATE", format!("date '{date}' must be YYYY-MM-DD")));
             }
             // Dry-run: validate without creating
-            let mode = arg_str(args, "mode").unwrap_or_default();
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
             if mode == "dry-run" {
                 if postings.len() < 2 {
                     return Err(BukioError::new("TOO_FEW_POSTINGS", "an entry needs at least 2 postings"));
@@ -204,7 +208,8 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 if sum != 0 {
                     return Err(BukioError::new("UNBALANCED", format!("postings do not sum to zero (sum = {sum})")));
                 }
-                return Ok(json!({"ok": true, "dry_run": true, "date": date, "description": description, "postings": postings.iter().map(|p| json!({"code": p.code, "amount_cents": p.amount_cents})).collect::<Vec<_>>()}));
+                let balanced = sum == 0;
+                return Ok(json!({"ok": true, "dry_run": true, "balanced": balanced, "date": date, "description": description, "postings": postings.iter().map(|p| json!({"code": p.code, "amount_cents": p.amount_cents})).collect::<Vec<_>>()}));
             }
             let post = arg_bool(args, "post", false);
             let entry = create_entry(
@@ -213,7 +218,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                     date: &date,
                     description: &description,
                     postings,
-                    source: "mcp",
+                    source: "manual",
                     source_ref: None,
                     actor,
                 },
@@ -235,7 +240,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             let id =
                 arg_i64(args, "id").ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
             let reason = arg_str(args, "reason").unwrap_or_default();
-            let mode = arg_str(args, "mode").unwrap_or_default();
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
             if mode == "dry-run" {
                 // Validate entry exists
                 if crate::entries::get_entry(db, id).is_none() {
@@ -262,12 +267,10 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                     let parts: Vec<&str> = s.splitn(2, ':').collect();
                     if parts.len() == 2 {
                         let code = parts[0].to_string();
-                        let amount: i64 = parts[1].parse().map_err(|_| {
-                            BukioError::new("INVALID_AMOUNT", format!("bad amount in '{s}'"))
-                        })?;
+                        let amount_cents = crate::money::parse_amount(parts[1])?;
                         postings.push(PostingSpec {
                             code,
-                            amount_cents: amount,
+                            amount_cents,
                             cost_center_code: None,
                         });
                     }
@@ -287,7 +290,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                     date: &date,
                     description: &description,
                     postings,
-                    source: "mcp",
+                    source: "manual",
                     source_ref: None,
                     actor,
                 },
