@@ -776,7 +776,13 @@ pub fn auto_match(db: &Connection, window_days: i64, actor: &str, dry_run: bool)
                         rusqlite::params![tx_date_str, desc, format!("tx:{}", tx_id), actor],
                     ).map_err(sql_err)?;
                     let entry_id: i64 = tx_ref.last_insert_rowid();
-                    let debtors_code = "1300";
+                    // Look up debtors account from profile
+                    let debtors_code: String = {
+                        let profile = crate::accounts::resolve_profile(&tx_ref).ok();
+                        profile
+                            .and_then(|p| p["reporting"]["debtorsAccount"].as_str().map(String::from))
+                            .unwrap_or_else(|| "1200".into())
+                    };
                     let bank_acct_id: i64 = tx_ref.query_row(
                         "SELECT id FROM accounts WHERE code = ?1",
                         [&account_code],
@@ -802,7 +808,7 @@ pub fn auto_match(db: &Connection, window_days: i64, actor: &str, dry_run: bool)
                     ).map_err(sql_err)?;
                     tx_ref.execute(
                         "INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
-                         VALUES (?1, 'invoice', ?2, 'invoice', 0.95, ?3)",
+                         VALUES (?1, 'invoice', ?2, 'exact', 0.95, ?3)",
                         rusqlite::params![tx_id, invoice_id, actor],
                     ).map_err(sql_err)?;
                 } else {
