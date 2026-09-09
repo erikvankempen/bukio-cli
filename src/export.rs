@@ -255,8 +255,18 @@ fn build_faia_b(
         ));
     }
     let company = db.query_row("SELECT * FROM company WHERE id = 1", [], |r| {
-        Ok(json!({"name": r.get::<_, Option<String>>(1)?, "registration_id": r.get::<_, Option<String>>(2)?, "tax_id": r.get::<_, Option<String>>(5)?, "address": r.get::<_, Option<String>>(14)?, "city": r.get::<_, Option<String>>(15)?, "postal_code": r.get::<_, Option<String>>(16)?, "base_currency": r.get::<_, Option<String>>(19)?}))
-    }).map_err(|_| export_error("NO_COMPANY", "no company initialised"))?;
+        Ok(json!({
+            "name": r.get::<_, Option<String>>(1)?,
+            "registration_id": r.get::<_, Option<String>>(2)?,
+            "tax_id": r.get::<_, Option<String>>(4)?,
+            "address": r.get::<_, Option<String>>(11)?,
+            "city": r.get::<_, Option<String>>(13)?,
+            "postal_code": r.get::<_, Option<String>>(12)?,
+            "country": r.get::<_, Option<String>>(16)?,
+            "base_currency": r.get::<_, Option<String>>(17)?,
+        }))
+    })
+    .map_err(|_| export_error("NO_COMPANY", "no company initialised"))?;
 
     let sel_from = format!("{year}-01-01");
     let sel_to = format!("{year}-12-31");
@@ -299,11 +309,11 @@ fn build_faia_b(
         ));
     }
 
-    // Balances
+    // Balances: opening = before 01-01, closing = through 12-31 (JS parity)
     let balances: Vec<(String, i64, i64)> = db
-        .prepare("SELECT a.code, COALESCE(SUM(CASE WHEN e.date < ?1 THEN p.amount_cents END), 0), COALESCE(SUM(CASE WHEN e.date <= ?1 THEN p.amount_cents END), 0) FROM accounts a LEFT JOIN postings p ON p.account_id = a.id LEFT JOIN journal_entries e ON e.id = p.entry_id AND e.state = 'posted' GROUP BY a.code")
+        .prepare("SELECT a.code, COALESCE(SUM(CASE WHEN e.date < ?1 THEN p.amount_cents END), 0), COALESCE(SUM(CASE WHEN e.date <= ?2 THEN p.amount_cents END), 0) FROM accounts a LEFT JOIN postings p ON p.account_id = a.id LEFT JOIN journal_entries e ON e.id = p.entry_id AND e.state = 'posted' GROUP BY a.code")
         .map_err(sql_err)?
-        .query_map(rusqlite::params![sel_from], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))
+        .query_map(rusqlite::params![sel_from, sel_to], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))
         .map_err(sql_err)?
         .filter_map(|r| r.ok())
         .collect();
