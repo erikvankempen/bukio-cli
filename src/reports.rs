@@ -1403,6 +1403,13 @@ fn group_by_prefix_lines(sections: &[Value], lines: &[Value]) -> Vec<Value> {
         .collect();
     let mut out = Vec::new();
     let mut known_prefixes: Vec<String> = Vec::new();
+    // balans() sections carry balance_cents; pnl() sections carry amount_cents
+    let amount_of = |a: &Value| -> i64 {
+        a["balance_cents"]
+            .as_i64()
+            .or_else(|| a["amount_cents"].as_i64())
+            .unwrap_or(0)
+    };
     for line in lines {
         let prefixes: Vec<String> = line["prefixes"]
             .as_array()
@@ -1426,17 +1433,14 @@ fn group_by_prefix_lines(sections: &[Value], lines: &[Value]) -> Vec<Value> {
         if hits.is_empty() {
             continue;
         }
-        let total_cents: i64 = hits
-            .iter()
-            .map(|a| a["balance_cents"].as_i64().unwrap_or(0))
-            .sum();
+        let total_cents: i64 = hits.iter().map(|a| amount_of(a)).sum();
         let accounts: Vec<Value> = hits
             .iter()
             .map(|a| {
                 json!({
                     "code": a["code"],
                     "name": a["name"],
-                    "amount_cents": a["balance_cents"],
+                    "amount_cents": amount_of(a),
                 })
             })
             .collect();
@@ -1456,17 +1460,14 @@ fn group_by_prefix_lines(sections: &[Value], lines: &[Value]) -> Vec<Value> {
         })
         .collect();
     if !leftover.is_empty() {
-        let total_cents: i64 = leftover
-            .iter()
-            .map(|a| a["balance_cents"].as_i64().unwrap_or(0))
-            .sum();
+        let total_cents: i64 = leftover.iter().map(|a| amount_of(a)).sum();
         let accounts: Vec<Value> = leftover
             .iter()
             .map(|a| {
                 json!({
                     "code": a["code"],
                     "name": a["name"],
-                    "amount_cents": a["balance_cents"],
+                    "amount_cents": amount_of(a),
                 })
             })
             .collect();
@@ -1526,15 +1527,18 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
 
     let company: Value = db
         .query_row("SELECT * FROM company WHERE id = 1", [], |r| {
+            // Column order after migration 022: id(0) name(1) registration_id(2)
+            // legal_form(3) tax_id(4) iban(5) vat_module(6) kor_flag(7)
+            // fiscal_year_end(8) ... address(11) postal_code(12) city(13)
             Ok(json!({
-                "name": r.get::<_, Option<String>>(0)?,
-                "registration_id": r.get::<_, Option<String>>(1)?,
-                "tax_id": r.get::<_, Option<String>>(2)?,
+                "name": r.get::<_, Option<String>>(1)?,
+                "registration_id": r.get::<_, Option<String>>(2)?,
+                "tax_id": r.get::<_, Option<String>>(4)?,
                 "legal_form": r.get::<_, Option<String>>(3)?,
-                "address": r.get::<_, Option<String>>(4)?,
-                "postal_code": r.get::<_, Option<String>>(5)?,
-                "city": r.get::<_, Option<String>>(6)?,
-                "fiscal_year_end": r.get::<_, Option<String>>(7)?,
+                "address": r.get::<_, Option<String>>(11)?,
+                "postal_code": r.get::<_, Option<String>>(12)?,
+                "city": r.get::<_, Option<String>>(13)?,
+                "fiscal_year_end": r.get::<_, Option<String>>(8)?,
             }))
         })
         .map_err(|e| BukioError::new("NOT_INITIALISED", e.to_string()))?;
@@ -1686,7 +1690,46 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
                         Some((label, sign))
                     })
                     .collect();
-                let grouped = group_by_prefix_lines(&pnl_sections, &lines_pnl);
+                let mut grouped = group_by_prefix_lines(&pnl_sections, &lines_pnl);
+                // leftover 'Autres' carries net_cents (JS parity): income adds
+                // amount_cents, expense subtracts — so MIXED leftovers
+                // (expense + income) reconcile with the balans result
+                if let Some(autres) = grouped.iter_mut().find(|l| l["label"].as_str() == Some("Autres")) {
+                    let mut known: Vec<String> = lines_pnl
+                        .iter()
+                        .flat_map(|l| {
+                            l["prefixes"]
+                                .as_array()
+                                .map(|a| {
+                                    a.iter()
+                                        .filter_map(|v| v.as_str().map(String::from))
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default()
+                        })
+                        .collect();
+                    // leftover accounts = pnl accounts not covered by any prefix
+                    let mut net: i64 = 0;
+                    for section in &pnl_sections {
+                        if let Some(accounts) = section["accounts"].as_array() {
+                            for a in accounts {
+                                let code = a["code"].as_str().unwrap_or("");
+                                let covered = known.iter().any(|p| code.starts_with(p.as_str()));
+                                if covered {
+                                    continue;
+                                }
+                                let amount = a["amount_cents"].as_i64().unwrap_or(0);
+                                if a["type"].as_str() == Some("income") {
+                                    net += amount;
+                                } else {
+                                    net -= amount;
+                                }
+                            }
+                        }
+                    }
+                    autres["net_cents"] = json!(net);
+                    let _ = &mut known;
+                }
                 let mut result = Vec::new();
                 for mut line in grouped {
                     let label = line["label"].as_str().unwrap_or("").to_string();
@@ -1709,8 +1752,14 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
                 let tc = l["taxonomy_code"].as_str();
                 let total = l["total_cents"].as_i64().unwrap_or(0);
                 if format == "lu-lsc" {
-                    let sign = l["sign"].as_i64().unwrap_or(1);
-                    sign * total
+                    // a line carrying net_cents (the 'Autres' catch-all)
+                    // contributes that directly; others: sign × total
+                    if let Some(net) = l.get("net_cents").and_then(|v| v.as_i64()) {
+                        net
+                    } else {
+                        let sign = l["sign"].as_i64().unwrap_or(1);
+                        sign * total
+                    }
                 } else {
                     // NL: income (WOMZ.80, WOVB.82) positive, costs negative
                     match tc {
@@ -1722,11 +1771,23 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
             })
             .sum();
 
-        report["pnl"] = json!({
-            "lines": pnl_lines,
-            "resultaat_cents": resultaat_cents,
-            "resultaat": crate::money::format_amount(resultaat_cents),
-        });
+        let mut pnl_out = serde_json::Map::new();
+        pnl_out.insert("lines".to_string(), Value::Array(pnl_lines));
+        // JS parity: LU emits resultat_cents, NL emits resultaat_cents
+        let result_key = if format == "lu-lsc" {
+            "resultat_cents"
+        } else {
+            "resultaat_cents"
+        };
+        pnl_out.insert(
+            result_key.to_string(),
+            json!(resultaat_cents),
+        );
+        pnl_out.insert(
+            "resultaat".to_string(),
+            json!(crate::money::format_amount(resultaat_cents)),
+        );
+        report["pnl"] = Value::Object(pnl_out);
     }
 
     Ok(report)
