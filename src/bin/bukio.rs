@@ -2462,8 +2462,26 @@ fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         // same value — drop from changes
         changes.remove(idx);
     }
-    if changes.is_empty() {
-        return Err(BukioError::new("NOTHING_TO_UPDATE", "nothing to update — pass at least one of --name/--registration-id/--tax-id/--iban/--address/--postal-code/--city"));
+    // Logo: --logo <file> sets it; --remove-logo clears it
+    let logo_file = arg(argv, "--logo");
+    let remove_logo = has_flag(argv, "--remove-logo");
+    if logo_file.is_some() && remove_logo {
+        return Err(BukioError::new(
+            "INVALID_ARGS",
+            "pass either --logo <file> or --remove-logo, not both",
+        ));
+    }
+    let mut logo_bytes: Option<Vec<u8>> = None;
+    let mut logo_mime: Option<String> = None;
+    if let Some(path) = &logo_file {
+        let (bytes, mime) = bukio::company::read_logo_file(path)?;
+        logo_bytes = Some(bytes);
+        logo_mime = Some(mime);
+    } else if remove_logo {
+        logo_bytes = Some(Vec::new()); // empty = clear
+    }
+    if changes.is_empty() && logo_file.is_none() && !remove_logo {
+        return Err(BukioError::new("NOTHING_TO_UPDATE", "nothing to update — pass at least one of --name/--registration-id/--tax-id/--iban/--address/--postal-code/--city, or --logo/--remove-logo"));
     }
     if dry_run {
         return Ok(json!({
@@ -2472,7 +2490,8 @@ fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
             "dryRun": true,
         }));
     }
-    let (updated, changes_map) = bukio::company::update_company(&db, &changes, None, None, actor)?;
+    let (updated, changes_map) =
+        bukio::company::update_company(&db, &changes, logo_bytes, logo_mime.as_deref(), actor)?;
     Ok(json!({ "company": updated, "changes": changes_map }))
 }
 

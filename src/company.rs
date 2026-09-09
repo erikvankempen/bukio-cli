@@ -107,11 +107,20 @@ pub fn update_company(
         db.execute(&sql, param_refs.as_slice()).map_err(sql_err)?;
     }
 
-    // apply logo change
+    // apply logo change: Some(bytes) sets it, Some(empty) clears it
     if logo_bytes.is_some() || logo_mime.is_some() {
+        let clear = logo_bytes.as_ref().map(|b| b.is_empty()).unwrap_or(false);
+        let (store_bytes, store_mime): (Option<Vec<u8>>, Option<String>) = if clear {
+            (None, None)
+        } else {
+            (
+                logo_bytes.clone(),
+                logo_mime.map(|m| m.to_string()),
+            )
+        };
         db.execute(
             "UPDATE company SET logo = ?1, logo_mime = ?2 WHERE id = 1",
-            rusqlite::params![logo_bytes, logo_mime],
+            rusqlite::params![store_bytes, store_mime],
         )
         .map_err(sql_err)?;
     }
@@ -139,6 +148,107 @@ pub fn update_company(
     )?;
 
     Ok((updated, changes_map))
+}
+
+/// Read + validate a logo file: PNG/JPEG/SVG only, max 1 MB, max 2048×2048 px
+/// (mirrors JS readLogo in cli/company.js). Returns (bytes, mime).
+pub fn read_logo_file(file: &str) -> Result<(Vec<u8>, String)> {
+    const MAX_BYTES: usize = 1_000_000;
+    const MAX_DIM: i64 = 2048;
+    let bytes = std::fs::read(file).map_err(|_| {
+        BukioError::new(
+            "LOGO_FILE_NOT_FOUND",
+            format!("logo file '{file}' not found"),
+        )
+    })?;
+    if bytes.len() > MAX_BYTES {
+        return Err(BukioError::new(
+            "LOGO_TOO_LARGE",
+            format!("logo file is {} bytes — the maximum is {MAX_BYTES}", bytes.len()),
+        ));
+    }
+    let mime = if bytes.len() >= 8
+        && bytes[0] == 0x89
+        && bytes[1] == 0x50
+        && bytes[2] == 0x4e
+        && bytes[3] == 0x47
+    {
+        "image/png"
+    } else if bytes.len() >= 3 && bytes[0] == 0xff && bytes[1] == 0xd8 && bytes[2] == 0xff {
+        "image/jpeg"
+    } else {
+        // wide window: XML declarations and comment blocks push <svg deep
+        let head = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)])
+            .trim_start_matches('\u{feff}')
+            .trim_start()
+            .to_string();
+        if head.starts_with("<svg")
+            || (head.starts_with("<?xml") && head.contains("<svg"))
+        {
+            "image/svg+xml"
+        } else {
+            return Err(BukioError::new(
+                "LOGO_UNSUPPORTED_FORMAT",
+                "unsupported logo format — use PNG, JPEG or SVG",
+            ));
+        }
+    };
+    if let Some((w, h)) = logo_dimensions(mime, &bytes) {
+        if w > MAX_DIM || h > MAX_DIM {
+            return Err(BukioError::new(
+                "LOGO_DIMENSIONS_TOO_LARGE",
+                format!("logo is {w}×{h} px — the maximum is {MAX_DIM}×{MAX_DIM}"),
+            ));
+        }
+    }
+    Ok((bytes, mime.to_string()))
+}
+
+fn logo_dimensions(mime: &str, bytes: &[u8]) -> Option<(i64, i64)> {
+    if mime == "image/png" && bytes.len() >= 24 {
+        return Some((
+            i64::from(u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]])),
+            i64::from(u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]])),
+        ));
+    }
+    if mime == "image/jpeg" {
+        let mut i = 2usize;
+        while i + 9 < bytes.len() {
+            if bytes[i] != 0xff {
+                i += 1;
+                continue;
+            }
+            let marker = bytes[i + 1];
+            if (0xc0..=0xcf).contains(&marker) && ![0xc4, 0xc8, 0xcc].contains(&marker) {
+                let h = u16::from_be_bytes([bytes[i + 5], bytes[i + 6]]);
+                let w = u16::from_be_bytes([bytes[i + 7], bytes[i + 8]]);
+                return Some((i64::from(w), i64::from(h)));
+            }
+            let len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
+            i += 2 + len;
+        }
+        return None;
+    }
+    if mime == "image/svg+xml" {
+        let head = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]).to_string();
+        // viewBox="x y w h"
+        let re = regex::Regex::new(
+            r#"viewBox=["']\s*[\d.-]+\s+[\d.-]+\s+([\d.]+)\s+([\d.]+)\s*["']"#,
+        )
+        .unwrap();
+        if let Some(c) = re.captures(&head) {
+            let w = c[1].parse::<f64>().ok()?.ceil() as i64;
+            let h = c[2].parse::<f64>().ok()?.ceil() as i64;
+            return Some((w, h));
+        }
+        let wre = regex::Regex::new(r#"width=["']\s*([\d.]+)"#).unwrap();
+        let hre = regex::Regex::new(r#"height=["']\s*([\d.]+)"#).unwrap();
+        if let (Some(w), Some(h)) = (wre.captures(&head), hre.captures(&head)) {
+            return Some((w[1].parse::<f64>().ok()?.ceil() as i64, h[1].parse::<f64>().ok()?.ceil() as i64));
+        }
+        return None; // no parsable dims — accept, renders at natural size
+    }
+    None
 }
 
 /// Extract the stored logo.

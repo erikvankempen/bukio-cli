@@ -75,6 +75,10 @@ fn tool_defs() -> Vec<Value> {
         json!({"name": "import_file", "description": "import opening balances or journal CSV", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}, "kind": {"type": "string"}, "date": {"type": "string"}, "create_missing": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["file", "kind"]}}),
         json!({"name": "import_contacts", "description": "import contacts from UBL XML", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}, "mode": {"type": "string"}}, "required": ["file"]}}),
         json!({"name": "invoice_import", "description": "import a UBL invoice as a payable", "inputSchema": {"type": "object", "properties": {"file_path": {"type": "string"}, "create_missing": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["file_path"]}}),
+        json!({"name": "invoice_create", "description": "create a draft invoice: contact_id + lines (\"2x Dienst @ 150.00 @21\") and/or items (\"1:2@140.00\"); discount_pct/discount_amount_cents apply before VAT", "inputSchema": {"type": "object", "properties": {"contact_id": {"type": "integer"}, "lines": {"type": "array", "items": {"type": "string"}}, "items": {"type": "array", "items": {"type": "string"}}, "date": {"type": "string"}, "due_days": {"type": "integer"}, "discount_pct": {"type": "number"}, "discount_amount_cents": {"type": "integer"}, "language": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["contact_id"]}}),
+        json!({"name": "item_add", "description": "add an item to the catalog (name, unit, price, optional default VAT code + revenue account)", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "description": {"type": "string"}, "unit": {"type": "string"}, "unit_price": {"type": "string"}, "vat_code": {"type": "string"}, "gl_account": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["name", "unit_price"]}}),
+        json!({"name": "item_list", "description": "items catalog (active items; pass include_inactive:true for all)", "inputSchema": {"type": "object", "properties": {"include_inactive": {"type": "boolean"}}}}),
+        json!({"name": "item_update", "description": "update an item (price, unit, VAT, GL account) or deactivate it", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "name": {"type": "string"}, "description": {"type": "string"}, "unit": {"type": "string"}, "unit_price": {"type": "string"}, "vat_code": {"type": "string"}, "gl_account": {"type": "string"}, "deactivate": {"type": "boolean"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["id"]}}),
         json!({"name": "invoice_email", "description": "email a finalized invoice (SMTP via BUKIO_SMTP_* env)", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "attach_pdf": {"type": "boolean"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["id"]}}),
         json!({"name": "report_aging", "description": "open items per contact, bucketed by days past due", "inputSchema": {"type": "object", "properties": {"as_of": {"type": "string"}, "kind": {"type": "string"}}}}),
         json!({"name": "report_sales", "description": "sales revenue for a year (per contact or item)", "inputSchema": {"type": "object", "properties": {"year": {"type": "string"}, "by": {"type": "string"}}}}),
@@ -207,6 +211,9 @@ fn is_mutating_tool(tool: &str) -> bool {
             | "invoice_credit"
             | "invoice_finalize"
             | "invoice_email"
+            | "invoice_create"
+            | "item_add"
+            | "item_update"
             | "year_end_close"
             | "fx_set"
             | "contact_add"
@@ -740,6 +747,183 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 dry_run,
             )?;
             Ok(r)
+        }
+        "invoice_create" => {
+            let contact_id = arg_i64(args, "contact_id")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "contact_id required"))?;
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            let dry_run = mode != "execute";
+            let due_days = arg_i64(args, "due_days");
+            let discount_pct = args.get("discount_pct").and_then(|v| v.as_f64());
+            let discount_amount_cents = arg_i64(args, "discount_amount_cents");
+            let (discount_type, discount_value) = match (discount_pct, discount_amount_cents) {
+                (Some(p), None) => (Some("pct".to_string()), Some((p * 100.0).round() as i64)),
+                (None, Some(a)) => (Some("amount".to_string()), Some(a)),
+                _ => (None, None),
+            };
+            let mut lines_raw: Vec<Value> = Vec::new();
+            if let Some(arr) = args.get("lines").and_then(|v| v.as_array()) {
+                for l in arr {
+                    if let Some(s) = l.as_str() {
+                        lines_raw.push(json!(s));
+                    }
+                }
+            }
+            if let Some(arr) = args.get("items").and_then(|v| v.as_array()) {
+                for i in arr {
+                    if let Some(s) = i.as_str() {
+                        // resolve the item spec against the catalog (JS parity:
+                        // snapshot price/VAT/unit/GL now, reject missing/inactive)
+                        let p = crate::invoice::parse_item_spec(s)?;
+                        let item_id = p["item_id"].as_i64().unwrap_or(0);
+                        let item = crate::items::get_item(db, item_id)?.ok_or_else(|| {
+                            BukioError::new(
+                                "ITEM_NOT_FOUND",
+                                format!("item {item_id} does not exist"),
+                            )
+                        })?;
+                        if item.get("active").and_then(|v| v.as_i64()).unwrap_or(1) != 1 {
+                            return Err(BukioError::new(
+                                "ITEM_INACTIVE",
+                                format!("item {item_id} is deactivated"),
+                            ));
+                        }
+                        let price = p["price_cents"]
+                            .as_i64()
+                            .or_else(|| item["unit_price_cents"].as_i64())
+                            .unwrap_or(0);
+                        let vat_code = p["vat_code"]
+                            .as_str()
+                            .map(String::from)
+                            .or_else(|| item["vat_code"].as_str().map(String::from));
+                        lines_raw.push(json!({
+                            "description": item["name"].as_str().unwrap_or(""),
+                            "qty_milli": p["qty_milli"].as_i64().unwrap_or(1000),
+                            "price_cents": price,
+                            "vat_code": vat_code,
+                            "discount_type": p["discount_type"],
+                            "discount_value": p["discount_value"],
+                            "unit": item["unit"].as_str(),
+                            "item_id": item_id,
+                            "gl_account": item["gl_account"].as_str(),
+                        }));
+                    }
+                }
+            }
+            let date = arg_str(args, "date").unwrap_or_else(crate::dates::today_iso);
+            let inv = crate::invoice::create_invoice(
+                db,
+                contact_id,
+                &date,
+                due_days,
+                None,
+                None,
+                None,
+                discount_type.as_deref(),
+                discount_value,
+                &lines_raw,
+                actor,
+                dry_run,
+            )?;
+            if dry_run {
+                let mut plan = inv;
+                if let Some(o) = plan.as_object_mut() {
+                    o.insert("mode".to_string(), json!("dry-run"));
+                }
+                return Ok(plan);
+            }
+            Ok(json!({
+                "action": "invoice.create", "contact_id": contact_id,
+                "lines": args.get("lines").cloned().unwrap_or(Value::Null),
+                "items": args.get("items").cloned().unwrap_or(Value::Null),
+                "date": inv["date"], "mode": "execute",
+                "invoice_id": inv["id"], "invoice_number": Value::Null, "status": "draft",
+                "totals": {
+                    "net": inv["net_cents"], "vat": inv["vat_cents"],
+                    "gross": inv["gross_cents"], "discount": inv["discount_cents"],
+                },
+            }))
+        }
+        "item_add" => {
+            let name = arg_str(args, "name")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "name required"))?;
+            let price_str = arg_str(args, "unit_price")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "unit_price required"))?;
+            let price = crate::money::parse_amount(&price_str)?;
+            let unit = arg_str(args, "unit").unwrap_or_else(|| "unit".into());
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            let dry_run = mode != "execute";
+            let item = crate::items::create_item(
+                db,
+                &name,
+                arg_str(args, "description").as_deref(),
+                &unit,
+                price,
+                arg_str(args, "vat_code").as_deref(),
+                arg_str(args, "gl_account").as_deref(),
+                actor,
+                dry_run,
+            )?;
+            if dry_run {
+                let mut plan = item;
+                if let Some(o) = plan.as_object_mut() {
+                    o.insert("mode".to_string(), json!("dry-run"));
+                }
+                return Ok(plan);
+            }
+            Ok(json!({
+                "action": "item.create", "mode": "execute",
+                "item_id": item["id"], "name": item["name"], "unit": item["unit"],
+                "unit_price_cents": item["unit_price_cents"],
+                "vat_code": item["vat_code"], "gl_account": item["gl_account"],
+            }))
+        }
+        "item_list" => {
+            let active_only = !args.get("include_inactive").and_then(|v| v.as_bool()).unwrap_or(false);
+            let rows = crate::items::list_items(db, active_only)?;
+            Ok(json!({"items": rows}))
+        }
+        "item_update" => {
+            let id = arg_i64(args, "id")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            let dry_run = mode != "execute";
+            let deactivate = args.get("deactivate").and_then(|v| v.as_bool()).unwrap_or(false);
+            let price = match args.get("unit_price") {
+                Some(v) if v.is_string() => {
+                    let ps = v.as_str().unwrap_or("");
+                    let cents = crate::money::parse_amount(ps)?;
+                    Some(cents)
+                }
+                _ => None,
+            };
+            let item = crate::items::update_item(
+                db,
+                id,
+                arg_str(args, "name").as_deref(),
+                arg_str(args, "description"),
+                arg_str(args, "unit").as_deref(),
+                price,
+                arg_str(args, "vat_code"),
+                arg_str(args, "gl_account"),
+                deactivate,
+                actor,
+                dry_run,
+            )?;
+            if dry_run {
+                let mut plan = item;
+                if let Some(o) = plan.as_object_mut() {
+                    o.insert("mode".to_string(), json!("dry-run"));
+                }
+                return Ok(plan);
+            }
+            Ok(json!({
+                "action": "item.update", "mode": "execute", "id": id,
+                "name": item["name"], "unit": item["unit"],
+                "unit_price_cents": item["unit_price_cents"],
+                "vat_code": item["vat_code"], "gl_account": item["gl_account"],
+                "active": item["active"],
+            }))
         }
         "audit" => {
             let limit = arg_i64(args, "limit").map(|l| l as usize).unwrap_or(50);
