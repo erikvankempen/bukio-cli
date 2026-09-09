@@ -104,6 +104,16 @@ fn parse_i64(argv: &[String], flag: &str) -> Option<i64> {
     arg(argv, flag).and_then(|v| v.parse().ok())
 }
 
+/// Parse --life-months: missing → 60, garbage → INVALID_LIFE.
+fn parse_life_months(argv: &[String]) -> Result<i64> {
+    match arg(argv, "--life-months") {
+        None => Ok(60),
+        Some(v) => v.parse::<i64>().map_err(|_| {
+            BukioError::new("INVALID_LIFE", format!("invalid --life-months '{v}' — must be a positive integer"))
+        }),
+    }
+}
+
 /// Parse --limit with validation: "abc" → INVALID_LIMIT, "0" → 0, missing → default.
 fn parse_limit(argv: &[String], default: i64) -> Result<i64> {
     match arg(argv, "--limit") {
@@ -1813,7 +1823,47 @@ fn cmd_recurring_run(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
     let db = open_existing(db_path)?;
     let as_of = arg(argv, "--as-of");
     let template_id = parse_i64(argv, "--template");
-    bukio::recurring::run_due(&db, as_of.as_deref(), template_id, actor, dry_run)
+    let result = bukio::recurring::run_due(&db, as_of.as_deref(), template_id, actor, dry_run)?;
+    // Text rendering for non-json mode (matches JS CLI output)
+    let json_mode = has_flag(argv, "--json");
+    if !json_mode {
+        let total: usize = result["templates"].as_array().map_or(0, |t| t.iter().map(|t| t["runs"].as_array().map_or(0, |r| r.len())).sum());
+        println!("recurring run: {} period(s) across {} template(s){}", total, result["templates"].as_array().map_or(0, |t| t.len()), if dry_run { " (dry run)" } else { "" });
+        for t in result["templates"].as_array().unwrap_or(&vec![]) {
+            for run in t["runs"].as_array().unwrap_or(&vec![]) {
+                if let Some(invoice) = run.get("invoice") {
+                    // invoice plan
+                    let date = invoice["date"].as_str().unwrap_or("?");
+                    let contact = invoice["contact_name"].as_str().unwrap_or("contact");
+                    println!("  {}  → draft invoice ({}) (plan)", date, contact);
+                } else if let Some(gen) = run.get("generated") {
+                    for g in gen.as_array().unwrap_or(&vec![]) {
+                        let kind = g["kind"].as_str().unwrap_or("entry");
+                        if kind == "invoice" {
+                            let date = g["invoice"]["date"].as_str().unwrap_or("?");
+                            println!("  {}  → draft invoice #{} (finalize to book & number)", date, g["invoice"]["id"]);
+                        } else {
+                            let date = g["entry"]["date"].as_str().unwrap_or("?");
+                            let id = g["entry"]["id"].as_i64().unwrap_or(0);
+                            let state = g["entry"]["state"].as_str().unwrap_or("draft");
+                            println!("  {}  → booked entry #{} ({})", date, id, state);
+                        }
+                    }
+                } else {
+                    // dry-run plan entry
+                    let kind = run["kind"].as_str().unwrap_or("entry");
+                    let date = run.get("entry").and_then(|e| e["date"].as_str()).unwrap_or("?");
+                    if kind == "reversal" {
+                        println!("  {}  → reversal of previous entry (plan)", date);
+                    } else {
+                        println!("  {}  → entry (plan)", date);
+                    }
+                }
+            }
+        }
+        std::process::exit(0);
+    }
+    Ok(result)
 }
 
 // ── depreciation ───────────────────────────────────────────────────────────
@@ -1832,8 +1882,9 @@ fn cmd_depreciation_add(
     let residual = arg(argv, "--residual").unwrap_or_else(|| "0".into());
     let residual_cents = bukio::money::parse_amount(&residual)?;
     // cost_cents comes from the asset account balance or a param — use 0 as default
-    let cost_cents: i64 = parse_i64(argv, "--cost").unwrap_or(0);
-    let life_months: i64 = parse_i64(argv, "--life-months").unwrap_or(60);
+    let cost_str = arg(argv, "--cost").unwrap_or_else(|| "0".into());
+    let cost_cents: i64 = bukio::money::parse_amount(&cost_str)?;
+    let life_months: i64 = parse_life_months(argv)?;
     bukio::recurring::build_depreciation_template(
         &db,
         &name,
@@ -2263,7 +2314,7 @@ fn cmd_asset_scheme_add(
     let db = open_existing(db_path)?;
     let name = arg(argv, "--name").unwrap_or_else(|| "standard".into());
     let method = arg(argv, "--method").unwrap_or_else(|| "lineair".into());
-    let life_months: i64 = parse_i64(argv, "--life-months").unwrap_or(60);
+    let life_months: i64 = parse_life_months(argv)?;
     let residual_bp: i64 = parse_i64(argv, "--residual-bp").unwrap_or(0);
     bukio::assets::create_scheme(
         &db,
@@ -2361,7 +2412,36 @@ fn cmd_asset_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> 
 fn cmd_asset_register(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let as_of = arg(argv, "--as-of");
-    bukio::assets::register(&db, as_of.as_deref(), actor)
+    let format = arg(argv, "--format").unwrap_or_else(|| "json".into());
+    let data = bukio::assets::register(&db, as_of.as_deref(), actor)?;
+    match format.as_str() {
+        "csv" => {
+            let assets = data["assets"].as_array().cloned().unwrap_or_default();
+            let totals = data["totals"].clone();
+            let header = "id,name,category,status,purchase,purchase price,cum. deprec.,book value";
+            let mut lines = vec![header.to_string()];
+            for a in &assets {
+                lines.push(format!(
+                    "{},{},{},{},{},{},{},{}",
+                    a["id"], a["name"], a.get("category").unwrap_or(&serde_json::Value::Null),
+                    a["status"], a["purchase_date"],
+                    bukio::money::format_amount(a["purchase_price_cents"].as_i64().unwrap_or(0)),
+                    bukio::money::format_amount(a["total_cum_dep_cents"].as_i64().unwrap_or(0)),
+                    bukio::money::format_amount(a["book_value_cents"].as_i64().unwrap_or(0)),
+                ));
+            }
+            lines.push(format!(
+                "TOTAL,,,,,,{},{}",
+                bukio::money::format_amount(totals["total_cum_dep_cents"].as_i64().unwrap_or(0)),
+                bukio::money::format_amount(totals["book_value_cents"].as_i64().unwrap_or(0)),
+            ));
+            // CSV output is raw text, not wrapped in {ok,data}
+            println!("{}", lines.join("\n"));
+            std::process::exit(0);
+        }
+        "json" => Ok(json!({ "ok": true, "data": data })),
+        _ => Ok(data),
+    }
 }
 
 fn cmd_asset_dispose(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
