@@ -457,7 +457,7 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
     if let Some(result) = try_match_cmd(&positional, argv.clone(), db_path, actor, dry_run) {
         return result;
     }
-    for trim in (1..positional.len()).rev() {
+    for trim in 1..positional.len() {
         let shorter = &positional[..positional.len() - trim];
         if let Some(result) = try_match_cmd(shorter, argv.clone(), db_path, actor, dry_run) {
             return result;

@@ -254,12 +254,19 @@ pub fn capability_of(cmd: &str, post: bool) -> Option<&'static str> {
     if cmd == "entry add" {
         return Some(if post { "entry.post" } else { "entry.draft" });
     }
+    // Prefix match: "actor roles grant bookkeeper" matches "actor roles grant"
+    let mut best: Option<(&str, &str)> = None;
     for &(c, cap) in CLI_CAPABILITIES {
         if c == cmd {
             return Some(cap);
         }
+        if cmd.starts_with(c) && cmd.as_bytes().get(c.len()) == Some(&b' ') {
+            if best.map_or(true, |(bc, _)| c.len() > bc.len()) {
+                best = Some((c, cap));
+            }
+        }
     }
-    None
+    best.map(|(_, cap)| cap)
 }
 
 /// May this actor perform this capability?
