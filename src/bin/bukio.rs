@@ -2128,6 +2128,9 @@ fn cmd_invoice_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool
     let notes = arg(argv, "--notes");
     let discount_pct = arg(argv, "--discount-pct");
     let discount_amount = arg(argv, "--discount-amount");
+    if discount_pct.is_some() && discount_amount.is_some() {
+        return Err(BukioError::new("INVALID_DISCOUNT", "use --discount-pct OR --discount-amount, not both"));
+    }
     let (discount_type, discount_value) = if let Some(pct) = discount_pct {
         (Some("percent".to_string()), pct.parse::<i64>().ok())
     } else if let Some(amt) = discount_amount {
