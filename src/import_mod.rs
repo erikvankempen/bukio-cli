@@ -254,7 +254,7 @@ pub fn import_opening_balances(
     }
     if dry_run {
         return Ok(
-            json!({"action": "import opening balances", "rows": parsed.len(), "date": the_date, "dryRun": true}),
+            json!({"action": "import opening balances", "accounts": parsed.len(), "date": the_date, "dryRun": true}),
         );
     }
 
@@ -284,13 +284,13 @@ pub fn import_opening_balances(
             actor,
             action: "import.opening_balances",
             command: Some("import opening-balances"),
-            args: Some(json!({"rows": parsed.len()})),
+            args: Some(json!({"accounts": parsed.len()})),
             outcome: "ok",
             entry_ids: vec![posted.id],
         },
     )?;
     Ok(
-        json!({"ok": true, "imported": true, "entry_id": posted.id, "date": the_date, "rows": parsed.len()}),
+        json!({"ok": true, "imported": true, "entry_id": posted.id, "date": the_date, "accounts": parsed.len()}),
     )
 }
 

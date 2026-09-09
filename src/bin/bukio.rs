@@ -1299,7 +1299,12 @@ fn cmd_audit_list(argv: &[String], db_path: &str) -> Result<Value> {
         arg(argv, "--by").as_deref().filter(|s| !s.is_empty()),
         limit,
     )?;
-    Ok(json!({ "entries": rows }))
+    if let Some(fmt) = arg(argv, "--format").filter(|f| f == "json") {
+        // --format json: wrap in {ok, data} even without --json flag
+        Ok(json!({ "ok": true, "data": { "entries": rows } }))
+    } else {
+        Ok(json!({ "entries": rows }))
+    }
 }
 
 fn cmd_audit_verify(argv: &[String], db_path: &str) -> Result<Value> {
@@ -1471,6 +1476,25 @@ fn cmd_bank_match_post(
                 format!("bank transaction {tx_id} does not exist"),
             )
         })?;
+        // Validate: must be unmatched
+        if tx["state"].as_str() == Some("matched") {
+            return Err(BukioError::new(
+                "ALREADY_MATCHED",
+                format!("bank transaction {tx_id} is already matched"),
+            ));
+        }
+        // Validate: account must exist
+        let account_exists = db
+            .prepare("SELECT 1 FROM accounts WHERE code = ?1 AND active = 1")
+            .map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?
+            .exists(rusqlite::params![account])
+            .map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
+        if !account_exists {
+            return Err(BukioError::new(
+                "ACCOUNT_NOT_FOUND",
+                format!("account '{account}' does not exist"),
+            ));
+        }
         let amount = tx["amount_cents"].as_i64().unwrap_or(0);
         return Ok(json!({
             "action": "post entry from bank transaction",
@@ -1532,6 +1556,21 @@ fn cmd_vat_book(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
     let specs = bukio::vat::parse_vat_posting_specs(&postings_raw)?;
     if dry_run {
         bukio::dates::validate_date(&date)?;
+        // Validate balanced (parity with entry add)
+        let sum: i64 = specs.iter().map(|s| s.amount_cents).sum();
+        if sum != 0 {
+            return Err(BukioError::new(
+                "UNBALANCED",
+                format!("postings do not sum to zero (sum = {sum})"),
+            ));
+        }
+        // Validate at least 2 postings
+        if specs.len() < 2 {
+            return Err(BukioError::new(
+                "TOO_FEW_POSTINGS",
+                "an entry needs at least 2 postings",
+            ));
+        }
         return Ok(json!({
             "action": "create vat-aware journal entry", "date": date, "description": desc,
             "postings": specs.iter().map(|s| json!({ "code": s.code, "amount_cents": s.amount_cents, "amount": bukio::money::format_amount(s.amount_cents), "vat_code": s.vat_code })).collect::<Vec<_>>(),
