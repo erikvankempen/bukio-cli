@@ -109,7 +109,10 @@ fn parse_limit(argv: &[String], default: i64) -> Result<i64> {
     match arg(argv, "--limit") {
         None => Ok(default),
         Some(v) => v.parse::<i64>().map_err(|_| {
-            BukioError::new("INVALID_LIMIT", format!("invalid --limit '{v}' — must be a non-negative integer"))
+            BukioError::new(
+                "INVALID_LIMIT",
+                format!("invalid --limit '{v}' — must be a non-negative integer"),
+            )
         }),
     }
 }
@@ -445,7 +448,8 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         .ok()
         .or_else(|| arg(argv, "--sign-key"));
     let cmd_str = positional.join(" ");
-    let sign_result = bukio::sign_gate::sign_command(actor, &cmd_str, argv, db_path, sign_key.as_deref(), None)?;
+    let sign_result =
+        bukio::sign_gate::sign_command(actor, &cmd_str, argv, db_path, sign_key.as_deref(), None)?;
     // Bridge: store sign result for audit rows
     if let Some(ref sr) = sign_result {
         bukio::audit::set_pending_signature(Some(bukio::audit::PendingSignature {
@@ -1399,11 +1403,17 @@ fn cmd_bank_match_auto(
     let window: i64 = match arg(argv, "--window-days") {
         None => 5,
         Some(v) => v.parse::<i64>().map_err(|_| {
-            BukioError::new("INVALID_WINDOW", format!("invalid --window-days '{v}' — must be a non-negative integer"))
+            BukioError::new(
+                "INVALID_WINDOW",
+                format!("invalid --window-days '{v}' — must be a non-negative integer"),
+            )
         })?,
     };
     if window < 0 {
-        return Err(BukioError::new("INVALID_WINDOW", "--window-days must not be negative"));
+        return Err(BukioError::new(
+            "INVALID_WINDOW",
+            "--window-days must not be negative",
+        ));
     }
     bukio::bank::auto_match(&db, window, actor, dry_run)
 }
@@ -1638,33 +1648,42 @@ fn cmd_recurring_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
     let day: u32 = match arg(argv, "--day") {
         None => 1,
         Some(v) => v.parse::<u32>().map_err(|_| {
-            BukioError::new("INVALID_DATE", format!("invalid --day '{v}' — must be 1-28"))
+            BukioError::new(
+                "INVALID_DATE",
+                format!("invalid --day '{v}' — must be 1-28"),
+            )
         })?,
     };
     if day == 0 || day > 28 {
-        return Err(BukioError::new("INVALID_DATE", "--day must be between 1 and 28"));
+        return Err(BukioError::new(
+            "INVALID_DATE",
+            "--day must be between 1 and 28",
+        ));
     }
     let end = arg(argv, "--end");
     let runs = parse_i64(argv, "--runs").map(|v| v as i64);
     let reverse_previous = has_flag(argv, "--reverse-previous");
+    let frequency = arg(argv, "--frequency").ok_or_else(|| missing_arg("--frequency"))?;
+    let start = arg(argv, "--start").ok_or_else(|| missing_arg("--start"))?;
 
     if kind == "entry" {
         let postings_raw = repeated(argv, "--postings");
         let postings_json = serde_json::to_string(
             &bukio::entries::parse_posting_specs(&postings_raw)?
                 .iter()
-                .map(|s| json!({ "code": s.code, "amount_cents": s.amount_cents }))
+                .map(|s| json!({ "code": s.code, "amountCents": s.amount_cents }))
                 .collect::<Vec<_>>(),
         )
         .unwrap_or_default();
-        let name = desc.clone().unwrap_or_else(|| "recurring entry".into());
+        let name = arg(argv, "--name")
+            .unwrap_or_else(|| desc.clone().unwrap_or_else(|| "recurring entry".into()));
         let tpl = bukio::recurring::create_template(
             &db,
             &name,
             desc.as_deref(),
-            "monthly",
+            &frequency,
             day,
-            &bukio::dates::today_iso(),
+            &start,
             end.as_deref(),
             runs,
             &postings_json,
@@ -1673,7 +1692,12 @@ fn cmd_recurring_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
             &kind,
             dry_run,
         )?;
-        Ok(tpl)
+        // dry-run: the plan is returned bare (JS parity); real runs wrap.
+        if dry_run {
+            Ok(tpl)
+        } else {
+            Ok(json!({ "template": tpl, "dryRun": false }))
+        }
     } else {
         // invoice kind — need contact + lines
         let contact_id: i64 =
@@ -1682,26 +1706,27 @@ fn cmd_recurring_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
             None => None,
             Some(v) => {
                 let val = v.parse::<i64>().map_err(|_| {
-                    BukioError::new("INVALID_DUE_DAYS", format!("invalid --due-days '{v}' — must be a non-negative integer"))
+                    BukioError::new(
+                        "INVALID_DUE_DAYS",
+                        format!("invalid --due-days '{v}' — must be a non-negative integer"),
+                    )
                 })?;
                 if val < 0 {
-                    return Err(BukioError::new("INVALID_DUE_DAYS", "--due-days must not be negative"));
+                    return Err(BukioError::new(
+                        "INVALID_DUE_DAYS",
+                        "--due-days must not be negative",
+                    ));
                 }
                 Some(val)
             }
         };
         let lines_raw = repeated(argv, "--lines");
         let items_raw = repeated(argv, "--items");
-        let name = desc.clone().unwrap_or_else(|| "recurring invoice".into());
+        let name = arg(argv, "--name")
+            .unwrap_or_else(|| desc.clone().unwrap_or_else(|| "recurring invoice".into()));
 
-        // Combine lines + items into a JSON array for the template
-        let mut specs: Vec<Value> = Vec::new();
-        for l in &lines_raw {
-            specs.push(json!({ "type": "line", "spec": l }));
-        }
-        for i in &items_raw {
-            specs.push(json!({ "type": "item", "spec": i }));
-        }
+        // Combine lines + items into a JSON array for the template (kept for
+        // parity with the JS CLI; the engine reads lines/items directly).
         let postings_json = json!({
             "contact_id": contact_id,
             "lines": lines_raw,
@@ -1714,9 +1739,9 @@ fn cmd_recurring_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
             &db,
             &name,
             desc.as_deref(),
-            "monthly",
+            &frequency,
             day,
-            &bukio::dates::today_iso(),
+            &start,
             end.as_deref(),
             runs,
             &postings_json,
@@ -1725,7 +1750,11 @@ fn cmd_recurring_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
             &kind,
             dry_run,
         )?;
-        Ok(tpl)
+        if dry_run {
+            Ok(tpl)
+        } else {
+            Ok(json!({ "template": tpl, "dryRun": false }))
+        }
     }
 }
 
@@ -1753,7 +1782,9 @@ fn cmd_recurring_pause(
     require_actor(actor)?;
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
-    bukio::recurring::set_template_status(&db, id, "paused", actor, dry_run)
+    Ok(
+        json!({ "template": bukio::recurring::set_template_status(&db, id, "paused", actor, dry_run)? }),
+    )
 }
 
 fn cmd_recurring_resume(
@@ -1765,7 +1796,9 @@ fn cmd_recurring_resume(
     require_actor(actor)?;
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
-    bukio::recurring::set_template_status(&db, id, "active", actor, dry_run)
+    Ok(
+        json!({ "template": bukio::recurring::set_template_status(&db, id, "active", actor, dry_run)? }),
+    )
 }
 
 fn cmd_recurring_preview(argv: &[String], db_path: &str) -> Result<Value> {
@@ -2169,7 +2202,13 @@ fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
     }
     // Country is immutable after init
     if changes.iter().any(|(col, _)| col == "country") {
-        let cur = db.query_row("SELECT country FROM company WHERE id=1", [], |r| r.get::<_, Option<String>>(0)).ok().flatten().unwrap_or_default();
+        let cur = db
+            .query_row("SELECT country FROM company WHERE id=1", [], |r| {
+                r.get::<_, Option<String>>(0)
+            })
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         return Err(BukioError::new("COUNTRY_IMMUTABLE", format!("country is immutable after init — company stays {cur} (re-init a new DB for another country)")));
     }
     if changes.is_empty() {
@@ -2933,11 +2972,17 @@ fn cmd_invoice_reminders(
     let within = match arg(argv, "--within-days") {
         None => 30,
         Some(v) => v.parse::<i64>().map_err(|_| {
-            BukioError::new("INVALID_WINDOW", format!("invalid --within-days '{v}' — must be a non-negative integer"))
+            BukioError::new(
+                "INVALID_WINDOW",
+                format!("invalid --within-days '{v}' — must be a non-negative integer"),
+            )
         })?,
     };
     if within < 0 {
-        return Err(BukioError::new("INVALID_WINDOW", "--within-days must not be negative"));
+        return Err(BukioError::new(
+            "INVALID_WINDOW",
+            "--within-days must not be negative",
+        ));
     }
     let rows = bukio::invoice::list_invoices(&db, None, None)?;
     let overdue: Vec<Value> = rows
