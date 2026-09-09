@@ -1242,10 +1242,33 @@ fn cmd_balans(argv: &[String], db_path: &str) -> Result<Value> {
     Ok(data)
 }
 
+/// Compute fiscal year window: reads company.fiscal_year_end, returns (from, to) for a given year.
+/// Default 12-31 → calendar year. Otherwise end=${year}-MM-DD, start=day after ${year-1}-MM-DD.
+fn fiscal_year_window(db: &rusqlite::Connection, year: &str) -> (String, String) {
+    let fy: String = db.prepare("SELECT fiscal_year_end FROM company WHERE id = 1")
+        .ok()
+        .and_then(|mut s| s.query_row([], |r| r.get(0)).ok())
+        .unwrap_or_else(|| "12-31".to_string());
+    let parts: Vec<&str> = fy.split('-').collect();
+    let mm: u32 = parts[parts.len().checked_sub(2).unwrap_or(0)].parse().unwrap_or(12);
+    let dd: u32 = parts.last().and_then(|s| s.parse().ok()).unwrap_or(31);
+    if mm == 12 && dd == 31 {
+        return (format!("{year}-01-01"), format!("{year}-12-31"));
+    }
+    let end = format!("{}-{:02}-{:02}", year, mm, dd);
+    let y: i32 = year.parse().unwrap_or(2026);
+    // start = day after (y-1)-MM-DD
+    let start = chrono::NaiveDate::from_ymd_opt(y - 1, mm, dd)
+        .map(|d| (d + chrono::Duration::days(1)).format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| format!("{}-01-01", y));
+    (start, end)
+}
+
 fn cmd_pnl(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let year = arg(argv, "--year").unwrap_or_else(|| bukio::dates::today_iso()[0..4].to_string());
-    let data = bukio::reports::pnl(&db, &format!("{year}-01-01"), &format!("{year}-12-31"))?;
+    let (from, to) = fiscal_year_window(&db, &year);
+    let data = bukio::reports::pnl(&db, &from, &to)?;
     let emitted = emit_csv(
         argv,
         &data,
@@ -1281,13 +1304,14 @@ fn cmd_pnl(argv: &[String], db_path: &str) -> Result<Value> {
 fn cmd_journal(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let year = arg(argv, "--year").unwrap_or_else(|| bukio::dates::today_iso()[0..4].to_string());
+    let (from, to) = fiscal_year_window(&db, &year);
     let rows = bukio::reports::journal(
         &db,
-        &format!("{year}-01-01"),
-        &format!("{year}-12-31"),
+        &from,
+        &to,
         None,
     )?;
-    let data = json!({ "rows": rows });
+    let data = json!({ "from": from, "to": to, "rows": rows });
     let emitted = emit_csv(
         argv,
         &data,
