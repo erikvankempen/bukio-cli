@@ -181,6 +181,17 @@ fn main() {
         Ok(data) => {
             if json_mode {
                 ok(data);
+            } else if let Some(p) = data.get("path").and_then(|v| v.as_str()) {
+                // file-writing commands print human text like the JS CLI
+                println!("wrote {p}");
+                if let Some(year) = data.get("year").and_then(|v| v.as_str()) {
+                    let name = data["company"]["name"].as_str().unwrap_or("");
+                    let reg = data["company"]["registration_id"].as_str().unwrap_or("-");
+                    let rek = data.get("rekeningen").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let mut_count = data.get("mutaties").and_then(|v| v.as_i64()).unwrap_or(0);
+                    println!("  {name} (KVK {reg}) — fiscal year {year}");
+                    println!("  {rek} accounts, {mut_count} mutations");
+                }
             } else {
                 println!("{}", serde_json::to_string_pretty(&data).unwrap());
             }
@@ -1360,7 +1371,57 @@ fn cmd_audit_list(argv: &[String], db_path: &str) -> Result<Value> {
         arg(argv, "--by").as_deref().filter(|s| !s.is_empty()),
         limit,
     )?;
-    if let Some(fmt) = arg(argv, "--format").filter(|f| f == "json") {
+    // csv/xlsx export (JS parity: audit --format csv|xlsx --out <path>)
+    let columns = [
+        "id", "timestamp", "actor", "action", "command", "args", "outcome", "entry_ids",
+    ];
+    let flat = |rows: &[Value]| -> Vec<Vec<String>> {
+        rows.iter()
+            .map(|r| {
+                vec![
+                    r["id"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                    r["timestamp"].as_str().unwrap_or("").to_string(),
+                    r["actor"].as_str().unwrap_or("").to_string(),
+                    r["action"].as_str().unwrap_or("").to_string(),
+                    r["command"].as_str().unwrap_or("").to_string(),
+                    r["args"].to_string(),
+                    r["outcome"].as_str().unwrap_or("").to_string(),
+                    r["entry_ids"]
+                        .as_array()
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_i64())
+                                .map(|v| v.to_string())
+                                .collect::<Vec<_>>()
+                                .join(";")
+                        })
+                        .unwrap_or_default(),
+                ]
+            })
+            .collect()
+    };
+    let fmt = arg(argv, "--format").unwrap_or_else(|| "csv".into());
+    if fmt == "xlsx" && arg(argv, "--out").is_none() {
+        return Err(BukioError::new(
+            "OUT_REQUIRED",
+            "--out <path> is required for xlsx output",
+        ));
+    }
+    if let Some(path) = arg(argv, "--out") {
+        if fmt == "csv" {
+            write_csv(&path, &columns, &flat(&rows))?;
+        } else if fmt == "xlsx" {
+            write_xlsx(&path, &columns, &flat(&rows))?;
+        } else if fmt == "json" {
+            return Ok(json!({ "ok": true, "data": { "entries": rows } }));
+        } else {
+            return Err(BukioError::new(
+                "INVALID_FORMAT",
+                format!("unknown --format '{fmt}' — use csv, xlsx or json"),
+            ));
+        }
+        Ok(json!({ "ok": true, "path": path }))
+    } else if let Some(fmt) = arg(argv, "--format").filter(|f| f == "json") {
         // --format json: wrap in {ok, data} even without --json flag
         Ok(json!({ "ok": true, "data": { "entries": rows } }))
     } else {
