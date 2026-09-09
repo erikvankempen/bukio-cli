@@ -75,6 +75,8 @@ fn tool_defs() -> Vec<Value> {
         json!({"name": "import_file", "description": "import opening balances or journal CSV", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}, "kind": {"type": "string"}, "date": {"type": "string"}, "create_missing": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["file", "kind"]}}),
         json!({"name": "import_contacts", "description": "import contacts from UBL XML", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}, "mode": {"type": "string"}}, "required": ["file"]}}),
         json!({"name": "invoice_import", "description": "import a UBL invoice as a payable", "inputSchema": {"type": "object", "properties": {"file_path": {"type": "string"}, "create_missing": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["file_path"]}}),
+        json!({"name": "report_aging", "description": "open items per contact, bucketed by days past due", "inputSchema": {"type": "object", "properties": {"as_of": {"type": "string"}, "kind": {"type": "string"}}}}),
+        json!({"name": "report_sales", "description": "sales revenue for a year (per contact or item)", "inputSchema": {"type": "object", "properties": {"year": {"type": "string"}, "by": {"type": "string"}}}}),
         json!({"name": "payments_mandate_add", "description": "register a signed SEPA direct-debit mandate for a contact (core = 8-week refund right, b2b = none)", "inputSchema": {"type": "object", "properties": {"contact_id": {"type": "integer"}, "mandate_ref": {"type": "string"}, "mandate_date": {"type": "string"}, "scheme": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["contact_id", "mandate_ref"]}}),
         json!({"name": "payments_mandate_list", "description": "list SEPA direct-debit mandates (optionally per contact)", "inputSchema": {"type": "object", "properties": {"contact_id": {"type": "integer"}}}}),
         json!({"name": "payments_batch_create", "description": "create a SEPA batch: type transfer (pain.001) or direct_debit (pain.008, each line needs a contact mandate)", "inputSchema": {"type": "object", "properties": {"payable_ids": {"type": "array", "items": {"type": "integer"}}, "batch_date": {"type": "string"}, "type": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}}}),
@@ -699,6 +701,25 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 "batch_id": r["batch_id"], "schema": r["schema"],
                 "msg_id": r["msg_id"], "status": r["status"], "xml": r["xml"],
             }))
+        }
+        "report_aging" => {
+            let as_of = arg_str(args, "as_of").unwrap_or_else(crate::dates::today_iso);
+            let kind = arg_str(args, "kind").unwrap_or_else(|| "both".into());
+            let r = crate::reports::aging(db, &as_of, &kind)?;
+            Ok(r)
+        }
+        "report_sales" => {
+            let year = arg_str(args, "year")
+                .unwrap_or_else(|| crate::dates::today_iso()[..4].to_string());
+            if year.len() != 4 || !year.chars().all(|c| c.is_ascii_digit()) {
+                return Err(BukioError::new(
+                    "INVALID_YEAR",
+                    format!("year '{year}' must be YYYY"),
+                ));
+            }
+            let by = arg_str(args, "by").unwrap_or_else(|| "contact".into());
+            let r = crate::reports::sales(db, &year, &by)?;
+            Ok(r)
         }
         "audit" => {
             let limit = arg_i64(args, "limit").map(|l| l as usize).unwrap_or(50);

@@ -3477,8 +3477,15 @@ fn cmd_import_xaf(argv: &[String], db_path: &str, actor: &str, dry_run: bool) ->
 fn cmd_import_invoice(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     let db = open_existing(db_path)?;
     let file = arg(argv, "--file").ok_or_else(|| missing_arg("--file"))?;
-    let content = std::fs::read_to_string(&file)
-        .map_err(|e| BukioError::new("FILE_READ_ERROR", format!("cannot read {file}: {e}")))?;
+    let content = match std::fs::read_to_string(&file) {
+        Ok(c) => c,
+        Err(_) => {
+            return Err(BukioError::new(
+                "FILE_NOT_FOUND",
+                format!("'{file}' not found"),
+            ));
+        }
+    };
     let contact_id = parse_i64(argv, "--contact-id");
     let create_missing = has_flag(argv, "--create-missing");
     let result = bukio::import_mod::import_invoice(
