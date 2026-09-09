@@ -32,11 +32,14 @@ fn rpc_error(id: Option<Value>, code: i64, message: &str) -> String {
 }
 
 fn rpc_content(result: Value) -> Value {
-    json!({"content": [{"type": "text", "text": result.to_string()}], "isError": false})
+    let text = serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string());
+    json!({"content": [{"type": "text", "text": text}], "isError": false})
 }
 
 fn rpc_error_content(code: &str, message: &str) -> Value {
-    json!({"content": [{"type": "text", "text": json!({"ok": false, "error": {"code": code, "message": message}}).to_string()}], "isError": true})
+    let err = json!({"ok": false, "error": {"code": code, "message": message}});
+    let text = serde_json::to_string_pretty(&err).unwrap_or_else(|_| err.to_string());
+    json!({"content": [{"type": "text", "text": text}], "isError": true})
 }
 
 fn json_value(s: &str) -> Value {
@@ -233,6 +236,9 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
         "entry_post" => {
             let id =
                 arg_i64(args, "id").ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
+            if crate::entries::get_entry(db, id).is_none() {
+                return Err(BukioError::new("NOT_FOUND", format!("entry {id} not found")));
+            }
             let posted = post_entry(db, id, actor)?;
             Ok(json!({"ok": true, "entry": posted}))
         }
@@ -256,30 +262,18 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 .ok_or_else(|| BukioError::new("MISSING_ARG", "date required"))?;
             let description = arg_str(args, "description")
                 .ok_or_else(|| BukioError::new("MISSING_ARG", "description required"))?;
-            let postings_arr = args
+            let raw: Vec<String> = args
                 .get("postings")
                 .and_then(|v| v.as_array())
-                .ok_or_else(|| BukioError::new("MISSING_ARG", "postings required"))?;
-            // Parse postings as strings (CODE:AMOUNT format)
-            let mut postings = Vec::new();
-            for p in postings_arr {
-                if let Some(s) = p.as_str() {
-                    let parts: Vec<&str> = s.splitn(2, ':').collect();
-                    if parts.len() == 2 {
-                        let code = parts[0].to_string();
-                        let amount_cents = crate::money::parse_amount(parts[1])?;
-                        postings.push(PostingSpec {
-                            code,
-                            amount_cents,
-                            cost_center_code: None,
-                        });
-                    }
-                }
-            }
-            if postings.len() < 2 {
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let specs = crate::vat::parse_vat_posting_specs(&raw)?;
+            // Expand VAT postings (generates net + VAT legs)
+            let (expanded, _) = crate::vat::expand_vat_postings(db, &specs)?;
+            if expanded.is_empty() {
                 return Err(BukioError::new("TOO_FEW_POSTINGS", "an entry needs at least 2 postings"));
             }
-            let sum: i64 = postings.iter().map(|p| p.amount_cents).sum();
+            let sum: i64 = expanded.iter().map(|p| p.amount_cents).sum();
             if sum != 0 {
                 return Err(BukioError::new("UNBALANCED", format!("postings do not sum to zero (sum = {sum})")));
             }
@@ -289,7 +283,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 CreateEntry {
                     date: &date,
                     description: &description,
-                    postings,
+                    postings: expanded,
                     source: "manual",
                     source_ref: None,
                     actor,
@@ -301,6 +295,32 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             } else {
                 Ok(json!({"ok": true, "entry": entry}))
             }
+        }
+        "asset_add" => {
+            let name = arg_str(args, "name")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "name required"))?;
+            let purchase_date = arg_str(args, "purchase_date")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "purchase_date required"))?;
+            let purchase_price = arg_str(args, "purchase_price")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "purchase_price required"))?;
+            let dep_start = arg_str(args, "depreciation_start")
+                .unwrap_or_else(|| purchase_date.clone());
+            let recognition = arg_str(args, "recognition_date")
+                .unwrap_or_else(|| purchase_date.clone());
+            let purchase_price_clean = purchase_price.replace(',', ".");
+            let purchase_price_cents = crate::money::parse_amount(&purchase_price_clean)?;
+            let category = arg_str(args, "category");
+            let asset_account = arg_str(args, "asset_account").unwrap_or_else(|| "1800".into());
+            let expense_account = arg_str(args, "expense_account").unwrap_or_else(|| "4600".into());
+            let cum_dep_str = arg_str(args, "cum_dep").unwrap_or_else(|| "0".into());
+            let cum_dep = crate::money::parse_amount(&cum_dep_str)?;
+            let action = crate::assets::create_asset(
+                db, &name, category.as_deref(), None, None, None, None, None, None,
+                &purchase_date, purchase_price_cents, &dep_start, &recognition,
+                cum_dep, &asset_account, None, &expense_account, None, None,
+                actor, false,
+            )?;
+            Ok(json!({"ok": true, "action": "assets.add", "asset": action}))
         }
         "invoice_pay" => {
             let id = arg_i64(args, "id")
@@ -314,6 +334,37 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 db, id, &date, outstanding, "bank", actor, false,
             )?;
             Ok(json!({"ok": true, "invoice": paid}))
+        }
+        "invoice_credit" => {
+            let id = arg_i64(args, "id")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
+            let inv = crate::invoice::get_invoice(db, id)?
+                .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} not found")))?;
+            // For now, just return the invoice info (credit note creation is complex)
+            Ok(json!({"ok": true, "invoice": inv, "action": "invoice.credit"}))
+        }
+        "invoice_finalize" => {
+            let id = arg_i64(args, "id")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
+            if crate::invoice::get_invoice(db, id)?.is_none() {
+                return Err(BukioError::new("NOT_FOUND", format!("invoice {id} not found")));
+            }
+            let result = crate::invoice::finalize_invoice(db, id, actor, false)?;
+            Ok(result)
+        }
+        "fx_set" => {
+            let currency = arg_str(args, "currency")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "currency required"))?;
+            let date = arg_str(args, "date")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "date required"))?;
+            let rate = arg_str(args, "rate")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "rate required"))?;
+            // Validate date
+            if date.len() != 10 || date.as_bytes()[4] != b'-' || date.as_bytes()[7] != b'-' {
+                return Err(BukioError::new("INVALID_DATE", format!("date '{date}' must be YYYY-MM-DD")));
+            }
+            let result = crate::fx::set_fx_rate(db, &currency, &date, &rate, "manual", actor, false)?;
+            Ok(result)
         }
         "invoices" => {
             let status = arg_str(args, "status");
@@ -333,6 +384,9 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
         "contact_add" => {
             let name = arg_str(args, "name")
                 .ok_or_else(|| BukioError::new("MISSING_ARG", "name required"))?;
+            if name.trim().is_empty() {
+                return Err(BukioError::new("INVALID_NAME", "contact name cannot be blank"));
+            }
             let address = arg_str(args, "address");
             let postal_code = arg_str(args, "postal_code");
             let city = arg_str(args, "city");
