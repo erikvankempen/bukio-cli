@@ -154,19 +154,18 @@ pub fn list_bank_accounts(db: &Connection) -> Result<Vec<Value>> {
         .map_err(sql_err)?;
     let rows = stmt
         .query_map([], |r| {
-            let balance = r.get::<_, i64>(5)?;
+            let balance = r.get::<_, i64>(6)?;
             Ok(json!({
                 "iban": r.get::<_, String>(1)?,
                 "name": r.get::<_, Option<String>>(2)?,
                 "account_code": r.get::<_, String>(3)?,
                 "transaction_count": r.get::<_, i64>(4)?,
-                "unmatched_count": r.get::<_, i64>(5)?, // wait — this is the wrong column
+                "unmatched_count": r.get::<_, i64>(5)?,
                 "balance_cents": balance,
                 "balance": format_amount(balance),
             }))
         })
         .map_err(sql_err)?;
-    // ^ note: column indices need fixing — unmatched is col 5 in SQL, balance is col 6
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
