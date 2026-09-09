@@ -1846,10 +1846,10 @@ fn cmd_invoice_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         (None, None)
     };
 
-    // Build lines from --lines and --items
+    // Build lines from --lines and --items (raw strings for parse_line_spec)
     let lines_raw: Vec<Value> = repeated(argv, "--lines")
         .into_iter()
-        .map(|l| json!({ "type": "line", "spec": l }))
+        .map(|l| json!(l))
         .chain(
             repeated(argv, "--items")
                 .into_iter()
@@ -2103,6 +2103,11 @@ fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         if let Some(v) = arg(argv, opt) {
             changes.push((col.to_string(), v));
         }
+    }
+    // Country is immutable after init
+    if changes.iter().any(|(col, _)| col == "country") {
+        let cur = db.query_row("SELECT country FROM company WHERE id=1", [], |r| r.get::<_, Option<String>>(0)).ok().flatten().unwrap_or_default();
+        return Err(BukioError::new("COUNTRY_IMMUTABLE", format!("country is immutable after init — company stays {cur} (re-init a new DB for another country)")));
     }
     if changes.is_empty() {
         return Err(BukioError::new("NOTHING_TO_UPDATE", "nothing to update — pass at least one of --name/--registration-id/--tax-id/--iban/--address/--postal-code/--city"));

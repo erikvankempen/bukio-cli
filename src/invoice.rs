@@ -45,7 +45,7 @@ fn parse_dutch_amount(s: &str) -> Option<i64> {
 pub fn parse_line_spec(spec: &str) -> Result<Value> {
     let s = spec.trim();
     // Try to extract quantity prefix
-    let (qty_milli, rest) = if let Some(idx) = s.find("x ") {
+    let (qty_milli, rest) = if let Some(idx) = s.find("x") {
         let qty_str = s[..idx].trim();
         if qty_str.starts_with('-') {
             return Err(invoice_error(
@@ -472,14 +472,20 @@ pub fn compute_invoice_totals(
 // --- invoice DB operations ------------------------------------------------
 
 fn serialize_invoice_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    // Column order: id, type, number, contact_id, date, due_date, status,
-    // language, currency, discount_type, discount_value, notes, subtotal_cents,
-    // vat_cents, total_cents, reference, created_by, created_at, description,
-    // delivery_date, invoice_type, invoice_number, entry_id, credit_for_invoice_id
+    // Matches explicit SELECT in get_invoice: id, invoice_type, invoice_number,
+    // contact_id, date, due_date, status, language, currency, discount_type,
+    // discount_value, notes, subtotal_cents, vat_cents, total_cents, reference,
+    // created_by, created_at, description, delivery_date, entry_id, credit_for_invoice_id
+    let id: i64 = row.get(0)?;
+    let inv_type: Option<String> = row.get(1)?;
+    let inv_number: Option<String> = row.get(2)?;
+    let subtotal: Option<i64> = row.get(12)?;
+    let vat: Option<i64> = row.get(13)?;
+    let total: Option<i64> = row.get(14)?;
     Ok(json!({
-        "id": row.get::<_, i64>(0)?,
-        "type": row.get::<_, Option<String>>(1)?,
-        "invoice_number": row.get::<_, Option<String>>(2)?,
+        "id": id,
+        "type": inv_type,
+        "invoice_number": inv_number,
         "contact_id": row.get::<_, Option<i64>>(3)?,
         "date": row.get::<_, Option<String>>(4)?,
         "due_date": row.get::<_, Option<String>>(5)?,
@@ -489,17 +495,16 @@ fn serialize_invoice_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "discount_type": row.get::<_, Option<String>>(9)?,
         "discount_value": row.get::<_, Option<i64>>(10)?,
         "notes": row.get::<_, Option<String>>(11)?,
-        "subtotal_cents": row.get::<_, Option<i64>>(12)?,
-        "vat_cents": row.get::<_, Option<i64>>(13)?,
-        "total_cents": row.get::<_, Option<i64>>(14)?,
+        "subtotal_cents": subtotal.unwrap_or(0),
+        "vat_cents": vat.unwrap_or(0),
+        "total_cents": total.unwrap_or(0),
         "reference": row.get::<_, Option<String>>(15)?,
         "created_by": row.get::<_, Option<String>>(16)?,
         "created_at": row.get::<_, Option<String>>(17)?,
         "description": row.get::<_, Option<String>>(18)?,
         "delivery_date": row.get::<_, Option<String>>(19)?,
-        "invoice_type": row.get::<_, Option<String>>(20)?,
-        "entry_id": row.get::<_, Option<i64>>(22)?,
-        "credit_for_invoice_id": row.get::<_, Option<i64>>(23)?,
+        "entry_id": row.get::<_, Option<i64>>(20)?,
+        "credit_for_invoice_id": row.get::<_, Option<i64>>(21)?,
     }))
 }
 
@@ -523,21 +528,29 @@ fn get_invoice_lines(db: &Connection, invoice_id: i64) -> Result<Vec<Value>> {
 
 fn get_invoice_payments(db: &Connection, invoice_id: i64) -> Result<Vec<Value>> {
     let mut stmt = db.prepare(
-        "SELECT id, invoice_id, date, amount_cents, method, reference, bank_tx_id, created_by FROM invoice_payments WHERE invoice_id = ?1 ORDER BY date, id"
+        "SELECT id, invoice_id, date, amount_cents, method, bank_tx_id, created_by FROM invoice_payments WHERE invoice_id = ?1 ORDER BY date, id"
     ).map_err(sql_err)?;
     let rows = stmt.query_map([invoice_id], |r| {
         Ok(json!({
             "id": r.get::<_, i64>(0)?, "invoice_id": r.get::<_, i64>(1)?, "date": r.get::<_, String>(2)?,
             "amount_cents": r.get::<_, i64>(3)?, "method": r.get::<_, String>(4)?,
-            "reference": r.get::<_, Option<String>>(5)?, "bank_tx_id": r.get::<_, Option<i64>>(6)?,
-            "created_by": r.get::<_, String>(7)?,
+            "bank_tx_id": r.get::<_, Option<i64>>(5)?,
+            "created_by": r.get::<_, String>(6)?,
         }))
     }).map_err(sql_err)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
 pub fn get_invoice(db: &Connection, id: i64) -> Result<Option<Value>> {
-    let inv = db.query_row("SELECT * FROM invoices WHERE id = ?1", [id], |r| {
+    let inv = db.query_row(
+        "SELECT i.id, i.invoice_type, i.invoice_number, i.contact_id, i.date, i.due_date, i.status,
+                i.language, i.currency, i.discount_type, i.discount_value, i.notes,
+                COALESCE((SELECT SUM(amount_cents) FROM invoice_lines WHERE invoice_id = i.id), 0) AS subtotal_cents,
+                COALESCE((SELECT SUM(vat_amount_cents) FROM invoice_lines WHERE invoice_id = i.id), 0) AS vat_cents,
+                COALESCE((SELECT SUM(amount_cents + vat_amount_cents) FROM invoice_lines WHERE invoice_id = i.id), 0) AS total_cents,
+                i.reference, i.created_by, i.created_at, i.description, i.delivery_date,
+                i.entry_id, i.credit_for_invoice_id
+         FROM invoices i WHERE i.id = ?1", [id], |r| {
         serialize_invoice_row(r)
     });
     let mut inv = match inv {
@@ -585,7 +598,13 @@ pub fn list_invoices(
     status: Option<&str>,
     invoice_type: Option<&str>,
 ) -> Result<Vec<Value>> {
-    let mut sql = "SELECT * FROM invoices".to_string();
+    let mut sql = "SELECT i.id, i.invoice_type, i.invoice_number, i.contact_id, i.date, i.due_date, i.status,
+        i.language, i.currency, i.discount_type, i.discount_value, i.notes,
+        COALESCE((SELECT SUM(amount_cents) FROM invoice_lines WHERE invoice_id = i.id), 0) AS subtotal_cents,
+        COALESCE((SELECT SUM(vat_amount_cents) FROM invoice_lines WHERE invoice_id = i.id), 0) AS vat_cents,
+        COALESCE((SELECT SUM(amount_cents + vat_amount_cents) FROM invoice_lines WHERE invoice_id = i.id), 0) AS total_cents,
+        i.reference, i.created_by, i.created_at, i.description, i.delivery_date,
+        i.entry_id, i.credit_for_invoice_id FROM invoices i".to_string();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     let mut clauses = Vec::new();
     if let Some(s) = status {
