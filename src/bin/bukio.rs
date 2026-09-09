@@ -1360,8 +1360,18 @@ fn cmd_bank_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
     let db = open_existing(db_path)?;
     let iban = arg(argv, "--iban").ok_or_else(|| missing_arg("--iban"))?;
     let name = arg(argv, "--name");
-    let account_code = arg(argv, "--account-code").unwrap_or_else(|| "1100".into());
-    bukio::bank::get_or_create_bank_account(&db, &iban, name.as_deref(), &account_code, dry_run)
+    let account_code = arg(argv, "--account-code").unwrap_or_else(|| {
+        let profile = bukio::accounts::resolve_profile(&db).ok();
+        profile
+            .and_then(|p| p["reporting"]["bankAccountDefault"].as_str().map(String::from))
+            .unwrap_or_else(|| "1100".into())
+    });
+    let result = bukio::bank::get_or_create_bank_account(&db, &iban, name.as_deref(), &account_code, dry_run)?;
+    if dry_run {
+        Ok(json!({ "plan": result }))
+    } else {
+        Ok(json!({ "bank_account": { "id": result["id"], "iban": result["iban"], "name": result["name"], "account_code": result["account_code"] } }))
+    }
 }
 
 fn cmd_bank_list(db_path: &str) -> Result<Value> {
@@ -1373,6 +1383,7 @@ fn cmd_bank_list(db_path: &str) -> Result<Value> {
 fn cmd_bank_import(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
+    let _profile = bukio::accounts::resolve_profile(&db)?; // fail early for unknown country
     let file = arg(argv, "--file").ok_or_else(|| missing_arg("--file"))?;
     let iban = arg(argv, "--iban").ok_or_else(|| missing_arg("--iban"))?;
     let name = arg(argv, "--name");
@@ -1608,6 +1619,16 @@ fn cmd_vat_book(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
 
 fn cmd_vat_readout(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
+    let profile = bukio::accounts::resolve_profile(&db)?;
+    if profile["tax"]["returnLayout"].as_str().is_none() {
+        return Err(BukioError::new(
+            "FORMAT_NOT_SUPPORTED",
+            format!(
+                "VAT return is not supported for country {}",
+                profile["meta"]["country"].as_str().unwrap_or("?")
+            ),
+        ));
+    }
     let period = arg(argv, "--period").ok_or_else(|| missing_arg("--period"))?;
     if has_flag(argv, "--mark-filed") {
         require_actor(actor)?;
@@ -2281,6 +2302,16 @@ fn cmd_import_contacts(
 fn cmd_export_xaf(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
+    let profile = bukio::accounts::resolve_profile(&db)?;
+    if profile["documents"]["auditFile"].as_str().is_none() {
+        return Err(BukioError::new(
+            "FORMAT_NOT_SUPPORTED",
+            format!(
+                "audit file export is not supported for country {}",
+                profile["meta"]["country"].as_str().unwrap_or("?")
+            ),
+        ));
+    }
     let year = arg(argv, "--year").unwrap_or_else(|| bukio::dates::today_iso()[0..4].to_string());
     let out = arg(argv, "--out").unwrap_or_else(|| format!("bukio-{year}.xaf"));
     bukio::export::export_xaf(&db, &year, &out, actor, dry_run)
@@ -2307,6 +2338,7 @@ fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
     let db = open_existing(db_path)?;
     let fields = [
         ("--name", "name"),
+        ("--country", "country"),
         ("--registration-id", "registration_id"),
         ("--tax-id", "tax_id"),
         ("--iban", "iban"),
@@ -2320,8 +2352,8 @@ fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
             changes.push((col.to_string(), v));
         }
     }
-    // Country is immutable after init
-    if changes.iter().any(|(col, _)| col == "country") {
+    // Country is immutable after init — allow same value (case-insensitive)
+    if let Some(idx) = changes.iter().position(|(col, _)| col == "country") {
         let cur = db
             .query_row("SELECT country FROM company WHERE id=1", [], |r| {
                 r.get::<_, Option<String>>(0)
@@ -2329,7 +2361,12 @@ fn cmd_company_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
             .ok()
             .flatten()
             .unwrap_or_default();
-        return Err(BukioError::new("COUNTRY_IMMUTABLE", format!("country is immutable after init — company stays {cur} (re-init a new DB for another country)")));
+        let new_val = &changes[idx].1;
+        if !new_val.eq_ignore_ascii_case(&cur) {
+            return Err(BukioError::new("COUNTRY_IMMUTABLE", format!("country is immutable after init — company stays {cur} (re-init a new DB for another country)")));
+        }
+        // same value — drop from changes
+        changes.remove(idx);
     }
     if changes.is_empty() {
         return Err(BukioError::new("NOTHING_TO_UPDATE", "nothing to update — pass at least one of --name/--registration-id/--tax-id/--iban/--address/--postal-code/--city"));
@@ -3055,6 +3092,16 @@ fn cmd_report_cost_center(argv: &[String], db_path: &str) -> Result<Value> {
 // ── financial-statements report ───────────────────────────────────
 fn cmd_financial_statements_report(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
+    let profile = bukio::accounts::resolve_profile(&db)?;
+    if profile["reporting"]["format"].as_str().is_none() {
+        return Err(BukioError::new(
+            "FORMAT_NOT_SUPPORTED",
+            format!(
+                "financial statements are not supported for country {}",
+                profile["meta"]["country"].as_str().unwrap_or("?")
+            ),
+        ));
+    }
     let year = arg(argv, "--year").ok_or_else(|| missing_arg("--year"))?;
     let format = arg(argv, "--format").unwrap_or_else(|| "json".into());
 

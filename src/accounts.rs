@@ -122,9 +122,8 @@ fn valid_taxonomy(t: &str) -> bool {
 
 pub fn create_account(db: &Connection, a: &NewAccount<'_>) -> Result<Value> {
     validate_account(a)?;
-    let taxonomy = resolve_profile(db)?["reporting"]["taxonomy"]
-        .as_str()
-        .unwrap_or("RGS");
+    let profile = resolve_profile(db)?;
+    let taxonomy: Option<&str> = profile["reporting"]["taxonomy"].as_str().filter(|s| !s.is_empty());
     let insert = db.execute(
         "INSERT INTO accounts (code, name, type, taxonomy_code, normal_balance, taxonomy) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![a.code, a.name.trim(), a.type_, non_empty(a.taxonomy_code), a.normal_balance, taxonomy],

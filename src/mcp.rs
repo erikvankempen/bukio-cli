@@ -52,8 +52,8 @@ fn tool_defs() -> Vec<Value> {
         json!({"name": "company_info", "description": "the company behind this database", "inputSchema": {"type": "object", "properties": {}}}),
         json!({"name": "trial_balance", "description": "per-account totals; balanced tells you the books reconcile", "inputSchema": {"type": "object", "properties": {"year": {"type": "string"}}}}),
         json!({"name": "balance_sheet", "description": "balance sheet as of a date", "inputSchema": {"type": "object", "properties": {"as_of": {"type": "string"}}}}),
-        json!({"name": "pnl", "description": "profit & loss for a year", "inputSchema": {"type": "object", "properties": {"year": {"type": "string"}}}}),
-        json!({"name": "journal", "description": "journal export for a year", "inputSchema": {"type": "object", "properties": {"year": {"type": "string"}, "limit": {"type": "integer"}}}}),
+        json!({"name": "pnl", "description": "profit & loss for a year", "inputSchema": {"type": "object", "properties": {"year": {"type": "string"}}, "required": ["year"]}}),
+        json!({"name": "journal", "description": "journal export for a year", "inputSchema": {"type": "object", "properties": {"year": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["year"]}}),
         json!({"name": "accounts", "description": "chart of accounts", "inputSchema": {"type": "object", "properties": {"include_inactive": {"type": "boolean"}}}}),
         json!({"name": "entry_add", "description": "create a journal entry", "inputSchema": {"type": "object", "properties": {"date": {"type": "string"}, "description": {"type": "string"}, "postings": {"type": "array", "items": {"type": "string"}}, "post": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["date", "description", "postings"]}}),
         json!({"name": "entry_post", "description": "post a draft entry", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "mode": {"type": "string"}}, "required": ["id"]}}),
@@ -63,6 +63,14 @@ fn tool_defs() -> Vec<Value> {
         json!({"name": "contact_add", "description": "create a contact", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "address": {"type": "string"}, "postal_code": {"type": "string"}, "city": {"type": "string"}, "country": {"type": "string"}, "email": {"type": "string"}, "vat_id": {"type": "string"}, "kvk": {"type": "string"}, "iban": {"type": "string"}, "mode": {"type": "string"}}, "required": ["name"]}}),
         json!({"name": "audit", "description": "append-only audit log", "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}}}),
         json!({"name": "vat_readout", "description": "VAT return fields 1a-5d", "inputSchema": {"type": "object", "properties": {"period": {"type": "string"}}, "required": ["period"]}}),
+        json!({"name": "vat_book", "description": "book a VAT entry with postings", "inputSchema": {"type": "object", "properties": {"date": {"type": "string"}, "description": {"type": "string"}, "postings": {"type": "array", "items": {"type": "string"}}, "post": {"type": "boolean"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["date", "description", "postings"]}}),
+        json!({"name": "asset_add", "description": "register an asset", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "purchase_date": {"type": "string"}, "purchase_price": {"type": "string"}, "depreciation_start": {"type": "string"}, "recognition_date": {"type": "string"}, "category": {"type": "string"}, "asset_account": {"type": "string"}, "expense_account": {"type": "string"}, "cum_dep": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["name", "purchase_date", "purchase_price"]}}),
+        json!({"name": "invoice_pay", "description": "mark an invoice as paid", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "date": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["id", "date"]}}),
+        json!({"name": "invoice_credit", "description": "create a credit note for an invoice", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["id"]}}),
+        json!({"name": "invoice_finalize", "description": "finalize a draft invoice", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["id"]}}),
+        json!({"name": "year_end_close", "description": "close the fiscal year", "inputSchema": {"type": "object", "properties": {"year": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["year"]}}),
+        json!({"name": "compliance", "description": "compliance status", "inputSchema": {"type": "object", "properties": {}}}),
+        json!({"name": "fx_set", "description": "set an FX exchange rate", "inputSchema": {"type": "object", "properties": {"currency": {"type": "string"}, "date": {"type": "string"}, "rate": {"type": "string"}, "actor": {"type": "string"}}, "required": ["currency", "date", "rate"]}}),
         json!({"name": "import_file", "description": "import opening balances or journal CSV", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}, "kind": {"type": "string"}, "date": {"type": "string"}, "create_missing": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["file", "kind"]}}),
         json!({"name": "import_contacts", "description": "import contacts from UBL XML", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}, "mode": {"type": "string"}}, "required": ["file"]}}),
     ]
@@ -104,10 +112,14 @@ fn dispatch(db: &Connection, actor: &str, msg: &Value) -> Result<String> {
             let args = params.get("arguments").unwrap_or(&Value::Null);
             match call_tool(db, actor, tool_name, args) {
                 Ok(result) => Ok(rpc_response(id.clone(), rpc_content(result))),
-                Err(e) => Ok(rpc_response(
-                    id.clone(),
-                    rpc_error_content(&e.code, &e.message),
-                )),
+                Err(e) => {
+                    if e.code == "UNKNOWN_TOOL" {
+                        // Return JSON-RPC error for unknown tools (matches JS parity)
+                        Ok(rpc_error(id.clone(), -32602, &e.message))
+                    } else {
+                        Ok(rpc_response(id.clone(), rpc_error_content(&e.code, &e.message)))
+                    }
+                }
             }
         }
         _ => Ok(rpc_error(
@@ -122,17 +134,17 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
     match tool {
         "company_info" => {
             let c = get_company(db)?;
-            Ok(json!({"ok": true, "data": c}))
+            Ok(json!({"company": c}))
         }
         "trial_balance" => {
             let year = arg_str(args, "year");
             let r = crate::reports::trial_balance(db, year.as_deref())?;
-            Ok(json!({"ok": true, "data": r}))
+            Ok(r)
         }
         "balance_sheet" => {
             let as_of = arg_str(args, "as_of");
             let r = crate::reports::trial_balance(db, as_of.as_deref())?;
-            Ok(json!({"ok": true, "data": r}))
+            Ok(r)
         }
         "pnl" => {
             let year =
@@ -146,7 +158,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             let from = format!("{year}-01-01");
             let to = format!("{year}-12-31");
             let r = crate::reports::pnl(db, &from, &to)?;
-            Ok(json!({"ok": true, "data": r}))
+            Ok(r)
         }
         "journal" => {
             let year = arg_str(args, "year")
@@ -188,7 +200,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
         "accounts" => {
             let include_inactive = arg_bool(args, "include_inactive", false);
             let r = list_accounts(db, None, include_inactive)?;
-            Ok(json!({"ok": true, "data": r}))
+            Ok(json!({"accounts": r}))
         }
         "entry_add" => {
             let date = arg_str(args, "date")
@@ -413,6 +425,21 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             let result = crate::invoice::finalize_invoice(db, id, actor, false)?;
             Ok(result)
         }
+        "year_end_close" => {
+            let year = arg_str(args, "year")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "year required"))?;
+            let result = crate::year_end::year_end_close(db, &year, actor, false)?;
+            Ok(result)
+        }
+        "compliance" => {
+            let year_str = arg_str(args, "year").unwrap_or_else(|| {
+                let today = crate::dates::today_iso();
+                today[..4].to_string()
+            });
+            let year: i32 = year_str.parse().unwrap_or(2026);
+            let result = crate::compliance::compliance_status(db, year)?;
+            Ok(result)
+        }
         "fx_set" => {
             let currency = arg_str(args, "currency")
                 .ok_or_else(|| BukioError::new("MISSING_ARG", "currency required"))?;
@@ -442,12 +469,12 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 }
             }
             let r = crate::invoice::list_invoices(db, status.as_deref(), None)?;
-            Ok(json!({"ok": true, "data": r}))
+            Ok(json!({"invoices": r}))
         }
         "contacts" => {
             let limit = arg_i64(args, "limit").map(|l| l as usize).unwrap_or(50);
             let r = list_contacts(db)?;
-            Ok(json!({"ok": true, "data": r}))
+            Ok(json!({"contacts": r}))
         }
         "contact_add" => {
             let name = arg_str(args, "name")
@@ -485,13 +512,13 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
         "audit" => {
             let limit = arg_i64(args, "limit").map(|l| l as usize).unwrap_or(50);
             let r = crate::audit::list(db, None, None, limit as i64)?;
-            Ok(json!({"ok": true, "data": r}))
+            Ok(json!({"rows": r}))
         }
         "vat_readout" => {
             let period = arg_str(args, "period")
                 .ok_or_else(|| BukioError::new("MISSING_ARG", "period required"))?;
             let r = crate::vat::ob_readout(db, &period)?;
-            Ok(json!({"ok": true, "data": r}))
+            Ok(r)
         }
         "import_file" => {
             let file = arg_str(args, "file")
@@ -510,13 +537,13 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                         actor,
                         dry_run,
                     )?;
-                    Ok(json!({"ok": true, "data": r}))
+                    Ok(r)
                 }
                 "journal" => {
                     let create_missing = arg_bool(args, "create_missing", false);
                     let r =
                         import_mod::import_journal_csv(db, &text, create_missing, actor, dry_run)?;
-                    Ok(json!({"ok": true, "data": r}))
+                    Ok(r)
                 }
                 _ => Err(BukioError::new(
                     "INVALID_KIND",
@@ -530,7 +557,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             let text = import_mod::read_import_file(&file)?;
             let dry_run = arg_bool(args, "mode", false);
             let r = import_mod::import_contacts(db, &text, actor, dry_run)?;
-            Ok(json!({"ok": true, "data": r}))
+            Ok(r)
         }
         _ => Err(BukioError::new(
             "UNKNOWN_TOOL",
