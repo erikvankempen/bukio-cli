@@ -1260,6 +1260,80 @@ pub fn mark_paid(
     get_invoice(db, id)?.ok_or_else(|| BukioError::new("DB_ERROR", "invoice not found"))
 }
 
+pub fn invoice_reminders(db: &Connection, within_days: i64) -> Result<Value> {
+    if within_days < 0 {
+        return Err(BukioError::new("INVALID_WINDOW", format!("within-days must be a non-negative integer, got '{within_days}'")));
+    }
+    let today = crate::dates::today_iso();
+    // due_soon cutoff = today + within_days
+    let due_soon = {
+        let today_naive = chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d")
+            .map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
+        let cutoff = today_naive + chrono::Duration::days(within_days);
+        cutoff.format("%Y-%m-%d").to_string()
+    };
+    let invoices = list_invoices(db, None, None)?;
+    let mut reminders: Vec<Value> = invoices
+        .iter()
+        .filter(|i| i["invoice_type"].as_str() == Some("sales"))
+        .filter(|i| {
+            let st = i["status"].as_str();
+            st == Some("overdue")
+                || (st == Some("sent")
+                    && i["due_date"].as_str().map_or(false, |d| d <= due_soon.as_str()))
+        })
+        .map(|i| {
+            let days_overdue = if i["status"].as_str() == Some("overdue") {
+                if let Some(due) = i["due_date"].as_str() {
+                    let due_dt = chrono::NaiveDate::parse_from_str(due, "%Y-%m-%d")
+                        .unwrap_or_default();
+                    let today_dt = chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d")
+                        .unwrap_or_default();
+                    (today_dt - due_dt).num_days().max(0)
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+            let gross = i["gross_cents"].as_i64().unwrap_or(0);
+            let paid = i["paid_cents"].as_i64().unwrap_or(0);
+            let outstanding = gross - paid;
+            let remind = if i["status"].as_str() == Some("overdue") {
+                "overdue"
+            } else {
+                "due_soon"
+            };
+            json!({
+                "invoice_id": i["id"],
+                "invoice_number": i["invoice_number"],
+                "contact_name": i["contact"]["name"],
+                "contact_email": i["contact"]["email"],
+                "due_date": i["due_date"],
+                "days_overdue": days_overdue,
+                "outstanding_cents": outstanding,
+                "outstanding": crate::money::format_amount(outstanding),
+                "gross": crate::money::format_amount(gross),
+                "status": i["status"],
+                "remind": remind,
+            })
+        })
+        .collect();
+    reminders.sort_by(|a, b| {
+        b["days_overdue"]
+            .as_i64()
+            .unwrap_or(0)
+            .cmp(&a["days_overdue"].as_i64().unwrap_or(0))
+            .then(a["invoice_id"].as_i64().unwrap_or(0).cmp(&b["invoice_id"].as_i64().unwrap_or(0)))
+    });
+    Ok(json!({
+        "as_of": today,
+        "within_days": within_days,
+        "count": reminders.len(),
+        "reminders": reminders,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

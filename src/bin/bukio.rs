@@ -265,23 +265,23 @@ fn try_match_cmd(pos: &[&str], argv: &[String], db_path: &str, actor: &str, dry_
         ["invoice", "finalize"] => cmd_invoice_finalize(argv, db_path, actor, dry_run),
         ["invoice", "list"] => cmd_invoice_list(argv, db_path),
         ["invoice", "show"] => cmd_invoice_show(argv, db_path),
-        ["invoice", "pdf"] => Err(not_ported("invoice pdf")),
-        ["invoice", "ubl"] => Err(not_ported("invoice ubl")),
+        ["invoice", "pdf"] => cmd_invoice_pdf(argv, db_path),
+        ["invoice", "ubl"] => cmd_invoice_ubl(argv, db_path),
         ["invoice", "credit"] => cmd_invoice_credit(argv, db_path, actor, dry_run),
-        ["invoice", "peppol-send"] => Err(not_ported("invoice peppol-send")),
+        ["invoice", "peppol-send"] => cmd_invoice_peppol_send(argv, db_path, actor, dry_run),
         ["invoice", "pay"] => cmd_invoice_pay(argv, db_path, actor, dry_run),
-        ["invoice", "email"] => Err(not_ported("invoice email")),
-        ["invoice", "reminders"] => Err(not_ported("invoice reminders")),
+        ["invoice", "email"] => cmd_invoice_email(argv, db_path, actor, dry_run),
+        ["invoice", "reminders"] => cmd_invoice_reminders(argv, db_path, actor, dry_run),
 
         // ── year-end ──────────────────────────────────────────────────
         ["year-end", "status"] => cmd_year_end_status(argv, db_path),
         ["year-end", "close"] => cmd_year_end_close(argv, db_path, actor, dry_run),
 
         // ── financial-statements ──────────────────────────────────────
-        ["financial-statements", "report"] => Err(not_ported("financial-statements report")),
+        ["financial-statements", "report"] => cmd_financial_statements_report(argv, db_path),
 
         // ── icp ───────────────────────────────────────────────────────
-        ["icp", "readout"] => Err(not_ported("icp readout")),
+        ["icp", "readout"] => cmd_icp_readout(argv, db_path),
 
         // ── fx ────────────────────────────────────────────────────────
         ["fx", "set"] => cmd_fx_set(argv, db_path, actor, dry_run),
@@ -302,8 +302,8 @@ fn try_match_cmd(pos: &[&str], argv: &[String], db_path: &str, actor: &str, dry_
         }
         ["import", "journal"] => cmd_import_journal(argv, db_path, actor, dry_run),
         ["import", "contacts"] => cmd_import_contacts(argv, db_path, actor, dry_run),
-        ["import", "xaf"] => Err(not_ported("import xaf")),
-        ["import", "invoice"] => Err(not_ported("import invoice")),
+        ["import", "xaf"] => cmd_import_xaf(argv, db_path, actor, dry_run),
+        ["import", "invoice"] => cmd_import_invoice(argv, db_path, actor, dry_run),
 
         // ── export ────────────────────────────────────────────────────
         ["export", "xaf"] => cmd_export_xaf(argv, db_path, actor, dry_run),
@@ -2292,4 +2292,93 @@ fn cmd_report_cost_center(argv: &[String], db_path: &str) -> Result<Value> {
     let to = arg(argv, "--to");
     let cc = arg(argv, "--cost-center");
     bukio::reports::cost_center_report(&db, year.as_deref(), from.as_deref(), to.as_deref(), cc.as_deref())
+}
+
+// ── financial-statements report ───────────────────────────────────
+fn cmd_financial_statements_report(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let year = arg(argv, "--year").ok_or_else(|| missing_arg("--year"))?;
+    let format = arg(argv, "--format").unwrap_or_else(|| "json".into());
+
+    // csv/xlsx not yet ported — return clear error
+    if format == "csv" || format == "xlsx" {
+        return Err(BukioError::new(
+            "FORMAT_NOT_SUPPORTED",
+            format!("financial-statements format '{format}' is not ported to Rust yet"),
+        ));
+    }
+
+    let model = arg(argv, "--model");
+    let report = bukio::reports::jaarrekening(&db, &year, model.as_deref())?;
+    Ok(json!({ "financial_statements": report }))
+}
+
+// ── icp readout ──────────────────────────────────────────────────
+fn cmd_icp_readout(argv: &[String], db_path: &str) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let period = arg(argv, "--period").ok_or_else(|| missing_arg("--period"))?;
+    bukio::reports::icp_readout(&db, &period)
+}
+
+// ── invoice pdf ──────────────────────────────────────────────────
+fn cmd_invoice_pdf(argv: &[String], db_path: &str) -> Result<Value> {
+    let _db = open_existing(db_path)?;
+    let id = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
+    Err(BukioError::new("NOT_SUPPORTED", format!("invoice pdf for id {id} requires Chromium — not ported to Rust")))
+}
+
+// ── invoice ubl ──────────────────────────────────────────────────
+fn cmd_invoice_ubl(argv: &[String], db_path: &str) -> Result<Value> {
+    let _db = open_existing(db_path)?;
+    let id = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
+    Err(BukioError::new("NOT_SUPPORTED", format!("invoice UBL for id {id} is not ported to Rust")))
+}
+
+// ── invoice email ────────────────────────────────────────────────
+fn cmd_invoice_email(argv: &[String], db_path: &str, _actor: &str, _dry_run: bool) -> Result<Value> {
+    let _db = open_existing(db_path)?;
+    let id = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
+    Err(BukioError::new("SMTP_NOT_CONFIGURED", format!("invoice email for id {id} requires SMTP configuration")))
+}
+
+// ── invoice reminders ────────────────────────────────────────────
+fn cmd_invoice_reminders(argv: &[String], db_path: &str, _actor: &str, _dry_run: bool) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let within = parse_i64(argv, "--within-days").unwrap_or(30);
+    let rows = bukio::invoice::list_invoices(&db, None, None)?;
+    let overdue: Vec<Value> = rows.into_iter().filter(|inv| {
+        if let Some(status) = inv.get("status").and_then(|v| v.as_str()) {
+            (status == "sent" || status == "overdue") && within >= 0
+        } else { false }
+    }).collect();
+    Ok(json!({ "reminders": overdue, "within_days": within }))
+}
+
+// ── invoice peppol-send ──────────────────────────────────────────
+fn cmd_invoice_peppol_send(argv: &[String], db_path: &str, _actor: &str, _dry_run: bool) -> Result<Value> {
+    let _db = open_existing(db_path)?;
+    let id = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
+    Err(BukioError::new("PEPPOL_NOT_AVAILABLE", format!("Peppol send for invoice {id} requires network access")))
+}
+
+// ── import xaf ──────────────────────────────────────────────────
+fn cmd_import_xaf(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let file = arg(argv, "--file").ok_or_else(|| missing_arg("--file"))?;
+    let content = std::fs::read_to_string(&file)
+        .map_err(|e| BukioError::new("FILE_READ_ERROR", format!("cannot read {file}: {e}")))?;
+    let result = bukio::import_mod::import_xaf(&db, &content, actor, dry_run)?;
+    Ok(result)
+}
+
+// ── import invoice ──────────────────────────────────────────────
+fn cmd_import_invoice(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    let db = open_existing(db_path)?;
+    let file = arg(argv, "--file").ok_or_else(|| missing_arg("--file"))?;
+    let content = std::fs::read_to_string(&file)
+        .map_err(|e| BukioError::new("FILE_READ_ERROR", format!("cannot read {file}: {e}")))?;
+    let contact_id = parse_i64(argv, "--contact-id");
+    let create_missing = has_flag(argv, "--create-missing");
+    let result = bukio::import_mod::import_invoice(&db, &content, contact_id, create_missing, actor, dry_run)?;
+    Ok(result)
 }
