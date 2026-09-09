@@ -18,6 +18,8 @@ import { exportXaf } from '../src/export/index.js';
 import { importXaf } from '../src/import/index.js';
 import { list } from '../src/audit/index.js';
 
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'target', 'release', 'bukio');
+
 let db;
 let tmpDir;
 
