@@ -68,16 +68,22 @@ test('invoice template: generates draft invoices on schedule (never auto-finaliz
 });
 
 test('invoice template: generated drafts finalize normally (compliance + number)', () => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const startDate = `${y}-${m}-01`;
+  // Due date = start + 14 days; run the day after start so invoice is not overdue
+  const runDate = `${y}-${m}-10`;
   const c = addContact();
   createTemplate(db, {
     name: 'SaaS abonnement', kind: 'invoice', contactId: c.id,
     invoiceLines: ['1x Premium @ 99.00 @21'],
-    frequency: 'monthly', startDate: '2026-08-01', actor: 'agent:test',
+    frequency: 'monthly', startDate, actor: 'agent:test',
   });
-  runDue(db, { asOf: '2026-08-31' });
+  runDue(db, { asOf: runDate });
   const draft = db.prepare('SELECT * FROM invoices').get();
   const result = finalizeInvoice(db, { id: draft.id, actor: 'agent:test' });
-  assert.equal(result.invoice.invoice_number, '2026-0001');
+  assert.equal(result.invoice.invoice_number, `${y}-0001`);
   assert.equal(result.invoice.status, 'sent');
   assert.equal(result.entry.state, 'posted');
 });
