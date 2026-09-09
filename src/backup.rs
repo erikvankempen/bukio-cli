@@ -141,6 +141,12 @@ pub fn cmd_restore(from: &str, to: &str, force: bool, actor: &str, dry_run: bool
 
     validate_backup_file(src_path)?;
 
+    if from == to {
+        return Err(BukioError::new(
+            "SAME_FILE",
+            format!("source and target are the same file: {to}"),
+        ));
+    }
     if !force && Path::new(to).exists() {
         return Err(BukioError::new(
             "RESTORE_EXISTS",

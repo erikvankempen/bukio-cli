@@ -249,6 +249,7 @@ fn try_match_cmd(
 
         // ── backup ────────────────────────────────────────────────────
         ["backup"] => cmd_backup(argv, db_path, actor, dry_run),
+        ["restore"] => cmd_backup_restore(argv, db_path, actor, dry_run),
         ["backup", "restore"] => cmd_backup_restore(argv, db_path, actor, dry_run),
 
         // ── bank ──────────────────────────────────────────────────────
