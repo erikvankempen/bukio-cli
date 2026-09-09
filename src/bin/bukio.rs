@@ -1122,7 +1122,36 @@ fn emit_csv(
         }
         return Ok(true);
     }
+    // XLSX format
+    if let Some(fmt) = arg(argv, "--format").filter(|f| f == "xlsx") {
+        let path = arg(argv, "--out")
+            .ok_or_else(|| BukioError::new("OUT_REQUIRED", "--out <path> is required for xlsx output"))?;
+        let rows = flat_fn(data);
+        write_xlsx(&path, columns, &rows)?;
+        return Ok(true);
+    }
     Ok(false)
+}
+
+fn write_xlsx(path: &str, columns: &[&str], rows: &[Vec<String>]) -> Result<()> {
+    use rust_xlsxwriter::Workbook;
+    let mut workbook = Workbook::new();
+    let sheet = workbook.add_worksheet();
+    // Header row
+    for (i, col) in columns.iter().enumerate() {
+        sheet.write_string(0, i as u16, col.to_string())
+            .map_err(|e| BukioError::new("FILE_ERROR", e.to_string()))?;
+    }
+    // Data rows
+    for (r_idx, row) in rows.iter().enumerate() {
+        for (c_idx, val) in row.iter().enumerate() {
+            sheet.write_string((r_idx + 1) as u32, c_idx as u16, val.clone())
+                .map_err(|e| BukioError::new("FILE_ERROR", e.to_string()))?;
+        }
+    }
+    workbook.save(path)
+        .map_err(|e| BukioError::new("FILE_ERROR", format!("cannot write xlsx: {e}")))?;
+    Ok(())
 }
 
 fn cmd_tb(argv: &[String], db_path: &str) -> Result<Value> {
