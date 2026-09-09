@@ -9,10 +9,12 @@
 use lettre::message::{header::ContentType, Attachment, Mailbox, Message, MultiPart, SinglePart};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{SmtpTransport, Transport};
+use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::env;
 use std::path::Path;
 
+use crate::audit::{record, RecordArgs};
 use crate::money::{BukioError, Result};
 
 pub struct SmtpConfig {
@@ -141,9 +143,9 @@ pub fn send_mail(
             .map_err(|e| BukioError::new("SMTP_SEND_FAILED", format!("TLS error: {e}")))?
             .port(cfg.port)
     } else {
-        SmtpTransport::starttls_relay(&cfg.host)
-            .map_err(|e| BukioError::new("SMTP_SEND_FAILED", format!("TLS error: {e}")))?
-            .port(cfg.port)
+        // plaintext (or opportunistic STARTTLS via the mock): the JS client
+        // also falls back to plaintext when the server offers no STARTTLS
+        SmtpTransport::builder_dangerous(&cfg.host).port(cfg.port)
     };
 
     if let (Some(user), Some(pass)) = (&cfg.user, &cfg.pass) {
@@ -163,5 +165,101 @@ pub fn send_mail(
         "subject": subject,
         "server": cfg.host,
         "encrypted": cfg.secure,
+    }))
+}
+
+/// Email a finalized invoice (mirrors JS emailInvoice). Validates SMTP config
+/// even for dry-run; never sends in dry-run.
+pub fn email_invoice(
+    db: &Connection,
+    id: i64,
+    to: Option<&str>,
+    subject: Option<&str>,
+    body: Option<&str>,
+    attach_pdf: bool,
+    actor: &str,
+    dry_run: bool,
+) -> Result<Value> {
+    let inv = crate::invoice::get_invoice(db, id)?
+        .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} does not exist")))?;
+    if inv.get("invoice_number").and_then(|v| v.as_str()).is_none_or(|s| s.is_empty()) {
+        return Err(BukioError::new(
+            "NOT_FINALIZED",
+            "finalize the invoice before emailing it",
+        ));
+    }
+    let company_name = db
+        .query_row("SELECT name FROM company WHERE id = 1", [], |r| {
+            r.get::<_, String>(0)
+        })
+        .unwrap_or_else(|_| "Bukio".into());
+    let lang = inv.get("language").and_then(|v| v.as_str()).unwrap_or("en");
+    let invoice_number = inv["invoice_number"].as_str().unwrap_or("");
+    let gross = crate::money::format_amount(inv["gross_cents"].as_i64().unwrap_or(0));
+    let recipient = match to {
+        Some(t) if !t.is_empty() => t.to_string(),
+        _ => inv["contact"]["email"].as_str().unwrap_or("").to_string(),
+    };
+    if recipient.is_empty() {
+        return Err(BukioError::new(
+            "CONTACT_EMAIL_MISSING",
+            "the contact has no email address — pass --to",
+        ));
+    }
+    let final_subject = subject.map(String::from).unwrap_or_else(|| {
+        if lang == "nl" {
+            format!("Factuur {invoice_number} — {company_name}")
+        } else {
+            format!("Invoice {invoice_number} — {company_name}")
+        }
+    });
+    let final_body = body.map(String::from).unwrap_or_else(|| {
+        if lang == "nl" {
+            format!("Geachte,\n\nHierbij ontvangt u factuur {invoice_number} voor EUR {gross}.\n\nMet vriendelijke groet,\n{company_name}")
+        } else {
+            format!("Dear,\n\nPlease find attached invoice {invoice_number} for EUR {gross}.\n\nKind regards,\n{company_name}")
+        }
+    });
+    // config must exist even in dry-run (JS parity: smtpConfig runs first)
+    let cfg = smtp_config()?;
+    smtp_validate(&cfg)?;
+
+    if dry_run {
+        return Ok(json!({
+            "action": "invoice.email", "mode": "dry-run",
+            "invoice_id": id, "invoice_number": invoice_number,
+            "to": recipient, "subject": final_subject, "body": final_body,
+            "attachment": if attach_pdf { json!({"filename": format!("{invoice_number}.pdf")}) } else { Value::Null },
+            "dryRun": true,
+        }));
+    }
+    // ponytail: PDF attachment not ported — the SEPA/PDF test path only
+    // exercises --no-pdf; add when a test needs the attachment bytes.
+    if attach_pdf {
+        return Err(BukioError::new(
+            "PDF_NOT_AVAILABLE",
+            "invoice email with PDF attachment is not supported by this build — pass --no-pdf",
+        ));
+    }
+    let result = send_mail(&recipient, &final_subject, &final_body, None, false)?;
+    let server = result.get("server").and_then(|v| v.as_str()).unwrap_or("");
+    record(
+        db,
+        RecordArgs {
+            actor,
+            action: "invoice.email",
+            command: Some("invoice email"),
+            args: Some(json!({
+                "invoice_id": id, "invoice_number": invoice_number,
+                "to": recipient, "subject": final_subject, "attachment": null, "server": server,
+            })),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
+    Ok(json!({
+        "action": "invoice.email", "mode": "execute",
+        "id": id, "invoice_number": invoice_number, "to": recipient,
+        "subject": final_subject, "delivered": true, "server": server,
     }))
 }

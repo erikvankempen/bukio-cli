@@ -3415,15 +3415,25 @@ fn cmd_invoice_ubl(argv: &[String], db_path: &str) -> Result<Value> {
 fn cmd_invoice_email(
     argv: &[String],
     db_path: &str,
-    _actor: &str,
-    _dry_run: bool,
+    actor: &str,
+    dry_run: bool,
 ) -> Result<Value> {
-    let _db = open_existing(db_path)?;
+    let db = open_existing(db_path)?;
     let id = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
-    Err(BukioError::new(
-        "SMTP_NOT_CONFIGURED",
-        format!("invoice email for id {id} requires SMTP configuration"),
-    ))
+    let to = arg(argv, "--to");
+    let subject = arg(argv, "--subject");
+    let body = arg(argv, "--body");
+    let attach_pdf = !has_flag(argv, "--no-pdf");
+    bukio::smtp::email_invoice(
+        &db,
+        id,
+        to.as_deref(),
+        subject.as_deref(),
+        body.as_deref(),
+        attach_pdf,
+        actor,
+        dry_run,
+    )
 }
 
 // ── invoice reminders ────────────────────────────────────────────

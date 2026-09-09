@@ -75,6 +75,7 @@ fn tool_defs() -> Vec<Value> {
         json!({"name": "import_file", "description": "import opening balances or journal CSV", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}, "kind": {"type": "string"}, "date": {"type": "string"}, "create_missing": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["file", "kind"]}}),
         json!({"name": "import_contacts", "description": "import contacts from UBL XML", "inputSchema": {"type": "object", "properties": {"file": {"type": "string"}, "mode": {"type": "string"}}, "required": ["file"]}}),
         json!({"name": "invoice_import", "description": "import a UBL invoice as a payable", "inputSchema": {"type": "object", "properties": {"file_path": {"type": "string"}, "create_missing": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["file_path"]}}),
+        json!({"name": "invoice_email", "description": "email a finalized invoice (SMTP via BUKIO_SMTP_* env)", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "attach_pdf": {"type": "boolean"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["id"]}}),
         json!({"name": "report_aging", "description": "open items per contact, bucketed by days past due", "inputSchema": {"type": "object", "properties": {"as_of": {"type": "string"}, "kind": {"type": "string"}}}}),
         json!({"name": "report_sales", "description": "sales revenue for a year (per contact or item)", "inputSchema": {"type": "object", "properties": {"year": {"type": "string"}, "by": {"type": "string"}}}}),
         json!({"name": "payments_mandate_add", "description": "register a signed SEPA direct-debit mandate for a contact (core = 8-week refund right, b2b = none)", "inputSchema": {"type": "object", "properties": {"contact_id": {"type": "integer"}, "mandate_ref": {"type": "string"}, "mandate_date": {"type": "string"}, "scheme": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["contact_id", "mandate_ref"]}}),
@@ -205,6 +206,7 @@ fn is_mutating_tool(tool: &str) -> bool {
             | "invoice_pay"
             | "invoice_credit"
             | "invoice_finalize"
+            | "invoice_email"
             | "year_end_close"
             | "fx_set"
             | "contact_add"
@@ -719,6 +721,24 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             }
             let by = arg_str(args, "by").unwrap_or_else(|| "contact".into());
             let r = crate::reports::sales(db, &year, &by)?;
+            Ok(r)
+        }
+        "invoice_email" => {
+            let id = arg_i64(args, "id")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            let dry_run = mode != "execute";
+            let attach_pdf = args.get("attach_pdf").and_then(|v| v.as_bool()).unwrap_or(true);
+            let r = crate::smtp::email_invoice(
+                db,
+                id,
+                arg_str(args, "to").as_deref(),
+                arg_str(args, "subject").as_deref(),
+                arg_str(args, "body").as_deref(),
+                attach_pdf,
+                actor,
+                dry_run,
+            )?;
             Ok(r)
         }
         "audit" => {
