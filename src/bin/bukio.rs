@@ -1450,10 +1450,25 @@ fn cmd_audit_verify(argv: &[String], db_path: &str) -> Result<Value> {
 
 fn cmd_backup(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
+    // --keep must be a positive integer
+    let keep = match arg(argv, "--keep") {
+        None => None,
+        Some(v) => match v.parse::<usize>() {
+            Ok(n) if n >= 1 => Some(n),
+            _ => {
+                return Err(BukioError::new(
+                    "INVALID_KEEP",
+                    format!("--keep must be a positive integer, got '{v}'"),
+                ));
+            }
+        },
+    };
     bukio::backup::cmd_backup(
         db_path,
         arg(argv, "--out").as_deref(),
-        parse_i64(argv, "--keep").map(|v| v as usize),
+        keep,
+        has_flag(argv, "--encrypt"),
+        arg(argv, "--passphrase").as_deref(),
         actor,
         dry_run,
     )
@@ -1466,7 +1481,14 @@ fn cmd_backup_restore(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         .or_else(|| positional_first(argv))
         .ok_or_else(|| missing_arg("--from"))?;
     let to = arg(argv, "--to").unwrap_or_else(|| db_path.to_string());
-    bukio::backup::cmd_restore(&from, &to, has_flag(argv, "--force"), actor, dry_run)
+    bukio::backup::cmd_restore(
+        &from,
+        &to,
+        has_flag(argv, "--force"),
+        arg(argv, "--passphrase").as_deref(),
+        actor,
+        dry_run,
+    )
 }
 
 /// Get the first non-flag positional argument after known subcommand tokens.
