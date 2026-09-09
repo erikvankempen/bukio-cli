@@ -1756,6 +1756,20 @@ fn cmd_vat_settle(argv: &[String], db_path: &str, actor: &str, dry_run: bool) ->
             format!("bank transaction {tx} does not exist"),
         ));
     };
+    // Check if already matched before calling vat_settle
+    if !dry_run {
+        let state: String = db.query_row(
+            "SELECT state FROM bank_transactions WHERE id = ?1",
+            [tx],
+            |r| r.get(0),
+        ).map_err(|_| BukioError::new("NOT_FOUND", format!("bank transaction {tx} does not exist")))?;
+        if state != "unmatched" {
+            return Err(BukioError::new(
+                "ALREADY_MATCHED",
+                format!("bank transaction {tx} is already {state} — use a different payment transaction"),
+            ));
+        }
+    }
     let mut result = bukio::vat::vat_settle(
         &db,
         tx_amount,
@@ -1771,8 +1785,8 @@ fn cmd_vat_settle(argv: &[String], db_path: &str, actor: &str, dry_run: bool) ->
     if !dry_run {
         if let Some(entry_id) = result["entry_id"].as_i64() {
             let _ = db.execute(
-                "UPDATE bank_transactions SET state = 'matched', matched_entry_id = ?1 WHERE id = ?2",
-                rusqlite::params![entry_id, tx],
+                "UPDATE bank_transactions SET state = 'matched' WHERE id = ?1",
+                rusqlite::params![tx],
             );
             result["tx"] = json!({ "id": tx, "state": "matched" });
         }
