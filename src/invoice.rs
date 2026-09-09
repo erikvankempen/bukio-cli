@@ -1144,7 +1144,7 @@ pub fn credit_invoice(
 ) -> Result<Value> {
     let original = get_invoice(db, id)?
         .ok_or_else(|| invoice_error("NOT_FOUND", format!("invoice {id} does not exist")))?;
-    if original["invoice_type"].as_str() != Some("sales") {
+    if original["type"].as_str() != Some("sales") {
         return Err(invoice_error(
             "NOT_SALES_INVOICE",
             "only sales invoices can be credited",
@@ -1167,7 +1167,21 @@ pub fn credit_invoice(
         }));
     }
 
-    let lines: Vec<Value> = original["lines"].as_array().cloned().unwrap_or_default();
+    let orig_lines: Vec<Value> = original["lines"].as_array().cloned().unwrap_or_default();
+    // Pass structured lines directly — create_invoice handles non-string specs
+    // but needs 'price_cents' not 'unit_price_cents'
+    let credit_lines_raw: Vec<Value> = orig_lines.iter().map(|l| {
+        let mut line = l.clone();
+        // rename unit_price_cents -> price_cents for create_invoice
+        if let Some(upc) = line.get("unit_price_cents").cloned() {
+            line["price_cents"] = upc;
+        }
+        // rename quantity -> qty_milli (milliunits)
+        if let Some(qty) = line.get("quantity").cloned() {
+            line["qty_milli"] = qty;
+        }
+        line
+    }).collect();
     let contact_id = original["contact_id"].as_i64().unwrap_or(0);
     let credit = create_invoice(
         db,
@@ -1180,9 +1194,9 @@ pub fn credit_invoice(
         ))),
         original["reference"].as_str(),
         None,
-        original["discount_type"].as_str(),
-        original["discount_value"].as_i64(),
-        &lines,
+        None,  // no discount on credit
+        None,
+        &credit_lines_raw,
         actor,
         false,
     )?;

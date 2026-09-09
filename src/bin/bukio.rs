@@ -2147,7 +2147,7 @@ fn cmd_invoice_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         return Err(BukioError::new("INVALID_DISCOUNT", "use --discount-pct OR --discount-amount, not both"));
     }
     let (discount_type, discount_value) = if let Some(pct) = discount_pct {
-        (Some("percent".to_string()), pct.parse::<i64>().ok())
+        (Some("pct".to_string()), pct.parse::<f64>().ok().map(|v| (v * 100.0).round() as i64))
     } else if let Some(amt) = discount_amount {
         (
             Some("amount".to_string()),
@@ -2225,7 +2225,14 @@ fn cmd_invoice_credit(argv: &[String], db_path: &str, actor: &str, dry_run: bool
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
     let date = arg(argv, "--date");
     let reason = arg(argv, "--reason");
-    bukio::invoice::credit_invoice(&db, id, date.as_deref(), reason.as_deref(), actor, dry_run)
+    let inv = bukio::invoice::credit_invoice(&db, id, date.as_deref(), reason.as_deref(), actor, dry_run)?;
+    // Wrap to match JS shape: { invoice: { ...invoice_type: ... } }
+    let mut data = inv;
+    // JS uses 'invoice_type' key, Rust uses 'type'
+    if let Some(t) = data.get("type").cloned() {
+        data["invoice_type"] = t;
+    }
+    Ok(json!({ "invoice": data }))
 }
 
 fn cmd_invoice_pay(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
