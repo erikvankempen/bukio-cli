@@ -34,7 +34,9 @@ fn parse_ntry(block: &str) -> Option<BankTx> {
     let amount_str = extract_tag(block, "Amt")?;
     let amount_cents = parse_amount_cents(&amount_str)?;
     let counterparty = extract_tag(block, "Nm").or_else(|| extract_tag(block, "Cdtr/Nm"));
-    let description = extract_tag(block, "AddtlNtryInf").or_else(|| extract_tag(block, "Desc"));
+    let description = extract_tag(block, "AddtlNtryInf")
+        .or_else(|| extract_tag(block, "Ustrd"))
+        .or_else(|| extract_tag(block, "Desc"));
     let iban_counter =
         extract_tag(block, "CdtrAcct/Id/IBAN").or_else(|| extract_tag(block, "DbtrAcct/Id/IBAN"));
     let bank_ref = extract_tag(block, "AcctSvcrRef");

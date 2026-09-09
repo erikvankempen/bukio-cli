@@ -56,9 +56,10 @@ fn normalize_header(h: &str) -> String {
     h.trim().to_lowercase().replace([' ', '_', '-'], "")
 }
 
-/// Find the column index for a canonical key.
+/// Find the column index for a canonical key (exact, then contains).
 fn find_column(header: &[String], key: &str) -> Option<usize> {
     header.iter().position(|h| h == key)
+        .or_else(|| header.iter().position(|h| h.contains(key)))
 }
 
 /// Parse a bank CSV file into transactions.
@@ -88,9 +89,11 @@ pub fn parse_bank_csv(content: &str, _default_iban: &str) -> Result<Vec<BankTx>,
         .or_else(|| find_column(&header, "counterparty"))
         .or_else(|| find_column(&header, "tegenrekening"))
         .or_else(|| find_column(&header, "from"));
-    let description_idx = find_column(&header, "omschrijving")
-        .or_else(|| find_column(&header, "description"))
-        .or_else(|| find_column(&header, "mededelingen"));
+    let description_idx = find_column(&header, "mededelingen")
+        .or_else(|| find_column(&header, "omschrijving"))
+        .or_else(|| find_column(&header, "description"));
+    let af_bij_idx = find_column(&header, "afbij")
+        .or_else(|| find_column(&header, "af/bij"));
     let iban_idx = find_column(&header, "rekening")
         .or_else(|| find_column(&header, "iban"))
         .or_else(|| find_column(&header, "tegenrekeningnummer"));
@@ -119,10 +122,20 @@ pub fn parse_bank_csv(content: &str, _default_iban: &str) -> Result<Vec<BankTx>,
         let amount_str = get(Some(amount_idx)).unwrap_or_default();
         // normalize the date: some banks use DD-MM-YYYY
         let date = normalize_date(&date_str);
-        let amount_cents = match parse_bank_amount(&amount_str) {
+        let mut amount_cents = match parse_bank_amount(&amount_str) {
             Some(v) => v,
             None => continue, // skip unparseable rows
         };
+        // Dutch CSV "Af Bij" column: "Af" = outgoing (negate), "Bij" = incoming (keep positive)
+        if let Some(idx) = af_bij_idx {
+            if let Some(code) = row.get(idx).map(|s| s.trim()) {
+                if code.eq_ignore_ascii_case("Af") && amount_cents > 0 {
+                    amount_cents = -amount_cents;
+                } else if code.eq_ignore_ascii_case("Bij") && amount_cents < 0 {
+                    amount_cents = amount_cents.abs();
+                }
+            }
+        }
         if date.is_empty() {
             continue;
         }
