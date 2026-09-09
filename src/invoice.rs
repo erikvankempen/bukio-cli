@@ -726,7 +726,7 @@ fn posting_defaults(db: &Connection) -> Result<Value> {
 pub fn build_invoice_postings(db: &Connection, invoice: &Value) -> Result<Vec<Value>> {
     let pd = posting_defaults(db)?;
     let vat_on = is_vat_enabled(db);
-    let is_credit = invoice["invoice_type"].as_str() == Some("credit");
+    let is_credit = invoice["type"].as_str() == Some("credit");
     let sign = if is_credit { 1i64 } else { -1i64 };
     let gross = invoice["gross_cents"].as_i64().unwrap_or(0);
     let mut postings: Vec<Value> = Vec::new();

@@ -688,23 +688,133 @@ pub fn auto_match(db: &Connection, window_days: i64, actor: &str, dry_run: bool)
                 continue;
             }
         }
-        // ponytail: invoice matching stubbed — needs invoice module (getInvoice, paymentFromBank)
+        // 2) incoming money -> unpaid sales invoice
+        if amount > 0 {
+            let inv_sql = "SELECT i.id, i.invoice_number, i.contact_id,
+                           COALESCE((SELECT SUM(amount_cents) FROM invoice_lines WHERE invoice_id = i.id), 0)
+                             + COALESCE((SELECT SUM(vat_amount_cents) FROM invoice_lines WHERE invoice_id = i.id), 0)
+                             AS gross_cents,
+                           COALESCE((SELECT SUM(amount_cents) FROM invoice_payments WHERE invoice_id = i.id), 0)
+                             AS paid_cents
+                           FROM invoices i
+                           WHERE i.invoice_type = 'sales' AND i.status IN ('sent','overdue')
+                           ORDER BY i.id";
+            if let Ok(mut inv_stmt) = db.prepare(inv_sql) {
+                let inv_rows: Vec<Value> = inv_stmt.query_map([], |r| {
+                    Ok(json!({
+                        "id": r.get::<_, i64>(0)?,
+                        "invoice_number": r.get::<_, Option<String>>(1)?,
+                        "contact_id": r.get::<_, Option<i64>>(2)?,
+                        "gross_cents": r.get::<_, i64>(3)?,
+                        "paid_cents": r.get::<_, i64>(4)?,
+                    }))
+                }).map_err(sql_err)?.filter_map(|r| r.ok()).collect();
+                let mut best_inv: Option<(i64, String, i64, i64)> = None; // (id, number, outstanding, delta)
+                for ir in &inv_rows {
+                    let iid = ir["id"].as_i64().unwrap();
+                    if used_entry_ids.contains(&iid) { continue; }
+                    let outstanding = ir["gross_cents"].as_i64().unwrap_or(0) - ir["paid_cents"].as_i64().unwrap_or(0);
+                    if outstanding <= 0 { continue; }
+                    let delta = (outstanding - amount).abs();
+                    let tolerance = std::cmp::max((outstanding * 5) / 10000, 10); // FX_MATCH_TOLERANCE_BP=5, floor=10
+                    if delta <= tolerance {
+                        if best_inv.as_ref().map_or(true, |b| delta < b.3) {
+                            best_inv = Some((iid, ir["invoice_number"].as_str().unwrap_or("").to_string(), outstanding, delta));
+                        }
+                    }
+                }
+                if let Some((iid, inum, outstanding, delta)) = best_inv {
+                    matches.push(json!({
+                        "kind": "invoice", "tx_id": tx_id, "tx_date": tx_date,
+                        "amount_cents": amount, "description": tx_row["description"],
+                        "counterparty": tx_row["counterparty"],
+                        "invoice_id": iid, "invoice_number": inum,
+                        "fx_delta_cents": amount - outstanding,
+                        "outstanding": outstanding,
+                        "method": "invoice", "confidence": 0.95,
+                    }));
+                    used_entry_ids.push(iid); // prevent re-matching
+                }
+            }
+        }
     }
 
     if !dry_run {
         let tx_ref = db.unchecked_transaction().map_err(sql_err)?;
         {
             for m in &matches {
-                let entry_id = m["entry_id"].as_i64().unwrap();
                 let tx_id = m["tx_id"].as_i64().unwrap();
-                let method = m["method"].as_str().unwrap();
-                let confidence = m["confidence"].as_f64();
-                tx_ref.execute(
-                    "INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
-                     VALUES (?1, 'entry', ?2, ?3, ?4, ?5)",
-                    rusqlite::params![tx_id, entry_id, method, confidence, actor],
-                )
-                .map_err(sql_err)?;
+                let kind = m["kind"].as_str().unwrap_or("entry");
+                if kind == "invoice" {
+                    let invoice_id = m["invoice_id"].as_i64().unwrap();
+                    let outstanding = m["outstanding"].as_i64().unwrap_or(0);
+                    let amount = m["amount_cents"].as_i64().unwrap_or(0);
+                    let tx_date_str = m["tx_date"].as_str().unwrap_or("");
+                    // Mark invoice paid
+                    tx_ref.execute(
+                        "INSERT INTO invoice_payments (invoice_id, date, amount_cents, method, bank_tx_id, created_by)
+                         VALUES (?1, ?2, ?3, 'bank', ?4, ?5)",
+                        rusqlite::params![invoice_id, tx_date_str, outstanding, tx_id, actor],
+                    ).map_err(sql_err)?;
+                    tx_ref.execute(
+                        "UPDATE invoices SET status = 'paid' WHERE id = ?1",
+                        [invoice_id],
+                    ).map_err(sql_err)?;
+                    // Get bank account code
+                    let bank_account_id = m.get("bank_account_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let account_code: String = tx_ref.query_row(
+                        "SELECT account_code FROM bank_accounts WHERE id = ?1",
+                        [bank_account_id],
+                        |r| r.get(0),
+                    ).unwrap_or_else(|_| "1100".into());
+                    let inv_num: String = m.get("invoice_number").and_then(|v| v.as_str()).map(String::from).unwrap_or_default();
+                    let desc = format!("Payment {}", inv_num);
+                    // Create draft entry first, add postings, then post
+                    tx_ref.execute(
+                        "INSERT INTO journal_entries (date, description, state, source, source_ref, created_by)
+                         VALUES (?1, ?2, 'draft', 'bank', ?3, ?4)",
+                        rusqlite::params![tx_date_str, desc, format!("tx:{}", tx_id), actor],
+                    ).map_err(sql_err)?;
+                    let entry_id: i64 = tx_ref.last_insert_rowid();
+                    let debtors_code = "1300";
+                    let bank_acct_id: i64 = tx_ref.query_row(
+                        "SELECT id FROM accounts WHERE code = ?1",
+                        [&account_code],
+                        |r| r.get(0),
+                    ).unwrap_or(0);
+                    let debtors_acct_id: i64 = tx_ref.query_row(
+                        "SELECT id FROM accounts WHERE code = ?1",
+                        [debtors_code],
+                        |r| r.get(0),
+                    ).unwrap_or(0);
+                    tx_ref.execute(
+                        "INSERT INTO postings (entry_id, account_id, amount_cents) VALUES (?1, ?2, ?3)",
+                        rusqlite::params![entry_id, bank_acct_id, amount],
+                    ).map_err(sql_err)?;
+                    tx_ref.execute(
+                        "INSERT INTO postings (entry_id, account_id, amount_cents) VALUES (?1, ?2, ?3)",
+                        rusqlite::params![entry_id, debtors_acct_id, -outstanding],
+                    ).map_err(sql_err)?;
+                    // Now post it
+                    tx_ref.execute(
+                        "UPDATE journal_entries SET state = 'posted' WHERE id = ?1",
+                        [entry_id],
+                    ).map_err(sql_err)?;
+                    tx_ref.execute(
+                        "INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
+                         VALUES (?1, 'invoice', ?2, 'invoice', 0.95, ?3)",
+                        rusqlite::params![tx_id, invoice_id, actor],
+                    ).map_err(sql_err)?;
+                } else {
+                    let entry_id = m["entry_id"].as_i64().unwrap();
+                    let method = m["method"].as_str().unwrap();
+                    let confidence = m["confidence"].as_f64();
+                    tx_ref.execute(
+                        "INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
+                         VALUES (?1, 'entry', ?2, ?3, ?4, ?5)",
+                        rusqlite::params![tx_id, entry_id, method, confidence, actor],
+                    ).map_err(sql_err)?;
+                }
                 tx_ref
                     .execute(
                         "UPDATE bank_transactions SET state = 'matched' WHERE id = ?1",
