@@ -137,9 +137,13 @@ pub fn send_mail(
     };
 
     let mut transport_builder = if cfg.secure {
-        SmtpTransport::relay(&cfg.host).map_err(|e| BukioError::new("SMTP_SEND_FAILED", format!("TLS error: {e}")))?.port(cfg.port)
+        SmtpTransport::relay(&cfg.host)
+            .map_err(|e| BukioError::new("SMTP_SEND_FAILED", format!("TLS error: {e}")))?
+            .port(cfg.port)
     } else {
-        SmtpTransport::starttls_relay(&cfg.host).map_err(|e| BukioError::new("SMTP_SEND_FAILED", format!("TLS error: {e}")))?.port(cfg.port)
+        SmtpTransport::starttls_relay(&cfg.host)
+            .map_err(|e| BukioError::new("SMTP_SEND_FAILED", format!("TLS error: {e}")))?
+            .port(cfg.port)
     };
 
     if let (Some(user), Some(pass)) = (&cfg.user, &cfg.pass) {

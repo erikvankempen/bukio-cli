@@ -617,12 +617,7 @@ pub fn read_import_file(path: &str) -> Result<String> {
 // ---------------------------------------------------------------------------
 
 /// Import an XAF 4.0 XML file — creates accounts and journal entries.
-pub fn import_xaf(
-    db: &Connection,
-    xml_text: &str,
-    actor: &str,
-    dry_run: bool,
-) -> Result<Value> {
+pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -> Result<Value> {
     use quick_xml::events::Event;
     use quick_xml::Reader;
 
@@ -743,16 +738,36 @@ pub fn import_invoice(
                 let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
                 depth += 1;
                 match tag.as_str() {
-                    "Invoice" | "CreditNote" => { in_tag = "root".to_string(); }
-                    "cbc:ID" if depth <= 4 => { in_tag = "id".to_string(); }
-                    "cbc:IssueDate" => { in_tag = "date".to_string(); }
-                    "cbc:DueDate" => { in_tag = "due".to_string(); }
-                    "cac:AccountingSupplierParty" => { in_supplier = true; }
-                    "cac:AccountingCustomerParty" => { in_supplier = false; }
-                    "cbc:Name" if in_supplier => { in_tag = "supplier".to_string(); }
-                    "cbc:CompanyID" if in_supplier => { in_tag = "supplier_vat".to_string(); }
-                    "cbc:TaxExclusiveAmount" | "cbc:LineExtensionAmount" => { in_tag = "total".to_string(); }
-                    "cbc:PayableAmount" => { in_tag = "payable".to_string(); }
+                    "Invoice" | "CreditNote" => {
+                        in_tag = "root".to_string();
+                    }
+                    "cbc:ID" if depth <= 4 => {
+                        in_tag = "id".to_string();
+                    }
+                    "cbc:IssueDate" => {
+                        in_tag = "date".to_string();
+                    }
+                    "cbc:DueDate" => {
+                        in_tag = "due".to_string();
+                    }
+                    "cac:AccountingSupplierParty" => {
+                        in_supplier = true;
+                    }
+                    "cac:AccountingCustomerParty" => {
+                        in_supplier = false;
+                    }
+                    "cbc:Name" if in_supplier => {
+                        in_tag = "supplier".to_string();
+                    }
+                    "cbc:CompanyID" if in_supplier => {
+                        in_tag = "supplier_vat".to_string();
+                    }
+                    "cbc:TaxExclusiveAmount" | "cbc:LineExtensionAmount" => {
+                        in_tag = "total".to_string();
+                    }
+                    "cbc:PayableAmount" => {
+                        in_tag = "payable".to_string();
+                    }
                     _ => {}
                 }
             }
@@ -764,14 +779,20 @@ pub fn import_invoice(
                     "due" => due_date = text,
                     "supplier" => supplier_name = text,
                     "supplier_vat" => supplier_vat_id = text,
-                    "total" => if total_amount.is_empty() { total_amount = text; },
+                    "total" => {
+                        if total_amount.is_empty() {
+                            total_amount = text;
+                        }
+                    }
                     "payable" => pay_amount = text,
                     _ => {}
                 }
             }
             Ok(Event::End(_)) => {
                 depth -= 1;
-                if depth <= 1 { in_tag.clear(); }
+                if depth <= 1 {
+                    in_tag.clear();
+                }
             }
             Ok(Event::Eof) => break,
             Err(_) => break,
@@ -780,7 +801,11 @@ pub fn import_invoice(
         buf.clear();
     }
 
-    let amount_str = if !pay_amount.is_empty() { &pay_amount } else { &total_amount };
+    let amount_str = if !pay_amount.is_empty() {
+        &pay_amount
+    } else {
+        &total_amount
+    };
     let amount_cents = parse_import_amount(amount_str).unwrap_or(0);
 
     if dry_run {

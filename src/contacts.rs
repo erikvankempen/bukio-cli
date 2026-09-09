@@ -195,19 +195,22 @@ pub fn update_contact(
 
 // ── contact statement (opgave) ────────────────────────────────────────────
 
-pub fn contact_statement(
-    db: &Connection,
-    contact_id: i64,
-    as_of: Option<&str>,
-) -> Result<Value> {
-    let contact = get_contact(db, contact_id)?
-        .ok_or_else(|| contact_error("CONTACT_NOT_FOUND", format!("contact {contact_id} does not exist")))?;
+pub fn contact_statement(db: &Connection, contact_id: i64, as_of: Option<&str>) -> Result<Value> {
+    let contact = get_contact(db, contact_id)?.ok_or_else(|| {
+        contact_error(
+            "CONTACT_NOT_FOUND",
+            format!("contact {contact_id} does not exist"),
+        )
+    })?;
     let as_of_date = match as_of {
         Some(d) => d.to_string(),
         None => chrono::Utc::now().format("%Y-%m-%d").to_string(),
     };
     if !as_of_date.chars().all(|c| c.is_ascii_digit() || c == '-') || as_of_date.len() != 10 {
-        return Err(contact_error("INVALID_DATE", format!("as-of '{as_of_date}' must be YYYY-MM-DD")));
+        return Err(contact_error(
+            "INVALID_DATE",
+            format!("as-of '{as_of_date}' must be YYYY-MM-DD"),
+        ));
     }
 
     let mut rows: Vec<Value> = Vec::new();
@@ -315,7 +318,12 @@ pub fn contact_statement(
             .as_str()
             .unwrap_or("")
             .cmp(b["date"].as_str().unwrap_or(""))
-            .then(a["kind"].as_str().unwrap_or("").cmp(b["kind"].as_str().unwrap_or("")))
+            .then(
+                a["kind"]
+                    .as_str()
+                    .unwrap_or("")
+                    .cmp(b["kind"].as_str().unwrap_or("")),
+            )
     });
     let mut balance: i64 = 0;
     for r in rows.iter_mut() {

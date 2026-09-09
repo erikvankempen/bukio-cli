@@ -35,6 +35,7 @@ pub mod recurring;
 pub mod reports;
 pub mod server;
 pub mod sign;
+pub mod sign_gate;
 pub mod smtp;
 pub mod ubl;
 pub mod vat;

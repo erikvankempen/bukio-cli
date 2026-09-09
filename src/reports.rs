@@ -497,10 +497,7 @@ fn empty_aging_totals() -> Value {
 }
 
 /// Batch-fetch invoice_lines for a set of invoice ids.
-fn batch_lines(
-    db: &Connection,
-    ids: &[i64],
-) -> Result<std::collections::HashMap<i64, Vec<Value>>> {
+fn batch_lines(db: &Connection, ids: &[i64]) -> Result<std::collections::HashMap<i64, Vec<Value>>> {
     use std::collections::HashMap;
     if ids.is_empty() {
         return Ok(HashMap::new());
@@ -677,9 +674,11 @@ fn debtors_aging(db: &Connection, as_of: &str) -> Result<Value> {
             continue;
         }
 
-        let due_str = inv["due_date"].as_str().or(inv["date"].as_str()).unwrap_or("");
-        let due_date = chrono::NaiveDate::parse_from_str(due_str, "%Y-%m-%d")
-            .unwrap_or(as_of_date);
+        let due_str = inv["due_date"]
+            .as_str()
+            .or(inv["date"].as_str())
+            .unwrap_or("");
+        let due_date = chrono::NaiveDate::parse_from_str(due_str, "%Y-%m-%d").unwrap_or(as_of_date);
         let days = (as_of_date - due_date).num_days().max(0);
         let bl = bucket_label(days);
 
@@ -750,10 +749,8 @@ fn debtors_aging(db: &Connection, as_of: &str) -> Result<Value> {
                 if remaining <= 0 {
                     break;
                 }
-                let take = std::cmp::min(
-                    item["outstanding_cents"].as_i64().unwrap_or(0),
-                    remaining,
-                );
+                let take =
+                    std::cmp::min(item["outstanding_cents"].as_i64().unwrap_or(0), remaining);
                 *item.get_mut("outstanding_cents").unwrap() =
                     json!(item["outstanding_cents"].as_i64().unwrap_or(0) - take);
                 remaining -= take;
@@ -853,8 +850,7 @@ fn creditors_aging(db: &Connection, as_of: &str) -> Result<Value> {
             ..Default::default()
         });
         let due_str = p["due_date"].as_str().or(p["date"].as_str()).unwrap_or("");
-        let due_date =
-            chrono::NaiveDate::parse_from_str(due_str, "%Y-%m-%d").unwrap_or(as_of_date);
+        let due_date = chrono::NaiveDate::parse_from_str(due_str, "%Y-%m-%d").unwrap_or(as_of_date);
         let days = (as_of_date - due_date).num_days().max(0);
         let bl = bucket_label(days);
         let bi = match bl {
@@ -1062,7 +1058,8 @@ pub fn sales(db: &Connection, year: &str, by: &str) -> Result<Value> {
             json!({ "invoice_count": 0, "net_cents": 0, "vat_cents": 0, "gross_cents": 0 }),
             |mut t, g| {
                 *t.get_mut("invoice_count").unwrap() = json!(
-                    t["invoice_count"].as_i64().unwrap_or(0) + g["invoice_count"].as_i64().unwrap_or(0)
+                    t["invoice_count"].as_i64().unwrap_or(0)
+                        + g["invoice_count"].as_i64().unwrap_or(0)
                 );
                 *t.get_mut("net_cents").unwrap() = json!(
                     t["net_cents"].as_i64().unwrap_or(0) + g["net_cents"].as_i64().unwrap_or(0)
@@ -1115,7 +1112,9 @@ pub fn sales(db: &Connection, year: &str, by: &str) -> Result<Value> {
                                 .ok()
                                 .flatten()
                                 .and_then(|v| v["name"].as_str().map(String::from))
-                                .unwrap_or_else(|| l["description"].as_str().unwrap_or("").to_string())
+                                .unwrap_or_else(|| {
+                                    l["description"].as_str().unwrap_or("").to_string()
+                                })
                         })
                         .clone()
                 } else {
@@ -1147,18 +1146,16 @@ pub fn sales(db: &Connection, year: &str, by: &str) -> Result<Value> {
             .unwrap_or(0)
             .cmp(&a["net_cents"].as_i64().unwrap_or(0))
     });
-    let totals = groups.iter().fold(
-        json!({ "line_count": 0, "net_cents": 0 }),
-        |mut t, g| {
+    let totals = groups
+        .iter()
+        .fold(json!({ "line_count": 0, "net_cents": 0 }), |mut t, g| {
             *t.get_mut("line_count").unwrap() = json!(
                 t["line_count"].as_i64().unwrap_or(0) + g["line_count"].as_i64().unwrap_or(0)
             );
-            *t.get_mut("net_cents").unwrap() = json!(
-                t["net_cents"].as_i64().unwrap_or(0) + g["net_cents"].as_i64().unwrap_or(0)
-            );
+            *t.get_mut("net_cents").unwrap() =
+                json!(t["net_cents"].as_i64().unwrap_or(0) + g["net_cents"].as_i64().unwrap_or(0));
             t
-        },
-    );
+        });
     Ok(json!({ "year": year, "by": by, "groups": groups, "totals": totals }))
 }
 
@@ -1229,22 +1226,20 @@ pub fn cost_center_report(
 
     for row in rows.filter_map(|r| r.ok()) {
         let (acc_id, amt, acc_code, acc_name, acc_type, cc_code, cc_name) = row;
-        let key = cc_code.clone().unwrap_or_else(|| "__unassigned__".to_string());
+        let key = cc_code
+            .clone()
+            .unwrap_or_else(|| "__unassigned__".to_string());
         let bucket = by_cc.entry(key).or_insert_with(|| CcBucket {
             code: cc_code.clone(),
             name: cc_name.clone(),
             accounts: HashMap::new(),
         });
-        let acc = bucket
-            .accounts
-            .entry(acc_id)
-            .or_insert_with(|| {
-                json!({
-                    "code": acc_code, "name": acc_name, "type": acc_type, "net_cents": 0i64,
-                })
-            });
-        *acc.get_mut("net_cents").unwrap() =
-            json!(acc["net_cents"].as_i64().unwrap_or(0) + amt);
+        let acc = bucket.accounts.entry(acc_id).or_insert_with(|| {
+            json!({
+                "code": acc_code, "name": acc_name, "type": acc_type, "net_cents": 0i64,
+            })
+        });
+        *acc.get_mut("net_cents").unwrap() = json!(acc["net_cents"].as_i64().unwrap_or(0) + amt);
     }
 
     // Build result: per cost center with accounts, revenue, costs, result
@@ -1328,10 +1323,7 @@ fn sql_err(e: rusqlite::Error) -> BukioError {
 /// Group balans/P&L sections by statutory lines from the profile.
 /// For "auto" format: match `taxonomy_code` to line's `rgs`.
 /// Returns Vec<(label, taxonomy_code, total_cents, accounts_json)>.
-fn group_by_statutory_lines(
-    sections: &[Value],
-    lines: &[Value],
-) -> Vec<Value> {
+fn group_by_statutory_lines(sections: &[Value], lines: &[Value]) -> Vec<Value> {
     let mut out = Vec::new();
     let mut known_codes: Vec<String> = Vec::new();
     for line in lines {
@@ -1345,10 +1337,18 @@ fn group_by_statutory_lines(
         if hits.is_empty() {
             continue;
         }
-        let total_cents: i64 = hits.iter().map(|s| s["total_cents"].as_i64().unwrap_or(0)).sum();
+        let total_cents: i64 = hits
+            .iter()
+            .map(|s| s["total_cents"].as_i64().unwrap_or(0))
+            .sum();
         let accounts: Vec<Value> = hits
             .iter()
-            .flat_map(|s| s["accounts"].as_array().map(|a| a.iter()).unwrap_or_default())
+            .flat_map(|s| {
+                s["accounts"]
+                    .as_array()
+                    .map(|a| a.iter())
+                    .unwrap_or_default()
+            })
             .cloned()
             .collect();
         out.push(json!({
@@ -1364,10 +1364,18 @@ fn group_by_statutory_lines(
         .filter(|s| !known_codes.contains(&s["taxonomy_code"].as_str().unwrap_or("").to_string()))
         .collect();
     if !leftover.is_empty() {
-        let total_cents: i64 = leftover.iter().map(|s| s["total_cents"].as_i64().unwrap_or(0)).sum();
+        let total_cents: i64 = leftover
+            .iter()
+            .map(|s| s["total_cents"].as_i64().unwrap_or(0))
+            .sum();
         let accounts: Vec<Value> = leftover
             .iter()
-            .flat_map(|s| s["accounts"].as_array().map(|a| a.iter()).unwrap_or_default())
+            .flat_map(|s| {
+                s["accounts"]
+                    .as_array()
+                    .map(|a| a.iter())
+                    .unwrap_or_default()
+            })
             .cloned()
             .collect();
         out.push(json!({
@@ -1381,14 +1389,16 @@ fn group_by_statutory_lines(
 }
 
 /// Group balans/P&L sections by PCN prefix lines (LU format).
-fn group_by_prefix_lines(
-    sections: &[Value],
-    lines: &[Value],
-) -> Vec<Value> {
+fn group_by_prefix_lines(sections: &[Value], lines: &[Value]) -> Vec<Value> {
     // flatten all accounts from sections
     let all_accounts: Vec<Value> = sections
         .iter()
-        .flat_map(|s| s["accounts"].as_array().map(|a| a.iter()).unwrap_or_default())
+        .flat_map(|s| {
+            s["accounts"]
+                .as_array()
+                .map(|a| a.iter())
+                .unwrap_or_default()
+        })
         .cloned()
         .collect();
     let mut out = Vec::new();
@@ -1396,7 +1406,11 @@ fn group_by_prefix_lines(
     for line in lines {
         let prefixes: Vec<String> = line["prefixes"]
             .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
         let label = line["label"].as_str().unwrap_or("").to_string();
         for p in &prefixes {
@@ -1412,14 +1426,19 @@ fn group_by_prefix_lines(
         if hits.is_empty() {
             continue;
         }
-        let total_cents: i64 = hits.iter().map(|a| a["balance_cents"].as_i64().unwrap_or(0)).sum();
+        let total_cents: i64 = hits
+            .iter()
+            .map(|a| a["balance_cents"].as_i64().unwrap_or(0))
+            .sum();
         let accounts: Vec<Value> = hits
             .iter()
-            .map(|a| json!({
-                "code": a["code"],
-                "name": a["name"],
-                "amount_cents": a["balance_cents"],
-            }))
+            .map(|a| {
+                json!({
+                    "code": a["code"],
+                    "name": a["name"],
+                    "amount_cents": a["balance_cents"],
+                })
+            })
             .collect();
         out.push(json!({
             "label": label,
@@ -1437,14 +1456,19 @@ fn group_by_prefix_lines(
         })
         .collect();
     if !leftover.is_empty() {
-        let total_cents: i64 = leftover.iter().map(|a| a["balance_cents"].as_i64().unwrap_or(0)).sum();
+        let total_cents: i64 = leftover
+            .iter()
+            .map(|a| a["balance_cents"].as_i64().unwrap_or(0))
+            .sum();
         let accounts: Vec<Value> = leftover
             .iter()
-            .map(|a| json!({
-                "code": a["code"],
-                "name": a["name"],
-                "amount_cents": a["balance_cents"],
-            }))
+            .map(|a| {
+                json!({
+                    "code": a["code"],
+                    "name": a["name"],
+                    "amount_cents": a["balance_cents"],
+                })
+            })
             .collect();
         out.push(json!({
             "label": "Autres",
@@ -1460,7 +1484,12 @@ fn group_by_prefix_lines(
 fn flatten_sections(sections: &[Value]) -> Vec<Value> {
     sections
         .iter()
-        .flat_map(|s| s["accounts"].as_array().map(|a| a.iter()).unwrap_or_default())
+        .flat_map(|s| {
+            s["accounts"]
+                .as_array()
+                .map(|a| a.iter())
+                .unwrap_or_default()
+        })
         .cloned()
         .collect()
 }
@@ -1473,7 +1502,11 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
     let sa = &reporting["statutoryAccounts"];
     let models: Vec<String> = sa["models"]
         .as_array()
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
     let default_model = models.last().cloned().unwrap_or_default();
     let model = model.unwrap_or(&default_model);
@@ -1508,26 +1541,53 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
 
     let fye = company["fiscal_year_end"].as_str().unwrap_or("12-31");
     let fye_parts: Vec<&str> = fye.split('-').collect();
-    let fye_month = fye_parts[fye_parts.len().saturating_sub(2)].parse::<u32>().unwrap_or(12);
-    let fye_day = fye_parts.last().and_then(|s| s.parse::<u32>().ok()).unwrap_or(31);
+    let fye_month = fye_parts[fye_parts.len().saturating_sub(2)]
+        .parse::<u32>()
+        .unwrap_or(12);
+    let fye_day = fye_parts
+        .last()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(31);
     let as_of = format!("{year}-{fye_month:02}-{fye_day:02}");
 
     let b = balans(db, &as_of)?;
-    let lines_activa = sa["lines"]["activa"].as_array().cloned().unwrap_or_default();
-    let lines_passiva = sa["lines"]["passiva"].as_array().cloned().unwrap_or_default();
+    let lines_activa = sa["lines"]["activa"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let lines_passiva = sa["lines"]["passiva"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
 
     let (activa, passiva) = match format {
         "auto" => {
-            let activa_sections = b["assets"]["sections"].as_array().cloned().unwrap_or_default();
-            let passiva_sections = b["liabilities_and_equity"]["sections"].as_array().cloned().unwrap_or_default();
-            (group_by_statutory_lines(&activa_sections, &lines_activa),
-             group_by_statutory_lines(&passiva_sections, &lines_passiva))
+            let activa_sections = b["assets"]["sections"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let passiva_sections = b["liabilities_and_equity"]["sections"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            (
+                group_by_statutory_lines(&activa_sections, &lines_activa),
+                group_by_statutory_lines(&passiva_sections, &lines_passiva),
+            )
         }
         "lu-lsc" => {
-            let activa_sections = b["assets"]["sections"].as_array().cloned().unwrap_or_default();
-            let passiva_sections = b["liabilities_and_equity"]["sections"].as_array().cloned().unwrap_or_default();
-            (group_by_prefix_lines(&activa_sections, &lines_activa),
-             group_by_prefix_lines(&passiva_sections, &lines_passiva))
+            let activa_sections = b["assets"]["sections"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let passiva_sections = b["liabilities_and_equity"]["sections"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            (
+                group_by_prefix_lines(&activa_sections, &lines_activa),
+                group_by_prefix_lines(&passiva_sections, &lines_passiva),
+            )
         }
         _ => {
             return Err(BukioError::new(
@@ -1538,16 +1598,23 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
     };
 
     // onverdeeld resultaat folds into equity
-    let result_cents = b["liabilities_and_equity"]["result_cents"].as_i64().unwrap_or(0);
+    let result_cents = b["liabilities_and_equity"]["result_cents"]
+        .as_i64()
+        .unwrap_or(0);
     let mut passiva = passiva;
     if result_cents != 0 {
         // try to find the equity line
         let ev_idx = passiva.iter().position(|s| {
-            s["taxonomy_code"].as_str() == Some("BEIV.05") || s["label"].as_str() == Some("Capitaux propres")
+            s["taxonomy_code"].as_str() == Some("BEIV.05")
+                || s["label"].as_str() == Some("Capitaux propres")
         });
         if let Some(idx) = ev_idx {
-            passiva[idx]["total_cents"] = json!(passiva[idx]["total_cents"].as_i64().unwrap_or(0) + result_cents);
-            if let Some(arr) = passiva[idx].get_mut("sections").and_then(|v| v.as_array_mut()) {
+            passiva[idx]["total_cents"] =
+                json!(passiva[idx]["total_cents"].as_i64().unwrap_or(0) + result_cents);
+            if let Some(arr) = passiva[idx]
+                .get_mut("sections")
+                .and_then(|v| v.as_array_mut())
+            {
                 arr.push(json!({
                     "taxonomy_code": null,
                     "label": "Onverdeeld resultaat",
@@ -1570,8 +1637,14 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
         }
     }
 
-    let total_activa: i64 = activa.iter().map(|g| g["total_cents"].as_i64().unwrap_or(0)).sum();
-    let total_passiva: i64 = passiva.iter().map(|g| g["total_cents"].as_i64().unwrap_or(0)).sum();
+    let total_activa: i64 = activa
+        .iter()
+        .map(|g| g["total_cents"].as_i64().unwrap_or(0))
+        .sum();
+    let total_passiva: i64 = passiva
+        .iter()
+        .map(|g| g["total_cents"].as_i64().unwrap_or(0))
+        .sum();
 
     let mut report = json!({
         "year": year,
@@ -1722,7 +1795,11 @@ pub fn icp_readout(db: &Connection, period: &str) -> Result<Value> {
     for row in &rows {
         if let Some(inv) = crate::invoice::get_invoice(db, row.id)? {
             if let Some(lines) = inv["lines"].as_array() {
-                let totals = crate::invoice::compute_invoice_totals(lines, inv.get("discount_type").and_then(|v| v.as_str()), inv.get("discount_value").and_then(|v| v.as_i64()));
+                let totals = crate::invoice::compute_invoice_totals(
+                    lines,
+                    inv.get("discount_type").and_then(|v| v.as_str()),
+                    inv.get("discount_value").and_then(|v| v.as_i64()),
+                );
                 if let Some(groups) = totals.get("groups").and_then(|v| v.as_array()) {
                     let re_net: i64 = groups
                         .iter()
@@ -1732,14 +1809,20 @@ pub fn icp_readout(db: &Connection, period: &str) -> Result<Value> {
                     if re_net == 0 {
                         continue;
                     }
-                    let signed = if row.invoice_type == "credit" { -re_net } else { re_net };
-                    let entry = per_contact.entry(row.contact_id).or_insert_with(|| ContactAgg {
-                        name: row.name.clone(),
-                        vat_id: row.vat_id.clone(),
-                        country: row.country.clone(),
-                        amount_cents: 0,
-                        invoice_numbers: Vec::new(),
-                    });
+                    let signed = if row.invoice_type == "credit" {
+                        -re_net
+                    } else {
+                        re_net
+                    };
+                    let entry = per_contact
+                        .entry(row.contact_id)
+                        .or_insert_with(|| ContactAgg {
+                            name: row.name.clone(),
+                            vat_id: row.vat_id.clone(),
+                            country: row.country.clone(),
+                            amount_cents: 0,
+                            invoice_numbers: Vec::new(),
+                        });
                     entry.amount_cents += signed;
                     if !entry.invoice_numbers.contains(&row.invoice_number) {
                         entry.invoice_numbers.push(row.invoice_number.clone());
@@ -1765,7 +1848,10 @@ pub fn icp_readout(db: &Connection, period: &str) -> Result<Value> {
         .collect();
     customers.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
 
-    let total_cents: i64 = customers.iter().map(|c| c["amount_cents"].as_i64().unwrap_or(0)).sum();
+    let total_cents: i64 = customers
+        .iter()
+        .map(|c| c["amount_cents"].as_i64().unwrap_or(0))
+        .sum();
 
     // check for missing VAT IDs
     let missing: Vec<&str> = customers

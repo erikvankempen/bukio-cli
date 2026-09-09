@@ -8,8 +8,8 @@ use crate::actor::{can_act_enrolled, get_authz, get_enforce, get_roles};
 use crate::db::open_db;
 use crate::money::{BukioError, Result};
 use crate::sign;
-use sha2::{Digest, Sha256};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -35,8 +35,7 @@ const REMOTE_LOCAL_ONLY: &[&str] = &[
 ];
 
 fn config_dir() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string()))
-        .join(".bukio")
+    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())).join(".bukio")
 }
 
 fn tokens_path() -> PathBuf {
@@ -78,7 +77,8 @@ pub fn mint_enrol_token(actor: &str, ttl_hours: u64) -> Result<String> {
         .map(|_| {
             let b: u8 = rng.gen();
             // base64url
-            const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            const CHARS: &[u8] =
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
             CHARS[(b as usize) % 64] as char
         })
         .collect();
@@ -106,13 +106,16 @@ pub fn mint_enrol_token(actor: &str, ttl_hours: u64) -> Result<String> {
 /// Consume (redeem) a one-time enrolment token.
 pub fn consume_enrol_token(token: &str, actor: &str) -> Result<()> {
     if token.is_empty() {
-        return Err(BukioError::new("TOKEN_INVALID", "an enrolment token is required"));
+        return Err(BukioError::new(
+            "TOKEN_INVALID",
+            "an enrolment token is required",
+        ));
     }
     let hash = hex::encode(Sha256::digest(token.as_bytes()));
     let mut tokens = read_tokens();
-    let entry = tokens.get_mut(&hash).ok_or_else(|| {
-        BukioError::new("TOKEN_INVALID", "unknown enrolment token")
-    })?;
+    let entry = tokens
+        .get_mut(&hash)
+        .ok_or_else(|| BukioError::new("TOKEN_INVALID", "unknown enrolment token"))?;
     if entry.actor != actor {
         return Err(BukioError::new(
             "TOKEN_ACTOR_MISMATCH",
@@ -166,7 +169,9 @@ fn verify_envelope(db: &rusqlite::Connection, envelope: &Value) -> Result<Value>
         if enforce {
             return Err(BukioError::new(
                 "SIGNATURE_REQUIRED",
-                format!("no signature in envelope for {actor} — the company enforces signed commands"),
+                format!(
+                    "no signature in envelope for {actor} — the company enforces signed commands"
+                ),
             ));
         }
         return Ok(json!({"ok": true, "sigStatus": "unsigned"}));
@@ -194,9 +199,7 @@ fn verify_envelope(db: &rusqlite::Connection, envelope: &Value) -> Result<Value>
 // --- Child process dispatch ------------------------------------------------
 
 fn run_child(db_path: &str, argv: &[String], env_extra: Option<&str>) -> Result<Value> {
-    let mut cmd = Command::new(
-        std::env::current_exe().unwrap_or_else(|_| PathBuf::from(BIN_PATH)),
-    );
+    let mut cmd = Command::new(std::env::current_exe().unwrap_or_else(|_| PathBuf::from(BIN_PATH)));
     cmd.arg("--db").arg(db_path);
     for arg in argv {
         cmd.arg(arg);
@@ -206,9 +209,9 @@ fn run_child(db_path: &str, argv: &[String], env_extra: Option<&str>) -> Result<
         cmd.env("BUKIO_REMOTE_SIG", env);
     }
 
-    let output = cmd.output().map_err(|e| {
-        BukioError::new("SERVER_EXEC", format!("failed to spawn CLI: {e}"))
-    })?;
+    let output = cmd
+        .output()
+        .map_err(|e| BukioError::new("SERVER_EXEC", format!("failed to spawn CLI: {e}")))?;
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     let exit_code = output.status.code().unwrap_or(1);
@@ -231,12 +234,11 @@ fn read_json_body(reader: &mut dyn Read, content_length: usize) -> Result<Value>
         ));
     }
     let mut body = vec![0u8; content_length];
-    reader.read_exact(&mut body).map_err(|e| {
-        BukioError::new("BAD_JSON", format!("read error: {e}"))
-    })?;
-    serde_json::from_slice(&body).map_err(|e| {
-        BukioError::new("BAD_JSON", format!("request body is not valid JSON: {e}"))
-    })
+    reader
+        .read_exact(&mut body)
+        .map_err(|e| BukioError::new("BAD_JSON", format!("read error: {e}")))?;
+    serde_json::from_slice(&body)
+        .map_err(|e| BukioError::new("BAD_JSON", format!("request body is not valid JSON: {e}")))
 }
 
 fn send_json_response(writer: &mut dyn Write, status: &str, payload: &Value) {
@@ -256,37 +258,57 @@ fn handle_request(db_path: &str, method: &str, path: &str, body: Value) -> (Stri
         ("POST", "/rpc") => {
             let db = match open_db(db_path) {
                 Ok(db) => db,
-                Err(e) => return ("500 Internal Server Error".into(), json!({"ok": false, "error": {"code": "ERROR", "message": e.to_string()}})),
+                Err(e) => {
+                    return (
+                        "500 Internal Server Error".into(),
+                        json!({"ok": false, "error": {"code": "ERROR", "message": e.to_string()}}),
+                    )
+                }
             };
             match verify_envelope(&db, &body) {
                 Ok(_gate) => {
                     let argv: Vec<String> = body["args"]["argv"]
                         .as_array()
-                        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                        .map(|a| {
+                            a.iter()
+                                .filter_map(|v| v.as_str().map(String::from))
+                                .collect()
+                        })
                         .unwrap_or_default();
                     if argv.is_empty() {
-                        return ("400 Bad Request".into(), json!({"ok": false, "error": {"code": "INVALID_ENVELOPE", "message": "args.argv missing"}}));
+                        return (
+                            "400 Bad Request".into(),
+                            json!({"ok": false, "error": {"code": "INVALID_ENVELOPE", "message": "args.argv missing"}}),
+                        );
                     }
                     let sig_bundle = serde_json::to_string(&body).unwrap_or_default();
                     match run_child(db_path, &argv, Some(&sig_bundle)) {
                         Ok(r) => ("200 OK".into(), r),
-                        Err(e) => ("500 Internal Server Error".into(), json!({"ok": false, "error": {"code": "ERROR", "message": e.to_string()}})),
+                        Err(e) => (
+                            "500 Internal Server Error".into(),
+                            json!({"ok": false, "error": {"code": "ERROR", "message": e.to_string()}}),
+                        ),
                     }
                 }
-                Err(e) => ("401 Unauthorized".into(), json!({"ok": false, "error": {"code": "ERROR", "message": e.to_string()}})),
+                Err(e) => (
+                    "401 Unauthorized".into(),
+                    json!({"ok": false, "error": {"code": "ERROR", "message": e.to_string()}}),
+                ),
             }
         }
 
-        _ => ("404 Not Found".into(), json!({"ok": false, "error": {"code": "NOT_FOUND", "message": "unknown endpoint"}})),
+        _ => (
+            "404 Not Found".into(),
+            json!({"ok": false, "error": {"code": "NOT_FOUND", "message": "unknown endpoint"}}),
+        ),
     }
 }
 
 /// Start the HTTP server.
 pub fn cmd_server_start(db_path: &str, port: u16, host: &str) -> Result<()> {
     let addr = format!("{host}:{port}");
-    let listener = TcpListener::bind(&addr).map_err(|e| {
-        BukioError::new("SERVER_START", format!("cannot bind {addr}: {e}"))
-    })?;
+    let listener = TcpListener::bind(&addr)
+        .map_err(|e| BukioError::new("SERVER_START", format!("cannot bind {addr}: {e}")))?;
     eprintln!("bukio server listening on {addr}");
     for stream in listener.incoming() {
         let stream = match stream {
@@ -326,7 +348,11 @@ pub fn cmd_server_start(db_path: &str, port: u16, host: &str) -> Result<()> {
             // Read body
             let body = if content_length > 0 {
                 read_json_body(&mut reader, content_length).unwrap_or_else(|e| {
-                    send_json_response(&mut writer, "400 Bad Request", &json!({"ok": false, "error": {"code": "ERROR", "message": e.to_string()}}));
+                    send_json_response(
+                        &mut writer,
+                        "400 Bad Request",
+                        &json!({"ok": false, "error": {"code": "ERROR", "message": e.to_string()}}),
+                    );
                     Value::Null
                 })
             } else {

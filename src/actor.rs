@@ -158,11 +158,11 @@ pub fn can_act_enrolled(db: &Connection, actor: &str) -> bool {
 }
 
 /// Enrol an actor key into the company registry.
-pub fn enrol_actor(db: &Connection, actor: &str, keyid: &str, public_pem: &str) -> Result<Value> {
+pub fn enrol_actor(db: &Connection, actor: &str, keyid: &str, public_key: &str) -> Result<Value> {
     let now = now_iso();
     db.execute(
-        "INSERT OR REPLACE INTO actor_keys (actor, keyid, public_pem, enrolled_at) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![actor, keyid, public_pem, now],
+        "INSERT OR REPLACE INTO actor_keys (actor, keyid, public_key, enrolled_at) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![actor, keyid, public_key, now],
     ).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
     Ok(json!({"actor": actor, "keyid": keyid, "enrolled_at": now}))
 }
@@ -178,10 +178,24 @@ pub fn revoke_actor(db: &Connection, actor: &str) -> Result<()> {
     Ok(())
 }
 
+/// Revoke an actor key with a reason. Returns the key info.
+pub fn revoke_actor_reason(db: &Connection, actor: &str, reason: &str) -> Result<ActorKeyRow> {
+    let now = now_iso();
+    db.execute(
+        "UPDATE actor_keys SET revoked_at = ?1, revoked_reason = ?2 WHERE actor = ?3 AND revoked_at IS NULL",
+        rusqlite::params![now, reason, actor],
+    )
+    .map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
+    let row = get_any_actor_key(db, actor)
+        .ok_or_else(|| BukioError::new("ACTOR_NOT_FOUND", format!("actor {actor} not found")))?;
+    Ok(row)
+}
+
 pub fn list_actors(db: &Connection) -> Result<Vec<Value>> {
     let mut stmt = db.prepare("SELECT actor, keyid, enrolled_at, revoked_at, revoked_reason FROM actor_keys ORDER BY enrolled_at, actor").map_err(sql_err)?;
     let rows = stmt.query_map([], |r| {
-        Ok(json!({"actor": r.get::<_, String>(0)?, "keyid": r.get::<_, String>(1)?, "enrolled_at": r.get::<_, String>(2)?, "revoked_at": r.get::<_, Option<String>>(3)?, "revoked_reason": r.get::<_, Option<String>>(4)?}))
+        let revoked_at: Option<String> = r.get(3)?;
+Ok(json!({"actor": r.get::<_, String>(0)?, "keyid": r.get::<_, String>(1)?, "enrolled_at": r.get::<_, String>(2)?, "revoked_at": revoked_at.as_deref(), "revoked_reason": r.get::<_, Option<String>>(4)?, "active": revoked_at.is_none()}))
     }).map_err(sql_err)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
 }

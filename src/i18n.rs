@@ -9,7 +9,10 @@ use std::collections::HashMap;
 type Table = HashMap<String, String>;
 
 fn build_table(pairs: &[(&str, &str)]) -> Table {
-    pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
 fn bg_table() -> Table {
@@ -1047,9 +1050,7 @@ fn fr_table() -> Table {
 }
 
 fn fr_lu_table() -> Table {
-    build_table(&[
-        ("pdf.kvk", "RCS"),
-    ])
+    build_table(&[("pdf.kvk", "RCS")])
 }
 
 fn hr_table() -> Table {
@@ -1813,8 +1814,14 @@ fn nl_be_table() -> Table {
         ("pdf.kvk", "KBO"),
         ("pdf.vat", "BTW"),
         ("report.undistributedResult", "te bestemmen resultaat"),
-        ("vat.file.description", "BTW-aangifte{period} — overdracht naar {account} ({direction})"),
-        ("vat.settle.description", "Betaling BTW-aangifte{period} — {account} (afrondingsverschil {amount})"),
+        (
+            "vat.file.description",
+            "BTW-aangifte{period} — overdracht naar {account} ({direction})",
+        ),
+        (
+            "vat.settle.description",
+            "Betaling BTW-aangifte{period} — {account} (afrondingsverschil {amount})",
+        ),
     ])
 }
 
@@ -2515,7 +2522,10 @@ pub fn t(key: &str, params: &[(&str, &str)], locale: &str) -> String {
     let base = loc.split('-').next().filter(|_| loc.contains('-'));
     let s = get_table(&loc)
         .and_then(|t| t.get(key).cloned())
-        .or_else(|| base.and_then(|b| get_table(b)).and_then(|t| t.get(key).cloned()))
+        .or_else(|| {
+            base.and_then(|b| get_table(b))
+                .and_then(|t| t.get(key).cloned())
+        })
         .or_else(|| get_table("en").and_then(|t| t.get(key).cloned()))
         .unwrap_or_else(|| key.to_string());
     let mut result = s;
@@ -2531,7 +2541,11 @@ pub fn label(key: &str, language: &str) -> String {
 
 pub fn unit_label(code: &str, language: &str) -> String {
     let s = t(&format!("unit.{code}"), &[], language);
-    if s == format!("unit.{code}") { code.to_string() } else { s }
+    if s == format!("unit.{code}") {
+        code.to_string()
+    } else {
+        s
+    }
 }
 
 pub fn resolve_locale(locale: Option<&str>) -> String {

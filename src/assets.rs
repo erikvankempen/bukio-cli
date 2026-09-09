@@ -413,37 +413,65 @@ pub fn create_asset(
         return Err(assets_error("INVALID_NAME", "asset needs a name"));
     }
     if !valid_date(purchase_date) {
-        return Err(assets_error("INVALID_DATE", format!("purchase-date '{purchase_date}' must be yyyy-mm-dd")));
+        return Err(assets_error(
+            "INVALID_DATE",
+            format!("purchase-date '{purchase_date}' must be yyyy-mm-dd"),
+        ));
     }
     if !valid_date(depreciation_start_date) {
-        return Err(assets_error("INVALID_DATE", format!("depreciation-start-date '{depreciation_start_date}' must be yyyy-mm-dd")));
+        return Err(assets_error(
+            "INVALID_DATE",
+            format!("depreciation-start-date '{depreciation_start_date}' must be yyyy-mm-dd"),
+        ));
     }
     if !valid_date(recognition_date) {
-        return Err(assets_error("INVALID_DATE", format!("recognition-date '{recognition_date}' must be yyyy-mm-dd")));
+        return Err(assets_error(
+            "INVALID_DATE",
+            format!("recognition-date '{recognition_date}' must be yyyy-mm-dd"),
+        ));
     }
     if depreciation_start_date < purchase_date {
-        return Err(assets_error("INVALID_DATE", "depreciation-start-date cannot be before purchase-date"));
+        return Err(assets_error(
+            "INVALID_DATE",
+            "depreciation-start-date cannot be before purchase-date",
+        ));
     }
     if recognition_date < purchase_date {
-        return Err(assets_error("INVALID_DATE", "recognition-date cannot be before purchase-date"));
+        return Err(assets_error(
+            "INVALID_DATE",
+            "recognition-date cannot be before purchase-date",
+        ));
     }
     if purchase_price_cents <= 0 {
-        return Err(assets_error("INVALID_COST", "purchase-price must be a positive amount in cents"));
+        return Err(assets_error(
+            "INVALID_COST",
+            "purchase-price must be a positive amount in cents",
+        ));
     }
     if cum_dep_at_recognition_cents < 0 {
-        return Err(assets_error("INVALID_DEPRECIATION", "cumulative depreciation at recognition must be >= 0"));
+        return Err(assets_error(
+            "INVALID_DEPRECIATION",
+            "cumulative depreciation at recognition must be >= 0",
+        ));
     }
 
     // Resolve scheme
     let scheme = if let Some(sid) = scheme_id {
-        get_scheme(db, sid)?.ok_or_else(|| assets_error("SCHEME_NOT_FOUND", format!("scheme {sid} does not exist")))?
+        get_scheme(db, sid)?.ok_or_else(|| {
+            assets_error("SCHEME_NOT_FOUND", format!("scheme {sid} does not exist"))
+        })?
     } else {
         ensure_default_scheme(db, actor)?
     };
-    let scheme_residual_cents = ((scheme["residual_bp"].as_i64().unwrap_or(0) as f64) / 10000.0 * purchase_price_cents as f64).round() as i64;
+    let scheme_residual_cents = ((scheme["residual_bp"].as_i64().unwrap_or(0) as f64) / 10000.0
+        * purchase_price_cents as f64)
+        .round() as i64;
     let residual = residual_cents_override.unwrap_or(scheme_residual_cents);
     if residual < 0 || residual >= purchase_price_cents {
-        return Err(assets_error("INVALID_RESIDUAL", format!("residual must be >= 0 and < purchase-price (got {residual})")));
+        return Err(assets_error(
+            "INVALID_RESIDUAL",
+            format!("residual must be >= 0 and < purchase-price (got {residual})"),
+        ));
     }
 
     // Resolve accounts
@@ -454,10 +482,19 @@ pub fn create_asset(
     let cum_dep_acct = cum_dep_account_code.and_then(|c| get_account_by_code(db, c));
 
     if let Some(eid) = entry_id {
-        let exists: bool = db.query_row("SELECT COUNT(*) FROM journal_entries WHERE id = ?1", [eid], |r| r.get::<_, i64>(0))
-            .map_err(sql_err)? > 0;
+        let exists: bool = db
+            .query_row(
+                "SELECT COUNT(*) FROM journal_entries WHERE id = ?1",
+                [eid],
+                |r| r.get::<_, i64>(0),
+            )
+            .map_err(sql_err)?
+            > 0;
         if !exists {
-            return Err(assets_error("ENTRY_NOT_FOUND", format!("entry {eid} does not exist")));
+            return Err(assets_error(
+                "ENTRY_NOT_FOUND",
+                format!("entry {eid} does not exist"),
+            ));
         }
     }
 
@@ -503,12 +540,8 @@ pub fn create_asset(
     let asset_acct_id: i64 = asset_acct["code"]
         .as_str()
         .and_then(|c| {
-            db.query_row(
-                "SELECT id FROM accounts WHERE code = ?1",
-                [c],
-                |r| r.get(0),
-            )
-            .ok()
+            db.query_row("SELECT id FROM accounts WHERE code = ?1", [c], |r| r.get(0))
+                .ok()
         })
         .or_else(|| {
             db.query_row(
@@ -522,12 +555,8 @@ pub fn create_asset(
     let expense_acct_id: i64 = expense_acct["code"]
         .as_str()
         .and_then(|c| {
-            db.query_row(
-                "SELECT id FROM accounts WHERE code = ?1",
-                [c],
-                |r| r.get(0),
-            )
-            .ok()
+            db.query_row("SELECT id FROM accounts WHERE code = ?1", [c], |r| r.get(0))
+                .ok()
         })
         .or_else(|| {
             db.query_row(
@@ -543,12 +572,8 @@ pub fn create_asset(
         .and_then(|a| a["code"].as_str())
         .or(cum_dep_account_code)
         .and_then(|c| {
-            db.query_row(
-                "SELECT id FROM accounts WHERE code = ?1",
-                [c],
-                |r| r.get(0),
-            )
-            .ok()
+            db.query_row("SELECT id FROM accounts WHERE code = ?1", [c], |r| r.get(0))
+                .ok()
         });
     db.execute(
         "INSERT INTO assets (name, category, serial, status, scheme_id, purchase_date, \
@@ -594,19 +619,32 @@ pub fn dispose_asset(
 ) -> Result<Value> {
     use crate::accounts::get_account_by_code;
 
-    let asset = get_asset(db, id)?.ok_or_else(|| assets_error("ASSET_NOT_FOUND", format!("asset {id} does not exist")))?;
+    let asset = get_asset(db, id)?
+        .ok_or_else(|| assets_error("ASSET_NOT_FOUND", format!("asset {id} does not exist")))?;
     if asset["status"].as_str() == Some("disposed") {
-        return Err(assets_error("ALREADY_DISPOSED", format!("asset {id} is already disposed")));
+        return Err(assets_error(
+            "ALREADY_DISPOSED",
+            format!("asset {id} is already disposed"),
+        ));
     }
     if !valid_date(date) {
-        return Err(assets_error("INVALID_DATE", format!("date '{date}' must be yyyy-mm-dd")));
+        return Err(assets_error(
+            "INVALID_DATE",
+            format!("date '{date}' must be yyyy-mm-dd"),
+        ));
     }
     let recog = asset["recognition_date"].as_str().unwrap_or("");
     if !recog.is_empty() && date < recog {
-        return Err(assets_error("INVALID_DATE", "disposal date cannot be before the recognition date"));
+        return Err(assets_error(
+            "INVALID_DATE",
+            "disposal date cannot be before the recognition date",
+        ));
     }
     if proceeds_cents < 0 {
-        return Err(assets_error("INVALID_AMOUNT", "proceeds must be a non-negative amount in cents"));
+        return Err(assets_error(
+            "INVALID_AMOUNT",
+            "proceeds must be a non-negative amount in cents",
+        ));
     }
 
     // Compute book value at disposal
@@ -620,22 +658,32 @@ pub fn dispose_asset(
 
     let bank_code = bank_account_code.unwrap_or("1100");
     let bank_acct = if proceeds_cents > 0 {
-        get_account_by_code(db, bank_code)
-            .ok_or_else(|| assets_error("ACCOUNT_NOT_FOUND", format!("bank account {bank_code} not found")))?
+        get_account_by_code(db, bank_code).ok_or_else(|| {
+            assets_error(
+                "ACCOUNT_NOT_FOUND",
+                format!("bank account {bank_code} not found"),
+            )
+        })?
     } else {
         json!(null)
     };
     let result_code = result_account_code.unwrap_or("8100");
-    let result_acct = get_account_by_code(db, result_code)
-        .ok_or_else(|| assets_error("ACCOUNT_NOT_FOUND", format!("result account {result_code} not found")))?;
+    let result_acct = get_account_by_code(db, result_code).ok_or_else(|| {
+        assets_error(
+            "ACCOUNT_NOT_FOUND",
+            format!("result account {result_code} not found"),
+        )
+    })?;
 
     let mut postings = Vec::new();
     if proceeds_cents > 0 {
         postings.push(json!({"code": bank_acct["code"], "amount_cents": proceeds_cents}));
     }
     if total_cum_dep > 0 {
-        let cum_code = asset["cum_dep_account_code"].as_str()
-            .or(asset["asset_account_code"].as_str()).unwrap_or("1800");
+        let cum_code = asset["cum_dep_account_code"]
+            .as_str()
+            .or(asset["asset_account_code"].as_str())
+            .unwrap_or("1800");
         postings.push(json!({"code": cum_code, "amount_cents": total_cum_dep}));
     }
     postings.push(json!({"code": asset["asset_account_code"], "amount_cents": -asset["purchase_price_cents"].as_i64().unwrap_or(0)}));
@@ -663,11 +711,14 @@ pub fn dispose_asset(
         crate::entries::CreateEntry {
             date,
             description: &description,
-            postings: postings.iter().map(|p| crate::entries::PostingSpec {
-                code: p["code"].as_str().unwrap_or("").to_string(),
-                amount_cents: p["amount_cents"].as_i64().unwrap_or(0),
-                cost_center_code: None,
-            }).collect(),
+            postings: postings
+                .iter()
+                .map(|p| crate::entries::PostingSpec {
+                    code: p["code"].as_str().unwrap_or("").to_string(),
+                    amount_cents: p["amount_cents"].as_i64().unwrap_or(0),
+                    cost_center_code: None,
+                })
+                .collect(),
             source: "assets",
             source_ref: Some(&source_ref),
             actor,
@@ -680,14 +731,19 @@ pub fn dispose_asset(
         rusqlite::params![date, proceeds_cents, posted.id, id],
     ).map_err(sql_err)?;
 
-    record(db, RecordArgs {
-        actor,
-        action: "assets.dispose",
-        command: Some("assets dispose"),
-        args: Some(json!({"asset_id": id, "date": date, "proceeds_cents": proceeds_cents, "result_cents": result_cents})),
-        outcome: "ok",
-        entry_ids: vec![posted.id],
-    })?;
+    record(
+        db,
+        RecordArgs {
+            actor,
+            action: "assets.dispose",
+            command: Some("assets dispose"),
+            args: Some(
+                json!({"asset_id": id, "date": date, "proceeds_cents": proceeds_cents, "result_cents": result_cents}),
+            ),
+            outcome: "ok",
+            entry_ids: vec![posted.id],
+        },
+    )?;
 
     Ok(json!({
         "asset": {"id": id, "name": asset_name, "status": "disposed", "disposed_date": date, "disposed_proceeds_cents": proceeds_cents},
@@ -698,9 +754,16 @@ pub fn dispose_asset(
 }
 
 pub fn pause_asset(db: &Connection, id: i64, actor: &str, dry_run: bool) -> Result<Value> {
-    let asset = get_asset(db, id)?.ok_or_else(|| assets_error("ASSET_NOT_FOUND", format!("asset {id} does not exist")))?;
+    let asset = get_asset(db, id)?
+        .ok_or_else(|| assets_error("ASSET_NOT_FOUND", format!("asset {id} does not exist")))?;
     if asset["status"].as_str() != Some("active") {
-        return Err(assets_error("INVALID_STATUS", format!("asset {id} is {}, only active assets can be paused", asset["status"])));
+        return Err(assets_error(
+            "INVALID_STATUS",
+            format!(
+                "asset {id} is {}, only active assets can be paused",
+                asset["status"]
+            ),
+        ));
     }
     if dry_run {
         return Ok(json!({
@@ -708,18 +771,33 @@ pub fn pause_asset(db: &Connection, id: i64, actor: &str, dry_run: bool) -> Resu
             "from": asset["status"], "to": "paused", "dryRun": true,
         }));
     }
-    db.execute("UPDATE assets SET status = 'paused' WHERE id = ?1", [id]).map_err(sql_err)?;
-    record(db, RecordArgs {
-        actor, action: "assets.pause", command: Some("assets pause"),
-        args: Some(json!({"asset_id": id})), outcome: "ok", entry_ids: vec![],
-    })?;
+    db.execute("UPDATE assets SET status = 'paused' WHERE id = ?1", [id])
+        .map_err(sql_err)?;
+    record(
+        db,
+        RecordArgs {
+            actor,
+            action: "assets.pause",
+            command: Some("assets pause"),
+            args: Some(json!({"asset_id": id})),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     Ok(json!({"asset": {"id": id, "name": asset["name"], "status": "paused"}}))
 }
 
 pub fn resume_asset(db: &Connection, id: i64, actor: &str, dry_run: bool) -> Result<Value> {
-    let asset = get_asset(db, id)?.ok_or_else(|| assets_error("ASSET_NOT_FOUND", format!("asset {id} does not exist")))?;
+    let asset = get_asset(db, id)?
+        .ok_or_else(|| assets_error("ASSET_NOT_FOUND", format!("asset {id} does not exist")))?;
     if asset["status"].as_str() != Some("paused") {
-        return Err(assets_error("INVALID_STATUS", format!("asset {id} is {}, only paused assets can be resumed", asset["status"])));
+        return Err(assets_error(
+            "INVALID_STATUS",
+            format!(
+                "asset {id} is {}, only paused assets can be resumed",
+                asset["status"]
+            ),
+        ));
     }
     if dry_run {
         return Ok(json!({
@@ -727,11 +805,19 @@ pub fn resume_asset(db: &Connection, id: i64, actor: &str, dry_run: bool) -> Res
             "from": asset["status"], "to": "active", "dryRun": true,
         }));
     }
-    db.execute("UPDATE assets SET status = 'active' WHERE id = ?1", [id]).map_err(sql_err)?;
-    record(db, RecordArgs {
-        actor, action: "assets.resume", command: Some("assets resume"),
-        args: Some(json!({"asset_id": id})), outcome: "ok", entry_ids: vec![],
-    })?;
+    db.execute("UPDATE assets SET status = 'active' WHERE id = ?1", [id])
+        .map_err(sql_err)?;
+    record(
+        db,
+        RecordArgs {
+            actor,
+            action: "assets.resume",
+            command: Some("assets resume"),
+            args: Some(json!({"asset_id": id})),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
     Ok(json!({"asset": {"id": id, "name": asset["name"], "status": "active"}}))
 }
 
@@ -739,7 +825,12 @@ pub fn register(db: &Connection, as_of: Option<&str>, actor: &str) -> Result<Val
     let target_period = match as_of {
         Some(d) if valid_date(d) => d[..7].to_string(),
         None => chrono::Utc::now().format("%Y-%m").to_string(),
-        _ => return Err(assets_error("INVALID_DATE", format!("as-of '{}' must be yyyy-mm-dd", as_of.unwrap_or("")))),
+        _ => {
+            return Err(assets_error(
+                "INVALID_DATE",
+                format!("as-of '{}' must be yyyy-mm-dd", as_of.unwrap_or("")),
+            ))
+        }
     };
     let assets = list_assets(db, None)?;
     let mut rows = Vec::new();
@@ -756,7 +847,9 @@ pub fn register(db: &Connection, as_of: Option<&str>, actor: &str) -> Result<Val
         let scheme = a["scheme"].as_object();
         let life_months = scheme.and_then(|s| s["life_months"].as_i64()).unwrap_or(60);
         let elapsed = std::cmp::max(0, month_diff(dep_start, recog));
-        let method = scheme.and_then(|s| s["method"].as_str()).unwrap_or("lineair");
+        let method = scheme
+            .and_then(|s| s["method"].as_str())
+            .unwrap_or("lineair");
         let first_period = first_run_period(recog, dep_start);
 
         // Find next unbooked period
@@ -767,10 +860,23 @@ pub fn register(db: &Connection, as_of: Option<&str>, actor: &str) -> Result<Val
             .map_err(sql_err)?
             .filter_map(|r| r.ok())
             .collect();
-        let remaining_cost = std::cmp::max(0, purchase_price - residual - a["cum_dep_at_recognition_cents"].as_i64().unwrap_or(0));
+        let remaining_cost = std::cmp::max(
+            0,
+            purchase_price - residual - a["cum_dep_at_recognition_cents"].as_i64().unwrap_or(0),
+        );
         let ml = std::cmp::max(1, life_months - elapsed as i64);
-        let sched = schedule_depreciation(remaining_cost, 0, ml, method, &first_period, &next_period(&target_period));
-        let next_run = sched.iter().find(|(p, _)| !booked_set.contains(p)).map(|(p, _)| p.clone());
+        let sched = schedule_depreciation(
+            remaining_cost,
+            0,
+            ml,
+            method,
+            &first_period,
+            &next_period(&target_period),
+        );
+        let next_run = sched
+            .iter()
+            .find(|(p, _)| !booked_set.contains(p))
+            .map(|(p, _)| p.clone());
 
         rows.push(json!({
             "id": aid, "name": a["name"], "category": a["category"], "serial": a["serial"],

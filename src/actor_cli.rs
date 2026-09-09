@@ -21,10 +21,7 @@ fn config_dir() -> PathBuf {
     std::env::var("BUKIO_CONFIG_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| {
-            PathBuf::from(
-                std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
-            )
-            .join(".bukio")
+            PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())).join(".bukio")
         })
 }
 
@@ -32,13 +29,13 @@ fn key_file_path(actor: &str) -> PathBuf {
     config_dir().join("keys").join(format!("{actor}.key"))
 }
 
-fn session_file_path(actor: &str) -> PathBuf {
+pub fn session_file_path(actor: &str) -> PathBuf {
     config_dir()
         .join("sessions")
-        .join(format!("{actor}.session"))
+        .join(format!("{}.key", actor.replace(":", "-")))
 }
 
-fn read_key_file(actor: &str) -> Result<String> {
+pub fn read_key_file(actor: &str) -> Result<String> {
     let path = key_file_path(actor);
     fs::read_to_string(&path).map_err(|_| {
         BukioError::new(
@@ -51,16 +48,24 @@ fn read_key_file(actor: &str) -> Result<String> {
     })
 }
 
-fn write_key_file(actor: &str, pem: &str) -> Result<()> {
+pub fn write_key_file(actor: &str, pem: &str) -> Result<()> {
     let path = key_file_path(actor);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).ok();
     }
-    fs::write(&path, format!("{pem}\n"))
-        .map_err(|e| BukioError::new("IO_ERROR", format!("cannot write {}: {e}", path.display())))
+    fs::write(&path, format!("{pem}\n")).map_err(|e| {
+        BukioError::new("IO_ERROR", format!("cannot write {}: {e}", path.display()))
+    })?;
+    // Set restrictive permissions: 0o600 for files
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
 }
 
-fn read_passphrase(actor: &str) -> Result<String> {
+pub fn read_passphrase(actor: &str) -> Result<String> {
     if let Ok(env) = std::env::var("BUKIO_SIGNING_PASSPHRASE") {
         if !env.is_empty() {
             return Ok(env);
@@ -72,7 +77,7 @@ fn read_passphrase(actor: &str) -> Result<String> {
     ))
 }
 
-/// Keygen: generate Ed25519 keypair.
+/// Keygen: generate Ed25519 keypair. Human keys are passphrase-encrypted.
 pub fn cmd_keygen(actor: &str, force: bool, dry_run: bool) -> Result<Value> {
     if !is_valid_actor(actor) {
         return Err(BukioError::new(
@@ -92,23 +97,25 @@ pub fn cmd_keygen(actor: &str, force: bool, dry_run: bool) -> Result<Value> {
         ));
     }
     let is_human = actor.starts_with("human:");
-    let passphrase = if is_human {
-        Some(read_passphrase(actor)?)
+    let (public_pem, private_pem, keyid, encrypted) = if is_human {
+        let passphrase = read_passphrase(actor)?;
+        let (pub_pem, priv_pem, kid) = sign::generate_key_pair_encrypted(&passphrase)
+            .map_err(|e| BukioError::new("KEY_ERROR", e))?;
+        (pub_pem, priv_pem, kid, true)
     } else {
-        None
+        let (pub_pem, priv_pem, kid) = sign::generate_key_pair();
+        (pub_pem, priv_pem, kid, false)
     };
-    // generate_key_pair returns (public_pem, private_pem, keyid)
-    let (public_pem, private_pem, keyid) = sign::generate_key_pair();
     if dry_run {
         return Ok(json!({
             "actor": actor, "keyid": keyid, "keyFile": path.display().to_string(),
-            "encrypted": passphrase.is_some(), "dryRun": true, "wouldOverwrite": exists,
+            "encrypted": encrypted, "dryRun": true, "wouldOverwrite": exists,
         }));
     }
     write_key_file(actor, &private_pem)?;
     Ok(json!({
         "actor": actor, "keyid": keyid, "keyFile": path.display().to_string(),
-        "encrypted": passphrase.is_some(), "publicKey": public_pem,
+        "encrypted": encrypted, "publicKey": public_pem,
     }))
 }
 
@@ -150,42 +157,107 @@ pub fn cmd_list(db_path: &str) -> Result<Value> {
     Ok(json!({"ok": true, "actors": actors}))
 }
 
-/// Revoke an actor.
-pub fn cmd_revoke(db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+/// Revoke an actor's key.
+pub fn cmd_revoke(
+    db_path: &str,
+    actor: &str,
+    reason: Option<&str>,
+    dry_run: bool,
+) -> Result<Value> {
+    if !is_valid_actor(actor) {
+        return Err(BukioError::new(
+            "INVALID_ACTOR",
+            format!("'{actor}' is not a valid '<role>:<name>' actor"),
+        ));
+    }
+    let reason_str = match reason {
+        Some(r) if !r.is_empty() => r,
+        _ => return Err(BukioError::new("INVALID_REASON", "--reason is required")),
+    };
     if dry_run {
-        return Ok(json!({"actor": actor, "dryRun": true}));
+        return Ok(json!({"actor": actor, "reason": reason_str, "dryRun": true}));
     }
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
-    revoke_actor(&db, actor)?;
+    let row = revoke_actor_reason(&db, actor, reason_str)?;
     record(
         &db,
         RecordArgs {
             actor,
             action: "actor.revoke",
             command: Some("actor revoke"),
-            args: Some(json!({"actor": actor})),
+            args: Some(json!({"actor": actor, "reason": reason_str})),
             outcome: "ok",
             entry_ids: vec![],
         },
     )?;
-    Ok(json!({"ok": true, "actor": actor, "revoked": true}))
+    Ok(
+        json!({"actor": actor, "keyid": row.keyid, "revoked_at": row.revoked_at, "reason": reason_str}),
+    )
 }
 
 /// Enforce mode on/off.
-pub fn cmd_enforce(db_path: &str, on: bool) -> Result<Value> {
+pub fn cmd_enforce(db_path: &str, actor: &str, on: bool, dry_run: bool) -> Result<Value> {
+    if dry_run {
+        return Ok(json!({"enforce": if on { "on" } else { "off" }, "dryRun": true}));
+    }
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
     set_enforce(&db, on);
-    Ok(json!({"ok": true, "enforce": on}))
+    record(
+        &db,
+        RecordArgs {
+            actor,
+            action: "actor.enforce",
+            command: Some("actor enforce"),
+            args: Some(json!({"enforce": if on { "on" } else { "off" }})),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
+    Ok(json!({"ok": true, "enforce": if on { "on" } else { "off" }}))
 }
 
 /// Authz mode on/off.
-pub fn cmd_authz(db_path: &str, on: bool) -> Result<Value> {
+pub fn cmd_authz(db_path: &str, actor: &str, on: bool, dry_run: bool) -> Result<Value> {
+    if dry_run {
+        return Ok(json!({
+            "authz": if on { "on" } else { "off" },
+            "enforce": if on { "on" } else { "off" },
+            "dryRun": true,
+            "owner_granted": if on { actor } else { "" },
+        }));
+    }
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
-    set_authz_mode(&db, on);
-    Ok(json!({"ok": true, "authz": on}))
+    // D1: authz implies enforce
+    if on {
+        set_authz_mode(&db, true);
+        set_enforce(&db, true);
+        // D3: flipper becomes owner
+        grant_role(&db, actor, "owner", actor)?;
+    } else {
+        set_authz_mode(&db, false);
+    }
+    // Audit the authz flip
+    record(
+        &db,
+        RecordArgs {
+            actor,
+            action: "actor.authz",
+            command: Some("actor authz"),
+            args: Some(json!({"authz": if on { "on" } else { "off" }})),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
+    let authz = get_authz(&db);
+    let enforce = get_enforce(&db);
+    Ok(json!({
+        "authz": if authz { "on" } else { "off" },
+        "enforce": if enforce { "on" } else { "off" },
+        "owner": if on { actor } else { "" },
+    }))
 }
 
-/// Unlock: store passphrase session.
+/// Unlock: decrypt key and store session.
 pub fn cmd_unlock(actor: &str, ttl_hours: Option<u64>) -> Result<Value> {
     let ttl = ttl_hours.unwrap_or(DEFAULT_TTL_HOURS);
     if ttl < 1 || ttl > MAX_TTL_HOURS {
@@ -194,10 +266,21 @@ pub fn cmd_unlock(actor: &str, ttl_hours: Option<u64>) -> Result<Value> {
             format!("--ttl-hours must be 1–{MAX_TTL_HOURS}"),
         ));
     }
+    if !actor.starts_with("human:") {
+        return Err(BukioError::new(
+            "UNLOCK_NOT_APPLICABLE",
+            "only human keys are unlocked per session — agent/system keys sign automatically",
+        ));
+    }
     let passphrase = read_passphrase(actor)?;
     let path = session_file_path(actor);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).ok();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+        }
     }
     let pem = read_key_file(actor)?;
     if !sign::is_encrypted(&pem) {
@@ -206,53 +289,92 @@ pub fn cmd_unlock(actor: &str, ttl_hours: Option<u64>) -> Result<Value> {
             format!("{actor} key is not passphrase-encrypted"),
         ));
     }
-    // Store session: passphrase + expiry timestamp
+    let decrypted = sign::decrypt_private_key_pem(&pem, &passphrase)
+        .map_err(|e| BukioError::new("PASSPHRASE_INVALID", e))?;
     let expires = chrono::Utc::now() + chrono::Duration::hours(ttl as i64);
-    let session = json!({"passphrase": passphrase, "expires": expires.to_rfc3339()});
+    let session = json!({"keyPem": decrypted, "expiresAt": expires.to_rfc3339()});
     fs::write(&path, session.to_string())
         .map_err(|e| BukioError::new("IO_ERROR", format!("cannot write session: {e}")))?;
-    Ok(json!({"ok": true, "actor": actor, "ttl_hours": ttl, "expires": expires.to_rfc3339()}))
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(json!({"ok": true, "actor": actor, "sessionFile": path.display().to_string(), "ttl_hours": ttl, "expires": expires.to_rfc3339()}))
 }
 
 /// Lock: remove session.
 pub fn cmd_lock(actor: &str) -> Result<Value> {
     let path = session_file_path(actor);
-    if path.exists() {
+    let removed = path.exists();
+    if removed {
         fs::remove_file(&path).ok();
     }
-    Ok(json!({"ok": true, "actor": actor, "locked": true}))
+    Ok(json!({"ok": true, "actor": actor, "locked": true, "removed": removed}))
+}
+
+/// Read session key PEM (if valid, not expired).
+pub fn read_session_key(actor: &str) -> Option<String> {
+    let path = session_file_path(actor);
+    let raw = fs::read_to_string(&path).ok()?;
+    let v: Value = serde_json::from_str(&raw).ok()?;
+    let expires = v["expiresAt"].as_str()?;
+    if let Ok(ts) = chrono::DateTime::parse_from_rfc3339(expires) {
+        if ts > chrono::Utc::now() {
+            return v["keyPem"].as_str().map(String::from);
+        }
+    }
+    None
 }
 
 /// Grant role.
 pub fn cmd_grant(db_path: &str, actor: &str, role: &str, granted_by: &str) -> Result<Value> {
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
     grant_role(&db, actor, role, granted_by)?;
-    Ok(json!({"ok": true, "actor": actor, "role": role, "granted_by": granted_by}))
+    Ok(json!({"actor": actor, "role": role, "granted_by": granted_by, "warning": null}))
 }
 
 /// Revoke role.
 pub fn cmd_revoke_role(db_path: &str, actor: &str, role: &str) -> Result<Value> {
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
     revoke_role(&db, actor, role)?;
-    Ok(json!({"ok": true, "actor": actor, "role": role, "revoked": true}))
+    Ok(json!({"actor": actor, "role": role, "revoked": true}))
 }
 
 /// List role grants.
-pub fn cmd_roles(db_path: &str) -> Result<Value> {
+pub fn cmd_roles(db_path: &str, actor: &str) -> Result<Value> {
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
-    let grants = list_role_grants(&db)?;
-    Ok(json!({"ok": true, "grants": grants}))
+    let roles = get_roles(&db, actor);
+    Ok(json!({"actor": actor, "roles": roles}))
 }
 
 /// Can: check if actor can perform action.
 pub fn cmd_can(db_path: &str, actor: &str, action: &str) -> Result<Value> {
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
     let allowed = can_act_enrolled(&db, actor);
-    Ok(json!({"ok": true, "actor": actor, "action": action, "allowed": allowed}))
+    Ok(json!({"actor": actor, "action": action, "allowed": allowed}))
 }
 
-/// Verify: check signature.
-pub fn cmd_verify(data: &str, signature: &str, public_pem: &str) -> Result<Value> {
+/// Verify: check actor's key state against the company registry.
+pub fn cmd_verify_actor(db_path: &str, actor: &str) -> Result<Value> {
+    let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
+    let any = get_any_actor_key(&db, actor);
+    let active = get_actor_key(&db, actor).is_some();
+    let registered = any.is_some();
+    let revoked = any.as_ref().and_then(|a| a.revoked_at.as_ref()).is_some();
+    let key_file = key_file_path(actor);
+    let key_file_exists = key_file.exists();
+    Ok(json!({
+        "actor": actor,
+        "registered": registered,
+        "active": active,
+        "revoked": revoked,
+        "keyFileExists": key_file_exists,
+    }))
+}
+
+/// Verify: check signature (low-level).
+pub fn cmd_verify_signature(data: &str, signature: &str, public_pem: &str) -> Result<Value> {
     let ok = sign::verify(data.as_bytes(), signature, public_pem);
     Ok(json!({"ok": true, "valid": ok}))
 }

@@ -1262,7 +1262,10 @@ pub fn mark_paid(
 
 pub fn invoice_reminders(db: &Connection, within_days: i64) -> Result<Value> {
     if within_days < 0 {
-        return Err(BukioError::new("INVALID_WINDOW", format!("within-days must be a non-negative integer, got '{within_days}'")));
+        return Err(BukioError::new(
+            "INVALID_WINDOW",
+            format!("within-days must be a non-negative integer, got '{within_days}'"),
+        ));
     }
     let today = crate::dates::today_iso();
     // due_soon cutoff = today + within_days
@@ -1280,15 +1283,17 @@ pub fn invoice_reminders(db: &Connection, within_days: i64) -> Result<Value> {
             let st = i["status"].as_str();
             st == Some("overdue")
                 || (st == Some("sent")
-                    && i["due_date"].as_str().map_or(false, |d| d <= due_soon.as_str()))
+                    && i["due_date"]
+                        .as_str()
+                        .map_or(false, |d| d <= due_soon.as_str()))
         })
         .map(|i| {
             let days_overdue = if i["status"].as_str() == Some("overdue") {
                 if let Some(due) = i["due_date"].as_str() {
-                    let due_dt = chrono::NaiveDate::parse_from_str(due, "%Y-%m-%d")
-                        .unwrap_or_default();
-                    let today_dt = chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d")
-                        .unwrap_or_default();
+                    let due_dt =
+                        chrono::NaiveDate::parse_from_str(due, "%Y-%m-%d").unwrap_or_default();
+                    let today_dt =
+                        chrono::NaiveDate::parse_from_str(&today, "%Y-%m-%d").unwrap_or_default();
                     (today_dt - due_dt).num_days().max(0)
                 } else {
                     0
@@ -1324,7 +1329,12 @@ pub fn invoice_reminders(db: &Connection, within_days: i64) -> Result<Value> {
             .as_i64()
             .unwrap_or(0)
             .cmp(&a["days_overdue"].as_i64().unwrap_or(0))
-            .then(a["invoice_id"].as_i64().unwrap_or(0).cmp(&b["invoice_id"].as_i64().unwrap_or(0)))
+            .then(
+                a["invoice_id"]
+                    .as_i64()
+                    .unwrap_or(0)
+                    .cmp(&b["invoice_id"].as_i64().unwrap_or(0)),
+            )
     });
     Ok(json!({
         "as_of": today,
