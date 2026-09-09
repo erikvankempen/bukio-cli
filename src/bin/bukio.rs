@@ -104,6 +104,16 @@ fn parse_i64(argv: &[String], flag: &str) -> Option<i64> {
     arg(argv, flag).and_then(|v| v.parse().ok())
 }
 
+/// Parse --limit with validation: "abc" → INVALID_LIMIT, "0" → 0, missing → default.
+fn parse_limit(argv: &[String], default: i64) -> Result<i64> {
+    match arg(argv, "--limit") {
+        None => Ok(default),
+        Some(v) => v.parse::<i64>().map_err(|_| {
+            BukioError::new("INVALID_LIMIT", format!("invalid --limit '{v}' — must be a non-negative integer"))
+        }),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -769,7 +779,7 @@ fn cmd_entry_reverse(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
 
 fn cmd_entry_list(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let limit: i64 = parse_i64(argv, "--limit").unwrap_or(100);
+    let limit: i64 = parse_limit(argv, 100)?;
     let rows = bukio::entries::list_entries(
         &db,
         arg(argv, "--state").as_deref().filter(|s| !s.is_empty()),
@@ -1243,7 +1253,7 @@ fn cmd_journal(argv: &[String], db_path: &str) -> Result<Value> {
 
 fn cmd_audit_list(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let limit: i64 = parse_i64(argv, "--limit").unwrap_or(50);
+    let limit: i64 = parse_limit(argv, 50)?;
     let rows = bukio::audit::list(
         &db,
         arg(argv, "--since").as_deref().filter(|s| !s.is_empty()),
@@ -1347,7 +1357,7 @@ fn cmd_bank_transactions(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let state = arg(argv, "--state");
     let iban = arg(argv, "--iban");
-    let limit: i64 = parse_i64(argv, "--limit").unwrap_or(200);
+    let limit: i64 = parse_limit(argv, 200)?;
     let transactions =
         bukio::bank::list_transactions(&db, state.as_deref(), iban.as_deref(), limit)?;
     Ok(json!({ "transactions": transactions }))
@@ -1785,7 +1795,7 @@ fn cmd_contact_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
             entry_ids: vec![],
         },
     )?;
-    Ok(contact)
+    Ok(json!({ "contact": contact }))
 }
 
 fn cmd_contact_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
@@ -1871,7 +1881,7 @@ fn cmd_invoice_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         actor,
         dry_run,
     )?;
-    Ok(invoice)
+    Ok(json!({ "invoice": invoice }))
 }
 
 fn cmd_invoice_finalize(
@@ -1883,7 +1893,8 @@ fn cmd_invoice_finalize(
     require_actor(actor)?;
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
-    bukio::invoice::finalize_invoice(&db, id, actor, dry_run)
+    let inv = bukio::invoice::finalize_invoice(&db, id, actor, dry_run)?;
+    Ok(json!({ "invoice": inv }))
 }
 
 fn cmd_invoice_list(argv: &[String], db_path: &str) -> Result<Value> {
@@ -1971,14 +1982,14 @@ fn cmd_fx_set(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Res
 fn cmd_fx_show(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let currency = arg(argv, "--currency").ok_or_else(|| missing_arg("--currency"))?;
-    let limit: i64 = parse_i64(argv, "--limit").unwrap_or(50);
+    let limit: i64 = parse_limit(argv, 50)?;
     let rates = bukio::fx::list_fx_rates(&db, Some(&currency), limit)?;
     Ok(json!({ "currency": currency, "rates": rates }))
 }
 
 fn cmd_fx_list(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let limit: i64 = parse_i64(argv, "--limit").unwrap_or(50);
+    let limit: i64 = parse_limit(argv, 50)?;
     let rates = bukio::fx::list_fx_rates(&db, None, limit)?;
     Ok(json!({ "rates": rates }))
 }
@@ -2456,7 +2467,7 @@ fn cmd_item_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
     let unit_price_cents = bukio::money::parse_amount(&price_str)?;
     let vat_code = arg(argv, "--vat");
     let gl_account = arg(argv, "--gl");
-    bukio::items::create_item(
+    let item = bukio::items::create_item(
         &db,
         &name,
         description.as_deref(),
@@ -2466,7 +2477,8 @@ fn cmd_item_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
         gl_account.as_deref(),
         actor,
         dry_run,
-    )
+    )?;
+    Ok(json!({ "item": item }))
 }
 
 fn cmd_item_list(argv: &[String], db_path: &str) -> Result<Value> {

@@ -887,6 +887,8 @@ pub fn create_invoice(
         ));
     }
 
+    // Split comma-separated line specs
+    let lines_raw: Vec<Value> = split_line_specs(lines_raw);
     if lines_raw.is_empty() {
         return Err(invoice_error("NO_LINES", "an invoice needs lines"));
     }
