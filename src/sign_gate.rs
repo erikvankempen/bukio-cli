@@ -99,7 +99,7 @@ fn key_file_path(actor: &str) -> PathBuf {
 pub fn is_signing_exempt(cmd: &str) -> bool {
     matches!(
         cmd,
-        "actor keygen" | "actor unlock" | "actor lock" | "mcp" | "server start" | "server token"
+        "actor keygen" | "actor unlock" | "actor lock" | "actor verify" | "mcp" | "server start" | "server token"
     )
 }
 
