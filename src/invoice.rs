@@ -581,6 +581,12 @@ pub fn get_invoice(db: &Connection, id: i64) -> Result<Option<Value>> {
         .map(|p| p["amount_cents"].as_i64().unwrap_or(0))
         .sum();
     inv["paid_cents"] = json!(paid);
+    // Formatted amount strings (JS parity: fmtInvoice adds these)
+    inv["net"] = json!(format_amount(inv["net_cents"].as_i64().unwrap_or(0)));
+    inv["vat"] = json!(format_amount(inv["vat_cents"].as_i64().unwrap_or(0)));
+    inv["gross"] = json!(format_amount(inv["gross_cents"].as_i64().unwrap_or(0)));
+    inv["paid"] = json!(format_amount(paid));
+    inv["outstanding_cents"] = json!(inv["gross_cents"].as_i64().unwrap_or(0) - paid);
     // Derived status: overdue
     if inv["status"].as_str() == Some("sent") {
         if let Some(due) = inv["due_date"].as_str() {

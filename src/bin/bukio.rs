@@ -1952,10 +1952,11 @@ fn cmd_invoice_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         )
         .collect();
 
+    let date = arg(argv, "--date").unwrap_or_else(|| bukio::dates::today_iso());
     let invoice = bukio::invoice::create_invoice(
         &db,
         contact_id,
-        &bukio::dates::today_iso(),
+        &date,
         due_days,
         description.as_deref(),
         reference.as_deref(),
@@ -1966,7 +1967,11 @@ fn cmd_invoice_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         actor,
         dry_run,
     )?;
-    Ok(json!({ "invoice": invoice }))
+    if dry_run {
+        Ok(invoice)
+    } else {
+        Ok(json!({ "invoice": invoice }))
+    }
 }
 
 fn cmd_invoice_finalize(
@@ -1979,7 +1984,7 @@ fn cmd_invoice_finalize(
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
     let inv = bukio::invoice::finalize_invoice(&db, id, actor, dry_run)?;
-    Ok(json!({ "invoice": inv }))
+    Ok(inv)
 }
 
 fn cmd_invoice_list(argv: &[String], db_path: &str) -> Result<Value> {
@@ -1995,7 +2000,7 @@ fn cmd_invoice_show(argv: &[String], db_path: &str) -> Result<Value> {
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
     let inv = bukio::invoice::get_invoice(&db, id)?
         .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} not found")))?;
-    Ok(inv)
+    Ok(json!({ "invoice": inv }))
 }
 
 fn cmd_invoice_credit(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
@@ -2021,7 +2026,7 @@ fn cmd_invoice_pay(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
             .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} not found")))?;
         inv["outstanding_cents"].as_i64().unwrap_or(0)
     };
-    bukio::invoice::mark_paid(
+    let inv = bukio::invoice::mark_paid(
         &db,
         id,
         &bukio::dates::today_iso(),
@@ -2029,7 +2034,12 @@ fn cmd_invoice_pay(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
         &method,
         actor,
         dry_run,
-    )
+    )?;
+    if inv.get("dryRun").and_then(|v| v.as_bool()).unwrap_or(false) {
+        Ok(json!({ "plan": inv }))
+    } else {
+        Ok(json!({ "invoice": inv }))
+    }
 }
 
 // ── year-end ───────────────────────────────────────────────────────────────
@@ -2089,6 +2099,7 @@ fn cmd_fx_fetch(argv: &[String]) -> Result<Value> {
 // ── mcp ────────────────────────────────────────────────────────────────────
 
 fn cmd_mcp(db_path: &str, actor: &str) -> Result<Value> {
+    ensure_db_exists(db_path)?;
     bukio::mcp::run(db_path, actor)?;
     Ok(json!({ "status": "ok" }))
 }
