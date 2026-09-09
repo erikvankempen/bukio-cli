@@ -137,14 +137,34 @@ pub fn add_attachment(
     let ext_dot = format!(".{ext}");
     let mime = mime_from_ext(&ext_dot);
     if dry_run {
+        let dest = if store == "file" {
+            Some(attachments_dir(db).join(&sha256))
+        } else {
+            None
+        };
         return Ok(
-            json!({"action": "attachments.add", "kind": kind, "ref_id": ref_id, "file_name": file_name, "mime": mime, "size": size, "sha256": sha256, "mode": store, "dryRun": true}),
+            json!({"action": "attachments.add", "kind": kind, "ref_id": ref_id, "file_name": file_name, "mime": mime, "size": size, "sha256": sha256, "mode": store, "path": dest.map(|d| d.to_string_lossy().to_string()), "dryRun": true}),
         );
     }
-    let data_opt = if store == "db" { Some(bytes) } else { None };
+    // file mode: copy into <db-dir>/<db>-attachments/<sha256> (JS parity)
+    let (data_opt, path_opt) = if store == "db" {
+        (Some(bytes), None)
+    } else {
+        let dir = attachments_dir(db);
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| attachment_error("IO_ERROR", format!("cannot create {dir:?}: {e}")))?;
+        let dest = dir.join(&sha256);
+        std::fs::copy(file_path, &dest).map_err(|e| {
+            attachment_error(
+                "IO_ERROR",
+                format!("cannot copy {file_path} to {dest:?}: {e}"),
+            )
+        })?;
+        (None, Some(dest.to_string_lossy().to_string()))
+    };
     db.execute(
-        "INSERT INTO attachments (kind, ref_id, file_name, mime, size, sha256, mode, data, path, note, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9, ?10)",
-        rusqlite::params![kind, ref_id, file_name, mime, size as i64, sha256, store, data_opt, note, actor],
+        "INSERT INTO attachments (kind, ref_id, file_name, mime, size, sha256, mode, data, path, note, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        rusqlite::params![kind, ref_id, file_name, mime, size as i64, sha256, store, data_opt, path_opt, note, actor],
     ).map_err(sql_err)?;
     let id = db.last_insert_rowid();
     record(
@@ -180,6 +200,77 @@ pub fn list_attachments(db: &Connection, kind: &str, ref_id: i64) -> Result<Vec<
         }))
     }).map_err(sql_err)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// <db-dir>/<db-name-without-.db>-attachments (JS parity: same helper)
+fn attachments_dir(db: &Connection) -> std::path::PathBuf {
+    let db_path = db
+        .path()
+        .map(std::path::Path::new)
+        .unwrap_or(std::path::Path::new("bukio.db"));
+    let dir = db_path.parent().unwrap_or(std::path::Path::new("."));
+    let stem = db_path
+        .file_name()
+        .map(|f| f.to_string_lossy().replace(".db", ""))
+        .unwrap_or_else(|| "bukio".into());
+    dir.join(format!("{stem}-attachments"))
+}
+
+/// Write the attachment's bytes to `out`. `db` mode reads the blob; `file`
+/// mode copies the stored path. Refuses to overwrite unless `force`.
+pub fn extract_attachment(db: &Connection, id: i64, out: &str, force: bool) -> Result<Value> {
+    let row = db.query_row(
+        "SELECT mode, data, path, file_name FROM attachments WHERE id = ?1",
+        [id],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<Vec<u8>>>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, String>(3)?,
+            ))
+        },
+    );
+    let (mode, data, path, file_name) = match row {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(attachment_error(
+                "ATTACHMENT_NOT_FOUND",
+                format!("attachment {id} does not exist"),
+            ));
+        }
+        Err(e) => return Err(sql_err(e)),
+    };
+    let bytes = match mode.as_str() {
+        "db" => data.ok_or_else(|| attachment_error("NO_DATA", "attachment has no stored blob"))?,
+        "file" => {
+            let p = path.ok_or_else(|| attachment_error("NO_PATH", "attachment has no path"))?;
+            std::fs::read(&p)
+                .map_err(|e| attachment_error("IO_ERROR", format!("cannot read {p}: {e}")))?
+        }
+        other => {
+            return Err(attachment_error(
+                "INVALID_STORE",
+                format!("unknown store mode '{other}'"),
+            ));
+        }
+    };
+    if std::path::Path::new(out).exists() && !force {
+        return Err(attachment_error(
+            "FILE_EXISTS",
+            format!("{out} already exists — pass --force to overwrite"),
+        ));
+    }
+    if let Some(parent) = std::path::Path::new(out).parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| attachment_error("IO_ERROR", format!("cannot create {parent:?}: {e}")))?;
+    }
+    std::fs::write(out, &bytes)
+        .map_err(|e| attachment_error("IO_ERROR", format!("cannot write {out}: {e}")))?;
+    Ok(json!({
+        "id": id, "file_name": file_name, "mode": mode, "size": bytes.len(),
+        "sha256": format!("{:x}", Sha256::digest(&bytes)), "out": out,
+    }))
 }
 
 pub fn get_attachment(db: &Connection, id: i64) -> Result<Value> {

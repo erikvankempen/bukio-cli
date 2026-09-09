@@ -3085,12 +3085,23 @@ fn cmd_attach_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) ->
     let file = arg(argv, "--file").ok_or_else(|| missing_arg("--file"))?;
     let store = arg(argv, "--store").unwrap_or_else(|| "db".into());
     let note = arg(argv, "--note");
-    let (kind, ref_id) = if let Some(id) = parse_i64(argv, "--invoice") {
-        ("invoice", id)
-    } else if let Some(id) = parse_i64(argv, "--entry") {
-        ("entry", id)
-    } else {
-        return Err(missing_arg("--invoice or --entry"));
+    let inv_id = parse_i64(argv, "--invoice");
+    let entry_id = parse_i64(argv, "--entry");
+    let (kind, ref_id) = match (inv_id, entry_id) {
+        (Some(_), Some(_)) => {
+            return Err(BukioError::new(
+                "REF_REQUIRED",
+                "pass exactly one of --invoice <id> or --entry <id>",
+            ));
+        }
+        (Some(i), None) => ("invoice", i),
+        (None, Some(e)) => ("entry", e),
+        (None, None) => {
+            return Err(BukioError::new(
+                "REF_REQUIRED",
+                "pass exactly one of --invoice <id> or --entry <id>",
+            ));
+        }
     };
     bukio::attachments::add_attachment(
         &db,
@@ -3120,6 +3131,10 @@ fn cmd_attach_list(argv: &[String], db_path: &str) -> Result<Value> {
 fn cmd_attach_show(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
+    if let Some(out) = arg(argv, "--out") {
+        let force = has_flag(argv, "--force");
+        return bukio::attachments::extract_attachment(&db, id, &out, force);
+    }
     bukio::attachments::get_attachment(&db, id)
 }
 
