@@ -2935,50 +2935,146 @@ fn cmd_update(argv: &[String]) -> Result<Value> {
     let yes = has_flag(argv, "--yes");
     let dry_run = has_flag(argv, "--dry-run");
     let trust_remote = has_flag(argv, "--trust-remote");
-    // Validate remote URL
-    let output = std::process::Command::new("git")
-        .args(["-C", &repo, "remote", "get-url", "origin"])
+    let git = |args: &[&str]| -> Result<String> {
+        let out = std::process::Command::new("git")
+            .args(["-C", &repo])
+            .args(args)
+            .output()
+            .map_err(|e| BukioError::new("GIT_ERROR", format!("git failed: {e}")))?;
+        if !out.status.success() {
+            return Err(BukioError::new(
+                "GIT_ERROR",
+                format!(
+                    "git {} failed: {}",
+                    args.join(" "),
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ),
+            ));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    // A bare git dir is not a clone; the fixture's origin.git is bare
+    let git_dir_ok = std::process::Command::new("git")
+        .args(["-C", &repo, "rev-parse", "--git-dir"])
         .output()
-        .map_err(|e| BukioError::new("GIT_ERROR", format!("git failed: {e}")))?;
-    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !git_dir_ok {
+        return Err(BukioError::new(
+            "UPDATE_NOT_A_CLONE",
+            format!("'{repo}' is not a git clone — `bukio update` works on a cloned installation; an npm -g install must be updated with `npm update -g bukio-cli`"),
+        ));
+    }
+    let url = git(&["remote", "get-url", "origin"])?;
     if !url.contains("github.com/erikvankempen/bukio-cli") && !trust_remote {
         return Err(BukioError::new(
             "UNTRUSTED_REMOTE",
             format!("remote URL {url} does not match expected repository"),
         ));
     }
-    if dry_run || !yes {
-        return Ok(
-            json!({ "repo": repo, "url": url, "dryRun": true, "message": "pass --yes to apply update" }),
-        );
+    git(&["fetch", "origin", "main"])?;
+    let current_sha = git(&["rev-parse", "HEAD"])?;
+    let target_sha = git(&["rev-parse", "origin/main"])
+        .map_err(|_| BukioError::new("UPDATE_NO_REMOTE_BRANCH", "no origin/main ref after fetching origin"))?;
+    let incoming: Vec<String> = git(&["log", "--oneline", &format!("{current_sha}..{target_sha}")])?
+        .split('\n')
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect();
+    let local_commits: Vec<String> = git(&["log", "--oneline", &format!("{target_sha}..{current_sha}")])?
+        .split('\n')
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect();
+    let status = git(&["status", "--porcelain"])?;
+    let modified_files: Vec<String> = status
+        .split('\n')
+        .filter(|l| !l.is_empty() && !l.starts_with("??"))
+        .map(|l| l.chars().skip(3).collect())
+        .collect();
+    let untracked_count = status.split('\n').filter(|l| l.starts_with("??")).count();
+    let package_json_changed = !git(&[
+        "diff",
+        "--name-only",
+        &format!("{current_sha}..{target_sha}"),
+        "--",
+        "package.json",
+    ])?
+    .is_empty();
+    let up_to_date = current_sha == target_sha;
+    let warning = if !modified_files.is_empty() || !local_commits.is_empty() {
+        Some(format!(
+            "OVERWRITES LOCAL CUSTOMIZATIONS: {} modified file(s) and {} local commit(s) will be lost by resetting to origin/main. Untracked files are kept.",
+            modified_files.len(),
+            local_commits.len()
+        ))
+    } else {
+        None
+    };
+    let current_version = std::fs::read_to_string(format!("{repo}/package.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("version").and_then(|x| x.as_str()).map(String::from));
+
+    if dry_run {
+        return Ok(json!({
+            "action": "update", "dryRun": true,
+            "repo_path": repo, "remote": "origin", "branch": "main", "remote_url": url,
+            "current_sha": current_sha, "target_sha": target_sha,
+            "current_version": current_version,
+            "incoming_count": incoming.len(), "incoming": incoming,
+            "local_commits": local_commits, "modified_files": modified_files,
+            "untracked_count": untracked_count,
+            "package_json_changed": package_json_changed,
+            "up_to_date": up_to_date, "warning": warning,
+        }));
     }
-    let fetch = std::process::Command::new("git")
-        .args(["-C", &repo, "fetch", "origin"])
-        .output()
-        .map_err(|e| BukioError::new("GIT_ERROR", format!("git fetch failed: {e}")))?;
-    if !fetch.status.success() {
+    if up_to_date {
+        return Ok(json!({
+            "action": "update", "updated": false,
+            "repo_path": repo, "remote": "origin", "branch": "main", "remote_url": url,
+            "current_sha": current_sha, "target_sha": target_sha,
+            "current_version": current_version,
+            "incoming_count": incoming.len(), "incoming": incoming,
+            "local_commits": local_commits, "modified_files": modified_files,
+            "untracked_count": untracked_count,
+            "package_json_changed": package_json_changed,
+            "up_to_date": true, "warning": warning,
+        }));
+    }
+    if !yes {
         return Err(BukioError::new(
-            "GIT_ERROR",
-            format!(
-                "git fetch failed: {}",
-                String::from_utf8_lossy(&fetch.stderr)
-            ),
+            "UPDATE_CONFIRM_REQUIRED",
+            "refusing to reset to origin/main without confirmation — pass --yes (this would overwrite local customizations; run --dry-run to see the plan)",
         ));
     }
-    let reset = std::process::Command::new("git")
-        .args(["-C", &repo, "reset", "--hard", "origin/main"])
-        .output()
-        .map_err(|e| BukioError::new("GIT_ERROR", format!("git reset failed: {e}")))?;
-    if !reset.status.success() {
-        return Err(BukioError::new(
-            "GIT_ERROR",
-            format!(
-                "git reset failed: {}",
-                String::from_utf8_lossy(&reset.stderr)
-            ),
-        ));
+    let from_sha = current_sha;
+    git(&["reset", "--hard", "origin/main"])?;
+    let mut deps_installed = false;
+    let mut deps_error: Option<String> = None;
+    if package_json_changed {
+        let dep = std::process::Command::new("npm")
+            .args(["install"])
+            .current_dir(&repo)
+            .output();
+        match dep {
+            Ok(o) if o.status.success() => deps_installed = true,
+            Ok(o) => deps_error = Some(String::from_utf8_lossy(&o.stderr).trim().to_string()),
+            Err(e) => deps_error = Some(e.to_string()),
+        }
     }
-    Ok(json!({ "repo": repo, "url": url, "updated": true }))
+    let to_sha = git(&["rev-parse", "HEAD"])?;
+    let version_after = std::fs::read_to_string(format!("{repo}/package.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("version").and_then(|x| x.as_str()).map(String::from));
+    Ok(json!({
+        "action": "update", "updated": true,
+        "from_sha": from_sha, "to_sha": to_sha,
+        "commits_applied": incoming.len(), "version_after": version_after,
+        "deps_installed": deps_installed, "deps_error": deps_error,
+        "repo_path": repo, "branch": "main",
+    }))
 }
 
 // ── attach ─────────────────────────────────────────────────────────────────
