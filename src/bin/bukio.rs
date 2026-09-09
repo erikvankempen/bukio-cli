@@ -3162,7 +3162,37 @@ fn cmd_report_aging(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let as_of = arg(argv, "--as-of").unwrap_or_else(bukio::dates::today_iso);
     let kind = arg(argv, "--kind").unwrap_or_else(|| "both".into());
-    bukio::reports::aging(&db, &as_of, &kind)
+    let data = bukio::reports::aging(&db, &as_of, &kind)?;
+    // CSV export flattens contacts into rows
+    emit_csv(argv, &data, &["kind", "contact_id", "name", "current", "d30", "d60", "d90", "d90plus", "total"], |d| {
+        let mut rows = Vec::new();
+        for kind_key in &["debtors", "creditors"] {
+            if let Some(section) = d.get(*kind_key) {
+                if let Some(contacts) = section["contacts"].as_array() {
+                    for c in contacts {
+                        rows.push(vec![
+                            kind_key.to_string(),
+                            c["id"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                            c["name"].as_str().unwrap_or("").to_string(),
+                            c["current"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                            c["d30"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                            c["d60"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                            c["d90"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                            c["d90plus"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                            c["total_cents"].as_i64().map(|v| v.to_string()).unwrap_or_default(),
+                        ]);
+                    }
+                }
+            }
+        }
+        rows
+    })?;
+    // If --format was specified, emit_csv handled it; otherwise return data
+    if has_flag(argv, "--format") {
+        Ok(json!({ "ok": true }))
+    } else {
+        Ok(data)
+    }
 }
 
 // ── report sales ───────────────────────────────────────────────────
