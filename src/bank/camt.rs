@@ -38,10 +38,13 @@ fn parse_ntry(block: &str) -> Option<BankTx> {
     let iban_counter =
         extract_tag(block, "CdtrAcct/Id/IBAN").or_else(|| extract_tag(block, "DbtrAcct/Id/IBAN"));
     let bank_ref = extract_tag(block, "AcctSvcrRef");
+    // DBIT = money out (negative), CRDT = money in (positive)
+    let direction = extract_tag(block, "CdtDbtInd").unwrap_or_default();
+    let signed_cents = if direction == "DBIT" { -amount_cents } else { amount_cents };
 
     Some(BankTx {
         date,
-        amount_cents,
+        amount_cents: signed_cents,
         counterparty,
         description,
         iban_counter,

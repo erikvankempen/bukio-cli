@@ -1744,8 +1744,8 @@ fn cmd_vat_settle(argv: &[String], db_path: &str, actor: &str, dry_run: bool) ->
     let db = open_existing(db_path)?;
     let row: Option<(i64, String)> = db
         .query_row(
-            "SELECT t.amount_cents, a.code FROM bank_transactions t
-             JOIN bank_accounts a ON a.id = t.account_id WHERE t.id = ?1",
+            "SELECT t.amount_cents, a.account_code FROM bank_transactions t
+             JOIN bank_accounts a ON a.id = t.bank_account_id WHERE t.id = ?1",
             [tx],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
