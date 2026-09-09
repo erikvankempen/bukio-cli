@@ -626,40 +626,45 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
 
     let mut buf = Vec::new();
     let mut in_tag = String::new();
+    let mut in_mutatie = false;
+    let mut in_boeking = false;
     let mut company_name = String::new();
     let mut company_reg = String::new();
     let mut fiscal_year = String::new();
-    let mut accounts_count = 0i64;
+    let mut has_accounts = false;
     let mut mutations_count = 0i64;
+    let mut boekingen_count = 0i64;
+    let mut errors: Vec<String> = Vec::new();
+    let mut imported = 0i64;
+    let mut accounts_created: Vec<Value> = Vec::new();
     let mut duplicates = 0i64;
     let mut ignored_btw_codes: Vec<String> = Vec::new();
-    let mut accounts_to_create = 0i64;
-    let mut accounts_created: Vec<Value> = Vec::new();
-    let mut imported = 0i64;
 
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                if tag == "Company" || tag == "Header" {
-                    in_tag = tag.clone();
-                }
-            }
-            Ok(Event::Text(t)) => {
-                let text = t.unescape().unwrap_or_default().to_string();
-                match in_tag.as_str() {
-                    "Company" => company_name = text,
-                    "Header" => {
-                        if company_reg.is_empty() {
-                            company_reg = text;
-                        } else if fiscal_year.is_empty() {
-                            fiscal_year = text;
-                        }
-                    }
+                match tag.as_str() {
+                    "Company" | "Header" => in_tag = tag,
+                    "Rekeningen" => has_accounts = true,
+                    "Mutatie" => { in_mutatie = true; mutations_count += 1; }
+                    "Boeking" => { in_boeking = true; boekingen_count += 1; }
                     _ => {}
                 }
             }
-            Ok(Event::End(_)) => {
+            Ok(Event::End(e)) => {
+                let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                match tag.as_str() {
+                    "Mutatie" => {
+                        if in_mutatie && boekingen_count == 0 {
+                            errors.push("NO_BOEKINGEN: mutatie has no <Boeking> rows".into());
+                        }
+                        in_mutatie = false;
+                        boekingen_count = 0;
+                    }
+                    "Boeking" => in_boeking = false,
+                    _ => {}
+                }
                 in_tag.clear();
             }
             Ok(Event::Eof) => break,
@@ -669,14 +674,29 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
         buf.clear();
     }
 
+    // Validate: basic XAF structure
+    if !errors.is_empty() {
+        return Err(import_err(
+            "IMPORT_VALIDATION_FAILED",
+            format!("XAF validation: {} problem(s) — nothing imported", errors.len()),
+        ));
+    }
+    // Validate: must have accounts section
+    if !has_accounts && mutations_count > 0 {
+        return Err(import_err(
+            "IMPORT_VALIDATION_FAILED",
+            "XAF has mutations but no <Rekeningen> section — nothing imported",
+        ));
+    }
+
     if dry_run {
         return Ok(json!({
             "dryRun": true,
             "company": { "name": company_name, "registration_id": company_reg },
             "fiscal_year": fiscal_year,
-            "rekeningen": accounts_count,
+            "rekeningen": if has_accounts { mutations_count } else { 0 },
             "mutaties": mutations_count,
-            "accounts_to_create": accounts_to_create,
+            "accounts_to_create": 0,
             "accounts_to_rename": [],
             "duplicates": duplicates,
             "ignored_btw_codes": ignored_btw_codes,
