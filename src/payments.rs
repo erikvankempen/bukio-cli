@@ -48,8 +48,8 @@ fn get_company(db: &Connection) -> Result<Option<Value>> {
             "id": r.get::<_, i64>(0)?, "name": r.get::<_, Option<String>>(1)?,
             "registration_id": r.get::<_, Option<String>>(2)?,
             "legal_form": r.get::<_, Option<String>>(3)?,
-            "tax_id": r.get::<_, Option<String>>(5)?,
-            "iban": r.get::<_, Option<String>>(6)?,
+            "tax_id": r.get::<_, Option<String>>(4)?,
+            "iban": r.get::<_, Option<String>>(5)?,
         }))
     });
     match r {
@@ -364,13 +364,13 @@ pub fn mark_payable_paid(db: &Connection, id: i64, actor: &str, dry_run: bool) -
 // --- Batch creation ---------------------------------------------------------
 
 fn serialize_batch(db: &Connection, id: i64) -> Result<Value> {
-    let batch = db.query_row("SELECT * FROM payment_batches WHERE id = ?1", [id], |r| {
-        Ok(json!({"id": r.get::<_, i64>(0)?, "batch_date": r.get::<_, String>(1)?, "debit_iban": r.get::<_, String>(2)?, "debit_name": r.get::<_, String>(3)?, "total_cents": r.get::<_, i64>(4)?, "batch_kind": r.get::<_, String>(5)?, "status": r.get::<_, String>(6)?, "msg_id": r.get::<_, Option<String>>(7)?, "file_hash": r.get::<_, Option<String>>(8)?, "schema": r.get::<_, Option<String>>(9)?, "exported_at": r.get::<_, Option<String>>(10)?, "created_by": r.get::<_, String>(11)?, "created_at": r.get::<_, String>(12)?}))
+    let batch = db.query_row("SELECT id, batch_date, debit_iban, debit_name, total_cents, status, msg_id, file_hash, schema, created_by, created_at, exported_at, batch_kind FROM payment_batches WHERE id = ?1", [id], |r| {
+        Ok(json!({"id": r.get::<_, i64>(0)?, "batch_date": r.get::<_, String>(1)?, "debit_iban": r.get::<_, String>(2)?, "debit_name": r.get::<_, String>(3)?, "total_cents": r.get::<_, i64>(4)?, "status": r.get::<_, String>(5)?, "msg_id": r.get::<_, Option<String>>(6)?, "file_hash": r.get::<_, Option<String>>(7)?, "schema": r.get::<_, Option<String>>(8)?, "created_by": r.get::<_, String>(9)?, "created_at": r.get::<_, String>(10)?, "exported_at": r.get::<_, Option<String>>(11)?, "batch_kind": r.get::<_, String>(12)?}))
     }).map_err(|_| payments_error("BATCH_NOT_FOUND", format!("batch {id} does not exist")))?;
 
     let mut stmt = db.prepare("SELECT id, batch_id, contact_id, name, iban, amount_cents, reference, mandate_id, mandate_ref, mandate_seq, mandate_date, scheme FROM payment_batch_lines WHERE batch_id = ?1 ORDER BY id").map_err(sql_err)?;
     let lines: Vec<Value> = stmt.query_map([id], |r| {
-        Ok(json!({"id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(3)?, "iban": r.get::<_, String>(4)?, "amount_cents": r.get::<_, i64>(5)?, "reference": r.get::<_, Option<String>>(6)?}))
+        Ok(json!({"id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(3)?, "iban": r.get::<_, String>(4)?, "amount_cents": r.get::<_, i64>(5)?, "reference": r.get::<_, Option<String>>(6)?, "mandate_id": r.get::<_, Option<i64>>(7)?, "mandate_ref": r.get::<_, Option<String>>(8)?, "mandate_seq": r.get::<_, Option<String>>(9)?, "mandate_date": r.get::<_, Option<String>>(10)?, "scheme": r.get::<_, Option<String>>(11)?}))
     }).map_err(sql_err)?.filter_map(|r| r.ok()).collect();
 
     let mut b = batch;
@@ -545,8 +545,15 @@ pub fn create_payment_batch(
                     let mandate = latest_mandate(db, p["contact_id"].as_i64().unwrap_or(0));
                     match mandate {
                         Some(m) => {
+                            let mid = m["id"].as_i64().unwrap_or(0);
+                            let used: i64 = db.prepare("SELECT COUNT(*) FROM payment_batch_lines WHERE mandate_id = ?1")
+                                .map_err(sql_err)?
+                                .query_row([mid], |r| r.get(0))
+                                .unwrap_or(0);
+                            let seq = if used > 0 { "RCUR" } else { "FRST" };
                             item["mandate_id"] = m["id"].clone();
                             item["mandate_ref"] = m["mandate_ref"].clone();
+                            item["mandate_seq"] = json!(seq);
                             item["mandate_date"] = m["mandate_date"].clone();
                             item["scheme"] = m["scheme"].clone();
                         }

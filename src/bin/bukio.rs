@@ -2627,18 +2627,20 @@ fn cmd_payable_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
     require_actor(actor)?;
     let db = open_existing(db_path)?;
     let contact_ref = arg(argv, "--contact").ok_or_else(|| missing_arg("--contact"))?;
-    let invoice_ref = arg(argv, "--invoice-ref").unwrap_or_default();
+    let invoice_ref = arg(argv, "--ref").or_else(|| arg(argv, "--invoice-ref")).unwrap_or_default();
+    let date = arg(argv, "--date").unwrap_or_else(bukio::dates::today_iso);
     let due = arg(argv, "--due").unwrap_or_else(bukio::dates::today_iso);
     let amount_str = arg(argv, "--amount").ok_or_else(|| missing_arg("--amount"))?;
     let amount_cents = bukio::money::parse_amount(&amount_str)?;
-    let method = arg(argv, "--method").unwrap_or_else(|| "transfer".into());
+    let method_raw = arg(argv, "--method").unwrap_or_else(|| "transfer".into());
+    let method = if method_raw == "direct-debit" { "direct_debit".to_string() } else { method_raw };
     let entry_id = parse_i64(argv, "--entry-id");
     bukio::payments::add_payable(
         &db,
         &contact_ref,
         &invoice_ref,
-        &due,
-        None,
+        &date,
+        if due.is_empty() { None } else { Some(due.as_str()) },
         amount_cents,
         &method,
         actor,
@@ -2698,10 +2700,36 @@ fn cmd_batch_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool) 
     let db = open_existing(db_path)?;
     let date = arg(argv, "--date");
     let from_iban = arg(argv, "--from-iban");
-    let kind = arg(argv, "--type").unwrap_or_else(|| "transfer".into());
-    let payable_ids: Vec<i64> = arg(argv, "--payable")
+    let kind_raw = arg(argv, "--type").unwrap_or_else(|| "transfer".into());
+    let kind = if kind_raw == "direct-debit" { "direct_debit".to_string() } else { kind_raw };
+    let from_invoices = has_flag(argv, "--from-invoices");
+    let mut payable_ids: Vec<i64> = arg(argv, "--payable")
         .map(|s| s.split(',').filter_map(|v| v.trim().parse().ok()).collect())
         .unwrap_or_default();
+    // --from-invoices: gather all unpaid payables matching the batch kind
+    let eligible: Vec<i64> = {
+        let method_filter = &kind;
+        db.prepare("SELECT id FROM payables WHERE status = 'unpaid' AND payment_method = ?1")
+            .map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?
+            .query_map([method_filter], |r| r.get(0))
+            .map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect()
+    };
+    if from_invoices && payable_ids.is_empty() {
+        payable_ids = eligible.clone();
+    }
+    // Validate explicit --payable IDs against eligible list
+    if !payable_ids.is_empty() {
+        for &pid in &payable_ids {
+            if !eligible.contains(&pid) {
+                return Err(BukioError::new(
+                    "PAYABLE_NOT_ELIGIBLE",
+                    format!("payable {pid} is not unpaid+{kind} (already batched or wrong payment term)"),
+                ));
+            }
+        }
+    }
     let lines: Vec<Value> = arg(argv, "--lines")
         .map(|s| {
             s.split(';')
@@ -2747,7 +2775,10 @@ fn cmd_batch_export(argv: &[String], db_path: &str, dry_run: bool) -> Result<Val
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
     let batch = bukio::payments::get_payment_batch(&db, id)?;
-    let schema = arg(argv, "--schema").unwrap_or_else(|| "001.03".into());
+    // Auto-detect schema: direct-debit → pain.008.001.02, transfer → pain.001.001.03
+    let batch_kind = batch.get("batch_kind").and_then(|v| v.as_str()).unwrap_or("transfer");
+    let default_schema = if batch_kind == "direct_debit" { "pain.008.001.02" } else { "pain.001.001.03" };
+    let schema = arg(argv, "--schema").unwrap_or_else(|| default_schema.into());
     let out = arg(argv, "--out");
     // Build pain.001 XML
     let lines = batch["lines"].as_array().cloned().unwrap_or_default();
