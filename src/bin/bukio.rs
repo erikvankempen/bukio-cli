@@ -406,6 +406,10 @@ fn try_match_cmd(
         ["actor", "can"] => cmd_actor_can(argv, db_path, actor),
         ["actor", "who-can"] => cmd_actor_who_can(argv, db_path, actor),
         ["actor", "verify"] => cmd_actor_verify_key(db_path, actor),
+        ["actor", sub] => {
+            let valid = "keygen, register, list, revoke, enforce, unlock, lock, verify, authz, roles, grant, revoke-role, can, who-can";
+            Err(BukioError::new("UNKNOWN_SUBCOMMAND", format!("unknown actor subcommand '{sub}' — valid: {valid}")))
+        }
 
         // ── server ────────────────────────────────────────────────────
         ["server", "start"] => cmd_server_start(argv, db_path),
@@ -1312,7 +1316,19 @@ fn cmd_audit_list(argv: &[String], db_path: &str) -> Result<Value> {
 
 fn cmd_audit_verify(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    bukio::audit::verify_trail(&db)
+    let result = bukio::audit::verify_trail(&db)?;
+    let tampered = result["summary"]["tampered"].as_i64().unwrap_or(0);
+    let invalid_sig = result["summary"]["invalid_signature"].as_i64().unwrap_or(0);
+    let unknown_key = result["summary"]["unknown_key"].as_i64().unwrap_or(0);
+    if tampered + invalid_sig + unknown_key > 0 {
+        use std::io::Write;
+        let wrapped = json!({ "ok": true, "data": result });
+        let json = serde_json::to_string_pretty(&wrapped).unwrap();
+        std::io::stdout().write_all(json.as_bytes()).ok();
+        std::io::stdout().flush().ok();
+        std::process::exit(1);
+    }
+    Ok(result)
 }
 
 // ── backup ─────────────────────────────────────────────────────────────────
