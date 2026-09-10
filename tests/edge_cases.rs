@@ -2853,7 +2853,7 @@ fn jaarrekening_html_renders_account_detail_without_nan() {
         specs(&[("1800", 537000), ("1100", -537000)]),
     );
     let r = bukio::reports::jaarrekening(&d, "2026", Some("klein")).unwrap();
-    let html = bukio::report_pdf::jaarrekening_html(&r);
+    let html = bukio::pdf::jaarrekening_html(&r);
     assert!(
         !html.contains("NaN"),
         "the HTML template must not contain NaN"
@@ -2876,7 +2876,7 @@ fn jaarrekening_pdf_renders_bytes() {
     let dir = temp_dir("pdf");
     let out = dir.join("test-jaarrekening.pdf");
     // the port writes the PDF natively — no browser, so this cannot be skipped
-    let res = bukio::report_pdf::jaarrekening_to_pdf(&r, Some(out.to_str().unwrap()))
+    let res = bukio::pdf::jaarrekening_to_pdf(&r, Some(out.to_str().unwrap()))
         .expect("native PDF render");
     // The port writes the PDF natively (no Chromium), so it is a valid ~3KB
     // document rather than the JS's chromium-inflated 48KB. Check the structure
@@ -2952,7 +2952,7 @@ fn jaarrekening_html_escapes_quotes_in_the_company_name() {
     )
     .unwrap();
     let r = bukio::reports::jaarrekening(&d, "2026", Some("klein")).unwrap();
-    let html = bukio::report_pdf::jaarrekening_html(&r);
+    let html = bukio::pdf::jaarrekening_html(&r);
     assert!(
         html.contains("Test &quot;Bedrijf&quot; BV"),
         "company name must be escaped"
@@ -2961,4 +2961,54 @@ fn jaarrekening_html_escapes_quotes_in_the_company_name() {
         !html.contains("Test \"Bedrijf\" BV"),
         "raw quotes must not reach the HTML"
     );
+}
+
+// ==== invoice HTML/PDF renderer (native, no browser) ========================
+
+#[test]
+fn invoice_html_and_pdf_are_native_documents() {
+    let d = setup();
+    let cid = add_contact(&d, None);
+    let inv = create_invoice(
+        &d,
+        cid,
+        "2026-07-01",
+        Some(30),
+        None,
+        Some("PO-77"),
+        None,
+        None,
+        None,
+        &lines(&["3x Consultancy @ 125.00 @21"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let id = inv["id"].as_i64().unwrap();
+    finalize_invoice(&d, id, "agent:test", false).unwrap();
+    let full = get_invoice(&d, id).unwrap().unwrap();
+
+    let html = bukio::pdf::invoice_html(&d, &full);
+    assert!(html.contains("2026-0001"), "invoice number on the document");
+    assert!(html.contains("Consultancy"), "line description");
+    assert!(html.contains("ACME B.V."), "customer");
+    assert!(!html.contains("NaN"), "no NaN in the HTML");
+    assert!(html.contains("375.00"), "line amount rendered");
+
+    let dir = temp_dir("invpdf");
+    let out = dir.join("inv.pdf");
+    let res = bukio::pdf::invoice_to_pdf(&d, &full, Some(out.to_str().unwrap())).unwrap();
+    let bytes = std::fs::read(&out).unwrap();
+    assert_eq!(res["bytes"].as_u64().unwrap() as usize, bytes.len());
+    assert!(bytes.len() > 800, "{res}");
+    assert!(bytes.starts_with(b"%PDF-1.4"), "must be a PDF");
+    assert!(bytes.ends_with(b"%%EOF\n"), "must be terminated");
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    assert!(text.contains("2026-0001"), "number on the PDF");
+    assert!(text.contains("Consultancy"), "line on the PDF");
+    assert!(
+        !text.contains('\u{c3}') && !text.contains('\u{c2}'),
+        "single-byte (WinAnsi) content stream"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }

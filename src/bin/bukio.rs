@@ -4243,7 +4243,7 @@ fn cmd_financial_statements_report(argv: &[String], db_path: &str) -> Result<Val
     let report = bukio::reports::jaarrekening(&db, &year, model.as_deref())?;
 
     if format == "html" {
-        return Ok(json!({ "html": bukio::report_pdf::jaarrekening_html(&report) }));
+        return Ok(json!({ "html": bukio::pdf::jaarrekening_html(&report) }));
     }
     if format == "pdf" {
         // the JS default out path: financial-statements-<year>-<model>.pdf
@@ -4252,7 +4252,7 @@ fn cmd_financial_statements_report(argv: &[String], db_path: &str) -> Result<Val
             report["model"].as_str().unwrap_or("klein")
         );
         let out = arg(argv, "--out").unwrap_or(default_out);
-        let result = bukio::report_pdf::jaarrekening_to_pdf(&report, Some(&out))?;
+        let result = bukio::pdf::jaarrekening_to_pdf(&report, Some(&out))?;
         return Ok(json!({ "path": result["path"], "bytes": result["bytes"] }));
     }
     Ok(json!({ "financial_statements": report }))
@@ -4267,12 +4267,19 @@ fn cmd_icp_readout(argv: &[String], db_path: &str) -> Result<Value> {
 
 // ── invoice pdf ──────────────────────────────────────────────────
 fn cmd_invoice_pdf(argv: &[String], db_path: &str) -> Result<Value> {
-    let _db = open_existing(db_path)?;
+    let db = open_existing(db_path)?;
     let id = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
-    Err(BukioError::new(
-        "NOT_SUPPORTED",
-        format!("invoice pdf for id {id} requires Chromium — not ported to Rust"),
-    ))
+    let inv = bukio::invoice::get_invoice(&db, id)?
+        .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} does not exist")))?;
+    let number = inv["invoice_number"].as_str().ok_or_else(|| {
+        BukioError::new(
+            "NOT_FINALIZED",
+            "finalize the invoice first — a draft has no number yet",
+        )
+    })?;
+    let default_out = format!("{number}.pdf");
+    let out = arg(argv, "--out").unwrap_or(default_out);
+    bukio::pdf::invoice_to_pdf(&db, &inv, Some(&out))
 }
 
 // ── invoice ubl ──────────────────────────────────────────────────
