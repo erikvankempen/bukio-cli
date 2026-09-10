@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 20:59:45 UTC — **✅ 304 passing · 0 failing (304 tests)**
+**Latest run:** 2026-09-10 21:08:02 UTC — **✅ 273 passing · 0 failing (273 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -39,42 +39,6 @@
     - ✅ MCP: repeated signed calls verify (fresh nonces, no replay refusal)
     - ✅ MCP: malformed actor still rejected (INVALID_ACTOR)
     - ✅ MCP: a second company DB uses its own registry/enforce state
-
-### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
-
-31 passing · 0 failing
-
-    - ✅ init --dry-run: shows plan, creates nothing
-    - ✅ init: creates company + 30-account chart with VAT on
-    - ✅ init: second init fails with ALREADY_INITIALISED
-    - ✅ entry add --dry-run: plans without writing
-    - ✅ entry add: rejects malformed posting spec and unknown account
-    - ✅ entry add --post + trial balance + audit end-to-end
-    - ✅ entry reverse: contra-entry keeps the trial balance balanced
-    - ✅ report trial-balance csv: TOTAAL row net is 0.00 for a balanced ledger (regression)
-    - ✅ commands fail cleanly when no database exists
-    - ✅ --actor is recorded on entries and audit
-    - ✅ account add/list/show/deactivate flow
-    - ✅ account import: dry-run validates, real import creates
-    - ✅ report balance-sheet/pnl/journal: JSON + CSV + XLSX export
-    - ✅ report balance-sheet --as-of is respected
-    - ✅ backup + restore roundtrip
-    - ✅ bank import (CAMT + CSV), idempotency, match --post, ignore
-    - ✅ bank match --auto links posted entries (exact)
-    - ✅ vat enable/book/readout/mark-filed end-to-end
-    - ✅ vat: module off blocks book, enable works on existing company
-    - ✅ account list: human mode renders without crashing (table import regression)
-    - ✅ update: fetches from origin/main via --repo (fixture only, never the live repo)
-    - ✅ vat file + settle with a custom af-te-dragen account (--account 2515)
-    - ✅ vat file + vat settle end-to-end: filing moves the position, the payment cancels it with the rounding difference in the P&L
-    - ✅ entry post --dry-run: rejects non-draft entries instead of a green plan
-    - ✅ entry reverse --dry-run: rejects drafts (NOT_POSTED) and double reversals
-    - ✅ vat book --dry-run: validates date and description like the execute path
-    - ✅ actor: help lists the identity subcommands
-    - ✅ actor enforce: needs exactly one of --on/--off (INVALID_ENFORCE, JSON contract)
-    - ✅ audit verify: clean signed trail -> JSON summary, exit 0
-    - ✅ audit verify: tampered row -> exit 1 with per-row status and counts
-    - ✅ version: --version and the MCP serverInfo match package.json (drift guard)
 
 ### company-simulation.test.js — 
 

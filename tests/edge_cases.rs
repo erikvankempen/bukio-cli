@@ -11693,3 +11693,1628 @@ fn authz_lifecycle_owner_splits_bookkeeping_and_payments() {
     assert_eq!(off["data"]["enforce"], json!("on"));
     let _ = std::fs::remove_dir_all(&c.dir);
 }
+// ==== CLI end-to-end (ported from test/cli.test.js) =========================
+
+/// db path in a fresh dir (no init).
+fn cdb(tag: &str) -> (std::path::PathBuf, String) {
+    let dir = temp_dir(tag);
+    let db = dir.join("test.db").to_string_lossy().to_string();
+    (dir, db)
+}
+
+/// The JS `run(dbPath, args)`: BUKIO_DB + BUKIO_ACTOR=agent:test.
+fn crun(db: &str, args: &[&str]) -> (Value, bool) {
+    let mut full = vec!["--json"];
+    full.extend_from_slice(args);
+    full.extend(["--db", db]);
+    let (v, ok, _) = acli(&full, &[("BUKIO_ACTOR", "agent:test")]);
+    (v, ok)
+}
+
+/// Raw stdout (CSV, human output).
+fn crun_text(db: &str, args: &[&str]) -> String {
+    let exe = env!("CARGO_BIN_EXE_bukio");
+    let out = std::process::Command::new(exe)
+        .args(args)
+        .env("BUKIO_DB", db)
+        .env("BUKIO_ACTOR", "agent:test")
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+const CAMT: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt><Stmt>
+    <Acct><Id><IBAN>NL91ABNA0417164300</IBAN></Id></Acct>
+    <Ntry>
+      <Amt>100.00</Amt><CdtDbtInd>CRDT</CdtDbtInd><BookgDt><Dt>2026-06-01</Dt></BookgDt>
+      <NtryDtls><TxDtls><RltdPties><Dbtr><Nm>ACME B.V.</Nm></Dbtr></RltdPties>
+      <RmtInf><Ustrd>Factuur 2026-001</Ustrd></RmtInf></TxDtls></NtryDtls>
+    </Ntry>
+    <Ntry>
+      <Amt>25.50</Amt><CdtDbtInd>DBIT</CdtDbtInd><BookgDt><Dt>2026-06-02</Dt></BookgDt>
+      <NtryDtls><TxDtls><RltdPties><Cdtr><Nm>Kantoorwinkel BV</Nm></Cdtr></RltdPties>
+      <RmtInf><Ustrd>Kantoorartikelen</Ustrd></RmtInf></TxDtls></NtryDtls>
+    </Ntry>
+  </Stmt></BkToCstmrStmt>
+</Document>"#;
+
+const RABO_CSV: &str = "Datum;Naam / Omschrijving;Rekening;Tegenrekening;Code;Af Bij;Bedrag (EUR);MutatieSoort;Mededelingen\n2026-06-01;ACME B.V.;NL91ABNA0417164300;NL00RABO0123456789;GT;Bij;100,00;Overschrijving;Factuur 2026-001\n2026-06-02;Kantoorwinkel BV;NL91ABNA0417164300;NL00RABO9876543210;GT;Af;25,50;Overschrijving;Kantoorartikelen";
+
+const CLI_IBAN: &str = "NL91ABNA0417164300";
+
+#[test]
+fn cli_init_dry_run_shows_a_plan_and_creates_nothing() {
+    let (_dir, db) = cdb("cli1");
+    let (out, ok) = crun(
+        &db,
+        &[
+            "init",
+            "--name",
+            "Demo BV",
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "bv",
+            "--vat",
+            "on",
+            "--dry-run",
+        ],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(out["data"]["dryRun"], json!(true), "{out}");
+    assert_eq!(out["data"]["company"]["name"], json!("Demo BV"));
+    assert_eq!(out["data"]["company"]["vat_module"], json!(1));
+    assert!(
+        !std::path::Path::new(&db).exists(),
+        "dry-run must not create the db"
+    );
+}
+
+#[test]
+fn cli_init_creates_the_company_and_the_vat_chart() {
+    let (_dir, db) = cdb("cli2");
+    let (out, ok) = crun(
+        &db,
+        &[
+            "init",
+            "--name",
+            "Demo BV",
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "bv",
+            "--vat",
+            "on",
+        ],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(
+        out["data"]["chart"]["accounts"],
+        json!(31),
+        "29 default + 2 VAT"
+    );
+    assert_eq!(out["data"]["chart"]["created"], json!(31));
+
+    let d = bukio::db::open_db(&db).unwrap();
+    let (name, form, vat): (String, String, i64) = d
+        .query_row(
+            "SELECT name, legal_form, vat_module FROM company",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(name, "Demo BV");
+    assert_eq!(form, "bv");
+    assert_eq!(vat, 1);
+}
+
+#[test]
+fn cli_second_init_is_already_initialised() {
+    let (_dir, db) = cdb("cli3");
+    let (_, ok) = crun(&db, &["init", "--name", "A"]);
+    assert!(ok);
+    let (out, ok) = crun(&db, &["init", "--name", "B"]);
+    assert!(!ok);
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["error"]["code"], json!("ALREADY_INITIALISED"), "{out}");
+}
+
+#[test]
+fn cli_entry_add_dry_run_plans_without_writing() {
+    let (_dir, db) = cdb("cli4");
+    crun(&db, &["init", "--name", "A"]);
+    let (out, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-08-04",
+            "--desc",
+            "Startkapitaal",
+            "--postings",
+            "1100:10000.00,3000:-10000.00",
+            "--dry-run",
+        ],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(out["data"]["dryRun"], json!(true));
+    assert_eq!(out["data"]["sum"], json!("0.00"));
+    assert_eq!(out["data"]["account_validation"], json!("ok"));
+    let d = bukio::db::open_db(&db).unwrap();
+    let n: i64 = d
+        .query_row("SELECT COUNT(*) FROM journal_entries", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0);
+}
+
+#[test]
+fn cli_entry_add_rejects_malformed_unknown_and_unbalanced() {
+    let (_dir, db) = cdb("cli5");
+    crun(&db, &["init", "--name", "A"]);
+    let (bad1, ok) = crun(
+        &db,
+        &["entry", "add", "--desc", "x", "--postings", "garbage"],
+    );
+    assert!(!ok);
+    assert_eq!(bad1["error"]["code"], json!("INVALID_POSTING"), "{bad1}");
+    let (bad2, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--desc",
+            "x",
+            "--postings",
+            "9999:1.00,3000:-1.00",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(bad2["error"]["code"], json!("ACCOUNT_NOT_FOUND"), "{bad2}");
+    let (bad3, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:5.00,3000:-4.00",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(bad3["error"]["code"], json!("UNBALANCED"), "{bad3}");
+}
+
+#[test]
+fn cli_entry_add_post_trial_balance_and_audit_end_to_end() {
+    let (_dir, db) = cdb("cli6");
+    crun(&db, &["init", "--name", "Demo BV", "--legal-form", "bv"]);
+    crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-08-04",
+            "--desc",
+            "Startkapitaal",
+            "--postings",
+            "1100:10000.00,3000:-10000.00",
+            "--post",
+        ],
+    );
+    crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-08-05",
+            "--desc",
+            "Kantoorartikelen",
+            "--postings",
+            "4300:250.00,1100:-250.00",
+            "--post",
+        ],
+    );
+
+    let (tb, ok) = crun(&db, &["report", "trial-balance"]);
+    assert!(ok, "{tb}");
+    let tb = &tb["data"];
+    assert_eq!(tb["balanced"], json!(true));
+    assert_eq!(tb["total_debit"], json!("10250.00"));
+    assert_eq!(tb["total_credit"], json!("10250.00"));
+    let acct = tb["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["code"] == json!("1100"))
+        .unwrap();
+    assert_eq!(acct["net"], json!("9750.00"), "{acct}");
+
+    let (audit, _) = crun(&db, &["audit", "--limit", "10"]);
+    let actions: Vec<&str> = audit["data"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["action"].as_str().unwrap())
+        .take(5)
+        .collect();
+    assert_eq!(
+        actions,
+        vec![
+            "entry.post",
+            "entry.create",
+            "entry.post",
+            "entry.create",
+            "company.init"
+        ],
+        "audit is newest-first"
+    );
+}
+
+#[test]
+fn cli_entry_reverse_keeps_the_trial_balance_balanced() {
+    let (_dir, db) = cdb("cli7");
+    crun(&db, &["init", "--name", "A"]);
+    let (created, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--desc",
+            "Omzet",
+            "--postings",
+            "1100:121.00,8000:-121.00",
+            "--post",
+        ],
+    );
+    assert!(ok, "{created}");
+    let id = created["data"]["id"].as_i64().unwrap();
+
+    let (rev, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "reverse",
+            "--id",
+            &id.to_string(),
+            "--reason",
+            "credit note",
+        ],
+    );
+    assert!(ok, "{rev}");
+    assert_eq!(rev["data"]["state"], json!("posted"));
+    assert_eq!(rev["data"]["source"], json!("reversal"));
+
+    let (tb, _) = crun(&db, &["report", "trial-balance"]);
+    let tb = &tb["data"];
+    assert_eq!(tb["balanced"], json!(true));
+    for code in ["1100", "8000"] {
+        let acct = tb["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["code"] == json!(code))
+            .unwrap();
+        assert_eq!(acct["net"], json!("0.00"), "{code} nets to zero: {acct}");
+    }
+}
+
+#[test]
+fn cli_trial_balance_csv_totaal_row_net_is_zero() {
+    let (dir, db) = cdb("cli8");
+    crun(&db, &["init", "--name", "A"]);
+    crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--desc",
+            "Startkapitaal",
+            "--postings",
+            "1100:10000.00,3000:-10000.00",
+            "--post",
+        ],
+    );
+    let csv_path = dir.join("tb.csv").to_string_lossy().to_string();
+    crun_text(
+        &db,
+        &[
+            "report",
+            "trial-balance",
+            "--format",
+            "csv",
+            "--out",
+            &csv_path,
+        ],
+    );
+    let csv = std::fs::read_to_string(&csv_path).unwrap();
+    let total = csv
+        .lines()
+        .find(|l| l.contains("TOTAAL"))
+        .unwrap_or_else(|| panic!("TOTAAL row must be present:\n{csv}"));
+    let cols: Vec<&str> = total.split(',').collect();
+    assert_eq!(cols[3], "10000.00", "debit");
+    assert_eq!(cols[4], "10000.00", "credit");
+    assert_eq!(
+        cols[5], "0.00",
+        "net must be the difference, not the debit: {total}"
+    );
+}
+
+#[test]
+fn cli_commands_fail_cleanly_without_a_database() {
+    let (_dir, db) = cdb("cli9");
+    let (out, ok) = crun(&db, &["report", "trial-balance"]);
+    assert!(!ok);
+    assert_eq!(out["error"]["code"], json!("NO_DATABASE"), "{out}");
+}
+
+#[test]
+fn cli_actor_is_recorded_on_entries_and_audit() {
+    let (_dir, db) = cdb("cli10");
+    crun(&db, &["init", "--name", "A"]);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--desc",
+            "agent posting",
+            "--postings",
+            "1100:10.00,3000:-10.00",
+            "--post",
+            "--actor",
+            "agent:test",
+        ],
+    );
+    assert!(ok);
+    let (audit, ok) = crun(&db, &["audit", "--by", "agent:test"]);
+    assert!(ok, "{audit}");
+    let rows = audit["data"]["entries"].as_array().unwrap();
+    assert!(rows.len() >= 2, "{audit}");
+    assert!(
+        rows.iter().all(|a| a["actor"] == json!("agent:test")),
+        "{audit}"
+    );
+}
+
+#[test]
+fn cli_account_add_list_show_deactivate_flow() {
+    let (_dir, db) = cdb("cli11");
+    crun(&db, &["init", "--name", "A"]);
+    let (added, ok) = crun(
+        &db,
+        &[
+            "account",
+            "add",
+            "--code",
+            "5000",
+            "--name",
+            "Testkosten",
+            "--type",
+            "expense",
+            "--normal-balance",
+            "debit",
+        ],
+    );
+    assert!(ok, "{added}");
+    assert_eq!(added["data"]["code"], json!("5000"));
+    assert!(added["data"]["taxonomy_code"].is_null());
+
+    let (dup, ok) = crun(
+        &db,
+        &[
+            "account",
+            "add",
+            "--code",
+            "5000",
+            "--name",
+            "x",
+            "--type",
+            "expense",
+            "--normal-balance",
+            "debit",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(dup["error"]["code"], json!("ACCOUNT_EXISTS"), "{dup}");
+
+    let (list, ok) = crun(&db, &["account", "list", "--type", "expense"]);
+    assert!(ok, "{list}");
+    assert_eq!(
+        list["data"]["accounts"].as_array().unwrap().len(),
+        14,
+        "13 default (incl. 4840) + 1 new"
+    );
+
+    let (_, ok) = crun(&db, &["account", "deactivate", "--code", "5000"]);
+    assert!(ok);
+    let (blocked, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--desc",
+            "x",
+            "--postings",
+            "5000:1.00,1100:-1.00",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(
+        blocked["error"]["code"],
+        json!("ACCOUNT_INACTIVE"),
+        "{blocked}"
+    );
+
+    crun(&db, &["account", "reactivate", "--code", "5000"]);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--desc",
+            "x",
+            "--postings",
+            "5000:1.00,1100:-1.00",
+            "--post",
+        ],
+    );
+    assert!(ok);
+}
+
+#[test]
+fn cli_account_import_dry_run_validates_then_creates() {
+    let (dir, db) = cdb("cli12");
+    crun(&db, &["init", "--name", "A"]);
+    let csv = dir.join("chart.csv");
+    std::fs::write(
+        &csv,
+        "code,name,type,normal_balance,taxonomy_code\n5000,Testkosten,expense,debit,WBED.42\n5100,Verkeerd,weird,debit,\n",
+    )
+    .unwrap();
+    let csv = csv.to_string_lossy().to_string();
+
+    let (dry, ok) = crun(&db, &["account", "import", "--file", &csv, "--dry-run"]);
+    assert!(ok, "{dry}");
+    assert_eq!(dry["data"]["created"], json!(1), "{dry}");
+    assert_eq!(dry["data"]["skipped"], json!(1));
+
+    let (real, ok) = crun(&db, &["account", "import", "--file", &csv]);
+    assert!(ok, "{real}");
+    assert_eq!(real["data"]["created"], json!(1));
+    assert_eq!(real["data"]["skipped"], json!(1));
+}
+
+#[test]
+fn cli_reports_json_csv_and_xlsx() {
+    let (dir, db) = cdb("cli13");
+    crun(&db, &["init", "--name", "A"]);
+    crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-01-05",
+            "--desc",
+            "Startkapitaal",
+            "--postings",
+            "1100:10000.00,3000:-10000.00",
+            "--post",
+        ],
+    );
+    crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-02-10",
+            "--desc",
+            "Omzet",
+            "--postings",
+            "1100:1210.00,8000:-1210.00",
+            "--post",
+        ],
+    );
+    crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-03-01",
+            "--desc",
+            "Kantoorartikelen",
+            "--postings",
+            "4300:250.00,1100:-250.00",
+            "--post",
+        ],
+    );
+
+    let (b, ok) = crun(&db, &["report", "balance-sheet", "--as-of", "2026-12-31"]);
+    assert!(ok, "{b}");
+    assert_eq!(b["data"]["balanced"], json!(true), "{b}");
+    assert_eq!(b["data"]["assets"]["total"], json!("10960.00"));
+    assert_eq!(
+        b["data"]["liabilities_and_equity"]["result"],
+        json!("960.00")
+    );
+
+    let (p, ok) = crun(&db, &["report", "pnl", "--year", "2026"]);
+    assert!(ok, "{p}");
+    assert_eq!(p["data"]["revenue"], json!("1210.00"));
+    assert_eq!(p["data"]["costs"], json!("250.00"));
+    assert_eq!(p["data"]["result"], json!("960.00"));
+
+    let csv = crun_text(&db, &["report", "pnl", "--year", "2026", "--format", "csv"]);
+    assert!(csv.starts_with("rgs,group,code,name,amount"), "{csv:.200}");
+
+    let csv_out = dir.join("pnl.csv").to_string_lossy().to_string();
+    crun_text(
+        &db,
+        &[
+            "report", "journal", "--year", "2026", "--format", "csv", "--out", &csv_out,
+        ],
+    );
+    let content = std::fs::read_to_string(&csv_out).unwrap();
+    assert!(
+        content.starts_with("date,entry,description"),
+        "{content:.200}"
+    );
+    assert!(content.contains("Kantoorartikelen"), "{content:.400}");
+
+    let xlsx_out = dir.join("pnl.xlsx").to_string_lossy().to_string();
+    crun_text(
+        &db,
+        &[
+            "report", "pnl", "--year", "2026", "--format", "xlsx", "--out", &xlsx_out,
+        ],
+    );
+    let meta = std::fs::metadata(&xlsx_out).unwrap();
+    assert!(meta.len() > 1000, "{} bytes", meta.len());
+
+    let (no_out, ok) = crun(&db, &["report", "pnl", "--format", "xlsx"]);
+    assert!(!ok);
+    assert_eq!(no_out["error"]["code"], json!("OUT_REQUIRED"), "{no_out}");
+}
+
+#[test]
+fn cli_balance_sheet_as_of_is_respected() {
+    let (_dir, db) = cdb("cli14");
+    crun(&db, &["init", "--name", "A"]);
+    crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-01-05",
+            "--desc",
+            "Startkapitaal",
+            "--postings",
+            "1100:1000.00,3000:-1000.00",
+            "--post",
+        ],
+    );
+    crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-06-01",
+            "--desc",
+            "Omzet",
+            "--postings",
+            "1100:500.00,8000:-500.00",
+            "--post",
+        ],
+    );
+
+    let (early, _) = crun(&db, &["report", "balance-sheet", "--as-of", "2026-03-01"]);
+    assert_eq!(early["data"]["as_of"], json!("2026-03-01"), "{early}");
+    assert_eq!(
+        early["data"]["assets"]["total"],
+        json!("1000.00"),
+        "omzet not yet booked"
+    );
+    assert_eq!(
+        early["data"]["liabilities_and_equity"]["result"],
+        json!("0.00")
+    );
+
+    let (late, _) = crun(&db, &["report", "balance-sheet", "--as-of", "2026-12-31"]);
+    assert_eq!(late["data"]["as_of"], json!("2026-12-31"));
+    assert_eq!(late["data"]["assets"]["total"], json!("1500.00"));
+    assert_eq!(
+        late["data"]["liabilities_and_equity"]["result"],
+        json!("500.00")
+    );
+}
+
+#[test]
+fn cli_backup_and_restore_roundtrip() {
+    let (dir, db) = cdb("cli15");
+    crun(&db, &["init", "--name", "A"]);
+    crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:100.00,3000:-100.00",
+            "--post",
+        ],
+    );
+    let backup_path = dir.join("backup.db").to_string_lossy().to_string();
+
+    let (backup, ok) = crun(&db, &["backup", "--out", &backup_path]);
+    assert!(ok, "{backup}");
+    assert!(std::path::Path::new(backup["data"]["path"].as_str().unwrap()).exists());
+    assert!(backup["data"]["bytes"].as_i64().unwrap() > 0);
+
+    let restored = dir.join("restored.db").to_string_lossy().to_string();
+    let (_, ok) = crun(&db, &["restore", "--from", &backup_path, "--to", &restored]);
+    assert!(ok);
+    let d = bukio::db::open_db(&restored).unwrap();
+    let name: String = d
+        .query_row("SELECT name FROM company", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(name, "A");
+    let n: i64 = d
+        .query_row(
+            "SELECT COUNT(*) FROM journal_entries WHERE state='posted'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+
+    let (conflict, ok) = crun(&db, &["restore", "--from", &backup_path, "--to", &db]);
+    assert!(!ok);
+    assert_eq!(
+        conflict["error"]["code"],
+        json!("RESTORE_EXISTS"),
+        "{conflict}"
+    );
+    let (_, ok) = crun(
+        &db,
+        &["restore", "--from", &backup_path, "--to", &db, "--force"],
+    );
+    assert!(ok);
+
+    let (bad, ok) = crun(&db, &["restore", "--from", "/nonexistent.db"]);
+    assert!(!ok);
+    assert_eq!(bad["error"]["code"], json!("FILE_NOT_FOUND"), "{bad}");
+    let junk = dir.join("junk.txt");
+    std::fs::write(&junk, "not a database").unwrap();
+    let (bad2, ok) = crun(&db, &["restore", "--from", &junk.to_string_lossy()]);
+    assert!(!ok);
+    assert_eq!(bad2["error"]["code"], json!("INVALID_BACKUP"), "{bad2}");
+    let (same, ok) = crun(
+        &db,
+        &["restore", "--from", &backup_path, "--to", &backup_path],
+    );
+    assert!(!ok);
+    assert_eq!(same["error"]["code"], json!("SAME_FILE"), "{same}");
+}
+
+#[test]
+fn cli_bank_import_idempotency_match_post_and_ignore() {
+    let (dir, db) = cdb("cli16");
+    crun(&db, &["init", "--name", "A"]);
+    let camt = dir.join("stmt.xml");
+    std::fs::write(&camt, CAMT).unwrap();
+    let camt = camt.to_string_lossy().to_string();
+
+    let (imp, ok) = crun(
+        &db,
+        &["bank", "import", "--file", &camt, "--iban", CLI_IBAN],
+    );
+    assert!(ok, "{imp}");
+    assert_eq!(imp["data"]["imported"], json!(2), "{imp}");
+
+    let (again, _) = crun(
+        &db,
+        &["bank", "import", "--file", &camt, "--iban", CLI_IBAN],
+    );
+    assert_eq!(again["data"]["imported"], json!(0));
+    assert_eq!(again["data"]["duplicates"], json!(2));
+
+    let (dry, _) = crun(
+        &db,
+        &[
+            "bank",
+            "import",
+            "--file",
+            &camt,
+            "--iban",
+            CLI_IBAN,
+            "--dry-run",
+        ],
+    );
+    assert_eq!(dry["data"]["imported"], json!(0));
+    assert_eq!(dry["data"]["duplicates"], json!(2));
+
+    let csv = dir.join("rabo.csv");
+    std::fs::write(&csv, RABO_CSV).unwrap();
+    let (csv_imp, _) = crun(
+        &db,
+        &[
+            "bank",
+            "import",
+            "--file",
+            &csv.to_string_lossy(),
+            "--iban",
+            CLI_IBAN,
+        ],
+    );
+    assert_eq!(
+        csv_imp["data"]["imported"],
+        json!(0),
+        "same transactions, hashes match: {csv_imp}"
+    );
+
+    let (txs, _) = crun(&db, &["bank", "transactions", "--state", "unmatched"]);
+    let txs = txs["data"]["transactions"].as_array().unwrap().clone();
+    assert_eq!(txs.len(), 2);
+    let income = txs
+        .iter()
+        .find(|t| t["amount_cents"].as_i64().unwrap() > 0)
+        .unwrap();
+    let income_id = income["id"].as_i64().unwrap();
+
+    let (posted, ok) = crun(
+        &db,
+        &[
+            "bank",
+            "match",
+            "post",
+            "--tx",
+            &income_id.to_string(),
+            "--account",
+            "8000",
+        ],
+    );
+    assert!(ok, "{posted}");
+    assert_eq!(posted["data"]["entry_id"], json!(1), "{posted}");
+    assert_eq!(posted["data"]["state"], json!("posted"));
+
+    let (list, _) = crun(&db, &["bank", "list"]);
+    let acct = &list["data"]["accounts"][0];
+    assert_eq!(acct["balance"], json!("74.50"), "{acct}");
+    assert_eq!(acct["unmatched_count"], json!(1), "{acct}");
+
+    let (remaining, _) = crun(&db, &["bank", "transactions", "--state", "unmatched"]);
+    let remaining_id = remaining["data"]["transactions"][0]["id"].as_i64().unwrap();
+    crun(&db, &["bank", "ignore", "--tx", &remaining_id.to_string()]);
+    let (after, _) = crun(&db, &["bank", "transactions", "--state", "unmatched"]);
+    assert_eq!(after["data"]["transactions"].as_array().unwrap().len(), 0);
+
+    let (tb, _) = crun(&db, &["report", "trial-balance"]);
+    assert_eq!(tb["data"]["balanced"], json!(true), "{tb}");
+}
+
+#[test]
+fn cli_bank_match_auto_links_posted_entries_exactly() {
+    let (dir, db) = cdb("cli17");
+    crun(&db, &["init", "--name", "A"]);
+    crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-06-01",
+            "--desc",
+            "Factuur 2026-001",
+            "--postings",
+            "1100:100.00,8000:-100.00",
+            "--post",
+        ],
+    );
+    let camt = dir.join("stmt.xml");
+    std::fs::write(&camt, CAMT).unwrap();
+    crun(
+        &db,
+        &[
+            "bank",
+            "import",
+            "--file",
+            &camt.to_string_lossy(),
+            "--iban",
+            CLI_IBAN,
+        ],
+    );
+
+    let (dry, ok) = crun(&db, &["bank", "match", "auto", "--dry-run"]);
+    assert!(ok, "{dry}");
+    assert_eq!(dry["data"]["matched"].as_array().unwrap().len(), 1, "{dry}");
+    assert_eq!(dry["data"]["matched"][0]["method"], json!("exact"));
+    assert_eq!(dry["data"]["matched"][0]["entry_id"], json!(1));
+
+    let (real, _) = crun(&db, &["bank", "match", "auto"]);
+    assert_eq!(real["data"]["matched"].as_array().unwrap().len(), 1);
+    let (matched, _) = crun(&db, &["bank", "transactions", "--state", "matched"]);
+    assert_eq!(matched["data"]["transactions"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn cli_vat_enable_book_readout_mark_filed_end_to_end() {
+    let (_dir, db) = cdb("cli18");
+    crun(&db, &["init", "--name", "A", "--vat", "on"]);
+    let (codes, ok) = crun(&db, &["vat", "codes"]);
+    assert!(ok, "{codes}");
+    assert_eq!(
+        codes["data"]["codes"].as_array().unwrap().len(),
+        8,
+        "{codes}"
+    );
+
+    crun(
+        &db,
+        &[
+            "vat",
+            "book",
+            "--date",
+            "2026-04-10",
+            "--desc",
+            "Factuur 2026-001",
+            "--postings",
+            "1100:121.00,8000:-100.00@21",
+            "--post",
+        ],
+    );
+    crun(
+        &db,
+        &[
+            "vat",
+            "book",
+            "--date",
+            "2026-05-15",
+            "--desc",
+            "Kantoorartikelen",
+            "--postings",
+            "4300:50.00@21,1100:-60.50",
+            "--post",
+        ],
+    );
+
+    let (r, ok) = crun(&db, &["vat", "readout", "--period", "2026-Q2"]);
+    assert!(ok, "{r}");
+    assert_eq!(r["data"]["fields"]["1a"]["amount"], json!("100.00"), "{r}");
+    assert_eq!(r["data"]["fields"]["5a"]["amount"], json!("21.00"), "{r}");
+    assert_eq!(r["data"]["fields"]["5b"]["amount"], json!("10.50"), "{r}");
+    assert_eq!(r["data"]["to_pay"], json!("10.50"), "{r}");
+
+    let (_, ok) = crun(
+        &db,
+        &["vat", "readout", "--period", "2026-Q2", "--mark-filed"],
+    );
+    assert!(ok);
+    let (tb, _) = crun(&db, &["report", "trial-balance"]);
+    assert_eq!(tb["data"]["balanced"], json!(true));
+}
+
+#[test]
+fn cli_vat_module_off_blocks_book_and_enable_works_on_an_existing_company() {
+    let (_dir, db) = cdb("cli19");
+    crun(&db, &["init", "--name", "B"]);
+    let (err, ok) = crun(
+        &db,
+        &[
+            "vat",
+            "book",
+            "--date",
+            "2026-04-10",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:121.00,8000:-100.00@21",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(err["error"]["code"], json!("VAT_MODULE_OFF"), "{err}");
+
+    let (_, ok) = crun(&db, &["vat", "enable"]);
+    assert!(ok);
+    let (codes, _) = crun(&db, &["vat", "codes"]);
+    assert_eq!(codes["data"]["codes"].as_array().unwrap().len(), 8);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "vat",
+            "book",
+            "--date",
+            "2026-04-10",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:121.00,8000:-100.00@21",
+            "--post",
+        ],
+    );
+    assert!(ok);
+}
+
+#[test]
+fn cli_account_list_human_mode_renders() {
+    let (_dir, db) = cdb("cli20");
+    crun(
+        &db,
+        &[
+            "init",
+            "--name",
+            "Demo BV",
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "bv",
+            "--vat",
+            "off",
+        ],
+    );
+    let exe = env!("CARGO_BIN_EXE_bukio");
+    let out = std::process::Command::new(exe)
+        .args(["--db", &db, "account", "list"])
+        .env("BUKIO_ACTOR", "agent:test")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(
+        text.contains("1100"),
+        "human account list must render:\n{text}"
+    );
+}
+
+#[test]
+fn cli_update_fetches_from_a_fixture_origin() {
+    let dir = temp_dir("cli21");
+    let origin = dir.join("origin.git").to_string_lossy().to_string();
+    let git = |cwd: &str, args: &[&str]| -> String {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    let dirs = dir.to_string_lossy().to_string();
+    git(&dirs, &["init", "--bare", "origin.git"]);
+    git(
+        &dirs,
+        &[
+            "--git-dir=origin.git",
+            "symbolic-ref",
+            "HEAD",
+            "refs/heads/main",
+        ],
+    );
+
+    let work1 = dir.join("work1").to_string_lossy().to_string();
+    git(&dirs, &["clone", &origin, "work1"]);
+    git(&work1, &["config", "user.email", "t@t"]);
+    git(&work1, &["config", "user.name", "T"]);
+    std::fs::write(
+        format!("{work1}/package.json"),
+        "{\"name\":\"bukio-cli\",\"version\":\"1.0.0\"}\n",
+    )
+    .unwrap();
+    std::fs::write(format!("{work1}/README.md"), "v1\n").unwrap();
+    git(&work1, &["add", "."]);
+    git(&work1, &["commit", "-m", "v1"]);
+    git(&work1, &["push", "-u", "origin", "main"]);
+
+    let work2 = dir.join("work2").to_string_lossy().to_string();
+    git(&dirs, &["clone", &origin, "work2"]);
+    git(&work2, &["config", "user.email", "t@t"]);
+    git(&work2, &["config", "user.name", "T"]);
+    std::fs::write(format!("{work2}/README.md"), "v2\n").unwrap();
+    git(&work2, &["add", "."]);
+    git(&work2, &["commit", "-m", "v2"]);
+    git(&work2, &["push", "origin", "main"]);
+
+    let (_d2, db) = cdb("cli21db"); // no company db -> update still works (audit skipped)
+    let (dry, ok) = crun(
+        &db,
+        &["update", "--repo", &work1, "--trust-remote", "--dry-run"],
+    );
+    assert!(ok, "{dry}");
+    assert_eq!(dry["data"]["incoming_count"], json!(1), "{dry}");
+    assert!(dry["data"]["warning"].is_null(), "{dry}");
+    assert_eq!(dry["data"]["up_to_date"], json!(false));
+
+    let (refused, ok) = crun(&db, &["update", "--repo", &work1, "--trust-remote"]);
+    assert!(!ok);
+    assert_eq!(
+        refused["error"]["code"],
+        json!("UPDATE_CONFIRM_REQUIRED"),
+        "{refused}"
+    );
+
+    let (done, ok) = crun(
+        &db,
+        &["update", "--repo", &work1, "--trust-remote", "--yes"],
+    );
+    assert!(ok, "{done}");
+    assert_eq!(done["data"]["updated"], json!(true), "{done}");
+    assert_eq!(done["data"]["commits_applied"], json!(1));
+    assert_eq!(
+        std::fs::read_to_string(format!("{work1}/README.md")).unwrap(),
+        "v2\n"
+    );
+}
+
+#[test]
+fn cli_vat_file_and_settle_with_a_custom_account() {
+    let (_dir, db) = cdb("cli22");
+    crun(
+        &db,
+        &[
+            "init",
+            "--name",
+            "Demo BV",
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "bv",
+            "--vat",
+            "on",
+        ],
+    );
+    crun(
+        &db,
+        &[
+            "vat",
+            "book",
+            "--date",
+            "2026-07-01",
+            "--desc",
+            "Omzet",
+            "--postings",
+            "1100:121.00,8000:-100.00@21",
+            "--post",
+        ],
+    );
+
+    let (dry, ok) = crun(
+        &db,
+        &[
+            "vat",
+            "file",
+            "--account",
+            "2515",
+            "--period",
+            "2026-Q3",
+            "--dry-run",
+        ],
+    );
+    assert!(ok, "{dry}");
+    assert_eq!(dry["data"]["account"], json!("2515"), "{dry}");
+    let (filed, ok) = crun(
+        &db,
+        &["vat", "file", "--account", "2515", "--period", "2026-Q3"],
+    );
+    assert!(ok, "{filed}");
+    assert_eq!(filed["data"]["account"], json!("2515"));
+    assert_eq!(filed["data"]["liability_cents"], json!(2100));
+
+    let tdir = temp_dir("cli22ob");
+    let camt = tdir.join("ob.camt.xml");
+    std::fs::write(
+        &camt,
+        r#"<?xml version="1.0"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt><Stmt><Acct><Id><IBAN>NL91ABNA0417164300</IBAN></Id></Acct>
+    <Ntry><Amt>21.00</Amt><CdtDbtInd>DBIT</CdtDbtInd><BookgDt><Dt>2026-07-25</Dt></BookgDt>
+      <NtryDtls><TxDtls><RltdPties><Dbtr><Nm>Belastingdienst</Nm></Dbtr></RltdPties>
+      <RmtInf><Ustrd>OB aangifte</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>
+  </Stmt></BkToCstmrStmt>
+</Document>"#,
+    )
+    .unwrap();
+    crun(
+        &db,
+        &["bank", "add", "--iban", CLI_IBAN, "--name", "Rabobank"],
+    );
+    crun(
+        &db,
+        &[
+            "bank",
+            "import",
+            "--file",
+            &camt.to_string_lossy(),
+            "--iban",
+            CLI_IBAN,
+        ],
+    );
+    let (txs, _) = crun(&db, &["bank", "transactions"]);
+    let tx_id = txs["data"]["transactions"][0]["id"].as_i64().unwrap();
+
+    let (settled, ok) = crun(
+        &db,
+        &[
+            "vat",
+            "settle",
+            "--tx",
+            &tx_id.to_string(),
+            "--account",
+            "2515",
+            "--period",
+            "2026-Q3",
+        ],
+    );
+    assert!(ok, "{settled}");
+    assert_eq!(settled["data"]["account"], json!("2515"));
+    assert_eq!(
+        settled["data"]["difference_cents"],
+        json!(0),
+        "21.00 filed = 21.00 booked"
+    );
+    assert_eq!(settled["data"]["tx"]["state"], json!("matched"));
+    let (tb, _) = crun(&db, &["report", "trial-balance"]);
+    assert_eq!(tb["data"]["balanced"], json!(true));
+}
+
+#[test]
+fn cli_vat_file_and_settle_end_to_end_with_a_rounding_difference() {
+    let (_dir, db) = cdb("cli23");
+    crun(
+        &db,
+        &[
+            "init",
+            "--name",
+            "Demo BV",
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "bv",
+            "--vat",
+            "on",
+        ],
+    );
+    crun(
+        &db,
+        &[
+            "vat",
+            "book",
+            "--date",
+            "2026-07-01",
+            "--desc",
+            "Omzet",
+            "--postings",
+            "1100:121.00,8000:-100.00@21",
+            "--post",
+        ],
+    );
+    crun(
+        &db,
+        &[
+            "vat",
+            "book",
+            "--date",
+            "2026-07-05",
+            "--desc",
+            "Inkoop",
+            "--postings",
+            "1100:-60.50,4300:50.00@21",
+            "--post",
+        ],
+    );
+
+    let (dry, ok) = crun(&db, &["vat", "file", "--period", "2026-Q3", "--dry-run"]);
+    assert!(ok, "{dry}");
+    assert_eq!(dry["data"]["dryRun"], json!(true));
+    assert_eq!(dry["data"]["liability_cents"], json!(1050));
+
+    let (filed, ok) = crun(&db, &["vat", "file", "--period", "2026-Q3"]);
+    assert!(ok, "{filed}");
+    assert!(filed["data"]["entry_id"].as_i64().unwrap() > 0, "{filed}");
+    assert_eq!(filed["data"]["liability_cents"], json!(1050));
+    assert_eq!(filed["data"]["owe"], json!(true));
+
+    let tdir = temp_dir("cli23ob");
+    let camt = tdir.join("ob.camt.xml");
+    std::fs::write(
+        &camt,
+        r#"<?xml version="1.0"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt><Stmt><Acct><Id><IBAN>NL91ABNA0417164300</IBAN></Id></Acct>
+    <Ntry><Amt>10.00</Amt><CdtDbtInd>DBIT</CdtDbtInd><BookgDt><Dt>2026-07-25</Dt></BookgDt>
+      <NtryDtls><TxDtls><RltdPties><Dbtr><Nm>Belastingdienst</Nm></Dbtr></RltdPties>
+      <RmtInf><Ustrd>OB aangifte</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>
+  </Stmt></BkToCstmrStmt>
+</Document>"#,
+    )
+    .unwrap();
+    crun(
+        &db,
+        &["bank", "add", "--iban", CLI_IBAN, "--name", "Rabobank"],
+    );
+    crun(
+        &db,
+        &[
+            "bank",
+            "import",
+            "--file",
+            &camt.to_string_lossy(),
+            "--iban",
+            CLI_IBAN,
+        ],
+    );
+    let (txs, _) = crun(&db, &["bank", "transactions"]);
+    let tx_id = txs["data"]["transactions"][0]["id"].as_i64().unwrap();
+
+    let (settle_dry, ok) = crun(
+        &db,
+        &[
+            "vat",
+            "settle",
+            "--tx",
+            &tx_id.to_string(),
+            "--period",
+            "2026-Q3",
+            "--dry-run",
+        ],
+    );
+    assert!(ok, "{settle_dry}");
+    assert_eq!(settle_dry["data"]["dryRun"], json!(true));
+    assert_eq!(settle_dry["data"]["difference_cents"], json!(-50));
+    let (txs2, _) = crun(&db, &["bank", "transactions"]);
+    assert_eq!(
+        txs2["data"]["transactions"][0]["state"],
+        json!("unmatched"),
+        "dry-run must not match"
+    );
+
+    let (settled, ok) = crun(
+        &db,
+        &[
+            "vat",
+            "settle",
+            "--tx",
+            &tx_id.to_string(),
+            "--period",
+            "2026-Q3",
+        ],
+    );
+    assert!(ok, "{settled}");
+    assert_eq!(
+        settled["data"]["difference_cents"],
+        json!(-50),
+        "paid 50 cents less -> P&L gain"
+    );
+    assert_eq!(settled["data"]["tx"]["state"], json!("matched"));
+
+    let (again, ok) = crun(&db, &["vat", "settle", "--tx", &tx_id.to_string()]);
+    assert!(!ok);
+    assert_eq!(again["error"]["code"], json!("ALREADY_MATCHED"), "{again}");
+
+    let (tb, _) = crun(&db, &["report", "trial-balance"]);
+    assert_eq!(tb["data"]["balanced"], json!(true));
+    let (pnl, _) = crun(&db, &["report", "pnl", "--year", "2026"]);
+    let has_gain = pnl["data"]["sections"].as_array().unwrap().iter().any(|s| {
+        s["accounts"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .any(|r| r["code"] == json!("4700") && r["amount_cents"] == json!(-50))
+            })
+            .unwrap_or(false)
+    });
+    assert!(has_gain, "the rounding gain must land in 4700: {pnl}");
+}
+
+#[test]
+fn cli_entry_post_dry_run_rejects_non_draft_entries() {
+    let (_dir, db) = cdb("cli24");
+    crun(
+        &db,
+        &[
+            "init",
+            "--name",
+            "Demo BV",
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "bv",
+            "--vat",
+            "off",
+        ],
+    );
+    let (out, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-01-01",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:100.00,3000:-100.00",
+            "--post",
+        ],
+    );
+    assert!(ok, "{out}");
+    let id = out["data"]["id"].as_i64().unwrap();
+    let (r, ok) = crun(
+        &db,
+        &["entry", "post", "--id", &id.to_string(), "--dry-run"],
+    );
+    assert!(
+        !ok,
+        "already posted -> dry-run must fail, not show a green plan"
+    );
+    assert_eq!(r["error"]["code"], json!("ALREADY_POSTED"), "{r}");
+}
+
+#[test]
+fn cli_entry_reverse_dry_run_rejects_drafts_and_double_reversals() {
+    let (_dir, db) = cdb("cli25");
+    crun(
+        &db,
+        &[
+            "init",
+            "--name",
+            "Demo BV",
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "bv",
+            "--vat",
+            "off",
+        ],
+    );
+    let (out, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-01-01",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:100.00,3000:-100.00",
+        ],
+    );
+    assert!(ok, "{out}");
+    let id = out["data"]["id"].as_i64().unwrap();
+
+    let (r1, ok) = crun(
+        &db,
+        &["entry", "reverse", "--id", &id.to_string(), "--dry-run"],
+    );
+    assert!(!ok, "a draft must not get a reversal plan");
+    assert_eq!(r1["error"]["code"], json!("NOT_POSTED"), "{r1}");
+
+    crun(&db, &["entry", "post", "--id", &id.to_string()]);
+    crun(
+        &db,
+        &[
+            "entry",
+            "reverse",
+            "--id",
+            &id.to_string(),
+            "--reason",
+            "correctie",
+        ],
+    );
+    let (r2, ok) = crun(
+        &db,
+        &["entry", "reverse", "--id", &id.to_string(), "--dry-run"],
+    );
+    assert!(!ok);
+    assert_eq!(r2["error"]["code"], json!("ALREADY_REVERSED"), "{r2}");
+}
+
+#[test]
+fn cli_vat_book_dry_run_validates_date_and_description() {
+    let (_dir, db) = cdb("cli26");
+    crun(
+        &db,
+        &[
+            "init",
+            "--name",
+            "Demo BV",
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "bv",
+            "--vat",
+            "on",
+        ],
+    );
+    let (r, ok) = crun(
+        &db,
+        &[
+            "vat",
+            "book",
+            "--date",
+            "2026-99-99",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:121.00,8000:-100.00@21",
+            "--dry-run",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(r["error"]["code"], json!("INVALID_DATE"), "{r}");
+}
+
+#[test]
+fn cli_actor_help_lists_the_identity_subcommands() {
+    let (_dir, db) = cdb("cli27");
+    let help = crun_text(&db, &["actor", "--help"]);
+    for cmd in [
+        "keygen", "register", "list", "revoke", "enforce", "unlock", "lock", "verify",
+    ] {
+        assert!(
+            help.contains(cmd),
+            "actor help must mention '{cmd}':\n{help}"
+        );
+    }
+    // an unknown subcommand exits non-zero
+    let exe = env!("CARGO_BIN_EXE_bukio");
+    let out = std::process::Command::new(exe)
+        .args(["--db", &db, "actor", "frobnicate"])
+        .env("BUKIO_ACTOR", "agent:test")
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "an unknown actor subcommand must fail"
+    );
+}
+
+#[test]
+fn cli_actor_enforce_needs_exactly_one_of_on_or_off() {
+    let (_dir, db) = cdb("cli28");
+    let (out, ok) = crun(&db, &["actor", "enforce"]);
+    assert!(!ok);
+    assert_eq!(out["ok"], json!(false), "{out}");
+    assert_eq!(out["error"]["code"], json!("INVALID_ENFORCE"), "{out}");
+}
+
+/// init + keygen + register agent:bartholomeus + one signed entry (enforce off).
+fn signed_company(tag: &str) -> (std::path::PathBuf, String, String, String) {
+    let dir = temp_dir(tag);
+    let cfg = dir.join("cfg").to_string_lossy().to_string();
+    let db = dir.join("company.db").to_string_lossy().to_string();
+    std::fs::create_dir_all(&cfg).unwrap();
+    let env: Vec<(&str, &str)> = vec![("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")];
+    let run = |args: &[&str]| {
+        let mut full = vec!["--json"];
+        full.extend_from_slice(args);
+        full.extend(["--db", &db]);
+        let (r, ok, out) = acli(&full, &env);
+        assert!(ok, "{}: {out}", args.join(" "));
+        r
+    };
+    run(&["--actor", "human:erik", "init", "--name", "X"]);
+    run(&["--actor", "agent:bartholomeus", "actor", "keygen"]);
+    run(&["--actor", "agent:bartholomeus", "actor", "register"]);
+    run(&[
+        "--actor",
+        "agent:bartholomeus",
+        "entry",
+        "add",
+        "--date",
+        "2026-08-10",
+        "--desc",
+        "Signed",
+        "--postings",
+        "1100:100.00,8000:-100.00",
+        "--post",
+    ]);
+    (dir, cfg, db, String::new())
+}
+
+#[test]
+fn cli_audit_verify_clean_trail_summarises_ok() {
+    let (dir, cfg, db, _) = signed_company("cli29");
+    let env: Vec<(&str, &str)> = vec![("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")];
+    let (data, ok, out) = acli(&["--json", "audit", "verify", "--db", &db], &env);
+    assert!(ok, "{out}");
+    let summary = &data["data"]["summary"];
+    assert!(summary["ok"].as_i64().unwrap() >= 1, "{summary}");
+    assert_eq!(summary["tampered"], json!(0), "{summary}");
+    assert_eq!(summary["invalid_signature"], json!(0));
+    assert_eq!(summary["unknown_key"], json!(0));
+    let rows = data["data"]["rows"].as_array().unwrap();
+    assert!(
+        rows.iter()
+            .all(|r| r["status"] == json!("ok") || r["status"] == json!("unsigned")),
+        "{rows:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cli_audit_verify_reports_a_tampered_row_with_exit_one() {
+    let (dir, cfg, db, _) = signed_company("cli30");
+    // The audit log is append-only (a trigger blocks UPDATE), so tamper the
+    // way the JS suite does: record a row whose stored digest does not match
+    // its signed args.
+    {
+        let d = bukio::db::open_db(&db).unwrap();
+        let ts = bukio::actor::now_iso();
+        let nonce = "tamper-nonce-1";
+        let args = json!({ "date": "2026-08-10", "desc": "original" });
+        let real_digest =
+            bukio::canonical::build_digest("agent:bartholomeus", "entry add", &args, &ts, nonce);
+        let tampered_digest = bukio::canonical::build_digest(
+            "agent:bartholomeus",
+            "entry add",
+            &json!({ "date": "2026-08-10", "desc": "HACKED" }),
+            &ts,
+            nonce,
+        );
+        let (_, private, _) = bukio::sign::generate_key_pair();
+        bukio::audit::set_pending_signature(Some(bukio::audit::PendingSignature {
+            digest_hash: Some(tampered_digest),
+            sig_keyid: Some("ff".repeat(16)),
+            sig_nonce: Some(nonce.to_string()),
+            sig_ts: Some(ts),
+            sig: Some(bukio::sign::sign(real_digest.as_bytes(), &private).unwrap()),
+            sig_status: "verified".to_string(),
+            signed_args: Some(args),
+            signed_command: Some("entry add".to_string()),
+        }));
+        bukio::audit::record(
+            &d,
+            bukio::audit::RecordArgs {
+                actor: "agent:bartholomeus",
+                action: "test.tampered",
+                command: Some("entry add"),
+                args: None,
+                outcome: "ok",
+                entry_ids: vec![],
+            },
+        )
+        .unwrap();
+        bukio::audit::set_pending_signature(None);
+    }
+    let env: Vec<(&str, &str)> = vec![("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")];
+    let (data, ok, _) = acli(&["--json", "audit", "verify", "--db", &db], &env);
+    assert!(!ok, "audit verify must exit 1 when the trail has problems");
+    let summary = &data["data"]["summary"];
+    assert_eq!(summary["tampered"], json!(1), "{summary}");
+    let bad = data["data"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["status"] == json!("tampered"))
+        .expect("a tampered row must be reported");
+    assert_eq!(bad["action"], json!("test.tampered"), "{bad}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cli_version_matches_package_json() {
+    let pkg =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/package.json")).unwrap();
+    let pkg: Value = serde_json::from_str(&pkg).unwrap();
+    let exe = env!("CARGO_BIN_EXE_bukio");
+    let out = std::process::Command::new(exe)
+        .arg("--version")
+        .output()
+        .unwrap();
+    let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    assert_eq!(
+        version,
+        pkg["version"].as_str().unwrap(),
+        "bukio --version must equal package.json"
+    );
+}
