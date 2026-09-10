@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 20:47:13 UTC — **✅ 349 passing · 0 failing (349 tests)**
+**Latest run:** 2026-09-10 20:54:19 UTC — **✅ 324 passing · 0 failing (324 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -39,36 +39,6 @@
     - ✅ MCP: repeated signed calls verify (fresh nonces, no replay refusal)
     - ✅ MCP: malformed actor still rejected (INVALID_ACTOR)
     - ✅ MCP: a second company DB uses its own registry/enforce state
-
-### authz-cli.test.js — Tier 0.5 authorizations end-to-end: actor authz/roles/can/who-can CLI, the AUTHZ_DENIED gate (dry-run parity, deny-by-default, authz implies enforce), MCP tool gate (no mutation on refusal, read-only unaffected), owner-mediated revoke, full SoD lifecycle
-
-25 passing · 0 failing
-
-    - ✅ authz --on: sets authz on, implies signing enforcement, grants the flipper owner
-    - ✅ authz --on --dry-run: nothing is written (no owner, no mode change)
-    - ✅ authz: exactly one of --on/--off is required (INVALID_AUTHZ)
-    - ✅ authz --off: the owner turns authz off; signing enforcement STAYS on
-    - ✅ authz --off: a non-owner is refused AUTHZ_DENIED under authz
-    - ✅ roles grant/revoke: audit rows + SoD warning on a conflicting grant
-    - ✅ roles revoke: ROLE_NOT_GRANTED on absent role; LAST_OWNER guards the last owner
-    - ✅ roles: invalid role and invalid grantee are rejected
-    - ✅ roles: self-service list for any enrolled actor; --actor <other> is owner only
-    - ✅ roles grant/revoke: work for any enrolled actor when authz is OFF (roles are inert data)
-    - ✅ actor can: self-service capability check with the ACTUAL mutation
-    - ✅ actor can --actor <other>: owner only under authz
-    - ✅ who-can: the SoD review lens — owner sees the full matrix
-    - ✅ gate: an actor with the right role acts; wrong capability is refused AUTHZ_DENIED before any mutation
-    - ✅ gate: B (payments) can create a SEPA batch but not post entries
-    - ✅ gate: deny-by-default — a role-less actor can only self-service
-    - ✅ gate: dry-run is refused identically (D6 — a plan needs the capability)
-    - ✅ gate: reads are gated too — a role-less actor cannot run report trial-balance
-    - ✅ gate: entry add --post needs entry.post — the ACTUAL mutation decides
-    - ✅ revoke --target: owner kills a compromised key; the target is refused everywhere after
-    - ✅ revoke --target: needs the OWNER role REGARDLESS of authz mode (D8)
-    - ✅ MCP gate: tool calls map to the same capabilities; refusals mutate nothing
-    - ✅ MCP gate: read-only tools are unaffected (not gated) — a role-less actor can still read
-    - ✅ MCP gate: vat_book maps to vat.book — a payments actor is refused
-    - ✅ lifecycle: owner bootstraps authz, splits bookkeeping/payments, the SoD boundary holds end-to-end
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 

@@ -3606,11 +3606,20 @@ struct Mcp {
 
 impl Mcp {
     fn start(db_path: &str) -> Mcp {
+        Mcp::start_as(db_path, "agent:test", None)
+    }
+
+    /// An MCP session with a chosen actor and config dir (the authz gate reads
+    /// both).
+    fn start_as(db_path: &str, actor: &str, config_dir: Option<&str>) -> Mcp {
         use std::process::{Command, Stdio};
         let exe = env!("CARGO_BIN_EXE_bukio");
-        let mut child = Command::new(exe)
-            .args(["mcp", "--db", db_path])
-            .env("BUKIO_ACTOR", "agent:test")
+        let mut cmd = Command::new(exe);
+        cmd.args(["mcp", "--db", db_path]).env("BUKIO_ACTOR", actor);
+        if let Some(c) = config_dir {
+            cmd.env("BUKIO_CONFIG_DIR", c);
+        }
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -10655,4 +10664,1032 @@ fn actor_lifecycle_across_two_companies() {
         "B has no revoked rows (fresh registry)"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+// ==== authz CLI + MCP gate (ported from test/authz-cli.test.js) =============
+
+struct AuthzCo {
+    dir: std::path::PathBuf,
+    cfg: String,
+    db: String,
+}
+
+fn co_env<'a>(cfg: &'a str, actor: &'a str) -> Vec<(&'static str, &'a str)> {
+    vec![("BUKIO_ACTOR", actor), ("BUKIO_CONFIG_DIR", cfg)]
+}
+
+impl AuthzCo {
+    fn run(&self, actor: &str, args: &[&str]) -> (Value, bool, String) {
+        let mut full = vec!["--json", "--actor", actor];
+        full.extend_from_slice(args);
+        full.extend(["--db", self.db.as_str()]);
+        acli(&full, &co_env(&self.cfg, actor))
+    }
+}
+
+/// Fresh company with the actors enrolled (keys in cfg, enrolled in the DB).
+fn authz_company(tag: &str, actors: &[&str]) -> AuthzCo {
+    let dir = temp_dir(tag);
+    let cfg_path = dir.join("cfg");
+    std::fs::create_dir_all(&cfg_path).unwrap();
+    let cfg = cfg_path.to_string_lossy().to_string();
+    let db = dir.join("company.db").to_string_lossy().to_string();
+    let (_, ok, out) = acli(
+        &["--json", "init", "--name", "X", "--db", &db],
+        &co_env(&cfg, "agent:owner"),
+    );
+    assert!(ok, "init: {out}");
+    for a in actors {
+        let (_, ok, out) = acli(
+            &["--json", "--actor", a, "actor", "keygen"],
+            &co_env(&cfg, a),
+        );
+        assert!(ok, "keygen {a}: {out}");
+        let (_, ok, out) = acli(
+            &["--json", "--actor", a, "actor", "register", "--db", &db],
+            &co_env(&cfg, a),
+        );
+        assert!(ok, "register {a}: {out}");
+    }
+    AuthzCo { dir, cfg, db }
+}
+
+/// Flip authz on (the flipper becomes owner) and grant the two roles.
+fn bootstrap_authz(c: &AuthzCo) {
+    for args in [
+        vec!["actor", "authz", "--on"],
+        vec![
+            "actor",
+            "roles",
+            "grant",
+            "bookkeeper",
+            "--for",
+            "agent:bookkeeper-a",
+        ],
+        vec![
+            "actor",
+            "roles",
+            "grant",
+            "payments",
+            "--for",
+            "agent:payments-b",
+        ],
+    ] {
+        let (_, ok, out) = c.run("agent:owner", &args);
+        assert!(ok, "{}: {out}", args.join(" "));
+    }
+}
+
+const ALL_ACTORS: [&str; 4] = [
+    "agent:owner",
+    "agent:bookkeeper-a",
+    "agent:payments-b",
+    "agent:nobody",
+];
+
+#[test]
+fn authz_on_sets_the_mode_implies_enforce_and_grants_the_flipper_owner() {
+    let c = authz_company("az1", &["agent:owner"]);
+    let (on, ok, out) = c.run("agent:owner", &["actor", "authz", "--on"]);
+    assert!(ok, "{out}");
+    assert_eq!(on["data"]["authz"], json!("on"), "{on}");
+    assert_eq!(on["data"]["enforce"], json!("on"), "authz implies enforce");
+    assert_eq!(
+        on["data"]["owner"],
+        json!("agent:owner"),
+        "the flipper becomes owner"
+    );
+
+    let (roles, ok, out) = c.run("agent:owner", &["actor", "roles"]);
+    assert!(ok, "{out}");
+    assert_eq!(roles["data"]["roles"], json!(["owner"]), "{roles}");
+
+    let db = bukio::db::open_db(&c.db).unwrap();
+    let mode: String = db
+        .query_row(
+            "SELECT value FROM settings WHERE key='authz_mode'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(mode, "on");
+    let enforce: String = db
+        .query_row(
+            "SELECT value FROM settings WHERE key='signing_enforce'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(enforce, "on");
+    let n: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'actor.authz'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(n >= 1, "the authz flip must be audited");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn authz_on_dry_run_writes_nothing() {
+    let c = authz_company("az2", &["agent:owner"]);
+    let (plan, ok, out) = c.run("agent:owner", &["actor", "authz", "--on", "--dry-run"]);
+    assert!(ok, "{out}");
+    assert_eq!(plan["data"]["dryRun"], json!(true), "{plan}");
+    assert_eq!(plan["data"]["owner_granted"], json!("agent:owner"));
+
+    let db = bukio::db::open_db(&c.db).unwrap();
+    let mode: String = db
+        .query_row(
+            "SELECT value FROM settings WHERE key='authz_mode'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(mode, "off", "dry-run must not flip the mode");
+    let n: i64 = db
+        .query_row("SELECT COUNT(*) FROM actor_roles", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "dry-run must not grant the owner");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn authz_requires_exactly_one_of_on_or_off() {
+    let c = authz_company("az3", &["agent:owner"]);
+    for args in [
+        vec!["actor", "authz"],
+        vec!["actor", "authz", "--on", "--off"],
+    ] {
+        let (r, ok, _) = c.run("agent:owner", &args);
+        assert!(!ok);
+        assert_eq!(r["error"]["code"], json!("INVALID_AUTHZ"), "{r}");
+    }
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn authz_off_keeps_signing_enforcement_on() {
+    let c = authz_company("az4", &["agent:owner"]);
+    c.run("agent:owner", &["actor", "authz", "--on"]);
+    let (off, ok, out) = c.run("agent:owner", &["actor", "authz", "--off"]);
+    assert!(ok, "{out}");
+    assert_eq!(off["data"]["authz"], json!("off"));
+    assert_eq!(off["data"]["enforce"], json!("on"), "Tier 0 stays active");
+
+    let db = bukio::db::open_db(&c.db).unwrap();
+    let enforce: String = db
+        .query_row(
+            "SELECT value FROM settings WHERE key='signing_enforce'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(enforce, "on");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn authz_off_by_a_non_owner_is_authz_denied() {
+    let c = authz_company("az5", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (off, ok, _) = c.run("agent:bookkeeper-a", &["actor", "authz", "--off"]);
+    assert!(!ok);
+    assert_eq!(off["error"]["code"], json!("AUTHZ_DENIED"), "{off}");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn roles_grant_and_revoke_audit_and_warn_on_sod_conflicts() {
+    let c = authz_company("az6", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (grant, ok, out) = c.run(
+        "agent:owner",
+        &[
+            "actor",
+            "roles",
+            "grant",
+            "payments",
+            "--for",
+            "agent:bookkeeper-a",
+        ],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(
+        grant["data"]["roles"],
+        json!(["bookkeeper", "payments"]),
+        "{grant}"
+    );
+    let warnings = grant["data"]["warnings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("bookkeeper + payments")),
+        "SoD warning expected: {warnings:?}"
+    );
+
+    let (revoke, ok, out) = c.run(
+        "agent:owner",
+        &[
+            "actor",
+            "roles",
+            "revoke",
+            "payments",
+            "--for",
+            "agent:bookkeeper-a",
+        ],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(revoke["data"]["roles"], json!(["bookkeeper"]), "{revoke}");
+
+    let db = bukio::db::open_db(&c.db).unwrap();
+    let mut stmt = db
+        .prepare("SELECT DISTINCT action FROM audit_log WHERE action LIKE 'actor.roles.%' ORDER BY action")
+        .unwrap();
+    let actions: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert!(
+        actions.contains(&"actor.roles.grant".to_string()),
+        "{actions:?}"
+    );
+    assert!(
+        actions.contains(&"actor.roles.revoke".to_string()),
+        "{actions:?}"
+    );
+    let args: String = db
+        .query_row(
+            "SELECT args_json FROM audit_log WHERE action = 'actor.roles.grant' ORDER BY id DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        args.contains("agent:bookkeeper-a"),
+        "the grantee must be in the signed args: {args}"
+    );
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn roles_revoke_guards_absent_roles_and_the_last_owner() {
+    let c = authz_company("az7", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (absent, ok, _) = c.run(
+        "agent:owner",
+        &[
+            "actor",
+            "roles",
+            "revoke",
+            "tax",
+            "--for",
+            "agent:payments-b",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(
+        absent["error"]["code"],
+        json!("ROLE_NOT_GRANTED"),
+        "{absent}"
+    );
+
+    let (last, ok, _) = c.run(
+        "agent:owner",
+        &["actor", "roles", "revoke", "owner", "--for", "agent:owner"],
+    );
+    assert!(!ok);
+    assert_eq!(last["error"]["code"], json!("LAST_OWNER"), "{last}");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn roles_rejects_an_invalid_role_and_grantee() {
+    let c = authz_company("az8", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (bad_role, ok, _) = c.run(
+        "agent:owner",
+        &[
+            "actor",
+            "roles",
+            "grant",
+            "superuser",
+            "--for",
+            "agent:bookkeeper-a",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(
+        bad_role["error"]["code"],
+        json!("INVALID_ROLE"),
+        "{bad_role}"
+    );
+
+    let (bad_actor, ok, _) = c.run(
+        "agent:owner",
+        &["actor", "roles", "grant", "bookkeeper", "--for", "agent"],
+    );
+    assert!(!ok);
+    assert_eq!(
+        bad_actor["error"]["code"],
+        json!("INVALID_ACTOR"),
+        "{bad_actor}"
+    );
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn roles_are_self_service_but_viewing_another_actor_is_owner_only() {
+    let c = authz_company("az9", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (own, ok, out) = c.run("agent:nobody", &["actor", "roles"]);
+    assert!(ok, "{out}");
+    assert_eq!(own["data"]["roles"], json!([]), "{own}");
+
+    let (owner_view, ok, out) = c.run(
+        "agent:owner",
+        &["actor", "roles", "--for", "agent:bookkeeper-a"],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(owner_view["data"]["roles"], json!(["bookkeeper"]));
+
+    let (denied, ok, _) = c.run(
+        "agent:bookkeeper-a",
+        &["actor", "roles", "--for", "agent:payments-b"],
+    );
+    assert!(!ok);
+    assert_eq!(denied["error"]["code"], json!("AUTHZ_DENIED"), "{denied}");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn roles_are_inert_data_when_authz_is_off() {
+    let c = authz_company("az10", &["agent:owner", "agent:bookkeeper-a"]);
+    // no authz --on: grants are configuration, not privilege
+    let (grant, ok, out) = c.run(
+        "agent:bookkeeper-a",
+        &[
+            "actor",
+            "roles",
+            "grant",
+            "readonly",
+            "--for",
+            "agent:owner",
+        ],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(grant["data"]["roles"], json!(["readonly"]), "{grant}");
+    let (roles, ok, out) = c.run("agent:owner", &["actor", "roles"]);
+    assert!(ok, "{out}");
+    assert_eq!(roles["data"]["roles"], json!(["readonly"]));
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn actor_can_is_a_self_service_check_of_the_actual_mutation() {
+    let c = authz_company("az11", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (draft, ok, out) = c.run("agent:bookkeeper-a", &["actor", "can", "entry add"]);
+    assert!(ok, "{out}");
+    assert_eq!(draft["data"]["capability"], json!("entry.draft"), "{draft}");
+    assert_eq!(draft["data"]["allowed"], json!(true));
+
+    let (post, _, _) = c.run("agent:bookkeeper-a", &["actor", "can", "entry add --post"]);
+    assert_eq!(post["data"]["capability"], json!("entry.post"), "{post}");
+    assert_eq!(post["data"]["allowed"], json!(true));
+
+    let (file, _, _) = c.run("agent:bookkeeper-a", &["actor", "can", "vat file"]);
+    assert_eq!(file["data"]["capability"], json!("vat.file"), "{file}");
+    assert_eq!(file["data"]["allowed"], json!(false));
+    assert_eq!(
+        file["data"]["denied_reason"],
+        json!("no capability 'vat.file'")
+    );
+
+    // the MCP form maps to the same capability
+    let (mcp, _, _) = c.run("agent:bookkeeper-a", &["actor", "can", "mcp:entry_add"]);
+    assert_eq!(mcp["data"]["capability"], json!("entry.draft"), "{mcp}");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn actor_can_for_another_actor_is_owner_only() {
+    let c = authz_company("az12", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (ok_r, ok, out) = c.run(
+        "agent:owner",
+        &["actor", "can", "entry post", "--for", "agent:bookkeeper-a"],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(ok_r["data"]["allowed"], json!(true), "{ok_r}");
+
+    let (denied, ok, _) = c.run(
+        "agent:bookkeeper-a",
+        &["actor", "can", "entry post", "--for", "agent:payments-b"],
+    );
+    assert!(!ok);
+    assert_eq!(denied["error"]["code"], json!("AUTHZ_DENIED"), "{denied}");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn who_can_is_the_sod_review_lens_owner_only() {
+    let c = authz_company("az13", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (who, ok, out) = c.run("agent:owner", &["actor", "who-can", "entry post"]);
+    assert!(ok, "{out}");
+    assert_eq!(who["data"]["capability"], json!("entry.post"), "{who}");
+    let actors = who["data"]["actors"].as_array().unwrap();
+    let allowed: Vec<&str> = actors
+        .iter()
+        .filter(|a| a["allowed"] == json!(true))
+        .map(|a| a["actor"].as_str().unwrap())
+        .collect();
+    assert!(allowed.contains(&"agent:owner"), "{allowed:?}");
+    assert!(allowed.contains(&"agent:bookkeeper-a"), "{allowed:?}");
+    assert!(!allowed.contains(&"agent:payments-b"), "{allowed:?}");
+    assert!(!allowed.contains(&"agent:nobody"), "{allowed:?}");
+
+    let (denied, ok, _) = c.run("agent:bookkeeper-a", &["actor", "who-can", "entry post"]);
+    assert!(!ok);
+    assert_eq!(denied["error"]["code"], json!("AUTHZ_DENIED"), "{denied}");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn gate_denies_a_wrong_capability_before_any_mutation() {
+    let c = authz_company("az14", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (_, ok, out) = c.run(
+        "agent:bookkeeper-a",
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-08-01",
+            "--desc",
+            "test",
+            "--postings",
+            "1100:100.00,3000:-100.00",
+        ],
+    );
+    assert!(ok, "{out}");
+    let (_, ok, out) = c.run("agent:bookkeeper-a", &["entry", "post", "--id", "1"]);
+    assert!(ok, "{out}");
+
+    let (file, ok, _) = c.run(
+        "agent:bookkeeper-a",
+        &["vat", "file", "--period", "2026-Q2"],
+    );
+    assert!(!ok);
+    let err = &file["error"];
+    assert_eq!(err["code"], json!("AUTHZ_DENIED"), "{file}");
+    let msg = err["message"].as_str().unwrap_or("");
+    assert!(msg.contains("agent:bookkeeper-a"), "{msg}");
+    assert!(msg.contains("'vat.file'"), "{msg}");
+    assert!(msg.contains("bookkeeper"), "{msg}");
+
+    let db = bukio::db::open_db(&c.db).unwrap();
+    let n: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'vat.file'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0, "the refused command wrote nothing");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn gate_lets_payments_act_but_not_post_entries() {
+    let c = authz_company("az15", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (_, ok, out) = c.run("agent:payments-b", &["bank", "list"]);
+    assert!(ok, "{out}");
+    let (b_post, ok, _) = c.run("agent:payments-b", &["entry", "post", "--id", "1"]);
+    assert!(!ok);
+    assert_eq!(b_post["error"]["code"], json!("AUTHZ_DENIED"), "{b_post}");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn gate_is_deny_by_default_for_a_role_less_actor() {
+    let c = authz_company("az16", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    for args in [
+        vec!["actor", "verify"],
+        vec!["actor", "roles"],
+        vec!["actor", "can", "entry add"],
+    ] {
+        let (_, ok, out) = c.run("agent:nobody", &args);
+        assert!(ok, "{}: {out}", args.join(" "));
+    }
+    let (add, ok, _) = c.run(
+        "agent:nobody",
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-08-01",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:100.00,3000:-100.00",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(add["error"]["code"], json!("AUTHZ_DENIED"), "{add}");
+    assert!(
+        add["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("no roles"),
+        "{add}"
+    );
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn gate_refuses_a_dry_run_identically() {
+    let c = authz_company("az17", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (plan, ok, _) = c.run(
+        "agent:payments-b",
+        &[
+            "entry",
+            "add",
+            "--post",
+            "--date",
+            "2026-08-01",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:100.00,3000:-100.00",
+            "--dry-run",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(plan["error"]["code"], json!("AUTHZ_DENIED"), "{plan}");
+    let db = bukio::db::open_db(&c.db).unwrap();
+    let n: i64 = db
+        .query_row("SELECT COUNT(*) FROM journal_entries", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "a dry-run refusal writes nothing");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn gate_covers_reads_too() {
+    let c = authz_company("az18", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (tb, ok, _) = c.run("agent:nobody", &["report", "trial-balance"]);
+    assert!(!ok);
+    assert_eq!(tb["error"]["code"], json!("AUTHZ_DENIED"), "{tb}");
+    let (tb_b, ok, out) = c.run("agent:payments-b", &["report", "trial-balance"]);
+    assert!(ok, "{out}");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn gate_lets_the_actual_mutation_decide_for_entry_add_post() {
+    let c = authz_company("az19", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (_, ok, out) = c.run(
+        "agent:bookkeeper-a",
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-08-01",
+            "--desc",
+            "d",
+            "--postings",
+            "1100:50.00,3000:-50.00",
+        ],
+    );
+    assert!(ok, "{out}");
+    let (_, ok, out) = c.run(
+        "agent:bookkeeper-a",
+        &[
+            "entry",
+            "add",
+            "--post",
+            "--date",
+            "2026-08-01",
+            "--desc",
+            "p",
+            "--postings",
+            "1100:50.00,3000:-50.00",
+        ],
+    );
+    assert!(ok, "{out}");
+    let (b_draft, ok, _) = c.run(
+        "agent:payments-b",
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-08-01",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:50.00,3000:-50.00",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(b_draft["error"]["code"], json!("AUTHZ_DENIED"), "{b_draft}");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn revoke_target_kills_a_compromised_key_everywhere() {
+    let c = authz_company("az20", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (kill, ok, out) = c.run(
+        "agent:owner",
+        &[
+            "actor",
+            "revoke",
+            "--target",
+            "agent:payments-b",
+            "--reason",
+            "compromised key",
+        ],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(kill["data"]["actor"], json!("agent:payments-b"), "{kill}");
+    assert_eq!(kill["data"]["revoked_by"], json!("agent:owner"));
+
+    let (after, ok, _) = c.run("agent:payments-b", &["bank", "list"]);
+    assert!(!ok);
+    assert_eq!(
+        after["error"]["code"],
+        json!("ACTOR_KEY_REVOKED"),
+        "{after}"
+    );
+
+    // self-revoke is ALSO gate-refused (enforce is on and the key is revoked)
+    let (self_revoke, ok, _) = c.run(
+        "agent:payments-b",
+        &["actor", "revoke", "--reason", "rotating out"],
+    );
+    assert!(!ok);
+    assert_eq!(
+        self_revoke["error"]["code"],
+        json!("ACTOR_KEY_REVOKED"),
+        "{self_revoke}"
+    );
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn revoke_target_needs_the_owner_role_regardless_of_authz_mode() {
+    let c = authz_company("az21", &["agent:owner", "agent:bookkeeper-a"]);
+    // authz is OFF; the owner role is granted explicitly (roles are inert data
+    // while authz is off, but the owner-kill check reads them regardless)
+    let (_, ok, out) = c.run(
+        "agent:owner",
+        &["actor", "roles", "grant", "owner", "--for", "agent:owner"],
+    );
+    assert!(ok, "{out}");
+
+    let (denied, ok, _) = c.run(
+        "agent:bookkeeper-a",
+        &[
+            "actor",
+            "revoke",
+            "--target",
+            "agent:owner",
+            "--reason",
+            "x",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(denied["error"]["code"], json!("AUTHZ_DENIED"), "{denied}");
+    assert!(
+        denied["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("owner role"),
+        "{denied}"
+    );
+
+    let (ok_r, ok, out) = c.run(
+        "agent:owner",
+        &[
+            "actor",
+            "revoke",
+            "--target",
+            "agent:bookkeeper-a",
+            "--reason",
+            "leaving",
+        ],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(ok_r["data"]["actor"], json!("agent:bookkeeper-a"));
+    let db = bukio::db::open_db(&c.db).unwrap();
+    let n: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM actor_keys WHERE actor = 'agent:bookkeeper-a' AND revoked_at IS NOT NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 1, "the target key must be revoked");
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn mcp_gate_maps_tools_to_the_same_capabilities_and_refuses_without_mutating() {
+    let c = authz_company("az22", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let (_, ok, out) = c.run("agent:owner", &["contact", "add", "--name", "Vendor"]);
+    assert!(ok, "{out}");
+
+    // A (bookkeeper): entry_add + entry_post work through MCP
+    let mut a = Mcp::start_as(&c.db, "agent:bookkeeper-a", Some(&c.cfg));
+    let (a_res, a_err) = a.tool(
+        "entry_add",
+        json!({ "date": "2026-08-01", "description": "via mcp", "postings": ["1100:100.00", "3000:-100.00"], "mode": "execute" }),
+    );
+    assert!(!a_err, "{a_res}");
+    assert_eq!(a_res["mode"], json!("execute"), "{a_res}");
+    let (a_post, a_post_err) = a.tool(
+        "entry_post",
+        json!({ "id": a_res["entry_id"], "mode": "execute", "actor": "agent:bookkeeper-a" }),
+    );
+    assert!(!a_post_err, "{a_post}");
+    a.stop();
+
+    // B (payments): entry_add with post:true is refused
+    let mut b = Mcp::start_as(&c.db, "agent:payments-b", Some(&c.cfg));
+    let (b_err_payload, b_is_err) = b.tool(
+        "entry_add",
+        json!({ "date": "2026-08-02", "description": "should not land", "postings": ["1100:50.00", "3000:-50.00"], "post": true, "mode": "execute" }),
+    );
+    assert!(b_is_err, "{b_err_payload}");
+    assert_eq!(
+        b_err_payload["error"]["code"],
+        json!("AUTHZ_DENIED"),
+        "{b_err_payload}"
+    );
+    assert!(
+        b_err_payload["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("entry.post"),
+        "{b_err_payload}"
+    );
+
+    // B can still do its own thing (an empty batch is a VALIDATION failure)
+    let (batch, _) = b.tool(
+        "payments_batch_create",
+        json!({ "type": "transfer", "payable_ids": [], "mode": "execute", "actor": "agent:payments-b" }),
+    );
+    assert_ne!(
+        batch["error"]["code"],
+        json!("AUTHZ_DENIED"),
+        "the gate let payments.sepa through: {batch}"
+    );
+    b.stop();
+
+    // the refused call mutated nothing
+    let db = bukio::db::open_db(&c.db).unwrap();
+    let mut stmt = db
+        .prepare("SELECT description FROM journal_entries")
+        .unwrap();
+    let descs: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert!(descs.iter().any(|d| d == "via mcp"), "{descs:?}");
+    assert!(
+        !descs.iter().any(|d| d == "should not land"),
+        "refused call must not mutate: {descs:?}"
+    );
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn mcp_read_only_tools_are_not_gated() {
+    let c = authz_company("az23", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let mut s = Mcp::start_as(&c.db, "agent:nobody", Some(&c.cfg));
+    let (tb, is_err) = s.tool("trial_balance", json!({}));
+    assert!(!is_err, "{tb}");
+    s.stop();
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn mcp_vat_book_maps_to_vat_book_capability() {
+    let c = authz_company("az24", &ALL_ACTORS);
+    bootstrap_authz(&c);
+    let mut b = Mcp::start_as(&c.db, "agent:payments-b", Some(&c.cfg));
+    let (payload, is_err) = b.tool(
+        "vat_book",
+        json!({ "date": "2026-08-01", "description": "x", "postings": ["1100:121.00", "8000:-100.00@21"], "post": true, "mode": "execute" }),
+    );
+    assert!(is_err, "{payload}");
+    assert_eq!(payload["error"]["code"], json!("AUTHZ_DENIED"), "{payload}");
+    assert!(
+        payload["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("vat.book"),
+        "{payload}"
+    );
+    b.stop();
+    let _ = std::fs::remove_dir_all(&c.dir);
+}
+
+#[test]
+fn authz_lifecycle_owner_splits_bookkeeping_and_payments() {
+    const IBAN: &str = "NL91ABNA0417164300"; // mod-97 valid SEPA test IBAN
+    let c = authz_company("az25", &ALL_ACTORS);
+
+    // 1. owner completes the company profile + a contact (SEPA needs both)
+    let (_, ok, out) = c.run(
+        "agent:owner",
+        &["company", "update", "--iban", IBAN, "--name", "SoD BV"],
+    );
+    assert!(ok, "{out}");
+    let (_, ok, out) = c.run(
+        "agent:owner",
+        &["contact", "add", "--name", "Vendor", "--iban", IBAN],
+    );
+    assert!(ok, "{out}");
+
+    // 2. bootstrap
+    let (on, ok, out) = c.run("agent:owner", &["actor", "authz", "--on"]);
+    assert!(ok, "{out}");
+    assert_eq!(on["data"]["owner"], json!("agent:owner"));
+
+    // 3. grants (owner only)
+    let (_, ok, out) = c.run(
+        "agent:owner",
+        &[
+            "actor",
+            "roles",
+            "grant",
+            "bookkeeper",
+            "--for",
+            "agent:bookkeeper-a",
+        ],
+    );
+    assert!(ok, "{out}");
+    let (_, ok, out) = c.run(
+        "agent:owner",
+        &[
+            "actor",
+            "roles",
+            "grant",
+            "payments",
+            "--for",
+            "agent:payments-b",
+        ],
+    );
+    assert!(ok, "{out}");
+
+    // 4. A (bookkeeper) drafts AND posts
+    let (_, ok, out) = c.run(
+        "agent:bookkeeper-a",
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-08-01",
+            "--desc",
+            "Inkoop",
+            "--postings",
+            "4300:100.00,1100:-100.00",
+        ],
+    );
+    assert!(ok, "{out}");
+    let (_, ok, out) = c.run("agent:bookkeeper-a", &["entry", "post", "--id", "1"]);
+    assert!(ok, "{out}");
+
+    // 5. B (payments): payables + SEPA batch — money OUT is B's job
+    let (_, ok, out) = c.run(
+        "agent:payments-b",
+        &[
+            "payments",
+            "payables",
+            "add",
+            "--contact",
+            "1",
+            "--ref",
+            "INV-1",
+            "--date",
+            "2026-08-01",
+            "--amount",
+            "100.00",
+        ],
+    );
+    assert!(ok, "{out}");
+    let (_, ok, out) = c.run(
+        "agent:payments-b",
+        &[
+            "payments",
+            "batch",
+            "create",
+            "--type",
+            "transfer",
+            "--payable",
+            "1",
+        ],
+    );
+    assert!(ok, "{out}");
+
+    // 6. cross-capability refusals: A cannot pay, B cannot book
+    let (a_pay, ok, _) = c.run(
+        "agent:bookkeeper-a",
+        &[
+            "payments",
+            "batch",
+            "create",
+            "--type",
+            "transfer",
+            "--payable",
+            "1",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(a_pay["error"]["code"], json!("AUTHZ_DENIED"), "{a_pay}");
+    let (b_book, ok, _) = c.run(
+        "agent:payments-b",
+        &[
+            "entry",
+            "add",
+            "--post",
+            "--date",
+            "2026-08-02",
+            "--desc",
+            "nope",
+            "--postings",
+            "4300:10.00,1100:-10.00",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(b_book["error"]["code"], json!("AUTHZ_DENIED"), "{b_book}");
+
+    // 7. SoD warning on a conflicting grant
+    let (conflict, ok, out) = c.run(
+        "agent:owner",
+        &[
+            "actor",
+            "roles",
+            "grant",
+            "payments",
+            "--for",
+            "agent:bookkeeper-a",
+        ],
+    );
+    assert!(ok, "{out}");
+    let warnings = conflict["data"]["warnings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("bookkeeper + payments")),
+        "{warnings:?}"
+    );
+
+    // 8. who-can 'entry post' → owner + A only
+    let (who, _, _) = c.run("agent:owner", &["actor", "who-can", "entry post"]);
+    let actors = who["data"]["actors"].as_array().unwrap();
+    let allowed: Vec<&str> = actors
+        .iter()
+        .filter(|a| a["allowed"] == json!(true))
+        .map(|a| a["actor"].as_str().unwrap())
+        .collect();
+    assert!(allowed.contains(&"agent:owner"), "{allowed:?}");
+    assert!(allowed.contains(&"agent:bookkeeper-a"), "{allowed:?}");
+    assert!(
+        !allowed.contains(&"agent:payments-b"),
+        "B must NOT post: {allowed:?}"
+    );
+
+    // 9. the trail stays cryptographically clean through the whole scenario
+    let (verify, ok, out) = c.run("agent:owner", &["audit", "verify"]);
+    assert!(ok, "{out}");
+    let summary = &verify["data"]["summary"];
+    assert_eq!(summary["tampered"], json!(0), "{summary}");
+    assert_eq!(summary["invalid_signature"], json!(0), "{summary}");
+    assert_eq!(summary["unknown_key"], json!(0), "{summary}");
+
+    // 10. authz --off closes the scenario; enforcement stays on
+    let (off, ok, out) = c.run("agent:owner", &["actor", "authz", "--off"]);
+    assert!(ok, "{out}");
+    assert_eq!(off["data"]["enforce"], json!("on"));
+    let _ = std::fs::remove_dir_all(&c.dir);
 }
