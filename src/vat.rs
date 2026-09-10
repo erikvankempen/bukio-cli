@@ -1395,6 +1395,595 @@ mod tests {
         assert_eq!(count, 1);
     }
 
+    // ── ported from test/vat-settle.test.js ──
+
+    const SETTLE_IBAN: &str = "NL91ABNA0417164300";
+
+    fn settle_company() -> Connection {
+        let db = open_db(":memory:").unwrap();
+        crate::accounts::seed_default_chart(&db).unwrap();
+        db.execute(
+            "INSERT INTO company (name, registration_id, legal_form, tax_id, iban, vat_module)
+             VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', ?1, 1)",
+            rusqlite::params![SETTLE_IBAN],
+        )
+        .unwrap();
+        enable_vat_module(&db, "human:erik").unwrap();
+        db
+    }
+
+    fn camt_payment(amount: &str, direction: &str) -> String {
+        format!(
+            r#"<?xml version="1.0"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt><Stmt><Acct><Id><IBAN>{iban}</IBAN></Id></Acct>
+    <Ntry><Amt>{amount}</Amt><CdtDbtInd>{direction}</CdtDbtInd><BookgDt><Dt>2026-07-25</Dt></BookgDt>
+      <NtryDtls><TxDtls><RltdPties><Dbtr><Nm>Belastingdienst</Nm></Dbtr></RltdPties>
+      <RmtInf><Ustrd>OB aangifte</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>
+  </Stmt></BkToCstmrStmt>
+</Document>"#,
+            iban = SETTLE_IBAN,
+            amount = amount,
+            direction = direction
+        )
+    }
+
+    /// Import one OB payment; returns (amount_cents, date, account_code, state).
+    fn import_payment(
+        db: &Connection,
+        amount: &str,
+        direction: &str,
+    ) -> (i64, String, String, String) {
+        let txs = crate::bank::parse_camt053(&camt_payment(amount, direction)).unwrap();
+        crate::bank::import_transactions(db, SETTLE_IBAN, &txs, None, "1100", "human:erik")
+            .unwrap();
+        last_tx(db)
+    }
+
+    fn last_tx(db: &Connection) -> (i64, String, String, String) {
+        db.query_row(
+            "SELECT bt.amount_cents, bt.date, ba.account_code, bt.state
+             FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.bank_account_id
+             ORDER BY bt.id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap()
+    }
+
+    fn account_bal(db: &Connection, code: &str) -> i64 {
+        db.query_row(
+            "SELECT COALESCE(SUM(p.amount_cents), 0) FROM postings p
+             JOIN journal_entries e ON e.id = p.entry_id AND e.state = 'posted'
+             JOIN accounts a ON a.id = p.account_id WHERE a.code = ?1",
+            [code],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    /// JS vatNetPosition = -(sum of the profile's ledger account balances).
+    fn vat_net_position(db: &Connection) -> i64 {
+        -(account_bal(db, "1500") + account_bal(db, "2500"))
+    }
+
+    fn book_quarter(db: &Connection) {
+        // 121.00 sale (21 VAT) + 60.50 purchase (10.50 input) -> owe 10.50
+        book_vat_entry(
+            db,
+            "2026-07-01",
+            "Omzet Q3",
+            &specs(&["1100:121.00,8000:-100.00@21"]),
+            "manual",
+            None,
+            "human:erik",
+            true,
+        )
+        .unwrap();
+        book_vat_entry(
+            db,
+            "2026-07-05",
+            "Inkoop Q3",
+            &specs(&["1100:-60.50,4300:50.00@21"]),
+            "manual",
+            None,
+            "human:erik",
+            true,
+        )
+        .unwrap();
+    }
+
+    fn add_account(db: &Connection, code: &str, name: &str) {
+        crate::accounts::create_account(
+            db,
+            &crate::accounts::NewAccount {
+                code,
+                name,
+                type_: "liability",
+                normal_balance: "credit",
+                taxonomy_code: None,
+            },
+        )
+        .unwrap();
+    }
+
+    fn audit_args(db: &Connection, action: &str) -> Option<Value> {
+        db.query_row(
+            "SELECT args_json FROM audit_log WHERE action = ?1",
+            [action],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .unwrap()
+        .map(|j| serde_json::from_str(&j).unwrap())
+    }
+
+    #[test]
+    fn file_owe_clears_2500_and_books_the_liability_to_2510() {
+        let db = settle_company();
+        book_quarter(&db);
+        assert_eq!(vat_net_position(&db), 1050); // 2100 output - 1050 input
+        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        assert_eq!(r["owe"], true);
+        assert_eq!(r["liability_cents"], 1050);
+        assert_eq!(account_bal(&db, "2500"), 0); // clearing account emptied
+        assert_eq!(account_bal(&db, "2510"), -1050); // af te dragen (credit)
+        let n: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM audit_log WHERE action = 'vat.file'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1);
+        let args = audit_args(&db, "vat.file").unwrap();
+        assert_eq!(args["period"], "2026-Q3");
+        assert_eq!(args["liability_cents"], 1050);
+    }
+
+    #[test]
+    fn file_refund_position_clears_1500_and_debits_2510() {
+        let db = settle_company();
+        // only input VAT: 121.00 purchase -> 21.00 voorbelasting, no sales
+        book_vat_entry(
+            &db,
+            "2026-07-01",
+            "Inkoop",
+            &specs(&["1100:-121.00,4300:100.00@21"]),
+            "manual",
+            None,
+            "human:erik",
+            true,
+        )
+        .unwrap();
+        assert_eq!(vat_net_position(&db), -2100);
+        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        assert_eq!(r["owe"], false);
+        assert_eq!(r["liability_cents"], 2100);
+        assert_eq!(account_bal(&db, "1500"), 0);
+        assert_eq!(account_bal(&db, "2510"), 2100); // debit = terug te ontvangen
+    }
+
+    #[test]
+    fn file_nothing_to_file_when_the_position_is_zero() {
+        let db = settle_company();
+        assert_eq!(
+            vat_file(&db, None, None, None, "agent:test", false)
+                .unwrap_err()
+                .code,
+            "VAT_NOTHING_TO_FILE"
+        );
+    }
+
+    #[test]
+    fn file_dry_run_writes_nothing_and_does_not_create_the_account() {
+        let db = settle_company();
+        book_quarter(&db);
+        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", true).unwrap();
+        assert_eq!(r["dryRun"], true);
+        assert_eq!(r["liability_cents"], 1050);
+        assert_eq!(account_bal(&db, "2500"), -2100); // untouched
+        assert_eq!(account_bal(&db, "2510"), 0);
+        let created: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM accounts WHERE code = '2510'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(created, 0);
+        let audits: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM audit_log WHERE action = 'vat.file'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(audits, 0);
+    }
+
+    #[test]
+    fn settle_rounding_in_your_favour_books_a_gain_to_4700() {
+        let db = settle_company();
+        book_quarter(&db);
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        let (amt, date, code, state) = import_payment(&db, "10.00", "DBIT");
+        assert_eq!(state, "unmatched");
+        let r = vat_settle(
+            &db,
+            amt,
+            Some(&date),
+            &code,
+            None,
+            None,
+            Some("2026-Q3"),
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(r["difference_cents"], -50); // paid 50c less -> gain
+        assert_eq!(r["difference_account"], "4700");
+        assert_eq!(account_bal(&db, "2510"), 0);
+        assert_eq!(account_bal(&db, "4700"), -50);
+        assert_eq!(account_bal(&db, "1100"), 5050); // 121.00 - 60.50 - 10.00
+        let args = audit_args(&db, "vat.settle").unwrap();
+        assert_eq!(args["difference_cents"], -50);
+    }
+
+    #[test]
+    fn settle_refund_received_in_your_favour_books_a_gain() {
+        let db = settle_company();
+        book_vat_entry(
+            &db,
+            "2026-07-01",
+            "Inkoop",
+            &specs(&["1100:-121.00,8000:100.00@21"]),
+            "manual",
+            None,
+            "human:erik",
+            true,
+        )
+        .unwrap();
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        let (amt, date, code, _) = import_payment(&db, "22.00", "CRDT");
+        let r = vat_settle(
+            &db,
+            amt,
+            Some(&date),
+            &code,
+            None,
+            None,
+            Some("2026-Q3"),
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(r["difference_cents"], -100); // received 1.00 more -> gain
+        assert_eq!(account_bal(&db, "2510"), 0);
+        assert_eq!(account_bal(&db, "4700"), -100);
+        assert_eq!(account_bal(&db, "1100"), -9900); // -121.00 + 22.00
+    }
+
+    #[test]
+    fn settle_paying_more_than_booked_books_a_loss() {
+        let db = settle_company();
+        book_quarter(&db);
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        let (amt, date, code, _) = import_payment(&db, "11.00", "DBIT");
+        let r = vat_settle(
+            &db,
+            amt,
+            Some(&date),
+            &code,
+            None,
+            None,
+            Some("2026-Q3"),
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(r["difference_cents"], 50); // loss (debit)
+        assert_eq!(account_bal(&db, "4700"), 50);
+    }
+
+    #[test]
+    fn settle_difference_beyond_five_euro_is_rejected() {
+        let db = settle_company();
+        book_quarter(&db);
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        let (amt, date, code, _) = import_payment(&db, "20.00", "DBIT");
+        assert_eq!(
+            vat_settle(
+                &db,
+                amt,
+                Some(&date),
+                &code,
+                None,
+                None,
+                None,
+                None,
+                "agent:test",
+                false
+            )
+            .unwrap_err()
+            .code,
+            "VAT_SETTLE_DIFFERENCE_TOO_LARGE"
+        );
+    }
+
+    #[test]
+    fn settle_nothing_without_a_filed_balance() {
+        let db = settle_company();
+        book_quarter(&db);
+        let (amt, date, code, _) = import_payment(&db, "10.50", "DBIT");
+        assert_eq!(
+            vat_settle(
+                &db,
+                amt,
+                Some(&date),
+                &code,
+                None,
+                None,
+                None,
+                None,
+                "agent:test",
+                false
+            )
+            .unwrap_err()
+            .code,
+            "VAT_SETTLE_NOTHING"
+        );
+    }
+
+    #[test]
+    fn settle_direction_guard_blocks_incoming_against_a_payable() {
+        let db = settle_company();
+        book_quarter(&db);
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        let (amt, date, code, _) = import_payment(&db, "10.50", "CRDT");
+        assert_eq!(
+            vat_settle(
+                &db,
+                amt,
+                Some(&date),
+                &code,
+                None,
+                None,
+                None,
+                None,
+                "agent:test",
+                false
+            )
+            .unwrap_err()
+            .code,
+            "VAT_SETTLE_DIRECTION"
+        );
+    }
+
+    #[test]
+    fn settle_rejects_an_invalid_difference_account() {
+        let db = settle_company();
+        book_quarter(&db);
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        let (amt, date, code, _) = import_payment(&db, "10.50", "DBIT");
+        assert_eq!(
+            vat_settle(
+                &db,
+                amt,
+                Some(&date),
+                &code,
+                None,
+                Some("9999"),
+                None,
+                None,
+                "agent:test",
+                false
+            )
+            .unwrap_err()
+            .code,
+            "INVALID_DIFFERENCE_ACCOUNT"
+        );
+    }
+
+    #[test]
+    fn settle_dry_run_books_nothing_and_leaves_the_tx_unmatched() {
+        let db = settle_company();
+        book_quarter(&db);
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        let (amt, date, code, _) = import_payment(&db, "10.00", "DBIT");
+        let r = vat_settle(
+            &db,
+            amt,
+            Some(&date),
+            &code,
+            None,
+            None,
+            Some("2026-Q3"),
+            None,
+            "agent:test",
+            true,
+        )
+        .unwrap();
+        assert_eq!(r["dryRun"], true);
+        assert_eq!(r["difference_cents"], -50);
+        assert_eq!(account_bal(&db, "2510"), -1050); // untouched
+        let entries: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM journal_entries WHERE description LIKE '%Betaling OB%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(entries, 0);
+        assert_eq!(last_tx(&db).3, "unmatched");
+    }
+
+    #[test]
+    fn settle_custom_difference_account() {
+        let db = settle_company();
+        crate::accounts::create_account(
+            &db,
+            &crate::accounts::NewAccount {
+                code: "4850",
+                name: "Afrondingsverschillen",
+                type_: "expense",
+                normal_balance: "debit",
+                taxonomy_code: None,
+            },
+        )
+        .unwrap();
+        book_quarter(&db);
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        let (amt, date, code, _) = import_payment(&db, "10.00", "DBIT");
+        let r = vat_settle(
+            &db,
+            amt,
+            Some(&date),
+            &code,
+            None,
+            Some("4850"),
+            None,
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(r["difference_account"], "4850");
+        assert_eq!(account_bal(&db, "4850"), -50);
+        assert_eq!(account_bal(&db, "4700"), 0);
+    }
+
+    #[test]
+    fn readout_5d_agrees_with_the_booked_net_position() {
+        let db = settle_company();
+        book_quarter(&db);
+        let readout = ob_readout(&db, "2026-07").unwrap();
+        assert_eq!(readout["to_pay_cents"], 1050);
+        assert_eq!(
+            vat_net_position(&db),
+            readout["to_pay_cents"].as_i64().unwrap()
+        );
+    }
+
+    #[test]
+    fn file_falls_to_the_next_free_code_when_2510_is_taken() {
+        let db = settle_company();
+        add_account(&db, "2510", "Te betalen omzetbelasting 2025");
+        book_quarter(&db);
+        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        assert_eq!(r["account"], "2511"); // next best numeric code
+        assert_eq!(account_bal(&db, "2510"), 0); // the foreign 2510 is untouched
+        assert_eq!(account_bal(&db, "2511"), -1050);
+        let (name, type_, nb): (String, String, String) = db
+            .query_row(
+                "SELECT name, type, normal_balance FROM accounts WHERE code = '2511'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(name, "Af te dragen omzetbelasting");
+        assert_eq!(type_, "liability");
+        assert_eq!(nb, "credit");
+
+        // and the settlement can target that account explicitly
+        let (amt, date, code, _) = import_payment(&db, "10.00", "DBIT");
+        let s = vat_settle(
+            &db,
+            amt,
+            Some(&date),
+            &code,
+            Some("2511"),
+            None,
+            None,
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(s["account"], "2511");
+        assert_eq!(s["difference_cents"], -50);
+        assert_eq!(account_bal(&db, "2511"), 0);
+    }
+
+    #[test]
+    fn file_uses_a_custom_account_when_requested_and_settle_cancels_it() {
+        let db = settle_company();
+        book_quarter(&db);
+        let r = vat_file(
+            &db,
+            Some("2515"),
+            Some("2026-Q3"),
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(r["account"], "2515");
+        assert_eq!(account_bal(&db, "2515"), -1050);
+        assert_eq!(account_bal(&db, "2510"), 0); // default account untouched
+        let (amt, date, code, _) = import_payment(&db, "10.00", "DBIT");
+        let s = vat_settle(
+            &db,
+            amt,
+            Some(&date),
+            &code,
+            Some("2515"),
+            None,
+            None,
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(s["account"], "2515");
+        assert_eq!(account_bal(&db, "2515"), 0);
+    }
+
+    #[test]
+    fn file_dry_run_plans_the_next_free_code_without_creating_anything() {
+        let db = settle_company();
+        add_account(&db, "2510", "Oude schuld");
+        book_quarter(&db);
+        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", true).unwrap();
+        assert_eq!(r["dryRun"], true);
+        assert_eq!(r["account"], "2511"); // the plan shows where it WOULD land
+        let created: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM accounts WHERE code = '2511'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(created, 0);
+        assert_eq!(account_bal(&db, "2510"), 0);
+    }
+
+    #[test]
+    fn file_reuses_the_same_reassigned_account_across_filings() {
+        let db = settle_company();
+        add_account(&db, "2510", "Oude schuld");
+        book_quarter(&db);
+        let first = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        assert_eq!(first["account"], "2511");
+        // a second quarter must find the SAME 2511 again
+        book_vat_entry(
+            &db,
+            "2026-10-01",
+            "Omzet Q4",
+            &specs(&["1100:121.00,8000:-100.00@21"]),
+            "manual",
+            None,
+            "human:erik",
+            true,
+        )
+        .unwrap();
+        let second = vat_file(&db, None, Some("2026-Q4"), None, "agent:test", false).unwrap();
+        assert_eq!(second["account"], "2511"); // reuse, not 2512
+        assert_eq!(account_bal(&db, "2511"), -3150); // -1050 (Q3) + -2100 (Q4)
+    }
+
     #[test]
     fn enable_is_idempotent_and_seeds_codes() {
         let db = vat_company();
