@@ -854,7 +854,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 .ok_or_else(|| BukioError::new("MISSING_ARG", "batch_id required"))?;
             let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
             let dry_run = mode != "execute";
-            let r = crate::payments::export_payment_batch(db, id, actor, dry_run)?;
+            let r = crate::payments::export_payment_batch(db, id, actor, dry_run, None)?;
             if dry_run {
                 return Ok(r);
             }

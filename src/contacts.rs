@@ -34,6 +34,7 @@ fn serialize_contact(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "vat_id": row.get::<_, Option<String>>(7)?,
         "kvk": row.get::<_, Option<String>>(8)?,
         "created_by": row.get::<_, Option<String>>(9)?,
+        "created_at": row.get::<_, Option<String>>(10)?,
         "iban": row.get::<_, Option<String>>(11)?,
     }))
 }

@@ -3028,7 +3028,7 @@ fn cmd_payable_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
         .or_else(|| arg(argv, "--invoice-ref"))
         .unwrap_or_default();
     let date = arg(argv, "--date").unwrap_or_else(bukio::dates::today_iso);
-    let due = arg(argv, "--due").unwrap_or_else(bukio::dates::today_iso);
+    let due = arg(argv, "--due"); // absent => NULL, like the JS (no default)
     let amount_str = arg(argv, "--amount").ok_or_else(|| missing_arg("--amount"))?;
     let amount_cents = bukio::money::parse_amount(&amount_str)?;
     let method_raw = arg(argv, "--method").unwrap_or_else(|| "transfer".into());
@@ -3043,11 +3043,7 @@ fn cmd_payable_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
         &contact_ref,
         &invoice_ref,
         &date,
-        if due.is_empty() {
-            None
-        } else {
-            Some(due.as_str())
-        },
+        due.as_deref(),
         amount_cents,
         &method,
         actor,
@@ -3059,7 +3055,14 @@ fn cmd_payable_list(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let status = arg(argv, "--status");
     let method = arg(argv, "--method");
-    let rows = bukio::payments::list_payables(&db, status.as_deref(), method.as_deref(), None)?;
+    // the JS CLI maps ONLY 'direct-debit'/'transfer' and passes null otherwise,
+    // so any other value silently disables the filter — match that
+    let method_filter = match method.as_deref() {
+        Some("direct-debit") => Some("direct_debit"),
+        Some("transfer") => Some("transfer"),
+        _ => None,
+    };
+    let rows = bukio::payments::list_payables(&db, status.as_deref(), method_filter, None)?;
     Ok(json!({ "payables": rows }))
 }
 
@@ -3141,14 +3144,40 @@ fn cmd_batch_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool) 
             }
         }
     }
+    // "CONTACT:AMOUNT[:REF];..." (the JS CLI's parseLinesSpec) — the old code
+    // passed the raw text through and the engine dropped every line
     let lines: Vec<Value> = arg(argv, "--lines")
         .map(|s| {
             s.split(';')
                 .filter(|l| !l.trim().is_empty())
-                .map(|l| json!({ "raw": l.trim() }))
+                .map(|l| {
+                    let parts: Vec<&str> = l.trim().split(':').collect();
+                    let contact = parts.first().copied().unwrap_or("");
+                    let amount =
+                        bukio::import_mod::parse_import_amount(parts.get(1).copied().unwrap_or(""))
+                            .unwrap_or(0);
+                    let reference = if parts.len() > 2 {
+                        Some(parts[2..].join(":"))
+                    } else {
+                        None
+                    };
+                    json!({"contact": contact, "amountCents": amount, "reference": reference})
+                })
                 .collect()
         })
         .unwrap_or_default();
+    if let Some(csv_file) = arg(argv, "--csv") {
+        let csv_text = std::fs::read_to_string(&csv_file)
+            .map_err(|e| BukioError::new("FILE_ERROR", format!("cannot read {csv_file}: {e}")))?;
+        return bukio::payments::create_payment_batch_from_csv(
+            &db,
+            &csv_text,
+            date.as_deref(),
+            from_iban.as_deref(),
+            actor,
+            dry_run,
+        );
+    }
     bukio::payments::create_payment_batch(
         &db,
         date.as_deref(),
@@ -3188,7 +3217,9 @@ fn cmd_batch_export(argv: &[String], db_path: &str, actor: &str, dry_run: bool) 
     // One code path owns the SEPA build + status/audit transition (JS parity:
     // the CLI calls exportPaymentBatch) — a second hand-rolled builder here
     // silently skipped the status update and the msg_id/file_hash bookkeeping.
-    let mut result = bukio::payments::export_payment_batch(&db, id, actor, dry_run)?;
+    let schema = arg(argv, "--schema");
+    let mut result =
+        bukio::payments::export_payment_batch(&db, id, actor, dry_run, schema.as_deref())?;
     if let Some(path) = arg(argv, "--out") {
         let xml = result["xml"].as_str().unwrap_or("");
         std::fs::write(&path, xml)
