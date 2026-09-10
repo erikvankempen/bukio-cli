@@ -8564,3 +8564,392 @@ fn prune_backups_on_a_missing_folder_is_a_noop() {
     assert_eq!(r.len(), 0, "{r:?}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ==== export xaf + audit formats (ported from test/export.test.js) =========
+
+fn xpost(db: &rusqlite::Connection, date: &str, desc: &str, postings: &[(&str, i64)]) {
+    let specs = postings
+        .iter()
+        .map(|(code, cents)| bukio::entries::PostingSpec {
+            code: (*code).to_string(),
+            amount_cents: *cents,
+            cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
+        })
+        .collect();
+    let e = bukio::entries::create_entry(
+        db,
+        bukio::entries::CreateEntry {
+            date,
+            description: desc,
+            postings: specs,
+            source: "manual",
+            source_ref: None,
+            actor: "agent:test",
+        },
+    )
+    .unwrap();
+    bukio::entries::post_entry(db, e.id, "agent:test").unwrap();
+}
+
+/// A file DB with the default chart and company (the JS beforeEach + seedCompany).
+fn export_env(tag: &str) -> (std::path::PathBuf, String) {
+    cli_db(
+        tag,
+        &[
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "eenmanszaak",
+            "--vat",
+            "off",
+        ],
+    )
+}
+
+fn seed_scenario(db: &rusqlite::Connection) {
+    xpost(
+        db,
+        "2026-01-05",
+        "Startkapitaal",
+        &[("1100", 1000000), ("3000", -1000000)],
+    );
+    xpost(
+        db,
+        "2026-02-10",
+        "Omzet",
+        &[("1100", 121000), ("8000", -121000)],
+    );
+    // 3-leg VAT split
+    xpost(
+        db,
+        "2026-02-28",
+        "Factuur met btw",
+        &[("1100", 12100), ("8000", -10000), ("2100", -2100)],
+    );
+    // a draft must NOT appear in the export
+    bukio::entries::create_entry(
+        db,
+        bukio::entries::CreateEntry {
+            date: "2026-04-01",
+            description: "Concept",
+            postings: vec![
+                bukio::entries::PostingSpec {
+                    code: "4300".into(),
+                    amount_cents: 5000,
+                    cost_center_code: None,
+                    vat_code: None,
+                    vat_amount_cents: None,
+                },
+                bukio::entries::PostingSpec {
+                    code: "1100".into(),
+                    amount_cents: -5000,
+                    cost_center_code: None,
+                    vat_code: None,
+                    vat_amount_cents: None,
+                },
+            ],
+            source: "manual",
+            source_ref: None,
+            actor: "agent:test",
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn export_xaf_writes_a_4_0_file_with_header_chart_and_one_mutatie_per_posted_entry() {
+    let (dir, f) = export_env("xp1");
+    let db = bukio::db::open_db(&f).unwrap();
+    seed_scenario(&db);
+    let out = dir.join("jaar-2026.xaf");
+    let outs = out.to_str().unwrap().to_string();
+
+    let res = bukio::export::export_xaf(&db, "2026", &outs, "agent:test", false).unwrap();
+    assert_eq!(res["ok"], json!(true), "{res}");
+    assert_eq!(res["year"], json!("2026"));
+    assert_eq!(res["rekeningen"], json!(29));
+    assert_eq!(res["mutaties"], json!(3), "drafts are excluded: {res}");
+
+    let xml = std::fs::read_to_string(&out).unwrap();
+    assert!(
+        xml.contains(r#"<Xaf xmlns="http://www.auditfiles.nl/XAF/4.0">"#),
+        "{xml:.400}"
+    );
+    assert!(xml.contains("<Version>4.0</Version>"));
+    assert!(xml.contains("<Boekstuknummer>1</Boekstuknummer>"));
+    assert!(xml.contains("<Boekstuknummer>3</Boekstuknummer>"));
+    assert!(!xml.contains("Concept"), "drafts are not exported");
+    assert_eq!(
+        xml.matches("<Boeking>").count(),
+        4,
+        "1 + 1 + 2 (the 3-leg splits into two pairs)"
+    );
+    assert!(
+        xml.contains("<Bedrag>10000.00</Bedrag>"),
+        "bedrag is positive in XAF"
+    );
+    assert!(!xml.contains("-10000.00"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn export_xaf_three_leg_entry_round_trips_through_the_importer() {
+    let (dir, f) = export_env("xp2");
+    let db = bukio::db::open_db(&f).unwrap();
+    seed_scenario(&db);
+    let out = dir.join("roundtrip.xaf");
+    bukio::export::export_xaf(&db, "2026", out.to_str().unwrap(), "agent:test", false).unwrap();
+
+    // a fresh DB with the same chart, re-imported
+    let db2 = bukio::db::open_db(":memory:").unwrap();
+    bukio::accounts::seed_default_chart(&db2).unwrap();
+    let xml = std::fs::read_to_string(&out).unwrap();
+    let res = bukio::import_mod::import_xaf(&db2, &xml, "agent:test", false).unwrap();
+    assert_eq!(res["imported"], json!(3), "{res}");
+
+    // the 3-leg entry: 1100:12100 / 8000:-10000 / 2100:-2100 must reconstruct
+    let entry_id: i64 = db2
+        .query_row(
+            "SELECT id FROM journal_entries WHERE description = 'Factuur met btw'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let mut stmt = db2
+        .prepare("SELECT a.code, p.amount_cents FROM postings p JOIN accounts a ON a.id = p.account_id WHERE p.entry_id = ? ORDER BY a.code")
+        .unwrap();
+    let mut sums: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for row in stmt
+        .query_map([entry_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })
+        .unwrap()
+    {
+        let (code, cents) = row.unwrap();
+        *sums.entry(code).or_insert(0) += cents;
+    }
+    assert_eq!(sums.get("1100"), Some(&12100), "{sums:?}");
+    assert_eq!(sums.get("8000"), Some(&-10000), "{sums:?}");
+    assert_eq!(sums.get("2100"), Some(&-2100), "{sums:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn export_xaf_follows_the_fiscal_year_for_non_calendar_years() {
+    let (dir, f) = export_env("xp3");
+    let db = bukio::db::open_db(&f).unwrap();
+    // FY ends 06-30 -> exporting 2026 covers 2025-07-01..2026-06-30
+    db.execute("UPDATE company SET fiscal_year_end = '06-30'", [])
+        .unwrap();
+    xpost(
+        &db,
+        "2025-06-15",
+        "Te vroeg",
+        &[("1100", 1000), ("8000", -1000)],
+    );
+    xpost(
+        &db,
+        "2025-09-01",
+        "Binnen",
+        &[("1100", 2000), ("8000", -2000)],
+    );
+    xpost(
+        &db,
+        "2026-06-30",
+        "Laatste",
+        &[("1100", 3000), ("8000", -3000)],
+    );
+    xpost(
+        &db,
+        "2026-07-15",
+        "Te laat",
+        &[("1100", 4000), ("8000", -4000)],
+    );
+
+    let out = dir.join("fiscaal-2026.xaf");
+    let res =
+        bukio::export::export_xaf(&db, "2026", out.to_str().unwrap(), "agent:test", false).unwrap();
+    assert_eq!(
+        res["mutaties"],
+        json!(2),
+        "only the in-window entries: {res}"
+    );
+
+    let xml = std::fs::read_to_string(&out).unwrap();
+    assert!(
+        xml.contains("<StartDate>2025-07-01</StartDate>"),
+        "{xml:.400}"
+    );
+    assert!(xml.contains("<EndDate>2026-06-30</EndDate>"));
+    assert!(!xml.contains("Te vroeg"));
+    assert!(!xml.contains("Te laat"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn export_xaf_records_an_audit_row() {
+    let (dir, f) = export_env("xp4");
+    let db = bukio::db::open_db(&f).unwrap();
+    seed_scenario(&db);
+    let out = dir.join("audited.xaf");
+    let outs = out.to_str().unwrap().to_string();
+    bukio::export::export_xaf(&db, "2026", &outs, "agent:test", false).unwrap();
+
+    let rows = bukio::audit::list(&db, None, None, 100).unwrap();
+    let row = rows
+        .iter()
+        .find(|r| r["action"] == json!("export.xaf"))
+        .expect("export.xaf audit row expected");
+    assert_eq!(row["actor"], json!("agent:test"));
+    let args: Value = serde_json::from_str(row["args_json"].as_str().unwrap()).unwrap();
+    assert_eq!(args["year"], json!("2026"));
+    assert_eq!(args["out"], json!(outs));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn export_xaf_on_a_year_with_no_posted_entries_is_export_empty_year() {
+    let (dir, f) = export_env("xp5");
+    let db = bukio::db::open_db(&f).unwrap();
+    xpost(
+        &db,
+        "2025-12-31",
+        "Beginbalans",
+        &[("1100", 10000), ("3000", -10000)],
+    );
+    let out = dir.join("empty.xaf");
+    let err = bukio::export::export_xaf(&db, "2027", out.to_str().unwrap(), "agent:test", false)
+        .unwrap_err();
+    assert_eq!(err.code, "EXPORT_EMPTY_YEAR", "{err:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn export_xaf_escapes_ampersands_and_angle_brackets() {
+    let (dir, f) = export_env("xp6");
+    let db = bukio::db::open_db(&f).unwrap();
+    xpost(
+        &db,
+        "2026-01-02",
+        "Kosten & \"<extra>\"",
+        &[("4300", 1000), ("1100", -1000)],
+    );
+    let out = dir.join("escape.xaf");
+    bukio::export::export_xaf(&db, "2026", out.to_str().unwrap(), "agent:test", false).unwrap();
+    let xml = std::fs::read_to_string(&out).unwrap();
+    assert!(
+        xml.contains("Kosten &amp; &quot;&lt;extra&gt;&quot;"),
+        "escaped description expected in {xml:.600}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cli_export_xaf_year_out_writes_a_file() {
+    let (dir, f) = export_env("xp7");
+    let db = bukio::db::open_db(&f).unwrap();
+    seed_scenario(&db);
+    let out = dir.join("cli.xaf");
+    let (_, ok, stdout) = run_cli(&[
+        "--json",
+        "export",
+        "xaf",
+        "--year",
+        "2026",
+        "--out",
+        out.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{stdout}");
+    assert!(
+        std::fs::read_to_string(&out).unwrap().contains("<Xaf"),
+        "the file holds the XAF document"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn audit_csv_exports_rows_with_headers() {
+    let (dir, f) = export_env("xp8");
+    let db = bukio::db::open_db(&f).unwrap();
+    seed_scenario(&db);
+    let out = dir.join("audit.csv");
+    let (_, ok, stdout) = run_cli(&[
+        "--json",
+        "audit",
+        "--format",
+        "csv",
+        "--out",
+        out.to_str().unwrap(),
+        "--limit",
+        "5",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{stdout}");
+    let csv = std::fs::read_to_string(&out).unwrap();
+    assert!(
+        csv.starts_with("id,timestamp,actor,action,command,args,outcome,entry_ids"),
+        "header row: {csv:.200}"
+    );
+    assert!(csv.contains("entry.post"), "{csv:.400}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn audit_xlsx_requires_out_and_writes_a_workbook() {
+    let (dir, f) = export_env("xp9");
+    let db = bukio::db::open_db(&f).unwrap();
+    seed_scenario(&db);
+    let out = dir.join("audit.xlsx");
+    let (_, ok, stdout) = run_cli(&[
+        "--json",
+        "audit",
+        "--format",
+        "xlsx",
+        "--out",
+        out.to_str().unwrap(),
+        "--limit",
+        "5",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{stdout}");
+    let buf = std::fs::read(&out).unwrap();
+    assert_eq!((buf[0], buf[1]), (0x50, 0x4b), "xlsx is a zip");
+
+    // no --out → OUT_REQUIRED
+    let (r, ok, stdout) = run_cli(&["--json", "audit", "--format", "xlsx", "--db", &f]);
+    assert!(!ok);
+    assert!(
+        r["error"]["code"] == json!("OUT_REQUIRED") || stdout.contains("OUT_REQUIRED"),
+        "OUT_REQUIRED expected: {stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn export_xaf_for_a_year_with_nothing_posted_is_export_empty_year_via_cli() {
+    let (dir, f) = export_env("xp10");
+    let out = dir.join("x.xaf");
+    let (r, ok, stdout) = run_cli(&[
+        "--json",
+        "export",
+        "xaf",
+        "--year",
+        "2030",
+        "--out",
+        out.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(!ok);
+    assert!(
+        r["error"]["code"] == json!("EXPORT_EMPTY_YEAR") || stdout.contains("EXPORT_EMPTY_YEAR"),
+        "{stdout}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

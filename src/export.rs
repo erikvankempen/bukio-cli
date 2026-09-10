@@ -203,21 +203,25 @@ fn build_xaf_40(
     xml.push_str("  </Rekeningen>\n  <Mutaties>\n");
 
     let mut mutatie_ids = Vec::new();
-    for (eid, _date, desc, _) in &posted {
+    for (eid, date, desc, _) in &posted {
         let rows = by_entry.get(eid).cloned().unwrap_or_default();
         if rows.is_empty() {
             continue;
         }
         mutatie_ids.push(eid);
-        let d = if desc.is_empty() {
+        let oms = if desc.is_empty() {
             format!("Boeking {eid}")
         } else {
             desc.clone()
         };
+        // <Datum> is the entry's date — the loop used to ignore it and write the
+        // first 10 chars of the description, so every exported boekstuk carried
+        // a garbage date (and the round-trip failed INVALID_DATE)
+        let datum = &date[..10.min(date.len())];
         let boekingen = to_boekingen(&rows);
-        xml.push_str(&format!("    <Mutatie>\n      <Boekstuknummer>{eid}</Boekstuknummer>\n      <Datum>{}</Datum>\n      <Omschrijving>{}</Omschrijving>\n      <Boekingen>\n", &d[..10.min(d.len())], esc(&d)));
+        xml.push_str(&format!("    <Mutatie>\n      <Boekstuknummer>{eid}</Boekstuknummer>\n      <Datum>{}</Datum>\n      <Omschrijving>{}</Omschrijving>\n      <Boekingen>\n", datum, esc(&oms)));
         for (rek, tegen, bedrag) in &boekingen {
-            xml.push_str(&format!("        <Boeking>\n          <RekeningCode>{}</RekeningCode>\n          <TegenrekeningCode>{}</TegenrekeningCode>\n          <Bedrag>{}</Bedrag>\n          <Omschrijving>{}</Omschrijving>\n        </Boeking>\n", esc(rek), esc(tegen), format_amount(*bedrag), esc(&d)));
+            xml.push_str(&format!("        <Boeking>\n          <RekeningCode>{}</RekeningCode>\n          <TegenrekeningCode>{}</TegenrekeningCode>\n          <Bedrag>{}</Bedrag>\n          <Omschrijving>{}</Omschrijving>\n        </Boeking>\n", esc(rek), esc(tegen), format_amount(*bedrag), esc(&oms)));
         }
         xml.push_str("      </Boekingen>\n    </Mutatie>\n");
     }

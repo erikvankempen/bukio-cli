@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 20:14:29 UTC — **✅ 392 passing · 0 failing (392 tests)**
+**Latest run:** 2026-09-10 20:23:13 UTC — **✅ 382 passing · 0 failing (382 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -160,21 +160,6 @@
     - ✅ stage 10: payables + SEPA batch — two suppliers in one pain.001
     - ✅ stage 11: year-end close, jaarrekening micro, ICP readout
     - ✅ stage 12: final verification — balanced books, bank, audit, backup
-
-### export.test.js — export xaf (Auditfile 4.0, round-trips through the importer) + audit csv/xlsx
-
-10 passing · 0 failing
-
-    - ✅ export xaf: writes a 4.0 file with header, chart and one Mutatie per posted entry
-    - ✅ export xaf: 3-leg entry round-trips through the importer losslessly
-    - ✅ export xaf: follows the FISCAL year for non-calendar fiscal years
-    - ✅ export xaf: records an export.xaf audit row
-    - ✅ export xaf: throws EXPORT_EMPTY_YEAR for a year with no posted entries
-    - ✅ export xaf: escaping — ampersands and < in descriptions survive XML
-    - ✅ cli: bukio export xaf --year --out writes a file
-    - ✅ audit: csv format exports rows with headers
-    - ✅ audit: xlsx format requires --out and writes a workbook
-    - ✅ export xaf: unknown-year-only drafts → EXPORT_EMPTY_YEAR via CLI
 
 ### hardening.test.js — 
 
