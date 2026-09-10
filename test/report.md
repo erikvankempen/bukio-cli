@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 15:38:13 UTC — **✅ 619 passing · 0 failing (619 tests)**
+**Latest run:** 2026-09-10 15:53:57 UTC — **✅ 611 passing · 0 failing (611 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -607,19 +607,6 @@
     - ✅ RO: init --country RO creates a Romanian company (language defaults to ro)
     - ✅ XK: getProfile returns the XK profile (EUR, sq, SKRFI convention chart)
     - ✅ XK: init --country XK creates a Kosovar company (language defaults to sq)
-
-### month-end.test.js — month-end close check
-
-8 passing · 0 failing
-
-    - ✅ month-end: clean month -> all clear, zero totals
-    - ✅ month-end: drafts and unmatched bank transactions are flagged
-    - ✅ month-end: VAT quarter readout when module on
-    - ✅ month-end: profit = income - expense for the period
-    - ✅ month-end: December totals exclude year-end closing entries
-    - ✅ month-end: overdue invoice warning with outstanding total
-    - ✅ month-end: invalid period rejected
-    - ✅ month-end: draft invoices are warned (booked revenue may be uninvoiced)
 
 ### remote.test.js — 
 
