@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 20:54:19 UTC — **✅ 324 passing · 0 failing (324 tests)**
+**Latest run:** 2026-09-10 20:59:45 UTC — **✅ 304 passing · 0 failing (304 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -333,31 +333,6 @@
     - ✅ RO: init --country RO creates a Romanian company (language defaults to ro)
     - ✅ XK: getProfile returns the XK profile (EUR, sq, SKRFI convention chart)
     - ✅ XK: init --country XK creates a Kosovar company (language defaults to sq)
-
-### remote.test.js — 
-
-20 passing · 0 failing
-
-    - ✅ server token: mints a single-use, actor-bound token (hashed at rest)
-    - ✅ remote register: enrols a client-only key (private key never leaves the client)
-    - ✅ remote register: a used token is refused (TOKEN_USED)
-    - ✅ remote register: an unknown / mismatched token is refused
-    - ✅ remote register: --token is required with --server (TOKEN_REQUIRED)
-    - ✅ remote register: an expired token is refused (TOKEN_EXPIRED)
-    - ✅ remote read: trial balance matches the local view (same device OK)
-    - ✅ remote mutation: posts an entry, the audit row carries the REAL signature
-    - ✅ remote mutation: dry-run parity (plan, no side effect)
-    - ✅ remote human output: byte-identical to local human output
-    - ✅ replay: the SAME envelope twice is refused (NONCE_REUSED)
-    - ✅ tamper: changing the signed argv breaks the signature (SIGNATURE_INVALID)
-    - ✅ enforcement: an unsigned envelope is refused under enforce (SIGNATURE_REQUIRED)
-    - ✅ authz: a readonly actor is refused a mutation (AUTHZ_DENIED)
-    - ✅ local-only commands refuse under --server (LOCAL_ONLY)
-    - ✅ health endpoint reports ok
-    - ✅ unknown route is 404
-    - ✅ unreachable server: clean REMOTE_UNREACHABLE error
-    - ✅ server token rejects a bad --ttl-hours value
-    - ✅ envelope can carry the --db of the CLIENT but the server DB is authoritative
 
 ---
 _Regenerated automatically on every `npm test`._
