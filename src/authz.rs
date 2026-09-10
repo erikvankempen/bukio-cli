@@ -61,6 +61,14 @@ pub const CLI_CAPABILITIES: &[(&str, &str)] = &[
     ("company update", "admin.company"),
     ("company logo", "admin.company"),
     ("update", "admin.company"),
+    // imports + vat enable: admin.company (JS parity — these were unmapped, so
+    // under `authz on` they were denied to EVERYONE including the owner)
+    ("import opening-balances", "admin.company"),
+    ("import journal", "admin.company"),
+    ("import xaf", "admin.company"),
+    ("import invoice", "admin.company"),
+    ("import contacts", "admin.company"),
+    ("vat enable", "admin.company"),
     ("account add", "admin.chart"),
     ("account import", "admin.chart"),
     ("account deactivate", "admin.chart"),
@@ -131,6 +139,7 @@ pub const CLI_CAPABILITIES: &[(&str, &str)] = &[
     ("year-end status", "close.year"),
     ("year-end close", "close.year"),
     ("year-end report", "close.year"),
+    ("financial-statements report", "close.year"),
     ("export xaf", "export.manage"),
     ("fx set", "fx.manage"),
     ("fx fetch", "fx.manage"),
@@ -408,6 +417,397 @@ pub fn check_authz(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── ported from test/authz.test.js ──
+
+    /// Every real CLI command path (the JS suite carried the same list).
+    const CLI_PATHS: &[&str] = &[
+        "init",
+        "account add",
+        "account list",
+        "account show",
+        "account deactivate",
+        "account reactivate",
+        "account import",
+        "actor keygen",
+        "actor register",
+        "actor list",
+        "actor revoke",
+        "actor enforce",
+        "actor unlock",
+        "actor lock",
+        "actor verify",
+        "assets scheme add",
+        "assets scheme list",
+        "assets add",
+        "assets list",
+        "assets show",
+        "assets run",
+        "assets register",
+        "assets dispose",
+        "assets pause",
+        "assets resume",
+        "attach add",
+        "attach list",
+        "attach show",
+        "attach remove",
+        "audit",
+        "audit verify",
+        "backup",
+        "restore",
+        "bank add",
+        "bank list",
+        "bank import",
+        "bank transactions",
+        "bank match auto",
+        "bank match suggest",
+        "bank match link",
+        "bank match post",
+        "bank ignore",
+        "bank unignore",
+        "company show",
+        "company update",
+        "company logo",
+        "compliance status",
+        "compliance mark",
+        "contact add",
+        "contact update",
+        "contact list",
+        "contact statement",
+        "entry add",
+        "entry post",
+        "entry reverse",
+        "entry list",
+        "entry show",
+        "export xaf",
+        "fx fetch",
+        "fx set",
+        "fx show",
+        "fx list",
+        "icp readout",
+        "import opening-balances",
+        "import journal",
+        "import contacts",
+        "import xaf",
+        "import invoice",
+        "invoice create",
+        "invoice finalize",
+        "invoice list",
+        "invoice show",
+        "invoice pdf",
+        "invoice ubl",
+        "invoice credit",
+        "invoice peppol-send",
+        "invoice pay",
+        "invoice email",
+        "invoice reminders",
+        "item add",
+        "item list",
+        "item show",
+        "item update",
+        "month-end",
+        "payments payables add",
+        "payments payables list",
+        "payments payables pay",
+        "payments mandate add",
+        "payments mandate list",
+        "payments mandate remove",
+        "payments batch create",
+        "payments batch list",
+        "payments batch show",
+        "payments batch delete",
+        "payments batch export",
+        "recurring add",
+        "recurring list",
+        "recurring show",
+        "recurring pause",
+        "recurring resume",
+        "recurring preview",
+        "recurring run",
+        "report trial-balance",
+        "report balance-sheet",
+        "report pnl",
+        "report journal",
+        "report aging",
+        "report sales",
+        "update",
+        "vat enable",
+        "vat codes",
+        "vat book",
+        "vat readout",
+        "vat file",
+        "vat settle",
+        "year-end close",
+        "year-end status",
+        "year-end report",
+        "financial-statements report",
+        "mcp",
+        "server start",
+        "server token",
+    ];
+
+    const MCP_MUTATING_TOOLS: &[&str] = &[
+        "entry_add",
+        "entry_post",
+        "entry_reverse",
+        "vat_book",
+        "invoice_create",
+        "invoice_finalize",
+        "invoice_credit",
+        "invoice_pay",
+        "invoice_email",
+        "invoice_import",
+        "item_add",
+        "item_update",
+        "attachment_add",
+        "attachment_remove",
+        "payments_mandate_add",
+        "payments_batch_create",
+        "payments_batch_export",
+        "recurring_run",
+        "year_end_close",
+        "fx_set",
+        "contact_add",
+        "asset_add",
+        "assets_run",
+        "asset_dispose",
+    ];
+
+    fn known_capabilities() -> std::collections::HashSet<&'static str> {
+        let mut set = std::collections::HashSet::new();
+        for (_, caps) in ROLE_CAPABILITIES {
+            for c in *caps {
+                set.insert(*c);
+            }
+        }
+        for (_, c) in CLI_CAPABILITIES {
+            set.insert(*c);
+        }
+        for (_, c) in MCP_CAPABILITIES {
+            set.insert(*c);
+        }
+        set
+    }
+
+    fn fresh_db() -> Connection {
+        let db = crate::db::open_db(":memory:").unwrap();
+        db.execute("INSERT INTO company (id, name) VALUES (1, 'X')", [])
+            .unwrap();
+        db
+    }
+
+    fn turn_authz_on(db: &Connection) {
+        db.execute(
+            "UPDATE settings SET value = 'on' WHERE key = 'authz_mode'",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn every_cli_path_maps_or_is_exempt() {
+        let missing: Vec<&str> = CLI_PATHS
+            .iter()
+            .copied()
+            .filter(|c| !is_authz_exempt(c, false) && capability_of(c, false).is_none())
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "real CLI commands without a capability mapping: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn every_mcp_mutating_tool_maps() {
+        let missing: Vec<&str> = MCP_MUTATING_TOOLS
+            .iter()
+            .copied()
+            .filter(|t| capability_of(&format!("mcp:{t}"), false).is_none())
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "MCP mutating tools without a capability mapping: {missing:?}"
+        );
+    }
+
+    #[test]
+    fn unmapped_commands_fail_closed() {
+        assert_eq!(capability_of("totally made-up", false), None);
+        assert_eq!(capability_of("mcp:made_up_tool", false), None);
+        assert_eq!(capability_of("", false), None);
+    }
+
+    #[test]
+    fn role_capabilities_reference_real_capabilities() {
+        let known = known_capabilities();
+        for (role, caps) in ROLE_CAPABILITIES {
+            assert!(ROLES.contains(role), "unknown role {role}");
+            for c in *caps {
+                assert!(
+                    known.contains(*c),
+                    "role {role} references unknown capability {c}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sod_map_stays_in_sync() {
+        let known = known_capabilities();
+        for (roles, msg) in SOD_PAIRS {
+            for r in *roles {
+                assert!(ROLES.contains(r), "unknown role {r} in an SoD pair");
+            }
+            assert!(msg.len() > 10);
+        }
+        for c in SOD_CAPABILITY_PAIR.0 {
+            assert!(
+                known.contains(*c),
+                "unknown capability {c} in the SoD capability pair"
+            );
+        }
+    }
+
+    #[test]
+    fn sod_warnings_pairs_and_clean_sets() {
+        assert!(sod_warnings(&["bookkeeper".into()]).is_empty());
+        assert!(sod_warnings(&["readonly".into()]).is_empty());
+        assert_eq!(
+            sod_warnings(&["bookkeeper".into(), "payments".into()]),
+            vec![
+                "bookkeeper + payments: the same actor books AND authorises money out".to_string(),
+                "entry.post + payments.sepa: the same actor moves the ledger AND authorises money out (strongest pair)".to_string(),
+            ]
+        );
+        assert_eq!(
+            sod_warnings(&["bookkeeper".into(), "tax".into()]),
+            vec!["bookkeeper + tax: the same actor books AND files tax".to_string()]
+        );
+        assert_eq!(
+            sod_warnings(&["payments".into(), "tax".into()]),
+            vec!["payments + tax: the same actor authorises money out AND files tax".to_string()]
+        );
+        // the owner may do everything — no warning
+        assert!(sod_warnings(&[
+            "owner".into(),
+            "bookkeeper".into(),
+            "payments".into(),
+            "tax".into()
+        ])
+        .is_empty());
+    }
+
+    #[test]
+    fn is_authz_exempt_self_service_versus_owner_actions() {
+        assert!(is_authz_exempt("actor keygen", false));
+        assert!(is_authz_exempt("actor unlock", false));
+        assert!(is_authz_exempt("actor lock", false));
+        assert!(is_authz_exempt("mcp", false));
+        assert!(is_authz_exempt("actor register", false));
+        assert!(is_authz_exempt("actor verify", false));
+        assert!(is_authz_exempt("actor roles", false)); // self
+        assert!(is_authz_exempt("actor can", false)); // self
+        assert!(is_authz_exempt("actor revoke", false)); // self-revoke
+                                                         // aimed at OTHERS these are owner territory (has_target)
+        assert!(!is_authz_exempt("actor roles", true));
+        assert!(!is_authz_exempt("actor can", true));
+        assert!(!is_authz_exempt("actor revoke", true));
+        // everything else is checked
+        assert!(!is_authz_exempt("entry add", false));
+        assert!(!is_authz_exempt("report trial-balance", false));
+        assert!(!is_authz_exempt("actor who-can", false));
+        assert!(!is_authz_exempt("actor list", false));
+        assert!(!is_authz_exempt("mcp:entry_add", false));
+    }
+
+    #[test]
+    fn can_act_deny_by_default_and_role_scoping() {
+        let db = fresh_db();
+        assert!(!can_act(&db, "agent:nobody", "report.read"));
+        assert!(!can_act(&db, "agent:nobody", "entry.draft"));
+
+        crate::actor::grant_role(&db, "human:erik", "owner", "human:erik").unwrap();
+        crate::actor::grant_role(&db, "agent:invoicing", "bookkeeper", "human:erik").unwrap();
+        crate::actor::grant_role(&db, "agent:pay", "payments", "human:erik").unwrap();
+        crate::actor::grant_role(&db, "agent:auditor", "readonly", "human:erik").unwrap();
+
+        // owner passes everything
+        assert!(can_act(&db, "human:erik", "admin.actor"));
+        assert!(can_act(&db, "human:erik", "payments.sepa"));
+        assert!(can_act(&db, "human:erik", "report.read"));
+
+        assert!(can_act(&db, "agent:invoicing", "entry.post"));
+        assert!(can_act(&db, "agent:invoicing", "invoice.manage"));
+        assert!(!can_act(&db, "agent:invoicing", "payments.sepa"));
+        assert!(!can_act(&db, "agent:invoicing", "vat.file"));
+
+        assert!(can_act(&db, "agent:pay", "payments.sepa"));
+        assert!(can_act(&db, "agent:pay", "bank.import"));
+        assert!(!can_act(&db, "agent:pay", "entry.post"));
+
+        assert!(can_act(&db, "agent:auditor", "report.read"));
+        assert!(!can_act(&db, "agent:auditor", "entry.draft"));
+
+        // fail closed — an empty capability is never granted
+        assert!(!can_act(&db, "human:erik", ""));
+    }
+
+    #[test]
+    fn check_authz_off_by_default_never_refuses() {
+        let db = fresh_db();
+        assert!(check_authz(&db, "agent:nobody", "entry add", false, false).is_ok());
+        assert!(check_authz(&db, "agent:nobody", "actor roles grant", false, false).is_ok());
+    }
+
+    #[test]
+    fn check_authz_unmapped_denies_when_on() {
+        let db = fresh_db();
+        turn_authz_on(&db);
+        crate::actor::grant_role(&db, "human:erik", "owner", "human:erik").unwrap();
+        let err = check_authz(&db, "human:erik", "made-up cmd", false, false).unwrap_err();
+        assert_eq!(err.code, "AUTHZ_DENIED");
+    }
+
+    #[test]
+    fn check_authz_denial_names_actor_capability_and_roles() {
+        let db = fresh_db();
+        turn_authz_on(&db);
+        crate::actor::grant_role(&db, "agent:invoicing", "bookkeeper", "human:erik").unwrap();
+        let err = check_authz(&db, "agent:invoicing", "vat file", false, false).unwrap_err();
+        assert_eq!(err.code, "AUTHZ_DENIED");
+        assert!(err.message.contains("agent:invoicing"));
+        assert!(err.message.contains("'vat.file'"));
+        assert!(err.message.contains("bookkeeper"));
+    }
+
+    #[test]
+    fn check_authz_resolves_by_actual_mutation() {
+        let db = fresh_db();
+        turn_authz_on(&db);
+        crate::actor::grant_role(&db, "agent:invoicing", "bookkeeper", "human:erik").unwrap();
+        // entry add --post needs entry.post, which bookkeeper holds
+        assert!(check_authz(&db, "agent:invoicing", "entry add", false, true).is_ok());
+        // vat file needs vat.file, which bookkeeper does not
+        let err = check_authz(&db, "agent:invoicing", "vat file", false, false).unwrap_err();
+        assert_eq!(err.code, "AUTHZ_DENIED");
+    }
+
+    #[test]
+    fn check_authz_owner_kill_needs_owner_regardless_of_mode() {
+        let db = fresh_db();
+        crate::actor::grant_role(&db, "agent:invoicing", "bookkeeper", "human:erik").unwrap();
+        // authz is OFF, but the owner-kill is still owner-only (D8)
+        let err = check_authz(&db, "agent:invoicing", "actor revoke", true, false).unwrap_err();
+        assert_eq!(err.code, "AUTHZ_DENIED");
+        crate::actor::grant_role(&db, "human:erik", "owner", "human:erik").unwrap();
+        assert!(check_authz(&db, "human:erik", "actor revoke", true, false).is_ok());
+    }
+
+    #[test]
+    fn capability_of_resolves_entry_add_by_the_actual_mutation() {
+        assert_eq!(capability_of("entry add", false), Some("entry.draft"));
+        assert_eq!(capability_of("entry add", true), Some("entry.post"));
+    }
 
     #[test]
     fn sod_warnings_basic() {
