@@ -313,7 +313,7 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
         ));
     }
 
-    let tx = db.unchecked_transaction().map_err(sql_err)?;
+    let tx = begin(db)?;
     let entry_id = {
         tx.execute(
             "INSERT INTO journal_entries (date, description, source, source_ref, state, created_by)
@@ -355,13 +355,50 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
         )?;
         id
     };
-    tx.commit().map_err(sql_err)?;
+    tx.commit()?;
     get_entry(db, entry_id)
         .ok_or_else(|| BukioError::new("INTERNAL", "entry vanished after insert"))
 }
 
 fn sql_err(e: rusqlite::Error) -> BukioError {
     BukioError::new("DB_ERROR", e.to_string())
+}
+
+/// A write scope: a real transaction when we own the connection's transaction,
+/// otherwise the ambient one. SQLite has no nested BEGIN and better-sqlite3 —
+/// which this port mirrors — nests via SAVEPOINT, so a caller that composes
+/// several writes (dispose_asset, the importers) must not lose atomicity just
+/// because create_entry/post_entry would otherwise open a second transaction.
+pub(crate) enum Tx<'a> {
+    Owned(rusqlite::Transaction<'a>),
+    Ambient(&'a Connection),
+}
+
+impl std::ops::Deref for Tx<'_> {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        match self {
+            Tx::Owned(t) => t,
+            Tx::Ambient(c) => c,
+        }
+    }
+}
+
+impl Tx<'_> {
+    pub(crate) fn commit(self) -> Result<()> {
+        match self {
+            Tx::Owned(t) => t.commit().map_err(sql_err),
+            Tx::Ambient(_) => Ok(()),
+        }
+    }
+}
+
+pub(crate) fn begin(db: &Connection) -> Result<Tx<'_>> {
+    if db.is_autocommit() {
+        Ok(Tx::Owned(db.unchecked_transaction().map_err(sql_err)?))
+    } else {
+        Ok(Tx::Ambient(db))
+    }
 }
 
 /// Transition draft -> posted (DB trigger backstops balance).
@@ -383,7 +420,7 @@ pub fn post_entry(db: &Connection, id: i64, actor: &str) -> Result<Entry> {
         }
         _ => {}
     }
-    let tx = db.unchecked_transaction().map_err(sql_err)?;
+    let tx = begin(db)?;
     {
         let inactive: Vec<String> = {
             let mut stmt = tx
@@ -425,7 +462,7 @@ pub fn post_entry(db: &Connection, id: i64, actor: &str) -> Result<Entry> {
             },
         )?;
     }
-    tx.commit().map_err(sql_err)?;
+    tx.commit()?;
     get_entry(db, id).ok_or_else(|| BukioError::new("INTERNAL", "entry vanished"))
 }
 
@@ -467,7 +504,7 @@ pub fn reverse_entry(db: &Connection, id: i64, actor: &str, reason: Option<&str>
         Some(r) if !r.is_empty() => format!("Reversal of entry {id} — {r}"),
         _ => format!("Reversal of entry {id}"),
     };
-    let tx = db.unchecked_transaction().map_err(sql_err)?;
+    let tx = begin(db)?;
     let reversal_id = {
         // re-check inside the transaction (two processes, WAL) — same guard as JS
         if count_reversals(&tx)? > 0 {
@@ -513,7 +550,7 @@ pub fn reverse_entry(db: &Connection, id: i64, actor: &str, reason: Option<&str>
         )?;
         rid
     };
-    tx.commit().map_err(sql_err)?;
+    tx.commit()?;
     get_entry(db, reversal_id).ok_or_else(|| BukioError::new("INTERNAL", "reversal vanished"))
 }
 

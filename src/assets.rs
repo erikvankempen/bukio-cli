@@ -14,8 +14,13 @@ use serde_json::{json, Value};
 fn assets_error(code: &'static str, msg: impl Into<String>) -> BukioError {
     BukioError::new(code, msg.into())
 }
-fn valid_date(s: &str) -> bool {
+pub fn valid_date(s: &str) -> bool {
     chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").is_ok()
+}
+
+/// `YYYY-MM` with month 01-12 (mirrors the JS /^\d{4}-(0[1-9]|1[0-2])$/).
+fn valid_period(s: &str) -> bool {
+    s.len() == 7 && chrono::NaiveDate::parse_from_str(&format!("{s}-01"), "%Y-%m-%d").is_ok()
 }
 
 fn month_diff(a: &str, b: &str) -> i32 {
@@ -74,11 +79,31 @@ fn first_run_period(recognition: &str, start: &str) -> String {
 }
 
 pub fn list_schemes(db: &Connection) -> Result<Vec<Value>> {
-    let mut stmt = db.prepare("SELECT id, name, method, life_months, residual_bp FROM depreciation_schemes ORDER BY id").map_err(sql_err)?;
-    let rows = stmt.query_map([], |r| {
-        Ok(json!({"id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?, "method": r.get::<_, String>(2)?, "life_months": r.get::<_, i64>(3)?, "residual_bp": r.get::<_, i64>(4)?}))
-    }).map_err(sql_err)?;
+    // the JS listSchemes is SELECT * — every column, not a projection
+    let mut stmt = db
+        .prepare("SELECT * FROM depreciation_schemes ORDER BY id")
+        .map_err(sql_err)?;
+    let rows = stmt.query_map([], row_json).map_err(sql_err)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+pub fn get_scheme_by_name(db: &Connection, name: &str) -> Result<Option<Value>> {
+    let r = db.query_row(
+        "SELECT id, name, method, life_months, residual_bp FROM depreciation_schemes WHERE name = ?1",
+        [name],
+        |r| {
+            Ok(json!({
+                "id": r.get::<_, i64>(0)?, "name": r.get::<_, String>(1)?,
+                "method": r.get::<_, String>(2)?, "life_months": r.get::<_, i64>(3)?,
+                "residual_bp": r.get::<_, i64>(4)?,
+            }))
+        },
+    );
+    match r {
+        Ok(v) => Ok(Some(v)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(sql_err(e)),
+    }
 }
 
 pub fn get_scheme(db: &Connection, id: i64) -> Result<Option<Value>> {
@@ -121,31 +146,41 @@ pub fn create_scheme(
     actor: &str,
     dry_run: bool,
 ) -> Result<Value> {
-    if name.trim().is_empty() {
+    let clean = name.trim();
+    if clean.is_empty() {
         return Err(assets_error("INVALID_NAME", "scheme needs a name"));
+    }
+    if get_scheme_by_name(db, clean)?.is_some() {
+        return Err(assets_error(
+            "SCHEME_NAME_TAKEN",
+            format!("scheme '{clean}' already exists"),
+        ));
     }
     if !["lineair", "degressief"].contains(&method) {
         return Err(assets_error(
             "INVALID_METHOD",
-            format!("method must be lineair or degressief, got '{method}'"),
+            format!("method must be 'lineair' or 'degressief', got '{method}'"),
         ));
     }
     if life_months < 1 || life_months > 600 {
-        return Err(assets_error("INVALID_LIFE", "life-months must be 1-600"));
+        return Err(assets_error(
+            "INVALID_LIFE",
+            "life-months must be an integer between 1 and 600",
+        ));
     }
     if residual_bp < 0 || residual_bp > 10000 {
         return Err(assets_error(
             "INVALID_RESIDUAL",
-            "residual-bp must be 0-10000",
+            "residual-bp must be between 0 and 10000",
         ));
     }
     if dry_run {
         return Ok(
-            json!({"action": "assets.scheme.add", "name": name, "method": method, "life_months": life_months, "residual_bp": residual_bp, "dryRun": true}),
+            json!({"action": "assets.scheme.add", "name": clean, "method": method, "life_months": life_months, "residual_bp": residual_bp, "dryRun": true}),
         );
     }
     db.execute("INSERT INTO depreciation_schemes (name, method, life_months, residual_bp, created_by) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![name, method, life_months, residual_bp, actor]).map_err(sql_err)?;
+        rusqlite::params![clean, method, life_months, residual_bp, actor]).map_err(sql_err)?;
     let id = db.last_insert_rowid();
     get_scheme(db, id)?.ok_or_else(|| assets_error("DB_ERROR", "scheme not found after insert"))
 }
@@ -205,44 +240,74 @@ pub fn module_dep_to_period(db: &Connection, asset_id: i64, period: &str) -> Res
         rusqlite::params![asset_id, period], |r| r.get(0)).map_err(sql_err)
 }
 
+/// All of a row's columns as JSON — the JS spread `...row`.
+fn row_json(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    let mut obj = serde_json::Map::new();
+    for (i, col) in row.as_ref().column_names().iter().enumerate() {
+        let v = match row.get_ref(i)? {
+            rusqlite::types::ValueRef::Null => Value::Null,
+            rusqlite::types::ValueRef::Integer(n) => json!(n),
+            rusqlite::types::ValueRef::Real(f) => json!(f),
+            rusqlite::types::ValueRef::Text(t) => json!(String::from_utf8_lossy(t).to_string()),
+            // ponytail: no blob columns on the tables this reads; length as placeholder
+            rusqlite::types::ValueRef::Blob(b) => json!(b.len()),
+        };
+        obj.insert((*col).to_string(), v);
+    }
+    Ok(Value::Object(obj))
+}
+
+/// Mirrors the JS serializeAsset: the whole row spread, then the resolved
+/// account codes/names and the scheme as an object. The spread matters —
+/// register() reads category/serial/disposed_* straight off this value.
 fn serialize_asset(db: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    let id: i64 = row.get(0)?;
-    let name: String = row.get(1)?;
-    let status: String = row.get(4)?;
-    let scheme_id: i64 = row.get(5)?;
-    let purchase_date: String = row.get(6)?;
-    let purchase_price_cents: i64 = row.get(7)?;
-    let residual_cents: i64 = row.get(8)?;
-    let dep_start: String = row.get(9)?;
-    let recog: String = row.get(10)?;
-    let cum_dep_at_rec: i64 = row.get(11)?;
-    let asset_acct_id: i64 = row.get(12)?;
-    let cum_dep_acct_id: Option<i64> = row.get(13)?;
-    let expense_acct_id: i64 = row.get(14)?;
-    let asset_acct = db
-        .query_row(
-            "SELECT code FROM accounts WHERE id = ?1",
-            [asset_acct_id],
-            |r| r.get::<_, String>(0),
-        )
-        .ok();
-    let cum_dep_acct = cum_dep_acct_id.and_then(|id| {
-        db.query_row("SELECT code FROM accounts WHERE id = ?1", [id], |r| {
-            r.get::<_, String>(0)
+    let Value::Object(mut obj) = row_json(row)? else {
+        unreachable!()
+    };
+    let account = |id: Option<i64>| -> Option<(String, String)> {
+        let id = id?;
+        db.query_row("SELECT code, name FROM accounts WHERE id = ?1", [id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })
         .ok()
-    });
-    let expense_acct = db
-        .query_row(
-            "SELECT code FROM accounts WHERE id = ?1",
-            [expense_acct_id],
-            |r| r.get::<_, String>(0),
-        )
-        .ok();
-    let scheme = get_scheme(db, scheme_id).ok().flatten();
-    Ok(
-        json!({"id": id, "name": name, "scheme": scheme, "purchase_date": purchase_date, "purchase_price_cents": purchase_price_cents, "residual_cents": residual_cents, "depreciation_start_date": dep_start, "recognition_date": recog, "cum_dep_at_recognition_cents": cum_dep_at_rec, "asset_account_code": asset_acct.as_deref(), "cum_dep_account_code": cum_dep_acct.as_deref(), "expense_account_code": expense_acct.as_deref(), "status": status}),
-    )
+    };
+    let asset_acc = account(obj.get("asset_account_id").and_then(|v| v.as_i64()));
+    let cum_acc = account(obj.get("cum_dep_account_id").and_then(|v| v.as_i64()));
+    let exp_acc = account(obj.get("expense_account_id").and_then(|v| v.as_i64()));
+    for (key, acc) in [
+        ("asset", &asset_acc),
+        ("cum_dep", &cum_acc),
+        ("expense", &exp_acc),
+    ] {
+        obj.insert(
+            format!("{key}_account_code"),
+            str_or_null(acc.as_ref().map(|a| a.0.as_str())),
+        );
+        obj.insert(
+            format!("{key}_account_name"),
+            str_or_null(acc.as_ref().map(|a| a.1.as_str())),
+        );
+    }
+    let scheme = obj
+        .get("scheme_id")
+        .and_then(|v| v.as_i64())
+        .and_then(|id| get_scheme(db, id).ok().flatten())
+        .map(|s| {
+            json!({
+                "id": s["id"], "name": s["name"], "method": s["method"],
+                "life_months": s["life_months"], "residual_bp": s["residual_bp"],
+            })
+        })
+        .unwrap_or(Value::Null);
+    obj.insert("scheme".to_string(), scheme);
+    Ok(Value::Object(obj))
+}
+
+fn str_or_null(v: Option<&str>) -> Value {
+    match v {
+        Some(s) => Value::String(s.to_string()),
+        None => Value::Null,
+    }
 }
 
 pub fn get_asset(db: &Connection, id: i64) -> Result<Option<Value>> {
@@ -277,6 +342,12 @@ pub fn list_assets(db: &Connection, status: Option<&str>) -> Result<Vec<Value>> 
 }
 
 pub fn run_due(db: &Connection, period: &str, actor: &str, dry_run: bool) -> Result<Value> {
+    if !period.is_empty() && !valid_period(period) {
+        return Err(assets_error(
+            "INVALID_PERIOD",
+            format!("period '{period}' must be YYYY-MM (01-12)"),
+        ));
+    }
     let assets = list_assets(db, Some("active"))?;
     let target = if period.is_empty() {
         chrono::Utc::now().format("%Y-%m").to_string()
@@ -321,7 +392,13 @@ pub fn run_due(db: &Connection, period: &str, actor: &str, dry_run: bool) -> Res
             .collect();
         if !due.is_empty() {
             let total: i64 = due.iter().map(|(_, a)| a).sum();
-            plan.push(json!({"asset_id": aid, "name": a["name"], "total_cents": total}));
+            let periods: Vec<Value> = due
+                .iter()
+                .map(|(p, amt)| json!({"period": p, "amountCents": amt}))
+                .collect();
+            plan.push(json!({
+                "asset_id": aid, "name": a["name"], "periods": periods, "total_cents": total,
+            }));
             to_book.push((a.clone(), due, exp.to_string(), cum.to_string()));
         }
     }
@@ -332,13 +409,17 @@ pub fn run_due(db: &Connection, period: &str, actor: &str, dry_run: bool) -> Res
         return Ok(json!({"booked": [], "plan": plan, "dryRun": true}));
     }
     let mut booked = Vec::new();
+    let tx = crate::entries::begin(db)?;
     for (a, due, exp, cum) in &to_book {
         let aid = a["id"].as_i64().unwrap();
+        let price = a["purchase_price_cents"].as_i64().unwrap_or(0);
+        let residual = a["residual_cents"].as_i64().unwrap_or(0);
+        let recognised = a["cum_dep_at_recognition_cents"].as_i64().unwrap_or(0);
         for (period, amt) in due {
             let desc = format!("Afschrijving {} {period}", a["name"].as_str().unwrap_or(""));
             let sr = format!("asset:{aid}:{period}");
             let entry = create_entry(
-                db,
+                &tx,
                 CreateEntry {
                     date: &format!("{period}-01"),
                     description: &desc,
@@ -363,11 +444,21 @@ pub fn run_due(db: &Connection, period: &str, actor: &str, dry_run: bool) -> Res
                     actor,
                 },
             )?;
-            let posted = post_entry(db, entry.id, actor)?;
-            db.execute("INSERT INTO asset_depreciation_runs (asset_id, period, entry_id, amount_cents, created_by) VALUES (?1, ?2, ?3, ?4, ?5)", rusqlite::params![aid, period, posted.id, amt, actor]).map_err(sql_err)?;
+            let posted = post_entry(&tx, entry.id, actor)?;
+            tx.execute("INSERT INTO asset_depreciation_runs (asset_id, period, entry_id, amount_cents, created_by) VALUES (?1, ?2, ?3, ?4, ?5)", rusqlite::params![aid, period, posted.id, amt, actor]).map_err(sql_err)?;
             booked.push(json!({"asset_id": aid, "period": period, "entry_id": posted.id, "amount_cents": amt}));
+            // auto-complete: the asset reached its residual
+            let total_dep = recognised + module_dep_to_period(&tx, aid, period)?;
+            if total_dep >= price - residual {
+                tx.execute(
+                    "UPDATE assets SET status = 'fully_depreciated' WHERE id = ?1 AND status = 'active'",
+                    [aid],
+                )
+                .map_err(sql_err)?;
+            }
         }
     }
+    tx.commit()?;
     record(
         db,
         RecordArgs {
@@ -459,11 +550,38 @@ pub fn create_asset(
         ));
     }
 
-    // Resolve scheme
+    // Resolve scheme: explicit id, or built from inline method/life/residual, or default
     let scheme = if let Some(sid) = scheme_id {
         get_scheme(db, sid)?.ok_or_else(|| {
             assets_error("SCHEME_NOT_FOUND", format!("scheme {sid} does not exist"))
         })?
+    } else if method.is_some() || life_months.is_some() {
+        let m = method.unwrap_or("lineair");
+        let life = life_months.unwrap_or(60);
+        let bp = residual_bp.unwrap_or(0);
+        let scheme_name = format!("{life} maanden {m} {bp}basis");
+        if dry_run {
+            // a dry-run must not write: reuse an existing scheme with the same
+            // parameters, else plan with an in-memory one (the JS does the same,
+            // so a second dry-run cannot fail SCHEME_NAME_TAKEN)
+            match get_scheme_by_name(db, &scheme_name)? {
+                Some(s) => s,
+                None => json!({
+                    "id": Value::Null, "name": scheme_name, "method": m,
+                    "life_months": life, "residual_bp": bp,
+                }),
+            }
+        } else {
+            create_scheme(db, &scheme_name, m, life, bp, actor, false)?
+        }
+    } else if dry_run {
+        match get_scheme_by_name(db, "Standaard 5 jaar lineair")? {
+            Some(s) => s,
+            None => json!({
+                "id": Value::Null, "name": "Standaard 5 jaar lineair",
+                "method": "lineair", "life_months": 60, "residual_bp": 0,
+            }),
+        }
     } else {
         ensure_default_scheme(db, actor)?
     };
@@ -478,12 +596,35 @@ pub fn create_asset(
         ));
     }
 
-    // Resolve accounts
-    let asset_acct = get_account_by_code(db, asset_account_code)
-        .ok_or_else(|| assets_error("ACCOUNT_NOT_FOUND", "asset account is required"))?;
-    let expense_acct = get_account_by_code(db, expense_account_code)
-        .ok_or_else(|| assets_error("ACCOUNT_NOT_FOUND", "expense account is required"))?;
-    let cum_dep_acct = cum_dep_account_code.and_then(|c| get_account_by_code(db, c));
+    // Resolve accounts: each must exist and carry the expected type
+    let resolve = |code: &str, expected: &str, label: &str| -> Result<Value> {
+        if code.trim().is_empty() {
+            return Err(assets_error(
+                "ACCOUNT_NOT_FOUND",
+                format!("{label} account is required"),
+            ));
+        }
+        let acc = get_account_by_code(db, code).ok_or_else(|| {
+            assets_error(
+                "ACCOUNT_NOT_FOUND",
+                format!("{label} account {code} does not exist"),
+            )
+        })?;
+        let got = acc["type"].as_str().unwrap_or("");
+        if got != expected {
+            return Err(assets_error(
+                "ACCOUNT_TYPE",
+                format!("{label} account {code} is '{got}', expected '{expected}'"),
+            ));
+        }
+        Ok(acc)
+    };
+    let asset_acct = resolve(asset_account_code, "asset", "asset")?;
+    let expense_acct = resolve(expense_account_code, "expense", "expense")?;
+    let cum_dep_acct = match cum_dep_account_code {
+        Some(c) => Some(resolve(c, "asset", "cumulative-depreciation")?),
+        None => None,
+    };
 
     if let Some(eid) = entry_id {
         let exists: bool = db
@@ -607,7 +748,66 @@ pub fn create_asset(
     )
     .map_err(sql_err)?;
     let asset_id = db.last_insert_rowid();
-    get_asset(db, asset_id)?.ok_or_else(|| assets_error("DB_ERROR", "asset not found after insert"))
+    let asset = get_asset(db, asset_id)?
+        .ok_or_else(|| assets_error("DB_ERROR", "asset not found after insert"))?;
+
+    // GL reconciliation warnings (never blockers — migration must stay frictionless)
+    let mut warnings: Vec<String> = Vec::new();
+    let posted_balance = |code: &str| -> i64 {
+        db.query_row(
+            "SELECT COALESCE(SUM(p.amount_cents),0) FROM postings p \
+             JOIN journal_entries e ON e.id = p.entry_id AND e.state = 'posted' \
+             WHERE p.account_id = (SELECT id FROM accounts WHERE code = ?1)",
+            [code],
+            |r| r.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+    };
+    let asset_balance = posted_balance(asset_account_code);
+    if asset_balance < purchase_price_cents {
+        warnings.push(format!(
+            "asset account {asset_account_code} carries {asset_balance} on the ledger, less than the purchase price {purchase_price_cents} — verify the purchase was booked there"
+        ));
+    }
+    if let Some(cum) = cum_dep_account_code {
+        let cum_balance = posted_balance(cum);
+        if cum_balance.abs() < cum_dep_at_recognition_cents {
+            warnings.push(format!(
+                "cumulative-depreciation account {cum} carries {cum_balance} on the ledger, less than the recognised {cum_dep_at_recognition_cents}"
+            ));
+        }
+    }
+    if let Some(eid) = entry_id {
+        let entry_date: Option<String> = db
+            .query_row(
+                "SELECT date FROM journal_entries WHERE id = ?1",
+                [eid],
+                |r| r.get(0),
+            )
+            .ok();
+        if entry_date.as_deref() != Some(purchase_date) {
+            warnings.push(format!(
+                "linked entry {eid} has a different date than purchase-date"
+            ));
+        }
+    }
+
+    record(
+        db,
+        RecordArgs {
+            actor,
+            action: "assets.add",
+            command: Some("assets add"),
+            args: Some(json!({
+                "name": clean_name, "purchase_price_cents": purchase_price_cents,
+                "scheme": scheme["name"], "recognition_date": recognition_date,
+                "cum_dep_at_recognition_cents": cum_dep_at_recognition_cents,
+            })),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
+    Ok(json!({"asset": asset, "warnings": warnings, "dryRun": false}))
 }
 
 pub fn dispose_asset(
@@ -681,18 +881,18 @@ pub fn dispose_asset(
 
     let mut postings = Vec::new();
     if proceeds_cents > 0 {
-        postings.push(json!({"code": bank_acct["code"], "amount_cents": proceeds_cents}));
+        postings.push(json!({"code": bank_acct["code"], "amountCents": proceeds_cents}));
     }
     if total_cum_dep > 0 {
         let cum_code = asset["cum_dep_account_code"]
             .as_str()
             .or(asset["asset_account_code"].as_str())
             .unwrap_or("1800");
-        postings.push(json!({"code": cum_code, "amount_cents": total_cum_dep}));
+        postings.push(json!({"code": cum_code, "amountCents": total_cum_dep}));
     }
-    postings.push(json!({"code": asset["asset_account_code"], "amount_cents": -asset["purchase_price_cents"].as_i64().unwrap_or(0)}));
+    postings.push(json!({"code": asset["asset_account_code"], "amountCents": -asset["purchase_price_cents"].as_i64().unwrap_or(0)}));
     if result_cents != 0 {
-        postings.push(json!({"code": result_acct["code"], "amount_cents": -result_cents}));
+        postings.push(json!({"code": result_acct["code"], "amountCents": -result_cents}));
     }
 
     if dry_run {
@@ -709,9 +909,11 @@ pub fn dispose_asset(
     let description = format!("Afstoting {asset_name} ({date})");
     let source_ref = format!("dispose:{id}:{date}");
 
-    // Create and post the entry
+    // Create and post the entry, then close the asset — one transaction, so a
+    // failure on either side leaves neither (the JS wraps both the same way)
+    let tx = crate::entries::begin(db)?;
     let entry = crate::entries::create_entry(
-        db,
+        &tx,
         crate::entries::CreateEntry {
             date,
             description: &description,
@@ -719,7 +921,7 @@ pub fn dispose_asset(
                 .iter()
                 .map(|p| crate::entries::PostingSpec {
                     code: p["code"].as_str().unwrap_or("").to_string(),
-                    amount_cents: p["amount_cents"].as_i64().unwrap_or(0),
+                    amount_cents: p["amountCents"].as_i64().unwrap_or(0),
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
@@ -730,12 +932,13 @@ pub fn dispose_asset(
             actor,
         },
     )?;
-    let posted = crate::entries::post_entry(db, entry.id, actor)?;
+    let posted = crate::entries::post_entry(&tx, entry.id, actor)?;
 
-    db.execute(
+    tx.execute(
         "UPDATE assets SET status = 'disposed', disposed_date = ?1, disposed_proceeds_cents = ?2, disposal_entry_id = ?3 WHERE id = ?4",
         rusqlite::params![date, proceeds_cents, posted.id, id],
     ).map_err(sql_err)?;
+    tx.commit()?;
 
     record(
         db,
@@ -954,5 +1157,905 @@ mod tests {
         let d = test_db();
         let s = create_scheme(&d, "Test 3yr", "lineair", 36, 0, "human:erik", false).unwrap();
         assert_eq!(s["name"], "Test 3yr");
+    }
+
+    // ==== ported from test/assets.test.js ====================================
+
+    use crate::accounts::{create_account, NewAccount};
+
+    fn chart_db() -> Connection {
+        let d = test_db();
+        create_account(
+            &d,
+            &NewAccount {
+                code: "1500",
+                name: "Cumulatieve afschrijvingen",
+                type_: "asset",
+                normal_balance: "debit",
+                taxonomy_code: None,
+            },
+        )
+        .unwrap();
+        d
+    }
+
+    fn spec(code: &str, cents: i64) -> crate::entries::PostingSpec {
+        crate::entries::PostingSpec {
+            code: code.to_string(),
+            amount_cents: cents,
+            cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
+        }
+    }
+
+    fn posted(db: &Connection) -> Vec<Value> {
+        crate::entries::list_entries(db, Some("posted"), None, None, 1000).unwrap()
+    }
+
+    /// create_asset with this suite's defaults (agent:test, no category/serial/note).
+    #[allow(clippy::too_many_arguments)]
+    fn add_asset(
+        db: &Connection,
+        name: &str,
+        purchase_date: &str,
+        price: i64,
+        dep_start: &str,
+        recognition: &str,
+        cum_dep_at_recognition: i64,
+        asset_account: &str,
+        cum_dep_account: Option<&str>,
+        expense_account: &str,
+        entry_id: Option<i64>,
+        dry_run: bool,
+    ) -> Value {
+        create_asset(
+            db,
+            name,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            purchase_date,
+            price,
+            dep_start,
+            recognition,
+            cum_dep_at_recognition,
+            asset_account,
+            cum_dep_account,
+            expense_account,
+            entry_id,
+            None,
+            "agent:test",
+            dry_run,
+        )
+        .unwrap()
+    }
+
+    fn asset_id(v: &Value) -> i64 {
+        v["id"].as_i64().unwrap()
+    }
+
+    /// Postings summed per account code, keys sorted.
+    fn sums_by_code(postings: &Value) -> Vec<(String, i64)> {
+        let mut m: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+        for p in postings.as_array().cloned().unwrap_or_default() {
+            *m.entry(p["code"].as_str().unwrap_or("").to_string())
+                .or_insert(0) += p["amountCents"].as_i64().unwrap_or(0);
+        }
+        m.into_iter().collect()
+    }
+
+    /// The account codes of an entry's legs, sorted.
+    fn leg_codes(db: &Connection, entry_id: i64) -> Vec<String> {
+        let mut stmt = db
+            .prepare(
+                "SELECT a.code FROM postings p JOIN accounts a ON a.id = p.account_id \
+                 WHERE p.entry_id = ?1 ORDER BY a.code",
+            )
+            .unwrap();
+        let rows = stmt
+            .query_map([entry_id], |r| r.get::<_, String>(0))
+            .unwrap();
+        rows.filter_map(|r| r.ok()).collect()
+    }
+
+    #[test]
+    fn ensure_default_scheme_creates_the_standard_5y_linear_scheme_lazily() {
+        let db = chart_db();
+        let s = ensure_default_scheme(&db, "human:erik").unwrap();
+        assert_eq!(s["name"].as_str(), Some("Standaard 5 jaar lineair"));
+        assert_eq!(s["method"].as_str(), Some("lineair"));
+        assert_eq!(s["life_months"].as_i64(), Some(60));
+        assert_eq!(s["residual_bp"].as_i64(), Some(0));
+        // idempotent
+        assert_eq!(
+            ensure_default_scheme(&db, "human:erik").unwrap()["id"],
+            s["id"]
+        );
+    }
+
+    #[test]
+    fn create_scheme_rejects_duplicate_names_and_bad_methods() {
+        let db = chart_db();
+        create_scheme(&db, "A", "lineair", 60, 0, "human:erik", false).unwrap();
+        assert_eq!(
+            create_scheme(&db, "A", "lineair", 60, 0, "human:erik", false)
+                .unwrap_err()
+                .code,
+            "SCHEME_NAME_TAKEN"
+        );
+        assert_eq!(
+            create_scheme(&db, "B", "weird", 60, 0, "human:erik", false)
+                .unwrap_err()
+                .code,
+            "INVALID_METHOD"
+        );
+        assert_eq!(
+            create_scheme(&db, "C", "lineair", 0, 0, "human:erik", false)
+                .unwrap_err()
+                .code,
+            "INVALID_LIFE"
+        );
+    }
+
+    #[test]
+    fn schedule_linear_60m_is_cents_exact_and_remainder_adjusted() {
+        let s = schedule_depreciation(100000, 0, 60, "lineair", "2026-01", "2030-12");
+        assert_eq!(s.len(), 60);
+        assert_eq!(s[0].1, 1667);
+        let head: i64 = s[..59].iter().map(|(_, a)| *a).sum();
+        assert_eq!(s[59].1, 100000 - head);
+        let total: i64 = s.iter().map(|(_, a)| *a).sum();
+        assert_eq!(total, 100000); // cents-exact
+        assert!(s.iter().all(|(_, a)| (*a - 1667).abs() <= 2)); // no drift
+    }
+
+    #[test]
+    fn schedule_degressief_is_double_declining_with_a_switch_to_linear() {
+        let s = schedule_depreciation(60000, 0, 12, "degressief", "2025-02", "2026-02");
+        assert_eq!(s.len(), 12);
+        assert_eq!(s[0].1, 10000); // 600 * 2/12
+        assert_eq!(s[6].1, 3349); // switched to the linear view
+        let total: i64 = s.iter().map(|(_, a)| *a).sum();
+        assert_eq!(total, 60000); // exactly to residual
+    }
+
+    #[test]
+    fn schedule_stops_at_the_residual_and_never_overshoots() {
+        let s = schedule_depreciation(10000, 1000, 36, "lineair", "2026-01", "2035-12");
+        let total: i64 = s.iter().map(|(_, a)| *a).sum();
+        assert_eq!(total, 9000);
+        assert!(s.len() <= 36);
+    }
+
+    #[test]
+    fn add_asset_standard_5y_linear_warns_when_the_purchase_is_not_booked() {
+        let db = chart_db();
+        let r = add_asset(
+            &db,
+            "Laptop",
+            "2024-01-15",
+            200000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        assert_eq!(r["asset"]["status"].as_str(), Some("active"));
+        assert_eq!(
+            r["asset"]["scheme"]["name"].as_str(),
+            Some("Standaard 5 jaar lineair")
+        );
+        assert!(r["asset"]["cum_dep_account_code"].is_null()); // booked on the asset account
+        assert!(r["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("asset account 1800")));
+    }
+
+    #[test]
+    fn add_asset_mid_life_adoption_keeps_only_the_remaining_depreciation() {
+        let db = chart_db();
+        // bought 2023, recognised 2024-06 with 250.00 already depreciated:
+        // remaining 950.00 over 48 months = 19.79
+        let r = add_asset(
+            &db,
+            "Fotocamera",
+            "2023-05-10",
+            120000,
+            "2023-06-01",
+            "2024-06-01",
+            25000,
+            "1800",
+            Some("1500"),
+            "4600",
+            None,
+            false,
+        );
+        let aid = asset_id(&r["asset"]);
+        assert_eq!(r["asset"]["status"].as_str(), Some("active"));
+        assert_eq!(r["asset"]["scheme"]["life_months"].as_i64(), Some(60));
+        let run = run_due(&db, "2024-06", "agent:test", false).unwrap();
+        assert_eq!(run["booked"].as_array().unwrap().len(), 1);
+        assert_eq!(run["booked"][0]["amount_cents"].as_i64(), Some(1979)); // round(950/48)
+        let reg = register(&db, Some("2024-06-30"), "human:erik").unwrap();
+        let a = reg["assets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["id"].as_i64() == Some(aid))
+            .unwrap();
+        assert_eq!(a["total_cum_dep_cents"].as_i64(), Some(25000 + 1979));
+        assert_eq!(a["book_value_cents"].as_i64(), Some(120000 - 25000 - 1979));
+    }
+
+    #[test]
+    fn add_asset_rejects_cum_dep_at_recognition_above_cost_minus_residual() {
+        let db = chart_db();
+        let err = create_asset(
+            &db,
+            "X",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "2024-01-01",
+            100000,
+            "2024-01-01",
+            "2024-06-01",
+            100001,
+            "1800",
+            None,
+            "4600",
+            None,
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID_DEPRECIATION");
+    }
+
+    #[test]
+    fn add_asset_recognises_an_already_fully_depreciated_asset() {
+        let db = chart_db();
+        let r = add_asset(
+            &db,
+            "Oud",
+            "2019-01-01",
+            100000,
+            "2019-02-01",
+            "2025-02-01",
+            100000,
+            "1800",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        assert_eq!(r["asset"]["status"].as_str(), Some("fully_depreciated"));
+        let run = run_due(&db, "2026-01", "human:erik", false).unwrap();
+        assert_eq!(run["booked"].as_array().unwrap().len(), 0); // nothing left
+    }
+
+    #[test]
+    fn add_asset_validates_account_types() {
+        let db = chart_db();
+        let err = create_asset(
+            &db,
+            "X",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "2024-01-01",
+            100000,
+            "2024-01-01",
+            "2024-01-01",
+            0,
+            "8000",
+            None,
+            "4600",
+            None,
+            None,
+            "agent:test",
+            false, // 8000 is income
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "ACCOUNT_TYPE");
+    }
+
+    #[test]
+    fn add_asset_missing_entry_link_fails_entry_not_found() {
+        let db = chart_db();
+        let err = create_asset(
+            &db,
+            "X",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "2024-01-01",
+            100000,
+            "2024-01-01",
+            "2024-01-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            Some(999),
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "ENTRY_NOT_FOUND");
+    }
+
+    #[test]
+    fn add_asset_dry_run_writes_nothing() {
+        let db = chart_db();
+        let r = add_asset(
+            &db,
+            "Laptop",
+            "2024-01-15",
+            200000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            true,
+        );
+        assert_eq!(r["dryRun"].as_bool(), Some(true));
+        assert_eq!(r["asset"]["months_left"].as_i64(), Some(60));
+        assert_eq!(list_assets(&db, None).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn run_due_books_monthly_depreciation_idempotently_per_asset_month() {
+        let db = chart_db();
+        add_asset(
+            &db,
+            "Laptop",
+            "2024-01-15",
+            200000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        let r1 = run_due(&db, "2024-03", "agent:test", false).unwrap();
+        assert_eq!(r1["booked"].as_array().unwrap().len(), 2); // 2024-02 + 2024-03
+        let r2 = run_due(&db, "2024-03", "agent:test", false).unwrap();
+        assert_eq!(r2["booked"].as_array().unwrap().len(), 0); // idempotent
+        let entries = posted(&db);
+        assert_eq!(entries.len(), 2);
+        for e in &entries {
+            let full = crate::entries::get_entry(&db, e["id"].as_i64().unwrap()).unwrap();
+            assert_eq!(full.source, "assets");
+            assert!(full
+                .source_ref
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("asset:"));
+        }
+    }
+
+    #[test]
+    fn run_due_skips_paused_assets_and_resuming_restarts_them() {
+        let db = chart_db();
+        let r = add_asset(
+            &db,
+            "Laptop",
+            "2024-01-15",
+            200000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        let aid = asset_id(&r["asset"]);
+        db.execute("UPDATE assets SET status = 'paused' WHERE id = ?1", [aid])
+            .unwrap();
+        assert_eq!(
+            run_due(&db, "2024-03", "human:erik", false).unwrap()["booked"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+        db.execute("UPDATE assets SET status = 'active' WHERE id = ?1", [aid])
+            .unwrap();
+        assert_eq!(
+            run_due(&db, "2024-03", "human:erik", false).unwrap()["booked"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn run_due_dry_run_plans_but_books_nothing() {
+        let db = chart_db();
+        add_asset(
+            &db,
+            "Laptop",
+            "2024-01-15",
+            200000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        let plan = run_due(&db, "2024-03", "human:erik", true).unwrap();
+        assert_eq!(plan["plan"].as_array().unwrap().len(), 1);
+        assert_eq!(plan["plan"][0]["periods"].as_array().unwrap().len(), 2);
+        assert_eq!(posted(&db).len(), 0);
+    }
+
+    #[test]
+    fn run_due_auto_completes_to_fully_depreciated_at_the_residual() {
+        let db = chart_db();
+        create_asset(
+            &db,
+            "Klein",
+            None,
+            None,
+            None,
+            None,
+            Some(12),
+            None,
+            None,
+            "2026-01-01",
+            12000,
+            "2026-02-01",
+            "2026-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        let r = run_due(&db, "2027-02", "human:erik", false).unwrap();
+        assert_eq!(r["booked"].as_array().unwrap().len(), 12);
+        assert_eq!(
+            list_assets(&db, None).unwrap()[0]["status"].as_str(),
+            Some("fully_depreciated")
+        );
+        let reg = register(&db, Some("2027-02-01"), "human:erik").unwrap();
+        assert_eq!(
+            reg["assets"][0]["total_cum_dep_cents"].as_i64(),
+            Some(12000)
+        );
+    }
+
+    #[test]
+    fn run_due_books_on_the_cum_dep_account_when_given_else_on_the_asset_account() {
+        let db = chart_db();
+        add_asset(
+            &db,
+            "A",
+            "2024-01-01",
+            120000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            Some("1500"),
+            "4600",
+            None,
+            false,
+        );
+        add_asset(
+            &db,
+            "B",
+            "2024-01-01",
+            120000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1850",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        run_due(&db, "2024-02", "human:erik", false).unwrap();
+        let mut entries = posted(&db);
+        entries.sort_by_key(|e| e["id"].as_i64().unwrap());
+        // asset A: cum-dep account leg; asset B: asset account leg
+        assert_eq!(
+            leg_codes(&db, entries[0]["id"].as_i64().unwrap()),
+            vec!["1500".to_string(), "4600".to_string()]
+        );
+        assert_eq!(
+            leg_codes(&db, entries[1]["id"].as_i64().unwrap()),
+            vec!["1850".to_string(), "4600".to_string()]
+        );
+    }
+
+    #[test]
+    fn dispose_asset_sale_with_winst_books_the_full_entry_and_closes_the_asset() {
+        let db = chart_db();
+        let r = add_asset(
+            &db,
+            "Fotocamera",
+            "2023-05-10",
+            120000,
+            "2023-06-01",
+            "2024-06-01",
+            25000,
+            "1800",
+            Some("1500"),
+            "4600",
+            None,
+            false,
+        );
+        let aid = asset_id(&r["asset"]);
+        run_due(&db, "2024-07", "human:erik", false).unwrap(); // 2 runs of 19.79
+        let d = dispose_asset(
+            &db,
+            aid,
+            "2024-08-15",
+            95000,
+            None,
+            None,
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        // book value = 1200 - (250 + 39.58) = 910.42 -> winst 39.58
+        assert_eq!(d["book_value_cents"].as_i64(), Some(91042));
+        assert_eq!(d["result_cents"].as_i64(), Some(3958));
+        assert_eq!(
+            sums_by_code(&d["postings"]),
+            vec![
+                ("1100".to_string(), 95000),
+                ("1500".to_string(), 28958),
+                ("1800".to_string(), -120000),
+                ("8100".to_string(), -3958),
+            ]
+        );
+        let a = &list_assets(&db, None).unwrap()[0];
+        assert_eq!(a["status"].as_str(), Some("disposed"));
+        assert_eq!(a["disposed_proceeds_cents"].as_i64(), Some(95000));
+        assert_eq!(d["entry"]["state"].as_str(), Some("posted"));
+        assert_eq!(posted(&db).len(), 3); // 2 runs + disposal
+    }
+
+    #[test]
+    fn dispose_asset_scrap_books_a_verlies() {
+        let db = chart_db();
+        let r = add_asset(
+            &db,
+            "Printer",
+            "2024-01-01",
+            50000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        let aid = asset_id(&r["asset"]);
+        run_due(&db, "2024-02", "human:erik", false).unwrap();
+        let d = dispose_asset(
+            &db,
+            aid,
+            "2024-03-01",
+            0,
+            None,
+            None,
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        // book value = 500 - 8.33 = 491.67 -> verlies 491.67 (debit 8100);
+        // no cum-dep account -> the cum-dep leg lands on the asset account itself
+        assert_eq!(d["result_cents"].as_i64(), Some(-49167));
+        assert_eq!(
+            sums_by_code(&d["postings"]),
+            vec![("1800".to_string(), -49167), ("8100".to_string(), 49167)]
+        );
+    }
+
+    #[test]
+    fn dispose_asset_rejects_double_disposal() {
+        let db = chart_db();
+        let r = add_asset(
+            &db,
+            "X",
+            "2024-01-01",
+            50000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        let aid = asset_id(&r["asset"]);
+        dispose_asset(
+            &db,
+            aid,
+            "2024-06-01",
+            0,
+            None,
+            None,
+            None,
+            "human:erik",
+            false,
+        )
+        .unwrap();
+        let err = dispose_asset(
+            &db,
+            aid,
+            "2024-07-01",
+            0,
+            None,
+            None,
+            None,
+            "human:erik",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "ALREADY_DISPOSED");
+    }
+
+    #[test]
+    fn dispose_asset_dry_run_books_nothing() {
+        let db = chart_db();
+        let r = add_asset(
+            &db,
+            "X",
+            "2024-01-01",
+            50000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        let aid = asset_id(&r["asset"]);
+        let d = dispose_asset(
+            &db,
+            aid,
+            "2024-06-01",
+            0,
+            None,
+            None,
+            None,
+            "human:erik",
+            true,
+        )
+        .unwrap();
+        assert_eq!(d["dryRun"].as_bool(), Some(true));
+        assert_eq!(
+            list_assets(&db, None).unwrap()[0]["status"].as_str(),
+            Some("active")
+        );
+        assert_eq!(posted(&db).len(), 0);
+    }
+
+    #[test]
+    fn register_reports_book_values_and_totals_as_of_a_date() {
+        let db = chart_db();
+        add_asset(
+            &db,
+            "Laptop",
+            "2024-01-15",
+            200000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        run_due(&db, "2024-04", "human:erik", false).unwrap(); // 3 runs of 33.33
+        let reg = register(&db, Some("2024-04-30"), "human:erik").unwrap();
+        assert_eq!(reg["assets"].as_array().unwrap().len(), 1);
+        assert_eq!(reg["assets"][0]["total_cum_dep_cents"].as_i64(), Some(9999));
+        assert_eq!(
+            reg["assets"][0]["book_value_cents"].as_i64(),
+            Some(200000 - 9999)
+        );
+        assert_eq!(
+            reg["assets"][0]["next_run_period"].as_str(),
+            Some("2024-05")
+        );
+        assert_eq!(reg["totals"]["purchase_price_cents"].as_i64(), Some(200000));
+    }
+
+    #[test]
+    fn register_surfaces_disposal_dates_and_proceeds() {
+        let db = chart_db();
+        let r = add_asset(
+            &db,
+            "X",
+            "2024-01-01",
+            50000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        let aid = asset_id(&r["asset"]);
+        dispose_asset(
+            &db,
+            aid,
+            "2024-06-01",
+            10000,
+            None,
+            None,
+            None,
+            "human:erik",
+            false,
+        )
+        .unwrap();
+        let reg = register(&db, Some("2024-06-30"), "human:erik").unwrap();
+        let a = &reg["assets"][0];
+        assert_eq!(a["status"].as_str(), Some("disposed"));
+        assert_eq!(a["disposed_date"].as_str(), Some("2024-06-01"));
+        assert_eq!(a["disposed_proceeds_cents"].as_i64(), Some(10000));
+    }
+
+    #[test]
+    fn trial_balance_stays_balanced_through_the_whole_lifecycle() {
+        let db = chart_db();
+        let e = crate::entries::create_entry(
+            &db,
+            crate::entries::CreateEntry {
+                date: "2024-01-15",
+                description: "Aankoop",
+                postings: vec![spec("1800", 200000), spec("1100", -200000)],
+                source: "manual",
+                source_ref: None,
+                actor: "agent:test",
+            },
+        )
+        .unwrap();
+        crate::entries::post_entry(&db, e.id, "agent:test").unwrap();
+        let r = add_asset(
+            &db,
+            "Laptop",
+            "2024-01-15",
+            200000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        let aid = asset_id(&r["asset"]);
+        run_due(&db, "2024-12", "human:erik", false).unwrap();
+        dispose_asset(
+            &db,
+            aid,
+            "2025-01-02",
+            90000,
+            None,
+            None,
+            None,
+            "human:erik",
+            false,
+        )
+        .unwrap();
+        let (d, c): (i64, i64) = db
+            .query_row(
+                "SELECT COALESCE(SUM(CASE WHEN p.amount_cents > 0 THEN p.amount_cents ELSE 0 END),0),
+                        COALESCE(SUM(CASE WHEN p.amount_cents < 0 THEN -p.amount_cents ELSE 0 END),0)
+                 FROM postings p JOIN journal_entries e ON e.id = p.entry_id AND e.state = 'posted'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(d, c);
+    }
+
+    #[test]
+    fn dispose_asset_entry_and_status_are_atomic_on_rollback() {
+        let db = chart_db();
+        let r = add_asset(
+            &db,
+            "Atomic",
+            "2024-01-01",
+            50000,
+            "2024-02-01",
+            "2024-02-01",
+            0,
+            "1800",
+            None,
+            "4600",
+            None,
+            false,
+        );
+        let aid = asset_id(&r["asset"]);
+        let before = posted(&db).len();
+        // force the UPDATE assets step (inside the disposal transaction) to fail
+        db.execute(
+            "CREATE TRIGGER IF NOT EXISTS trg_fail_disposal BEFORE UPDATE OF status ON assets \
+             WHEN NEW.status = 'disposed' AND OLD.name = 'Atomic' \
+             BEGIN SELECT RAISE(ABORT, 'boom'); END",
+            [],
+        )
+        .unwrap();
+        let err = dispose_asset(
+            &db,
+            aid,
+            "2024-06-01",
+            0,
+            None,
+            None,
+            None,
+            "human:erik",
+            false,
+        )
+        .unwrap_err();
+        assert!(err.message.contains("boom"), "got: {}", err.message);
+        db.execute("DROP TRIGGER trg_fail_disposal", []).unwrap();
+        // nothing persisted: no new posted entry, asset still active
+        assert_eq!(posted(&db).len(), before);
+        assert_eq!(
+            list_assets(&db, None).unwrap()[0]["status"].as_str(),
+            Some("active")
+        );
     }
 }

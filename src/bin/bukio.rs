@@ -2722,24 +2722,69 @@ fn cmd_asset_list(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let status = arg(argv, "--status");
     let rows = bukio::assets::list_assets(&db, status.as_deref())?;
-    Ok(json!({ "assets": rows }))
+    // the JS CLI projects these seven keys and flattens the scheme to its name
+    let data: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            json!({
+                "id": r["id"], "name": r["name"], "category": r["category"],
+                "status": r["status"], "purchase_date": r["purchase_date"],
+                "purchase_price_cents": r["purchase_price_cents"],
+                "scheme": r["scheme"]["name"],
+            })
+        })
+        .collect();
+    Ok(json!({ "assets": data }))
 }
 
 fn cmd_asset_show(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
     let asset = bukio::assets::get_asset(&db, id)?
-        .ok_or_else(|| BukioError::new("NOT_FOUND", format!("asset {id} not found")))?;
-    Ok(asset)
+        .ok_or_else(|| BukioError::new("ASSET_NOT_FOUND", format!("asset {id} does not exist")))?;
+    let mut stmt = db
+        .prepare("SELECT period, amount_cents, entry_id FROM asset_depreciation_runs WHERE asset_id = ?1 ORDER BY period")
+        .map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
+    let runs: Vec<Value> = stmt
+        .query_map([id], |r| {
+            Ok(json!({
+                "period": r.get::<_, String>(0)?,
+                "amount_cents": r.get::<_, i64>(1)?,
+                "entry_id": r.get::<_, i64>(2)?,
+            }))
+        })
+        .map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(json!({ "asset": asset, "runs": runs }))
 }
 
 fn cmd_asset_run(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
-    let period = arg(argv, "--period")
-        .or_else(|| arg(argv, "--as-of"))
-        .unwrap_or_else(bukio::dates::today_iso);
-    bukio::assets::run_due(&db, &period, actor, dry_run)
+    // the engine takes a period; --as-of is a full date, so only its month
+    // applies (JS: `period ?? asOf.slice(0,7) ?? today`)
+    let period = match arg(argv, "--period") {
+        Some(p) => p,
+        None => match arg(argv, "--as-of") {
+            Some(d) => {
+                if !bukio::assets::valid_date(&d) {
+                    return Err(BukioError::new(
+                        "INVALID_DATE",
+                        format!("as-of '{d}' must be yyyy-mm-dd"),
+                    ));
+                }
+                d[..7].to_string()
+            }
+            None => bukio::dates::today_iso()[..7].to_string(),
+        },
+    };
+    let result = bukio::assets::run_due(&db, &period, actor, dry_run)?;
+    if dry_run {
+        // the JS dry-run output carries the plan only (no empty booked list)
+        return Ok(json!({"plan": result["plan"], "dryRun": true}));
+    }
+    Ok(result)
 }
 
 fn cmd_asset_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
@@ -2827,7 +2872,12 @@ fn cmd_asset_register(argv: &[String], db_path: &str, actor: &str) -> Result<Val
             println!("{}", lines.join("\n"));
             std::process::exit(0);
         }
-        "json" => Ok(json!({ "ok": true, "data": data })),
+        "json" => {
+            // --format json is the declared default and must emit JSON even
+            // without the global --json flag (the JS CLI prints and returns here)
+            ok(data);
+            std::process::exit(0);
+        }
         _ => Ok(data),
     }
 }
