@@ -41,6 +41,9 @@ const CASES = [
   },
   {
     name: 'entry',
+    setup: [
+      ['init', '--name', 'Entry BV'],
+    ],
     steps: [
       ['entry', 'add', '--date', '2026-01-10', '--desc', 'Startkapitaal', '--postings', '1100:10000.00,3000:-10000.00', '--post'],
       ['entry', 'add', '--date', '2026-01-15', '--desc', 'Verkoop', '--postings', '1100:121.00,8000:-100.00,1500:-21.00', '--post'],
@@ -59,6 +62,9 @@ const CASES = [
   },
   {
     name: 'entry-dry-run',
+    setup: [
+      ['init', '--name', 'DryRun BV'],
+    ],
     steps: [
       ['entry', 'add', '--date', '2026-01-10', '--desc', 'X', '--postings', '1100:10.00,3000:-10.00', '--dry-run'],
       ['entry', 'add', '--date', '2026-01-10', '--desc', 'X', '--postings', '1100:10.00,3000:-9.00', '--dry-run'],
@@ -67,6 +73,9 @@ const CASES = [
   },
   {
     name: 'account',
+    setup: [
+      ['init', '--name', 'Account BV'],
+    ],
     steps: [
       ['account', 'list'],
       ['account', 'show', '--code', '1100'],
@@ -82,6 +91,9 @@ const CASES = [
   },
   {
     name: 'cost-center',
+    setup: [
+      ['init', '--name', 'CostCenter BV'],
+    ],
     steps: [
       ['cost-center', 'add', '--code', 'HQ', '--name', 'Hoofdkantoor'],
       ['cost-center', 'add', '--code', 'HQ', '--name', 'Dup'],
@@ -94,6 +106,7 @@ const CASES = [
   {
     name: 'reports',
     setup: [
+      ['init', '--name', 'Reports BV'],
       ['entry', 'add', '--date', '2026-01-10', '--desc', 'Start', '--postings', '1100:10000.00,3000:-10000.00', '--post'],
       ['entry', 'add', '--date', '2026-03-10', '--desc', 'Omzet', '--postings', '1100:121.00,8000:-100.00,1500:-21.00', '--post'],
       ['entry', 'add', '--date', '2026-04-10', '--desc', 'Kosten', '--postings', '4000:50.00,1100:-50.00', '--post'],
@@ -110,6 +123,9 @@ const CASES = [
   },
   {
     name: 'fx',
+    setup: [
+      ['init', '--name', 'FX BV'],
+    ],
     steps: [
       ['fx', 'set', '--currency', 'USD', '--date', '2026-01-15', '--rate', '1.0875'],
       ['fx', 'set', '--currency', 'GBP', '--date', '2026-01-15', '--rate', '0.8590'],
@@ -195,6 +211,8 @@ function parse(stdout) {
 
 let total = 0;
 let mismatches = 0;
+let vacuous = 0;
+const vacuousCases = new Set();
 const tmp = mkdtempSync(path.join(tmpdir(), 'bukio-parity-'));
 try {
   for (const c of CASES) {
@@ -207,6 +225,16 @@ try {
       const rsOut = normalise(parse(runRust(dbRs, step)));
       const jsS = JSON.stringify(jsOut);
       const rsS = JSON.stringify(rsOut);
+      // A step where BOTH engines fail with NO_DATABASE proves nothing: the
+      // case never ran `init`, so every command dies before any logic runs.
+      // Shared *other* errors (e.g. both reject a bad date) are real signal.
+      const bogus = jsOut && rsOut && jsOut.ok === false && rsOut.ok === false
+        && jsOut.error && rsOut.error && jsOut.error.code === rsOut.error.code
+        && jsOut.error.code === 'NO_DATABASE';
+      if (bogus) { vacuous += 1; vacuousCases.add(c.name); }
+      if (process.env.PARITY_DEBUG) {
+        console.log(`  [dbg ${c.name}: ${step.join(' ')}] ${bogus ? 'VACUOUS ' + jsOut.error.code : 'compared'}`);
+      }
       if (jsS !== rsS) {
         mismatches += 1;
         console.log(`\n✗ ${c.name}: bukio ${step.join(' ')}`);
@@ -220,4 +248,8 @@ try {
   rmSync(tmp, { recursive: true, force: true });
 }
 console.log(`\n${total - mismatches}/${total} steps in parity`);
+if (vacuous) {
+  console.log(`WARNING: ${vacuous}/${total} of those steps were VACUOUS — both engines failed with the same error (usually a case that never ran 'init'), so they prove nothing.`);
+  console.log(`  affected cases: ${[...vacuousCases].join(', ')}`);
+}
 process.exit(mismatches === 0 ? 0 : 1);
