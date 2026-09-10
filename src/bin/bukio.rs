@@ -1071,7 +1071,7 @@ fn cmd_cc_add(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
         &db,
         bukio::audit::RecordArgs {
             actor,
-            action: "cost_center.add",
+            action: "cost-center.add",
             command: Some("cost-center add"),
             args: Some(json!({ "code": code, "name": name })),
             outcome: "ok",
@@ -1094,8 +1094,12 @@ fn cmd_cc_list(argv: &[String], db_path: &str) -> Result<Value> {
 fn cmd_cc_show(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let code = arg(argv, "--code").ok_or_else(|| missing_arg("--code"))?;
-    let cc = bukio::accounts::get_cost_center_by_code(&db, &code)
-        .ok_or_else(|| BukioError::new("NOT_FOUND", format!("cost center {code} not found")))?;
+    let cc = bukio::accounts::get_cost_center_by_code(&db, &code).ok_or_else(|| {
+        BukioError::new(
+            "COST_CENTER_NOT_FOUND",
+            format!("cost center '{code}' does not exist"),
+        )
+    })?;
     Ok(bukio::accounts::serialize_cost_center(&cc))
 }
 
@@ -1110,9 +1114,9 @@ fn cmd_cc_toggle(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
         bukio::audit::RecordArgs {
             actor,
             action: if reactivate {
-                "cost_center.reactivate"
+                "cost-center.reactivate"
             } else {
-                "cost_center.deactivate"
+                "cost-center.deactivate"
             },
             command: Some(if reactivate {
                 "cost-center reactivate"
@@ -3978,17 +3982,45 @@ fn cmd_report_sales(argv: &[String], db_path: &str) -> Result<Value> {
 // ── report cost-center ─────────────────────────────────────────────
 fn cmd_report_cost_center(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let year = arg(argv, "--year");
-    let from = arg(argv, "--from");
-    let to = arg(argv, "--to");
+    let mut year = arg(argv, "--year");
+    let mut from = arg(argv, "--from");
+    let mut to = arg(argv, "--to");
     let cc = arg(argv, "--cost-center");
-    bukio::reports::cost_center_report(
+    if let Some(period) = arg(argv, "--period") {
+        let (f, t) = bukio::vat::parse_period(&period)?;
+        from = Some(f);
+        to = Some(t);
+    }
+    // the JS CLI falls back to the current year when no period is given at all
+    if year.is_none() && from.is_none() && to.is_none() {
+        year = Some(bukio::dates::today_iso()[..4].to_string());
+    }
+    let r = bukio::reports::cost_center_report(
         &db,
         year.as_deref(),
         from.as_deref(),
         to.as_deref(),
         cc.as_deref(),
-    )
+    )?;
+    // the JS CLI projects a summary: formatted amounts, no per-account rows
+    let centers: Vec<Value> = r["centers"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|c| {
+            json!({
+                "cost_center_code": c["cost_center_code"],
+                "cost_center_name": c["cost_center_name"],
+                "revenue": bukio::money::format_amount(c["revenue_cents"].as_i64().unwrap_or(0)),
+                "costs": bukio::money::format_amount(c["costs_cents"].as_i64().unwrap_or(0)),
+                "result": bukio::money::format_amount(c["result_cents"].as_i64().unwrap_or(0)),
+            })
+        })
+        .collect();
+    Ok(json!({
+        "year": r["year"], "from": r["from"], "to": r["to"], "centers": centers,
+    }))
 }
 
 // ── financial-statements report ───────────────────────────────────

@@ -303,14 +303,13 @@ pub fn reactivate_account(db: &Connection, code: &str) -> Result<Value> {
 // --- cost centers -----------------------------------------------------------
 
 pub fn create_cost_center(db: &Connection, code: &str, name: &str) -> Result<Value> {
+    // JS CODE_RE is ^[A-Z0-9][A-Z0-9 ._-]{0,31}$ — UPPERCASE only: a lowercase
+    // code is rejected by the JS and was accepted here
     let code_ok = {
         let b = code.as_bytes();
-        !b.is_empty()
-            && b.len() <= 32
-            && b[0].is_ascii_alphanumeric()
-            && b[1..]
-                .iter()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b' ' | b'.' | b'_' | b'-'))
+        let alnum = |c: u8| c.is_ascii_uppercase() || c.is_ascii_digit();
+        let body = |c: u8| alnum(c) || matches!(c, b' ' | b'.' | b'_' | b'-');
+        !b.is_empty() && b.len() <= 32 && alnum(b[0]) && b[1..].iter().all(|c| body(*c))
     };
     if !code_ok {
         return Err(BukioError::new(
@@ -909,5 +908,162 @@ mod tests {
                 .code,
             "ALREADY_INACTIVE"
         );
+    }
+
+    // ==== ported from test/cost-centers.test.js ==============================
+
+    fn cc_db() -> Connection {
+        let db = company_db();
+        seed_default_chart(&db).unwrap();
+        db
+    }
+
+    fn cc_spec(code: &str, cents: i64, cc: Option<&str>) -> crate::entries::PostingSpec {
+        crate::entries::PostingSpec {
+            code: code.to_string(),
+            amount_cents: cents,
+            cost_center_code: cc.map(String::from),
+            vat_code: None,
+            vat_amount_cents: None,
+        }
+    }
+
+    fn add_cc_entry(
+        db: &Connection,
+        date: &str,
+        description: &str,
+        postings: Vec<crate::entries::PostingSpec>,
+    ) -> crate::entries::Entry {
+        crate::entries::create_entry(
+            db,
+            crate::entries::CreateEntry {
+                date,
+                description,
+                postings,
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn cost_center_basic_crud() {
+        let db = cc_db();
+        let cc = create_cost_center(&db, "ADM", "Administration").unwrap();
+        assert_eq!(cc["code"].as_str(), Some("ADM"));
+        assert_eq!(cc["name"].as_str(), Some("Administration"));
+        assert_eq!(cc["active"].as_i64(), Some(1));
+        assert!(get_cost_center_by_code(&db, "ADM").is_some());
+        assert_eq!(list_cost_centers(&db, false).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn cost_center_rejects_a_duplicate_code() {
+        let db = cc_db();
+        create_cost_center(&db, "ADM", "Administration").unwrap();
+        assert_eq!(
+            create_cost_center(&db, "ADM", "Admin").unwrap_err().code,
+            "COST_CENTER_EXISTS"
+        );
+    }
+
+    #[test]
+    fn cost_center_rejects_an_invalid_code() {
+        let db = cc_db();
+        assert_eq!(
+            create_cost_center(&db, "x", "X").unwrap_err().code,
+            "INVALID_CODE"
+        );
+    }
+
+    #[test]
+    fn deactivating_a_cost_center_blocks_new_bookings_but_keeps_history() {
+        let db = cc_db();
+        create_cost_center(&db, "ADM", "Administration").unwrap();
+        let updated = set_cost_center_active(&db, "ADM", false, false).unwrap();
+        assert_eq!(updated["active"].as_i64(), Some(0));
+        // booking on an inactive center is refused (JS resolveCostCenterIds)
+        let spec = || {
+            vec![
+                cc_spec("8000", -10000, Some("ADM")),
+                cc_spec("3000", 10000, None),
+            ]
+        };
+        let err = crate::entries::create_entry(
+            &db,
+            crate::entries::CreateEntry {
+                date: "2026-08-04",
+                description: "CC test",
+                postings: spec(),
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "COST_CENTER_INACTIVE");
+        // after reactivation it is resolvable again
+        set_cost_center_active(&db, "ADM", true, true).unwrap();
+        let e = add_cc_entry(&db, "2026-08-04", "CC test", spec());
+        assert_eq!(e.postings.len(), 2);
+    }
+
+    #[test]
+    fn posting_specs_without_a_cost_center() {
+        let specs =
+            crate::entries::parse_posting_specs(&["8000:-100.00,3000:100.00".to_string()]).unwrap();
+        assert_eq!(specs.len(), 2);
+        assert_eq!(specs[0].code, "8000");
+        assert_eq!(specs[0].amount_cents, -10000);
+        assert_eq!(specs[0].cost_center_code, None);
+    }
+
+    #[test]
+    fn posting_specs_with_an_at_cc_suffix() {
+        let specs =
+            crate::entries::parse_posting_specs(&["8000:-100.00@ADM,3000:100.00".to_string()])
+                .unwrap();
+        assert_eq!(specs[0].cost_center_code.as_deref(), Some("ADM"));
+        assert_eq!(specs[1].cost_center_code, None);
+    }
+
+    #[test]
+    fn an_entry_carries_the_cost_center_and_surfaces_it() {
+        let db = cc_db();
+        create_cost_center(&db, "ADM", "Admin").unwrap();
+        let e = add_cc_entry(
+            &db,
+            "2026-08-04",
+            "CC test",
+            vec![
+                cc_spec("8000", -10000, Some("ADM")),
+                cc_spec("3000", 10000, None),
+            ],
+        );
+        assert_eq!(e.postings[0].cost_center_code.as_deref(), Some("ADM"));
+        assert_eq!(e.postings[1].cost_center_code, None);
+    }
+
+    #[test]
+    fn a_reversal_carries_the_cost_center_to_the_contra_entry() {
+        let db = cc_db();
+        create_cost_center(&db, "ADM", "Admin").unwrap();
+        let e = add_cc_entry(
+            &db,
+            "2026-08-04",
+            "CC test",
+            vec![
+                cc_spec("8000", -10000, Some("ADM")),
+                cc_spec("3000", 10000, None),
+            ],
+        );
+        crate::entries::post_entry(&db, e.id, "human:erik").unwrap();
+        let rev = crate::entries::reverse_entry(&db, e.id, "human:erik", None).unwrap();
+        assert_eq!(rev.postings[0].cost_center_code.as_deref(), Some("ADM"));
+        // the reversal balances
+        let sum: i64 = rev.postings.iter().map(|p| p.amount_cents).sum();
+        assert_eq!(sum, 0);
     }
 }

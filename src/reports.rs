@@ -2188,4 +2188,174 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["account_code"], "1100");
     }
+
+    // ==== ported from test/cost-centers.test.js (report half) ================
+
+    fn cc_spec(code: &str, cents: i64, cc: Option<&str>) -> PostingSpec {
+        PostingSpec {
+            code: code.to_string(),
+            amount_cents: cents,
+            cost_center_code: cc.map(String::from),
+            vat_code: None,
+            vat_amount_cents: None,
+        }
+    }
+
+    fn cc_entry(db: &Connection, date: &str, desc: &str, postings: Vec<PostingSpec>) {
+        create_entry(
+            db,
+            CreateEntry {
+                date,
+                description: desc,
+                postings,
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        )
+        .unwrap();
+    }
+
+    fn post_everything(db: &Connection) {
+        let entries = crate::entries::list_entries(db, None, None, None, 500).unwrap();
+        for e in entries {
+            post_entry(db, e["id"].as_i64().unwrap(), "human:erik").unwrap();
+        }
+    }
+
+    #[test]
+    fn cost_center_report_groups_postings_by_center() {
+        let db = books();
+        crate::accounts::create_cost_center(&db, "ADM", "Admin").unwrap();
+        crate::accounts::create_cost_center(&db, "SALES", "Sales").unwrap();
+        cc_entry(
+            &db,
+            "2026-08-04",
+            "adm expense",
+            vec![
+                cc_spec("4700", 20000, Some("ADM")),
+                cc_spec("1100", -20000, None),
+            ],
+        );
+        cc_entry(
+            &db,
+            "2026-08-05",
+            "sales revenue",
+            vec![
+                cc_spec("1100", 30000, None),
+                cc_spec("8000", -30000, Some("SALES")),
+            ],
+        );
+        cc_entry(
+            &db,
+            "2026-08-06",
+            "unassigned expense",
+            vec![cc_spec("4700", 5000, None), cc_spec("1100", -5000, None)],
+        );
+        post_everything(&db);
+
+        let r = cost_center_report(&db, Some("2026"), None, None, None).unwrap();
+        let centers = r["centers"].as_array().unwrap();
+        assert_eq!(centers.len(), 3); // ADM, SALES, unassigned
+        let adm = centers
+            .iter()
+            .find(|c| c["cost_center_code"].as_str() == Some("ADM"))
+            .unwrap();
+        assert!(adm["result_cents"].as_i64().unwrap() < 0); // expense only
+        let sales = centers
+            .iter()
+            .find(|c| c["cost_center_code"].as_str() == Some("SALES"))
+            .unwrap();
+        assert!(sales["result_cents"].as_i64().unwrap() > 0); // revenue only
+        assert!(centers.iter().any(|c| c["cost_center_code"].is_null()));
+    }
+
+    #[test]
+    fn trial_balance_stays_balanced_after_cc_tagged_entries() {
+        let db = books();
+        crate::accounts::create_cost_center(&db, "ADM", "Admin").unwrap();
+        cc_entry(
+            &db,
+            "2026-08-04",
+            "CC entry",
+            vec![
+                cc_spec("8000", -50000, Some("ADM")),
+                cc_spec("3000", 50000, None),
+            ],
+        );
+        post_everything(&db);
+        let tb = trial_balance(&db, Some("2026")).unwrap();
+        assert_eq!(tb["balanced"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn cost_center_report_filters_by_period() {
+        let db = books();
+        crate::accounts::create_cost_center(&db, "ADM", "Admin").unwrap();
+        cc_entry(
+            &db,
+            "2026-01-15",
+            "jan",
+            vec![
+                cc_spec("4700", 10000, Some("ADM")),
+                cc_spec("1100", -10000, None),
+            ],
+        );
+        cc_entry(
+            &db,
+            "2026-08-04",
+            "aug",
+            vec![
+                cc_spec("4700", 20000, Some("ADM")),
+                cc_spec("1100", -20000, None),
+            ],
+        );
+        post_everything(&db);
+        // filter to August only: the January expense must not appear
+        let r =
+            cost_center_report(&db, None, Some("2026-08-01"), Some("2026-08-31"), None).unwrap();
+        let adm = r["centers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["cost_center_code"].as_str() == Some("ADM"))
+            .unwrap();
+        let total: i64 = adm["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["amount_cents"].as_i64().unwrap_or(0))
+            .sum();
+        assert_eq!(total, 20000);
+    }
+
+    #[test]
+    fn cost_center_report_filter_returns_only_that_center() {
+        let db = books();
+        crate::accounts::create_cost_center(&db, "ADM", "Admin").unwrap();
+        crate::accounts::create_cost_center(&db, "SALES", "Sales").unwrap();
+        cc_entry(
+            &db,
+            "2026-08-04",
+            "adm",
+            vec![
+                cc_spec("4700", 10000, Some("ADM")),
+                cc_spec("1100", -10000, None),
+            ],
+        );
+        cc_entry(
+            &db,
+            "2026-08-05",
+            "sales",
+            vec![
+                cc_spec("4700", 20000, Some("SALES")),
+                cc_spec("1100", -20000, None),
+            ],
+        );
+        post_everything(&db);
+        let r = cost_center_report(&db, Some("2026"), None, None, Some("ADM")).unwrap();
+        let centers = r["centers"].as_array().unwrap();
+        assert_eq!(centers.len(), 1);
+        assert_eq!(centers[0]["cost_center_code"].as_str(), Some("ADM"));
+    }
 }

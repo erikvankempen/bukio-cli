@@ -50,15 +50,12 @@ pub fn parse_posting_specs(raw: &[String]) -> Result<Vec<PostingSpec>> {
             if code.is_empty() || code.len() > 6 || !code.bytes().all(|b| b.is_ascii_digit()) {
                 return Err(bad());
             }
+            // the JS regex only strips a VALID @CC suffix — anything else stays
+            // part of the amount and fails as INVALID_AMOUNT
             let (amount, cc) = match rest.split_once('@') {
-                Some((a, c)) => (a, Some(c)),
-                None => (rest, None),
+                Some((a, c)) if valid_cc_code(c) => (a, Some(c)),
+                _ => (rest, None),
             };
-            if let Some(c) = cc {
-                if !valid_cc_code(c) {
-                    return Err(bad());
-                }
-            }
             out.push(PostingSpec {
                 code: code.to_string(),
                 amount_cents: parse_amount(amount)?,
@@ -72,17 +69,19 @@ pub fn parse_posting_specs(raw: &[String]) -> Result<Vec<PostingSpec>> {
 }
 
 fn valid_cc_code(c: &str) -> bool {
-    // ^[A-Z0-9][A-Z0-9 ._-]{0,31}$
+    // ^[A-Z0-9][A-Z0-9 ._-]{0,31}$ — uppercase only (is_ascii_alphanumeric
+    // would also accept lowercase, which the JS regex rejects)
     let b = c.as_bytes();
     if b.is_empty() || b.len() > 32 {
         return false;
     }
-    if !b[0].is_ascii_alphanumeric() {
+    let alnum = |ch: u8| ch.is_ascii_uppercase() || ch.is_ascii_digit();
+    if !alnum(b[0]) {
         return false;
     }
     b[1..]
         .iter()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, b' ' | b'.' | b'_' | b'-'))
+        .all(|ch| alnum(*ch) || matches!(ch, b' ' | b'.' | b'_' | b'-'))
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
