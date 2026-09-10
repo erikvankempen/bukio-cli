@@ -168,98 +168,165 @@ pub fn import_opening_balances(
             format!("date '{the_date}' must be yyyy-mm-dd"),
         ));
     }
-    let already: bool = db
+    // a REVERSED opening-balances entry (the documented correction path) must
+    // not block re-import: the reversal nets the old balances to zero, so a
+    // fresh import books only the corrected values
+    let existing_id: Option<i64> = db
         .query_row(
-            "SELECT 1 FROM journal_entries WHERE source='import' AND source_ref='opening-balances' LIMIT 1",
+            "SELECT id FROM journal_entries e
+             WHERE e.source = 'import' AND e.source_ref = 'opening-balances'
+               AND NOT EXISTS (SELECT 1 FROM journal_entries r WHERE r.reversed_from_id = e.id)
+             LIMIT 1",
             [],
-            |r| r.get::<_, i32>(0),
+            |r| r.get::<_, i64>(0),
         )
-        .map(|_| true)
-        .unwrap_or(false);
-    if already {
+        .ok();
+    if let Some(id) = existing_id {
         return Err(import_err(
             "OPENING_ALREADY_IMPORTED",
-            "opening balances already imported",
+            format!("opening balances were already imported (entry {id})"),
         ));
     }
 
     let rows = parse_csv_rows(csv_text);
     if rows.is_empty() {
-        return Err(import_err("EMPTY_CSV", "CSV has no data rows"));
-    }
-
-    let header = &rows[0].1;
-    let is_three = header.len() >= 3
-        && (header[1].to_lowercase().contains("debet")
-            || header[1].to_lowercase().contains("credit"));
-    let data_start = if header.iter().any(|h| {
-        matches!(
-            h.to_lowercase().as_str(),
-            "code" | "account" | "rekening" | "rekeningcode"
-        )
-    }) {
-        1
-    } else {
-        0
-    };
-
-    let mut errors = Vec::new();
-    let mut parsed: Vec<(String, i64)> = Vec::new();
-    for (ln, cells) in rows.iter().skip(data_start) {
-        if cells.len() < 2 || cells[0].is_empty() {
-            continue;
-        }
-        let code = cells[0].trim().to_string();
-        if !valid_code(&code) {
-            errors.push(format!("line {ln}: INVALID_CODE '{code}'"));
-            continue;
-        }
-        let amt = if is_three && cells.len() >= 3 {
-            let d = if cells[1].is_empty() {
-                0
-            } else {
-                parse_import_amount(&cells[1]).unwrap_or(0)
-            };
-            let c = if cells[2].is_empty() {
-                0
-            } else {
-                parse_import_amount(&cells[2]).unwrap_or(0)
-            };
-            d - c
-        } else {
-            parse_import_amount(&cells[1]).unwrap_or(0)
-        };
-        if amt == 0 {
-            errors.push(format!("line {ln}: zero amount for {code}"));
-            continue;
-        }
-        parsed.push((code, amt));
-    }
-    if parsed.is_empty() {
-        return Err(import_err("EMPTY_CSV", "no valid rows"));
-    }
-    let total: i64 = parsed.iter().map(|(_, a)| a).sum();
-    if total != 0 {
-        errors.push(format!("sum is {total} — must be zero"));
-    }
-    for (code, _) in &parsed {
-        if get_account_by_code(db, code).is_none() {
-            errors.push(format!("ACCOUNT_NOT_FOUND: {code}"));
-        }
-    }
-    if !errors.is_empty() {
         return Err(import_err(
-            "IMPORT_VALIDATION_FAILED",
-            format!("{} problem(s)", errors.len()),
+            "EMPTY_CSV",
+            "opening-balances CSV has no data rows",
         ));
     }
-    if dry_run {
-        return Ok(
-            json!({"action": "import opening balances", "accounts": parsed.len(), "date": the_date, "dryRun": true}),
-        );
+    // optional header row: a data row ALWAYS starts with a 1-6 digit account code
+    let data_start = if rows[0].1.first().map(|c| valid_code(c)).unwrap_or(false) {
+        0
+    } else {
+        1
+    };
+    if rows.len() <= data_start {
+        return Err(import_err(
+            "EMPTY_CSV",
+            "opening-balances CSV has no data rows after the header",
+        ));
     }
 
-    let postings: Vec<PostingSpec> = parsed
+    let mut errors: Vec<Value> = Vec::new();
+    let mut specs: Vec<(String, i64)> = Vec::new();
+    for (ln, cells) in rows.iter().skip(data_start) {
+        // the layout is decided by the column count, so empties are kept
+        let (code, amount) = match cells.len() {
+            2 => (cells[0].trim().to_string(), cells[1].clone()),
+            3 => {
+                let (c, debet, credit) = (&cells[0], &cells[1], &cells[2]);
+                if !debet.trim().is_empty() && !credit.trim().is_empty() {
+                    errors.push(json!({
+                        "line": ln,
+                        "error": "INVALID_ROW: both debet and credit are filled on one line",
+                    }));
+                    continue;
+                }
+                let a = if !debet.trim().is_empty() {
+                    debet.clone()
+                } else if !credit.trim().is_empty() {
+                    format!("-{}", credit.trim())
+                } else {
+                    String::new()
+                };
+                (c.trim().to_string(), a)
+            }
+            n => {
+                errors.push(json!({
+                    "line": ln,
+                    "error": format!(
+                        "INVALID_ROW: expected \"code,amount\" or \"code,debet,credit\" (got {n} columns)"
+                    ),
+                }));
+                continue;
+            }
+        };
+        if !valid_code(&code) {
+            errors.push(json!({
+                "line": ln,
+                "error": format!("INVALID_CODE: '{code}' must be 1-6 digits"),
+            }));
+            continue;
+        }
+        let amount_cents = match parse_import_amount(&amount) {
+            Ok(v) => v,
+            Err(e) => {
+                errors.push(json!({
+                    "line": ln, "error": format!("{}: {}", e.code, e.message),
+                }));
+                continue;
+            }
+        };
+        if amount_cents == 0 {
+            errors.push(json!({
+                "line": ln, "error": "INVALID_AMOUNT: amount must be non-zero",
+            }));
+            continue;
+        }
+        match get_account_by_code(db, &code) {
+            None => {
+                errors.push(json!({
+                    "line": ln,
+                    "error": format!(
+                        "ACCOUNT_NOT_FOUND: account {code} does not exist (create it first or import the chart)"
+                    ),
+                }));
+                continue;
+            }
+            Some(a) if account_is_inactive(&a) => {
+                errors.push(json!({
+                    "line": ln,
+                    "error": format!("ACCOUNT_INACTIVE: account {code} is inactive"),
+                }));
+                continue;
+            }
+            _ => {}
+        }
+        specs.push((code, amount_cents));
+    }
+
+    let sum: i64 = specs.iter().map(|(_, a)| a).sum();
+    if sum != 0 {
+        errors.push(json!({
+            "line": 0,
+            "error": format!(
+                "UNBALANCED: opening balances sum to {} — debet must equal credit",
+                crate::money::format_amount(sum)
+            ),
+        }));
+    }
+    if specs.len() < 2 && errors.is_empty() {
+        errors.push(json!({
+            "line": 0, "error": "TOO_FEW_POSTINGS: opening balances need at least 2 accounts",
+        }));
+    }
+    if !errors.is_empty() {
+        return Err(BukioError::with_details(
+            "IMPORT_VALIDATION_FAILED",
+            format!(
+                "opening-balances file has {} problem(s) — nothing imported",
+                errors.len()
+            ),
+            json!(errors),
+        ));
+    }
+
+    let total_debit: i64 = specs.iter().filter(|(_, a)| *a > 0).map(|(_, a)| *a).sum();
+    let total_credit = -sum + total_debit;
+    let plan = json!({
+        "action": "import opening balances",
+        "date": the_date,
+        "accounts": specs.len(),
+        "total_debit_cents": total_debit,
+        "total_credit_cents": total_credit,
+        "dryRun": true,
+    });
+    if dry_run {
+        return Ok(plan);
+    }
+
+    let postings: Vec<PostingSpec> = specs
         .iter()
         .map(|(c, a)| PostingSpec {
             code: c.clone(),
@@ -273,7 +340,7 @@ pub fn import_opening_balances(
         db,
         CreateEntry {
             date: the_date,
-            description: "Opening balances",
+            description: "Beginbalans",
             postings,
             source: "import",
             source_ref: Some("opening-balances"),
@@ -285,16 +352,27 @@ pub fn import_opening_balances(
         db,
         RecordArgs {
             actor,
-            action: "import.opening_balances",
+            action: "import.opening-balances",
             command: Some("import opening-balances"),
-            args: Some(json!({"accounts": parsed.len()})),
+            args: Some(json!({
+                "date": the_date,
+                "accounts": specs.len(),
+                "total_debit_cents": total_debit,
+            })),
             outcome: "ok",
-            entry_ids: vec![posted.id],
+            entry_ids: vec![entry.id],
         },
     )?;
-    Ok(
-        json!({"ok": true, "imported": true, "entry_id": posted.id, "date": the_date, "accounts": parsed.len()}),
-    )
+    Ok(json!({
+        "entry": {
+            "id": posted.id, "date": posted.date,
+            "description": posted.description, "state": posted.state,
+        },
+        "accounts": specs.len(),
+        "total_debit_cents": total_debit,
+        "total_credit_cents": total_credit,
+        "dryRun": false,
+    }))
 }
 
 /// Import journal CSV (boekstuk-based double-entry).
