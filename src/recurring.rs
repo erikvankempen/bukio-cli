@@ -195,7 +195,7 @@ pub fn create_template(
     }
 
     // Invoice kind: the spec object arrives as postings_json from the CLI.
-    let (invoice_spec, invoice_lines_raw, invoice_items_raw, due_days, vat_aware_flag) = if kind
+    let (invoice_spec, invoice_lines_raw, invoice_items_raw, due_days, mut vat_aware_flag) = if kind
         == "invoice"
     {
         let v: Value = serde_json::from_str(postings_json).unwrap_or(Value::Null);
@@ -317,11 +317,65 @@ pub fn create_template(
         (None, None, None, None, false)
     };
 
+    // The JS resolves a MIX of strings ("CODE:AMOUNT[@VAT]", one string may carry
+    // several comma-separated postings) and plain objects. The port only
+    // understood objects, so the documented "4300:1000.00,1100:-1000.00" form
+    // failed INVALID_POSTINGS and a VAT-tagged entry silently lost its VAT leg.
+    let mut entry_postings: Option<String> = None;
     if kind != "invoice" {
-        let parsed: Vec<PostingSpec> = serde_json::from_str(postings_json).map_err(|_| {
+        let raw: Vec<Value> = serde_json::from_str(postings_json).map_err(|_| {
             recurring_error("INVALID_POSTINGS", "postings_json must be valid JSON array")
         })?;
+        let has_tag = raw
+            .iter()
+            .any(|p| p.as_str().map(|s| s.contains('@')).unwrap_or(false));
+        let mut resolved: Vec<Value> = Vec::new();
+        if has_tag {
+            let strings: Vec<String> = raw
+                .iter()
+                .filter_map(|p| p.as_str().map(String::from))
+                .collect();
+            let specs = parse_vat_posting_specs(&strings)?;
+            let (expanded, vats) = expand_vat_postings(db, &specs)?;
+            for (i, sp) in expanded.iter().enumerate() {
+                let (vc, va) = vats.get(i).cloned().unwrap_or((None, None));
+                resolved.push(json!({
+                    "code": sp.code, "amountCents": sp.amount_cents,
+                    "vatCode": vc, "vatAmountCents": va,
+                }));
+            }
+            // object postings in the same list are already final form — keep them
+            for p in raw.iter().filter(|p| !p.is_string()) {
+                resolved.push(json!({
+                    "code": p["code"].clone(), "amountCents": p["amountCents"].clone(),
+                    "vatCode": p["vatCode"].clone(), "vatAmountCents": p["vatAmountCents"].clone(),
+                }));
+            }
+        } else {
+            for p in &raw {
+                match p.as_str() {
+                    Some(spec) => {
+                        for sp in crate::entries::parse_posting_specs(&[spec.to_string()])? {
+                            resolved.push(json!({
+                                "code": sp.code, "amountCents": sp.amount_cents,
+                                "vatCode": sp.vat_code, "vatAmountCents": sp.vat_amount_cents,
+                            }));
+                        }
+                    }
+                    None => resolved.push(json!({
+                        "code": p["code"].clone(), "amountCents": p["amountCents"].clone(),
+                        "vatCode": p["vatCode"].clone(), "vatAmountCents": p["vatAmountCents"].clone(),
+                    })),
+                }
+            }
+        }
+        let parsed: Vec<PostingSpec> = serde_json::from_value(Value::Array(resolved.clone()))
+            .map_err(|e| {
+                recurring_error("INVALID_POSTINGS", format!("invalid posting spec: {e}"))
+            })?;
         validate_postings(db, &parsed)?;
+        vat_aware_flag = has_tag;
+        entry_postings = Some(serde_json::to_string(&resolved).unwrap());
     }
 
     // compute next_run_date
@@ -346,25 +400,41 @@ pub fn create_template(
     }
 
     if dry_run {
-        // plan: for invoice kind expose the spec fields the JS CLI renders
+        // the JS's plan: the raw specs joined with ", " (objects stringified),
+        // null when there are none; vat_aware/reverse_previous always present
+        let postings_text: Value = if kind == "invoice" {
+            Value::Null
+        } else {
+            match serde_json::from_str::<Value>(postings_json) {
+                Ok(Value::Array(items)) if !items.is_empty() => {
+                    let parts: Vec<String> = items
+                        .iter()
+                        .map(|p| match p.as_str() {
+                            Some(s) => s.to_string(),
+                            None => p.to_string(),
+                        })
+                        .collect();
+                    Value::String(parts.join(", "))
+                }
+                _ => Value::Null,
+            }
+        };
         let mut plan = json!({
             "action": "recurring.template_add", "kind": kind, "name": name,
             "description": description, "frequency": frequency,
             "day_of_period": day_of_period, "start_date": start_date,
             "end_date": end_date, "runs": runs,
-            "postings": if kind == "invoice" { Value::Null } else { Value::String(postings_json.to_string()) },
+            "due_days": due_days, "reverse_previous": reverse_previous,
+            "contact_id": invoice_spec, "vat_aware": vat_aware_flag,
+            "postings": postings_text,
+            "lines": Value::Null, "items": Value::Null,
             "next_run_date": next_run, "dryRun": true,
         });
-        if kind == "invoice" {
-            plan["vat_aware"] = json!(vat_aware_flag);
-            plan["due_days"] = json!(due_days);
-            plan["contact_id"] = json!(invoice_spec);
-            if let Some(ref l) = invoice_lines_raw {
-                plan["lines"] = json!(l);
-            }
-            if let Some(ref i) = invoice_items_raw {
-                plan["items"] = json!(i);
-            }
+        if let Some(ref l) = invoice_lines_raw {
+            plan["lines"] = json!(l);
+        }
+        if let Some(ref i) = invoice_items_raw {
+            plan["items"] = json!(i);
         }
         return Ok(plan);
     }
@@ -374,7 +444,7 @@ pub fn create_template(
     let stored_postings = if kind == "invoice" {
         "[]".to_string()
     } else {
-        postings_json.to_string()
+        entry_postings.unwrap_or_else(|| postings_json.to_string())
     };
     let invoice_lines_json = invoice_lines_raw.map(|l| serde_json::to_string(&l).unwrap());
     let invoice_items_json = invoice_items_raw.map(|i| serde_json::to_string(&i).unwrap());
@@ -445,13 +515,13 @@ pub fn get_template(db: &Connection, id: i64) -> Result<Option<Value>> {
                 "end_date": r.get::<_, Option<String>>(6)?,
                 "runs": r.get::<_, Option<i64>>(7)?,
                 "postings": serde_json::from_str::<Value>(&posts).unwrap_or(json!([])),
-                "reverse_previous": r.get::<_, i64>(9)? == 1,
+                "reverse_previous": r.get::<_, i64>(9)?,
                 "next_run_date": r.get::<_, String>(10)?,
                 "last_run_date": r.get::<_, Option<String>>(11)?,
                 "last_entry_id": r.get::<_, Option<i64>>(12)?,
                 "runs_done": r.get::<_, i64>(13)?,
                 "status": r.get::<_, String>(14)?,
-                "vat_aware": r.get::<_, i64>(15)? == 1,
+                "vat_aware": r.get::<_, i64>(15)?,
                 "kind": r.get::<_, String>(16)?,
                 "contact_id": r.get::<_, Option<i64>>(17)?,
                 "due_days": r.get::<_, Option<i64>>(18)?,
@@ -493,8 +563,12 @@ pub fn set_template_status(
     actor: &str,
     dry_run: bool,
 ) -> Result<Value> {
-    let tpl = get_template(db, id)?
-        .ok_or_else(|| recurring_error("NOT_FOUND", format!("template {id} does not exist")))?;
+    let tpl = get_template(db, id)?.ok_or_else(|| {
+        recurring_error(
+            "NOT_FOUND",
+            format!("recurring template {id} does not exist"),
+        )
+    })?;
     if tpl["status"] == "completed" {
         return Err(recurring_error(
             "ALREADY_COMPLETED",
@@ -608,7 +682,7 @@ fn run_template_once(db: &Connection, tpl: &Value, actor: &str) -> Result<Value>
         }));
     } else {
         let postings_val = &tpl["postings"];
-        let final_val = tpl.get("final_postings");
+        let final_val = tpl.get("final_postings").filter(|v| !v.is_null());
         let is_final = final_val.is_some() && runs.map_or(false, |r| runs_done + 1 >= r);
         let entries_val = if is_final {
             final_val.unwrap()
@@ -619,7 +693,7 @@ fn run_template_once(db: &Connection, tpl: &Value, actor: &str) -> Result<Value>
             .map_err(|_| recurring_error("INVALID_POSTINGS", "could not parse postings"))?;
 
         // accrual: reverse previous
-        if tpl["reverse_previous"].as_bool().unwrap_or(false) {
+        if tpl["reverse_previous"].as_i64().unwrap_or(0) == 1 {
             if let Some(prev_id) = tpl["last_entry_id"].as_i64() {
                 match crate::entries::reverse_entry(
                     db,
@@ -631,7 +705,14 @@ fn run_template_once(db: &Connection, tpl: &Value, actor: &str) -> Result<Value>
                     )),
                 ) {
                     Ok(reversal) => {
-                        generated.push(json!({ "kind": "reversal", "entry_id": reversal.id }));
+                        generated.push(json!({
+                            "kind": "reversal",
+                            "entry": {
+                                "id": reversal.id,
+                                "date": reversal.date,
+                                "state": reversal.state,
+                            },
+                        }));
                     }
                     Err(e) if e.code == "ALREADY_REVERSED" || e.code == "NOT_POSTED" => {}
                     Err(e) => return Err(e),
@@ -654,7 +735,10 @@ fn run_template_once(db: &Connection, tpl: &Value, actor: &str) -> Result<Value>
         )?;
         let posted = post_entry(db, entry.id, "recurring")?;
         last_entry_id = Some(posted.id);
-        generated.push(json!({ "kind": "entry", "entry_id": last_entry_id }));
+        generated.push(json!({
+            "kind": "entry",
+            "entry": { "id": posted.id, "date": posted.date, "state": posted.state },
+        }));
     }
 
     // advance
@@ -678,6 +762,15 @@ fn run_template_once(db: &Connection, tpl: &Value, actor: &str) -> Result<Value>
 }
 
 /// Generate all due runs.
+/// The JS's previewDue: a read-only plan, identical to runDue(dryRun: true).
+pub fn preview_due(
+    db: &Connection,
+    as_of: Option<&str>,
+    template_id: Option<i64>,
+) -> Result<Value> {
+    run_due(db, as_of, template_id, "recurring", true)
+}
+
 pub fn run_due(
     db: &Connection,
     as_of: Option<&str>,
@@ -704,10 +797,10 @@ pub fn run_due(
             "frequency": r.get::<_, String>(3)?, "day_of_period": r.get::<_, i64>(4)?,
             "start_date": r.get::<_, String>(5)?, "end_date": r.get::<_, Option<String>>(6)?,
             "runs": r.get::<_, Option<i64>>(7)?, "postings": serde_json::from_str::<Value>(&posts).unwrap_or(json!([])),
-            "reverse_previous": r.get::<_, i64>(9)? == 1,
+            "reverse_previous": r.get::<_, i64>(9)?,
             "next_run_date": r.get::<_, String>(10)?, "last_run_date": r.get::<_, Option<String>>(11)?,
             "last_entry_id": r.get::<_, Option<i64>>(12)?, "runs_done": r.get::<_, i64>(13)?,
-            "status": r.get::<_, String>(14)?, "vat_aware": r.get::<_, i64>(15)? == 1,
+            "status": r.get::<_, String>(14)?, "vat_aware": r.get::<_, i64>(15)?,
             "kind": r.get::<_, String>(16)?,
             "contact_id": r.get::<_, Option<i64>>(17)?, "due_days": r.get::<_, Option<i64>>(18)?,
             "invoice_lines": il.and_then(|s| serde_json::from_str::<Value>(&s).ok()),
@@ -763,10 +856,9 @@ pub fn run_due(
                             "description": format!("{name} {run_date}"),
                         },
                     });
-                    if current["reverse_previous"].as_bool().unwrap_or(false)
+                    if current["reverse_previous"].as_i64().unwrap_or(0) == 1
                         && current["last_entry_id"].as_i64().is_some()
                     {
-                        run["kind"] = json!("reversal_preceding");
                         tpl_result["runs"].as_array_mut().unwrap().push(json!({
                             "kind": "reversal",
                             "entry": {
@@ -800,10 +892,11 @@ pub fn run_due(
                 current["next_run_date"] = json!(next_run);
                 current["runs_done"] = json!(runs_done);
                 current["status"] = json!(status);
-                if current["reverse_previous"].as_bool().unwrap_or(false) {
+                if current["reverse_previous"].as_i64().unwrap_or(0) == 1 {
                     current["last_entry_id"] = json!(-runs_done);
                 }
             } else {
+                tpl_result["ok"] = json!(true);
                 match run_template_once(db, &current, actor) {
                     Ok(r) => {
                         tpl_result["runs"].as_array_mut().unwrap().push(r.clone());
@@ -821,6 +914,10 @@ pub fn run_due(
                     }
                 }
             }
+        }
+        // the JS sets ok = true after the try/catch, for BOTH paths
+        if tpl_result.get("error").is_none() {
+            tpl_result["ok"] = json!(true);
         }
         if tpl_result["runs"]
             .as_array()
@@ -1051,7 +1148,7 @@ mod tests {
         assert_eq!(tpl["kind"], "invoice");
         assert_eq!(tpl["contact_id"], 1);
         assert_eq!(tpl["due_days"], 14);
-        assert_eq!(tpl["vat_aware"], false);
+        assert_eq!(tpl["vat_aware"].as_i64(), Some(0));
         assert_eq!(
             tpl["invoice_lines"].as_array().unwrap()[0],
             "2x Coaching @ 100.00"
@@ -1143,5 +1240,520 @@ mod tests {
             .unwrap();
         assert_eq!(line["desc"], "SaaS");
         assert_eq!(line["qty"], 2000);
+    }
+
+    // ==== ported from test/recurring.test.js ================================
+    fn tdb() -> Connection {
+        let d = crate::db::open_db(":memory:").unwrap();
+        crate::accounts::seed_default_chart(&d).unwrap();
+        d.execute(
+            "INSERT INTO company (name, legal_form) VALUES ('Test BV','bv')",
+            [],
+        )
+        .unwrap();
+        d
+    }
+
+    /// The JS test's tpl(overrides) helper.
+    fn tpl(db: &Connection, over: Value) -> Result<Value> {
+        let mut o = json!({
+            "name": "Huur kantoor", "frequency": "monthly", "dayOfPeriod": 1,
+            "startDate": "2026-01-01", "postings": ["4300:1000.00,1100:-1000.00"],
+        });
+        if let Some(m) = over.as_object() {
+            for (k, v) in m {
+                o[k] = v.clone();
+            }
+        }
+        create_template(
+            db,
+            o["name"].as_str().unwrap(),
+            None,
+            o["frequency"].as_str().unwrap(),
+            o["dayOfPeriod"].as_u64().unwrap_or(1) as u32,
+            o["startDate"].as_str().unwrap(),
+            o["endDate"].as_str(),
+            o["runs"].as_i64(),
+            &serde_json::to_string(&o["postings"]).unwrap(),
+            o["reversePrevious"].as_bool().unwrap_or(false),
+            "agent:test",
+            "entry",
+            false,
+        )
+    }
+
+    fn tpl_ok(db: &Connection) -> Value {
+        tpl(db, json!({})).unwrap()
+    }
+
+    fn one(db: &Connection, sql: &str) -> i64 {
+        db.query_row(sql, [], |r| r.get::<_, Option<i64>>(0))
+            .unwrap()
+            .unwrap_or(0)
+    }
+
+    fn entry_json(db: &Connection, id: i64) -> Value {
+        serde_json::to_value(crate::entries::get_entry(db, id).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn add_period_monthly_quarterly_yearly_keeps_the_day() {
+        assert_eq!(
+            add_period("2026-01-15", "monthly", 1).unwrap(),
+            "2026-02-01"
+        );
+        assert_eq!(
+            add_period("2026-11-01", "monthly", 5).unwrap(),
+            "2026-12-05"
+        );
+        assert_eq!(
+            add_period("2026-12-01", "monthly", 1).unwrap(),
+            "2027-01-01"
+        );
+        assert_eq!(
+            add_period("2026-01-01", "quarterly", 1).unwrap(),
+            "2026-04-01"
+        );
+        assert_eq!(
+            add_period("2026-10-01", "quarterly", 1).unwrap(),
+            "2027-01-01"
+        );
+        assert_eq!(add_period("2026-01-01", "yearly", 1).unwrap(), "2027-01-01");
+    }
+
+    #[test]
+    fn create_template_validates_postings_balance_accounts() {
+        let d = tdb();
+        let e = tpl(&d, json!({"postings": ["4300:1000.00"]})).unwrap_err();
+        assert_eq!(e.code, "INVALID_POSTINGS");
+        let e = tpl(&d, json!({"postings": ["4300:1000.00,1100:-999.00"]})).unwrap_err();
+        assert_eq!(e.code, "UNBALANCED");
+        let e = tpl(&d, json!({"postings": ["9999:100.00,1100:-100.00"]})).unwrap_err();
+        assert_eq!(e.code, "ACCOUNT_NOT_FOUND");
+        let e = tpl(&d, json!({"frequency": "weekly"})).unwrap_err();
+        assert_eq!(e.code, "INVALID_FREQUENCY");
+        let e = tpl(&d, json!({"dayOfPeriod": 29})).unwrap_err();
+        assert_eq!(e.code, "INVALID_DATE");
+        let e = tpl(&d, json!({"startDate": "2026-13-01"})).unwrap_err();
+        assert_eq!(e.code, "INVALID_DATE");
+        let e = tpl(&d, json!({"endDate": "2025-12-01"})).unwrap_err();
+        assert_eq!(e.code, "INVALID_RANGE");
+    }
+
+    #[test]
+    fn create_template_rejects_an_inactive_account() {
+        let d = tdb();
+        crate::accounts::deactivate_account(&d, "4300").unwrap();
+        let e = tpl(&d, json!({})).unwrap_err();
+        assert_eq!(e.code, "ACCOUNT_INACTIVE");
+    }
+
+    #[test]
+    fn create_template_normalizes_the_first_run_to_day_of_period() {
+        let d = tdb();
+        let a = tpl(&d, json!({"startDate": "2026-01-15", "dayOfPeriod": 1})).unwrap();
+        assert_eq!(a["next_run_date"].as_str(), Some("2026-02-01"));
+        let b = tpl(&d, json!({"startDate": "2026-01-15", "dayOfPeriod": 20})).unwrap();
+        assert_eq!(b["next_run_date"].as_str(), Some("2026-01-20"));
+        let c = tpl(&d, json!({"startDate": "2026-01-25", "dayOfPeriod": 1})).unwrap();
+        assert_eq!(c["next_run_date"].as_str(), Some("2026-02-01"));
+    }
+
+    #[test]
+    fn run_due_books_one_entry_per_period_on_schedule() {
+        let d = tdb();
+        tpl_ok(&d);
+        let r = run_due(&d, Some("2026-03-15"), None, "agent:test", false).unwrap();
+        assert_eq!(r["templates"].as_array().unwrap().len(), 1);
+        assert_eq!(r["templates"][0]["runs"].as_array().unwrap().len(), 3);
+        let t = get_template(&d, 1).unwrap().unwrap();
+        assert_eq!(t["runs_done"].as_i64(), Some(3));
+        assert_eq!(t["next_run_date"].as_str(), Some("2026-04-01"));
+        assert_eq!(t["status"].as_str(), Some("active"));
+        let mut stmt = d
+            .prepare("SELECT date, source_ref, created_by FROM journal_entries WHERE source = 'recurring' ORDER BY date")
+            .unwrap();
+        let rows: Vec<(String, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        let dates: Vec<&str> = rows.iter().map(|r| r.0.as_str()).collect();
+        assert_eq!(dates, vec!["2026-01-01", "2026-02-01", "2026-03-01"]);
+        assert_eq!(rows[0].1, "tpl:1");
+        assert_eq!(rows[0].2, "recurring");
+    }
+
+    #[test]
+    fn run_due_is_idempotent() {
+        let d = tdb();
+        tpl_ok(&d);
+        run_due(&d, Some("2026-01-31"), None, "agent:test", false).unwrap();
+        let again = run_due(&d, Some("2026-01-31"), None, "agent:test", false).unwrap();
+        assert_eq!(again["templates"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            one(
+                &d,
+                "SELECT COUNT(*) FROM journal_entries WHERE source='recurring'"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn run_due_completes_the_template_after_the_run_limit() {
+        let d = tdb();
+        tpl(&d, json!({"runs": 2})).unwrap();
+        run_due(&d, Some("2026-06-30"), None, "agent:test", false).unwrap();
+        let t = get_template(&d, 1).unwrap().unwrap();
+        assert_eq!(t["runs_done"].as_i64(), Some(2));
+        assert_eq!(t["status"].as_str(), Some("completed"));
+        assert_eq!(
+            one(
+                &d,
+                "SELECT COUNT(*) FROM journal_entries WHERE source='recurring'"
+            ),
+            2
+        );
+    }
+
+    #[test]
+    fn run_due_completes_the_template_at_end_date() {
+        let d = tdb();
+        tpl(&d, json!({"endDate": "2026-02-28"})).unwrap();
+        run_due(&d, Some("2026-12-31"), None, "agent:test", false).unwrap();
+        let t = get_template(&d, 1).unwrap().unwrap();
+        assert_eq!(t["status"].as_str(), Some("completed"));
+        assert_eq!(t["runs_done"].as_i64(), Some(2));
+    }
+
+    #[test]
+    fn run_due_skips_paused_templates() {
+        let d = tdb();
+        tpl_ok(&d);
+        set_template_status(&d, 1, "paused", "agent:test", false).unwrap();
+        let r = run_due(&d, Some("2026-03-01"), None, "agent:test", false).unwrap();
+        assert_eq!(r["templates"].as_array().unwrap().len(), 0);
+        assert_eq!(
+            one(
+                &d,
+                "SELECT COUNT(*) FROM journal_entries WHERE source='recurring'"
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn run_due_with_a_template_id_runs_only_that_template() {
+        let d = tdb();
+        tpl_ok(&d);
+        tpl(
+            &d,
+            json!({"name": "Verzekering", "postings": ["4320:100.00,1700:-100.00"]}),
+        )
+        .unwrap();
+        let r = run_due(&d, Some("2026-02-01"), Some(2), "agent:test", false).unwrap();
+        assert_eq!(r["templates"].as_array().unwrap().len(), 1);
+        assert_eq!(r["templates"][0]["template_id"].as_i64(), Some(2));
+        assert_eq!(
+            one(
+                &d,
+                "SELECT COUNT(*) FROM journal_entries WHERE source='recurring'"
+            ),
+            2
+        );
+    }
+
+    #[test]
+    fn run_due_dry_run_writes_nothing() {
+        let d = tdb();
+        tpl_ok(&d);
+        let r = run_due(&d, Some("2026-03-01"), None, "agent:test", true).unwrap();
+        assert_eq!(r["templates"].as_array().unwrap().len(), 1);
+        assert_eq!(r["templates"][0]["runs"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            one(
+                &d,
+                "SELECT COUNT(*) FROM journal_entries WHERE source='recurring'"
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn reverse_previous_reverses_the_prior_entry_each_run() {
+        let d = tdb();
+        tpl(
+            &d,
+            json!({"name": "Nog te betalen kosten", "reversePrevious": true,
+                   "postings": ["4310:250.00,2400:-250.00"]}),
+        )
+        .unwrap();
+        run_due(&d, Some("2026-01-31"), None, "agent:test", false).unwrap();
+        assert_eq!(
+            one(
+                &d,
+                "SELECT COUNT(*) FROM journal_entries WHERE source='recurring'"
+            ),
+            1
+        );
+        let net = "SELECT SUM(amount_cents) FROM postings p JOIN journal_entries e ON e.id=p.entry_id WHERE e.state='posted' AND p.account_id=(SELECT id FROM accounts WHERE code='2400')";
+        assert_eq!(one(&d, net), -25000);
+
+        run_due(&d, Some("2026-02-28"), None, "agent:test", false).unwrap();
+        assert_eq!(one(&d, "SELECT COUNT(*) FROM journal_entries"), 3);
+        let ids: Vec<i64> = {
+            let mut stmt = d
+                .prepare("SELECT id FROM journal_entries ORDER BY id")
+                .unwrap();
+            let v: Vec<i64> = stmt
+                .query_map([], |r| r.get(0))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect();
+            v
+        };
+        let reversal = entry_json(&d, ids[1]);
+        assert_eq!(reversal["source"].as_str(), Some("reversal"));
+        assert!(reversal["reversed_from_id"].as_i64().is_some());
+        assert_eq!(reversal["state"].as_str(), Some("posted"));
+        assert_eq!(one(&d, net), -25000);
+    }
+
+    #[test]
+    fn reverse_previous_completed_chain_leaves_the_last_accrual_outstanding() {
+        let d = tdb();
+        tpl(
+            &d,
+            json!({"name": "Tijdelijke post", "reversePrevious": true, "runs": 3,
+                   "postings": ["4310:100.00,2400:-100.00"]}),
+        )
+        .unwrap();
+        run_due(&d, Some("2026-03-31"), None, "agent:test", false).unwrap();
+        let net = "SELECT SUM(amount_cents) FROM postings p JOIN journal_entries e ON e.id=p.entry_id WHERE e.state='posted' AND p.account_id=(SELECT id FROM accounts WHERE code='2400')";
+        assert_eq!(one(&d, net), -10000);
+    }
+
+    #[test]
+    fn reverse_previous_dry_run_preview_mirrors_the_execute_shape() {
+        let d = tdb();
+        tpl(
+            &d,
+            json!({"name": "Nog te betalen kosten", "reversePrevious": true,
+                   "postings": ["4310:250.00,2400:-250.00"]}),
+        )
+        .unwrap();
+        run_due(&d, Some("2026-01-31"), None, "agent:test", false).unwrap();
+        let preview = run_due(&d, Some("2026-02-28"), None, "agent:test", true).unwrap();
+        let t = &preview["templates"][0];
+        assert_eq!(t["runs"].as_array().unwrap().len(), 2);
+        assert_eq!(t["runs"][0]["kind"].as_str(), Some("reversal"));
+        assert_eq!(t["runs"][0]["entry"]["id"].as_i64(), Some(1));
+        assert_eq!(t["runs"][1]["kind"].as_str(), Some("entry"));
+        assert_eq!(t["runs"][1]["entry"]["date"].as_str(), Some("2026-02-01"));
+        assert_eq!(
+            one(
+                &d,
+                "SELECT COUNT(*) FROM journal_entries WHERE source='recurring'"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn build_depreciation_template_adjusts_the_final_run() {
+        let d = tdb();
+        let r = build_depreciation_template(
+            &d,
+            "Laptop Dell",
+            "1800",
+            "4600",
+            537000,
+            0,
+            36,
+            "2026-01-01",
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(r["monthly_cents"].as_i64(), Some(14917));
+        assert_eq!(r["final_cents"].as_i64(), Some(14905));
+        assert_eq!(r["total_cents"].as_i64(), Some(537000));
+        let t = get_template(&d, r["template"]["id"].as_i64().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(t["runs"].as_i64(), Some(36));
+        assert_eq!(t["frequency"].as_str(), Some("monthly"));
+        assert_eq!(t["postings"][0]["code"].as_str(), Some("4600"));
+        assert_eq!(t["postings"][0]["amountCents"].as_i64(), Some(14917));
+        assert_eq!(t["final_postings"][0]["amountCents"].as_i64(), Some(14905));
+
+        run_due(&d, Some("2028-12-31"), None, "agent:test", false).unwrap();
+        let asset = "SELECT SUM(amount_cents) FROM postings p JOIN journal_entries e ON e.id=p.entry_id WHERE e.state='posted' AND p.account_id=(SELECT id FROM accounts WHERE code='1800')";
+        assert_eq!(one(&d, asset), -537000);
+    }
+
+    #[test]
+    fn build_depreciation_template_validates() {
+        let d = tdb();
+        let e = build_depreciation_template(
+            &d,
+            "x",
+            "1800",
+            "4600",
+            -5,
+            0,
+            36,
+            "2026-01-01",
+            None,
+            "a:t",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(e.code, "INVALID_COST");
+        let e = build_depreciation_template(
+            &d,
+            "x",
+            "1800",
+            "4600",
+            1000,
+            2000,
+            36,
+            "2026-01-01",
+            None,
+            "a:t",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(e.code, "INVALID_RESIDUAL");
+        let e = build_depreciation_template(
+            &d,
+            "x",
+            "1800",
+            "4600",
+            1000,
+            0,
+            1,
+            "2026-01-01",
+            None,
+            "a:t",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(e.code, "INVALID_LIFE");
+    }
+
+    #[test]
+    fn vat_aware_template_stores_the_expansion_and_replays_it() {
+        let d = tdb();
+        crate::vat::enable_vat_module(&d, "agent:test").unwrap();
+        let t = tpl(
+            &d,
+            json!({"name": "Abonnement", "postings": ["4340:100.00@21,1100:-121.00"]}),
+        )
+        .unwrap();
+        assert_eq!(t["vat_aware"].as_i64(), Some(1));
+        assert_eq!(t["postings"].as_array().unwrap().len(), 3);
+        run_due(&d, Some("2026-01-31"), None, "agent:test", false).unwrap();
+        let entry = entry_json(&d, 1);
+        let posts = entry["postings"].as_array().unwrap();
+        let net = posts
+            .iter()
+            .find(|p| p["account_code"] == "4340")
+            .expect("4340 posting");
+        assert_eq!(net["vat_amount_cents"].as_i64(), Some(2100));
+        let vat_leg = posts
+            .iter()
+            .find(|p| p["account_code"] == "1500")
+            .expect("1500 posting");
+        assert_eq!(vat_leg["amount_cents"].as_i64(), Some(2100));
+    }
+
+    #[test]
+    fn vat_aware_template_requires_the_vat_module() {
+        let d = tdb();
+        let e = tpl(&d, json!({"postings": ["4340:100.00@21,1100:-121.00"]})).unwrap_err();
+        assert_eq!(e.code, "VAT_MODULE_OFF");
+    }
+
+    #[test]
+    fn vat_aware_keeps_object_postings_mixed_into_a_tagged_list() {
+        let d = tdb();
+        crate::vat::enable_vat_module(&d, "agent:test").unwrap();
+        let t = tpl(
+            &d,
+            json!({"name": "Gemengd", "postings": ["4340:100.00@21", {"code": "1100", "amountCents": -12100}]}),
+        )
+        .unwrap();
+        assert_eq!(t["vat_aware"].as_i64(), Some(1));
+        let codes: Vec<String> = t["postings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["code"].as_str().unwrap_or("").to_string())
+            .collect();
+        assert!(
+            codes.contains(&"4340".to_string()),
+            "string posting expanded"
+        );
+        assert!(codes.contains(&"1500".to_string()), "VAT leg added");
+        assert!(codes.contains(&"1100".to_string()), "object posting kept");
+        let sum: i64 = t["postings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["amountCents"].as_i64().unwrap_or(0))
+            .sum();
+        assert_eq!(sum, 0);
+        run_due(&d, Some("2026-01-31"), None, "agent:test", false).unwrap();
+        let entry = entry_json(&d, 1);
+        assert_eq!(entry["state"].as_str(), Some("posted"));
+        let esum: i64 = entry["postings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["amount_cents"].as_i64().unwrap_or(0))
+            .sum();
+        assert_eq!(esum, 0);
+    }
+
+    #[test]
+    fn preview_due_is_read_only_and_matches_run_due() {
+        let d = tdb();
+        tpl_ok(&d);
+        let plan = preview_due(&d, Some("2026-02-15"), None).unwrap();
+        assert_eq!(plan["templates"][0]["runs"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            one(
+                &d,
+                "SELECT COUNT(*) FROM journal_entries WHERE source='recurring'"
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn list_templates_filters_by_status() {
+        let d = tdb();
+        tpl_ok(&d);
+        tpl(&d, json!({"name": "B", "runs": 1})).unwrap();
+        run_due(&d, Some("2026-01-31"), None, "agent:test", false).unwrap();
+        assert_eq!(list_templates(&d, "active").unwrap().len(), 1);
+        assert_eq!(list_templates(&d, "completed").unwrap().len(), 1);
+        assert_eq!(list_templates(&d, "all").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn generated_entries_are_posted_and_the_books_stay_balanced() {
+        let d = tdb();
+        tpl_ok(&d);
+        run_due(&d, Some("2026-01-31"), None, "agent:test", false).unwrap();
+        let entry = entry_json(&d, 1);
+        assert_eq!(entry["state"].as_str(), Some("posted"));
+        assert_eq!(
+            one(&d, "SELECT COALESCE(SUM(amount_cents),0) FROM postings"),
+            0
+        );
     }
 }

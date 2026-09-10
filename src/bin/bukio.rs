@@ -2047,6 +2047,124 @@ fn cmd_vat_settle(argv: &[String], db_path: &str, actor: &str, dry_run: bool) ->
 
 // ── recurring ──────────────────────────────────────────────────────────────
 
+/// The JS CLI's fmtPostings (src/cli/recurring.js): snake_case + a formatted
+/// amount string alongside the cents.
+fn fmt_postings(postings: &Value) -> Value {
+    let arr = postings.as_array().cloned().unwrap_or_default();
+    Value::Array(
+        arr.iter()
+            .map(|p| {
+                let cents = p["amountCents"]
+                    .as_i64()
+                    .or_else(|| p["amount_cents"].as_i64())
+                    .unwrap_or(0);
+                json!({
+                    "code": p["code"].clone(),
+                    "amount_cents": cents,
+                    "amount": bukio::money::format_amount(cents),
+                    "vat_code": p["vatCode"].clone(),
+                })
+            })
+            .collect(),
+    )
+}
+
+/// The JS CLI's fmtTemplate — a fixed key set, bools for the 0/1 flags.
+fn fmt_template(t: &Value) -> Value {
+    let postings = if t["postings"].is_null() {
+        Value::Null
+    } else {
+        fmt_postings(&t["postings"])
+    };
+    let final_postings = if t["final_postings"].is_null() {
+        Value::Null
+    } else {
+        fmt_postings(&t["final_postings"])
+    };
+    let mut out = json!({
+        "id": t["id"].clone(), "name": t["name"].clone(),
+        "description": t["description"].clone(),
+        "kind": t["kind"].clone(), "contact_id": t["contact_id"].clone(),
+        "invoice_lines": t["invoice_lines"].clone(),
+        "frequency": t["frequency"].clone(), "day_of_period": t["day_of_period"].clone(),
+        "start_date": t["start_date"].clone(), "end_date": t["end_date"].clone(),
+        "runs": t["runs"].clone(), "status": t["status"].clone(),
+        "next_run_date": t["next_run_date"].clone(), "last_run_date": t["last_run_date"].clone(),
+        "runs_done": t["runs_done"].clone(),
+        "reverse_previous": json!(t["reverse_previous"].as_i64().unwrap_or(0) == 1),
+        "vat_aware": json!(t["vat_aware"].as_i64().unwrap_or(0) == 1),
+        "postings": postings, "final_postings": final_postings,
+    });
+    if !t["action"].is_null() {
+        out["action"] = t["action"].clone();
+    }
+    if t["dryRun"].is_boolean() {
+        out["dryRun"] = t["dryRun"].clone();
+    }
+    out
+}
+
+/// The JS CLI's recurring-run projection: {ok, error, runs:[{kind?, entries[]}]}.
+fn fmt_run(data: &Value) -> Value {
+    let templates = data["templates"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|t| {
+            let runs = t["runs"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|r| {
+                    let entries: Vec<Value> = match r["generated"].as_array() {
+                        Some(gens) => gens
+                            .iter()
+                            .map(|g| {
+                                if g["kind"] == "invoice" {
+                                    json!({
+                                        "kind": "invoice",
+                                        "invoice_id": g["invoice"]["id"].clone(),
+                                        "date": g["invoice"]["date"].clone(),
+                                        "state": "draft",
+                                    })
+                                } else {
+                                    json!({
+                                        "kind": g["kind"].clone(),
+                                        "entry_id": g["entry"]["id"].clone(),
+                                        "date": g["entry"]["date"].clone(),
+                                        "state": g["entry"]["state"].clone(),
+                                    })
+                                }
+                            })
+                            .collect(),
+                        None => vec![json!({
+                            "kind": if r["kind"].is_null() { json!("entry") } else { r["kind"].clone() },
+                            "entry_id": r["entry"]["id"].clone(),
+                            "date": r["entry"]["date"].clone(),
+                            "state": "plan",
+                        })],
+                    };
+                    let mut run = json!({ "entries": entries });
+                    if r["generated"].is_null() {
+                        run["kind"] = if r["kind"].is_null() { json!("entry") } else { r["kind"].clone() };
+                    }
+                    run
+                })
+                .collect::<Vec<Value>>();
+            json!({
+                "template_id": t["template_id"].clone(),
+                "name": t["name"].clone(),
+                "ok": t["ok"].clone(),
+                "error": if t["error"].is_null() { Value::Null } else { t["error"].clone() },
+                "runs": runs,
+            })
+        })
+        .collect::<Vec<Value>>();
+    json!({ "as_of": data["as_of"].clone(), "dry_run": data["dry_run"].clone(), "templates": templates })
+}
+
 fn cmd_recurring_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
@@ -2074,14 +2192,10 @@ fn cmd_recurring_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
     let start = arg(argv, "--start").ok_or_else(|| missing_arg("--start"))?;
 
     if kind == "entry" {
+        // pass the raw specs through (like the JS CLI): flattening them here
+        // dropped the "@VAT" tag, so a VAT-tagged template failed UNBALANCED
         let postings_raw = repeated(argv, "--postings");
-        let postings_json = serde_json::to_string(
-            &bukio::entries::parse_posting_specs(&postings_raw)?
-                .iter()
-                .map(|s| json!({ "code": s.code, "amountCents": s.amount_cents }))
-                .collect::<Vec<_>>(),
-        )
-        .unwrap_or_default();
+        let postings_json = serde_json::to_string(&postings_raw).unwrap_or_default();
         let name = arg(argv, "--name")
             .unwrap_or_else(|| desc.clone().unwrap_or_else(|| "recurring entry".into()));
         let tpl = bukio::recurring::create_template(
@@ -2103,7 +2217,7 @@ fn cmd_recurring_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
         if dry_run {
             Ok(tpl)
         } else {
-            Ok(json!({ "template": tpl, "dryRun": false }))
+            Ok(json!({ "template": fmt_template(&tpl), "dryRun": false }))
         }
     } else {
         // invoice kind — need contact + lines
@@ -2169,15 +2283,20 @@ fn cmd_recurring_list(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let status = arg(argv, "--status").unwrap_or_else(|| "active".into());
     let rows = bukio::recurring::list_templates(&db, &status)?;
-    Ok(json!({ "templates": rows }))
+    let mapped: Vec<Value> = rows.iter().map(fmt_template).collect();
+    Ok(json!({ "templates": mapped }))
 }
 
 fn cmd_recurring_show(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
-    let tpl = bukio::recurring::get_template(&db, id)?
-        .ok_or_else(|| BukioError::new("NOT_FOUND", format!("template {id} not found")))?;
-    Ok(tpl)
+    let tpl = bukio::recurring::get_template(&db, id)?.ok_or_else(|| {
+        BukioError::new(
+            "NOT_FOUND",
+            format!("recurring template {id} does not exist"),
+        )
+    })?;
+    Ok(json!({ "template": fmt_template(&tpl) }))
 }
 
 fn cmd_recurring_pause(
@@ -2190,7 +2309,7 @@ fn cmd_recurring_pause(
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
     Ok(
-        json!({ "template": bukio::recurring::set_template_status(&db, id, "paused", actor, dry_run)? }),
+        json!({ "template": fmt_template(&bukio::recurring::set_template_status(&db, id, "paused", actor, dry_run)?) }),
     )
 }
 
@@ -2204,7 +2323,7 @@ fn cmd_recurring_resume(
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
     Ok(
-        json!({ "template": bukio::recurring::set_template_status(&db, id, "active", actor, dry_run)? }),
+        json!({ "template": fmt_template(&bukio::recurring::set_template_status(&db, id, "active", actor, dry_run)?) }),
     )
 }
 
@@ -2275,7 +2394,7 @@ fn cmd_recurring_run(argv: &[String], db_path: &str, actor: &str, dry_run: bool)
         }
         std::process::exit(0);
     }
-    Ok(result)
+    Ok(fmt_run(&result))
 }
 
 // ── depreciation ───────────────────────────────────────────────────────────
