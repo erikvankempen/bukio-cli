@@ -617,6 +617,22 @@ mod tests {
         assert_eq!(accounts.len(), 29);
         // all RGS-mapped
         assert!(accounts.iter().all(|a| a["taxonomy_code"].is_string()));
+        // spot-checks carried over from the entry suite's fixture test
+        assert!(accounts
+            .iter()
+            .any(|a| a["code"] == "1100" && a["type"] == "asset"));
+        // 4840 Koersverschillen (FX differences on invoice payments)
+        assert!(accounts
+            .iter()
+            .any(|a| a["code"] == "4840" && a["taxonomy_code"] == "WFBE.84"));
+        assert!(accounts
+            .iter()
+            .any(|a| a["code"] == "8000" && a["type"] == "income"));
+        // VAT-agnostic: no btw accounts in the core chart
+        assert!(!accounts.iter().any(|a| {
+            let name = a["name"].as_str().unwrap_or("").to_lowercase();
+            name.contains("btw") || name.contains("omzetbelasting")
+        }));
         // second seed is a no-op
         assert_eq!(seed_default_chart(&db).unwrap(), 0);
     }

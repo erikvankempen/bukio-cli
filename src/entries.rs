@@ -652,6 +652,410 @@ mod tests {
             .collect()
     }
 
+    // ── ported from test/entries.test.js ──
+    // (That file's first case, "default chart is seeded with 29 accounts", is a
+    // chart assertion and lives with the other chart tests in accounts.rs.)
+
+    /// The full NL default chart — the JS suite's fixture.
+    fn full_chart() -> Connection {
+        let db = open_db(":memory:").unwrap();
+        db.execute("INSERT INTO company (name) VALUES ('Test BV')", [])
+            .unwrap();
+        crate::accounts::seed_default_chart(&db).unwrap();
+        db
+    }
+
+    fn make(
+        db: &Connection,
+        date: &str,
+        description: &str,
+        items: &[(&str, i64)],
+        actor: &str,
+    ) -> Result<Entry> {
+        create_entry(
+            db,
+            CreateEntry {
+                date,
+                description,
+                postings: spec(items),
+                source: "manual",
+                source_ref: None,
+                actor,
+            },
+        )
+    }
+
+    #[test]
+    fn balanced_two_posting_entry_lands_as_draft() {
+        let db = full_chart();
+        let e = make(
+            &db,
+            "2026-08-04",
+            "Startkapitaal",
+            &[("1100", 1000000), ("3000", -1000000)],
+            "human", // the JS engine's default actor
+        )
+        .unwrap();
+        assert_eq!(e.state, "draft");
+        assert_eq!(e.postings.len(), 2);
+        assert_eq!(e.postings.iter().map(|p| p.amount_cents).sum::<i64>(), 0);
+        assert_eq!(e.created_by, "human");
+    }
+
+    #[test]
+    fn agent_actor_is_recorded() {
+        let db = full_chart();
+        let e = make(
+            &db,
+            "2026-08-04",
+            "x",
+            &[("1100", 100), ("3000", -100)],
+            "agent:test",
+        )
+        .unwrap();
+        assert_eq!(e.created_by, "agent:test");
+    }
+
+    #[test]
+    fn rejects_unbalanced_few_and_zero_amount_postings() {
+        let db = full_chart();
+        assert_eq!(
+            make(
+                &db,
+                "2026-08-04",
+                "x",
+                &[("1100", 100), ("3000", -99)],
+                "human"
+            )
+            .unwrap_err()
+            .code,
+            "UNBALANCED"
+        );
+        assert_eq!(
+            make(&db, "2026-08-04", "x", &[("1100", 100)], "human")
+                .unwrap_err()
+                .code,
+            "TOO_FEW_POSTINGS"
+        );
+        assert_eq!(
+            make(&db, "2026-08-04", "x", &[("1100", 0), ("3000", 0)], "human")
+                .unwrap_err()
+                .code,
+            "INVALID_AMOUNT_CENTS"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_and_inactive_accounts() {
+        let db = full_chart();
+        assert_eq!(
+            make(
+                &db,
+                "2026-08-04",
+                "x",
+                &[("9999", 100), ("3000", -100)],
+                "human"
+            )
+            .unwrap_err()
+            .code,
+            "ACCOUNT_NOT_FOUND"
+        );
+        db.execute("UPDATE accounts SET active = 0 WHERE code = '4300'", [])
+            .unwrap();
+        assert_eq!(
+            make(
+                &db,
+                "2026-08-04",
+                "x",
+                &[("4300", 100), ("3000", -100)],
+                "human"
+            )
+            .unwrap_err()
+            .code,
+            "ACCOUNT_INACTIVE"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_date_and_missing_description() {
+        let db = full_chart();
+        assert_eq!(
+            make(
+                &db,
+                "04-08-2026",
+                "x",
+                &[("1100", 100), ("3000", -100)],
+                "human"
+            )
+            .unwrap_err()
+            .code,
+            "INVALID_DATE"
+        );
+        assert_eq!(
+            make(
+                &db,
+                "2026-08-04",
+                "  ",
+                &[("1100", 100), ("3000", -100)],
+                "human"
+            )
+            .unwrap_err()
+            .code,
+            "INVALID_DESCRIPTION"
+        );
+    }
+
+    #[test]
+    fn post_moves_draft_to_posted_and_guards_idempotence() {
+        let db = full_chart();
+        let e = make(
+            &db,
+            "2026-08-04",
+            "x",
+            &[("1100", 100), ("3000", -100)],
+            "human",
+        )
+        .unwrap();
+        let posted = post_entry(&db, e.id, "human:erik").unwrap();
+        assert_eq!(posted.state, "posted");
+        assert!(posted.posted_at.is_some());
+        assert_eq!(
+            post_entry(&db, e.id, "human:erik").unwrap_err().code,
+            "ALREADY_POSTED"
+        );
+    }
+
+    #[test]
+    fn db_trigger_blocks_an_unbalanced_draft() {
+        let db = full_chart();
+        let e = make(
+            &db,
+            "2026-08-04",
+            "x",
+            &[("1100", 100), ("3000", -100)],
+            "human",
+        )
+        .unwrap();
+        // bypass the engine: make the draft unbalanced via raw SQL
+        db.execute(
+            "INSERT INTO postings (entry_id, account_id, amount_cents)
+             VALUES (?1, (SELECT id FROM accounts WHERE code = '4300'), 50)",
+            rusqlite::params![e.id],
+        )
+        .unwrap();
+        let err = post_entry(&db, e.id, "human:erik").unwrap_err();
+        assert!(err.message.contains("unbalanced"), "got: {err:?}");
+    }
+
+    #[test]
+    fn db_trigger_requires_at_least_two_postings() {
+        let db = full_chart();
+        let e = make(
+            &db,
+            "2026-08-04",
+            "x",
+            &[("1100", 100), ("3000", -100)],
+            "human",
+        )
+        .unwrap();
+        db.execute(
+            "DELETE FROM postings WHERE entry_id = ?1
+             AND account_id = (SELECT id FROM accounts WHERE code = '3000')",
+            rusqlite::params![e.id],
+        )
+        .unwrap();
+        let err = post_entry(&db, e.id, "human:erik").unwrap_err();
+        assert!(err.message.contains("at least 2 postings"), "got: {err:?}");
+    }
+
+    #[test]
+    fn postings_of_a_posted_entry_are_immutable() {
+        let db = full_chart();
+        let e = make(
+            &db,
+            "2026-08-04",
+            "x",
+            &[("1100", 100), ("3000", -100)],
+            "human",
+        )
+        .unwrap();
+        post_entry(&db, e.id, "human:erik").unwrap();
+
+        let updated = db.execute(
+            "UPDATE postings SET amount_cents = 200 WHERE entry_id = ?1",
+            rusqlite::params![e.id],
+        );
+        assert!(updated.is_err());
+        assert!(format!("{:?}", updated.unwrap_err()).contains("non-draft"));
+
+        let deleted = db.execute(
+            "DELETE FROM postings WHERE entry_id = ?1",
+            rusqlite::params![e.id],
+        );
+        assert!(deleted.is_err());
+        assert!(format!("{:?}", deleted.unwrap_err()).contains("non-draft"));
+    }
+
+    #[test]
+    fn reversal_posts_a_linked_contra_entry_and_leaves_the_original_posted() {
+        let db = full_chart();
+        let e = make(
+            &db,
+            "2026-08-04",
+            "Verkeerde boeking",
+            &[("4300", 5000), ("1100", -5000)],
+            "human",
+        )
+        .unwrap();
+        post_entry(&db, e.id, "human:erik").unwrap();
+
+        let reversal = reverse_entry(&db, e.id, "human:erik", Some("verkeerde categorie")).unwrap();
+        assert_eq!(reversal.state, "posted");
+        assert_eq!(reversal.source, "reversal");
+        assert_eq!(reversal.reversed_from_id, Some(e.id));
+        assert_eq!(reversal.postings.len(), 2);
+        assert_eq!(reversal.postings[0].amount_cents, -5000);
+        assert_eq!(reversal.postings[1].amount_cents, 5000);
+
+        // the original stays posted — the contra-entry cancels it (net zero)
+        let original = get_entry(&db, e.id).unwrap();
+        assert_eq!(original.state, "posted");
+        assert_eq!(original.reversed_from_id, None);
+    }
+
+    #[test]
+    fn reversal_guards() {
+        let db = full_chart();
+        let e = make(
+            &db,
+            "2026-08-04",
+            "x",
+            &[("1100", 100), ("3000", -100)],
+            "human",
+        )
+        .unwrap();
+        assert_eq!(
+            reverse_entry(&db, e.id, "human:erik", None)
+                .unwrap_err()
+                .code,
+            "NOT_POSTED" // still a draft
+        );
+        post_entry(&db, e.id, "human:erik").unwrap();
+        reverse_entry(&db, e.id, "human:erik", None).unwrap();
+        assert_eq!(
+            reverse_entry(&db, e.id, "human:erik", None)
+                .unwrap_err()
+                .code,
+            "ALREADY_REVERSED"
+        );
+        assert_eq!(
+            post_entry(&db, e.id, "human:erik").unwrap_err().code,
+            "ALREADY_POSTED"
+        );
+    }
+
+    #[test]
+    fn parse_posting_specs_is_repeatable_and_comma_separated() {
+        let specs = parse_posting_specs(&["1100:1000.00,3000:-1000.00".to_string()]).unwrap();
+        assert_eq!(specs.len(), 2);
+        assert_eq!(specs[0].code, "1100");
+        assert_eq!(specs[0].amount_cents, 100000);
+        assert_eq!(specs[1].code, "3000");
+        assert_eq!(specs[1].amount_cents, -100000); // negative = credit
+
+        let multi =
+            parse_posting_specs(&["1100:10.00".to_string(), "3000:-10.00".to_string()]).unwrap();
+        assert_eq!(multi.len(), 2);
+
+        assert_eq!(
+            parse_posting_specs(&["nonsense".to_string()])
+                .unwrap_err()
+                .code,
+            "INVALID_POSTING"
+        );
+        assert_eq!(
+            parse_posting_specs(&["1100:1.234".to_string()])
+                .unwrap_err()
+                .code,
+            "INVALID_AMOUNT"
+        );
+    }
+
+    #[test]
+    fn every_mutation_writes_an_audit_record() {
+        let db = full_chart();
+        let e = make(
+            &db,
+            "2026-08-04",
+            "x",
+            &[("1100", 100), ("3000", -100)],
+            "agent:test",
+        )
+        .unwrap();
+        post_entry(&db, e.id, "agent:test").unwrap();
+        reverse_entry(&db, e.id, "agent:test", None).unwrap();
+
+        let audit = crate::audit::list(&db, None, None, 100).unwrap();
+        let actions: Vec<&str> = audit
+            .iter()
+            .map(|a| a["action"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            actions,
+            vec!["entry.reverse", "entry.post", "entry.create"] // newest first
+        );
+        assert!(audit.iter().all(|a| a["actor"] == "agent:test"));
+    }
+
+    #[test]
+    fn list_entries_filters_by_state_and_date() {
+        let db = full_chart();
+        let a = make(
+            &db,
+            "2026-01-15",
+            "jan",
+            &[("1100", 100), ("3000", -100)],
+            "human",
+        )
+        .unwrap();
+        make(
+            &db,
+            "2026-02-15",
+            "feb",
+            &[("1100", 200), ("3000", -200)],
+            "human",
+        )
+        .unwrap();
+        post_entry(&db, a.id, "human:erik").unwrap();
+
+        let all = list_entries(&db, None, None, None, 100).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!(
+            list_entries(&db, Some("posted"), None, None, 100)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            list_entries(&db, Some("draft"), None, None, 100)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            list_entries(&db, None, Some("2026-02-01"), None, 100)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            list_entries(&db, None, None, Some("2026-01-31"), 100)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
     #[test]
     fn create_post_reverse_lifecycle() {
         let db = setup();
