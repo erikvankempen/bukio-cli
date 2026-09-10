@@ -19,7 +19,7 @@ mod camt;
 mod csv_bank;
 
 pub use camt::parse_camt053;
-pub use csv_bank::parse_bank_csv;
+pub use csv_bank::{parse_bank_csv, BankCsv};
 
 fn bank_error(code: &'static str, msg: impl Into<String>) -> BukioError {
     BukioError::new(code, msg.into())
@@ -90,7 +90,7 @@ pub fn tx_hash(iban: &str, tx: &BankTx) -> String {
     sha256_hex(&raw)
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct BankTx {
     pub date: String,
     pub amount_cents: i64,
@@ -98,6 +98,9 @@ pub struct BankTx {
     pub description: Option<String>,
     pub iban_counter: Option<String>,
     pub bank_ref: Option<String>,
+    /// the bank account's own IBAN (the JS parser stamps every row with the
+    /// caller's --iban; it shows up in the `bank import --dry-run` plan)
+    pub iban: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -1016,6 +1019,7 @@ mod tests {
             description: Some("Invoice".into()),
             iban_counter: None,
             bank_ref: None,
+            iban: None,
         };
         let h1 = tx_hash("NL91ABNA0417164300", &tx);
         let h2 = tx_hash("NL91ABNA0417164300", &tx);
@@ -1044,6 +1048,7 @@ mod tests {
                 description: None,
                 iban_counter: None,
                 bank_ref: None,
+                iban: None,
             },
             BankTx {
                 date: "2026-01-16".into(),
@@ -1052,6 +1057,7 @@ mod tests {
                 description: Some("Payment".into()),
                 iban_counter: None,
                 bank_ref: None,
+                iban: None,
             },
         ];
         let r = import_transactions(&d, "NL91ABNA0417164300", &txs, None, "1100", "human:erik")
@@ -1077,6 +1083,7 @@ mod tests {
             description: None,
             iban_counter: None,
             bank_ref: None,
+            iban: None,
         }];
         import_transactions(&d, "NL91ABNA0417164300", &txs, None, "1100", "human:erik").unwrap();
         let tx = get_transaction(&d, 1).unwrap().unwrap();
@@ -1099,10 +1106,489 @@ mod tests {
             description: Some("Koffie".into()),
             iban_counter: None,
             bank_ref: None,
+            iban: None,
         }];
         import_transactions(&d, "NL91ABNA0417164300", &txs, None, "1100", "human:erik").unwrap();
         let (tx, entry) = post_from_transaction(&d, 1, "4300", "human:erik", true).unwrap();
         assert_eq!(tx["state"], "matched");
         assert_eq!(entry["state"], "posted");
+    }
+
+    // ==== ported from test/bank.test.js ======================================
+
+    const IBAN: &str = "NL91ABNA0417164300";
+
+    fn spec(code: &str, cents: i64) -> crate::entries::PostingSpec {
+        crate::entries::PostingSpec {
+            code: code.to_string(),
+            amount_cents: cents,
+            cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
+        }
+    }
+
+    /// Create and post an entry; returns its id.
+    fn post_entry_at(
+        db: &Connection,
+        date: &str,
+        description: &str,
+        postings: Vec<crate::entries::PostingSpec>,
+    ) -> i64 {
+        let e = crate::entries::create_entry(
+            db,
+            crate::entries::CreateEntry {
+                date,
+                description,
+                postings,
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        )
+        .unwrap();
+        crate::entries::post_entry(db, e.id, "human:erik").unwrap();
+        e.id
+    }
+
+    /// The JS suite's CAMT fixture: €100 in on 2026-06-01, €25.50 out on 06-02.
+    fn camt_xml() -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02">
+  <BkToCstmrStmt>
+    <Stmt>
+      <Acct><Id><IBAN>{IBAN}</IBAN></Id></Acct>
+      <Ntry>
+        <Amt>100.00</Amt><CdtDbtInd>CRDT</CdtDbtInd>
+        <BookgDt><Dt>2026-06-01</Dt></BookgDt>
+        <NtryDtls><TxDtls><RltdPties><Dbtr><Nm>ACME B.V.</Nm></Dbtr></RltdPties><RmtInf><Ustrd>Factuur 2026-001</Ustrd></RmtInf></TxDtls></NtryDtls>
+      </Ntry>
+      <Ntry>
+        <Amt>25.50</Amt><CdtDbtInd>DBIT</CdtDbtInd>
+        <BookgDt><Dt>2026-06-02</Dt></BookgDt>
+        <NtryDtls><TxDtls><RltdPties><Cdtr><Nm>Kantoorwinkel BV</Nm></Cdtr></RltdPties><RmtInf><Ustrd>Kantoorartikelen</Ustrd></RmtInf></TxDtls></NtryDtls>
+      </Ntry>
+    </Stmt>
+  </BkToCstmrStmt>
+</Document>"#
+        )
+    }
+
+    fn import_camt(db: &Connection) -> Vec<Value> {
+        let txs = parse_camt053(&camt_xml()).unwrap();
+        import_transactions(db, IBAN, &txs, None, "1100", "human:erik").unwrap();
+        list_transactions(db, None, None, 200).unwrap()
+    }
+
+    #[test]
+    fn import_is_idempotent_via_hash_duplicates_skipped() {
+        let d = db();
+        let txs = parse_camt053(&camt_xml()).unwrap();
+        let first = import_transactions(&d, IBAN, &txs, None, "1100", "agent:test").unwrap();
+        assert_eq!(first["imported"].as_i64(), Some(2));
+        let second = import_transactions(&d, IBAN, &txs, None, "1100", "agent:test").unwrap();
+        assert_eq!(second["imported"].as_i64(), Some(0));
+        assert_eq!(second["duplicates"].as_i64(), Some(2));
+        assert_eq!(list_transactions(&d, None, None, 200).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn preview_import_counts_without_writing() {
+        let d = db();
+        let txs = parse_camt053(&camt_xml()).unwrap();
+        import_transactions(&d, IBAN, &txs, None, "1100", "human:erik").unwrap();
+        let preview = preview_import(&d, IBAN, &txs).unwrap();
+        assert_eq!(preview["imported"].as_i64(), Some(0));
+        assert_eq!(preview["duplicates"].as_i64(), Some(2));
+        assert_eq!(preview["total"].as_i64(), Some(2));
+    }
+
+    #[test]
+    fn get_or_create_bank_account_validates_iban_and_links_the_ledger_account() {
+        let d = db();
+        let account =
+            get_or_create_bank_account(&d, IBAN, Some("Betaalrekening"), "1100", false).unwrap();
+        assert_eq!(account["iban"].as_str(), Some(IBAN));
+        assert_eq!(account["account_code"].as_str(), Some("1100"));
+        assert_eq!(
+            get_or_create_bank_account(&d, "not-an-iban", None, "1100", false)
+                .unwrap_err()
+                .code,
+            "INVALID_IBAN"
+        );
+        assert_eq!(
+            get_or_create_bank_account(&d, IBAN, None, "9999", false)
+                .unwrap_err()
+                .code,
+            "ACCOUNT_NOT_FOUND"
+        );
+    }
+
+    #[test]
+    fn dashed_iban_normalizes_to_the_stored_form_without_a_duplicate_account() {
+        // regression: a dashed IBAN passed validation but was stored
+        // dash-retaining, so a later import lookup missed and created a SECOND
+        // account for the same real IBAN
+        let d = db();
+        let dashed = "NL91-ABNA-0417-1643-00";
+        let first =
+            get_or_create_bank_account(&d, dashed, Some("Betaalrekening"), "1100", false).unwrap();
+        assert_eq!(first["iban"].as_str(), Some(IBAN)); // stored dash-free
+        let second = get_or_create_bank_account(&d, IBAN, None, "1100", false).unwrap();
+        assert_eq!(second["id"].as_i64(), first["id"].as_i64()); // same row
+        let count: i64 = d
+            .query_row("SELECT COUNT(*) FROM bank_accounts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        // listTransactions filters with a dashed iban too
+        import_camt(&d);
+        assert_eq!(
+            list_transactions(&d, Some("unmatched"), Some(dashed), 200)
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn list_bank_accounts_reports_balance_and_counts() {
+        let d = db();
+        import_camt(&d);
+        let accounts = list_bank_accounts(&d).unwrap();
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0]["balance_cents"].as_i64(), Some(7450)); // 10000 - 2550
+        assert_eq!(accounts[0]["unmatched_count"].as_i64(), Some(2));
+    }
+
+    #[test]
+    fn post_from_transaction_posts_bank_and_counter_leg_and_reconciles() {
+        let d = db();
+        let txs = import_camt(&d);
+        let income = txs
+            .iter()
+            .find(|t| t["amount_cents"].as_i64().unwrap() > 0)
+            .unwrap()
+            .clone();
+        let expense = txs
+            .iter()
+            .find(|t| t["amount_cents"].as_i64().unwrap() < 0)
+            .unwrap()
+            .clone();
+        let income_id = income["id"].as_i64().unwrap();
+        let (transaction, entry) =
+            post_from_transaction(&d, income_id, "8000", "agent:test", true).unwrap();
+        assert_eq!(entry["state"].as_str(), Some("posted"));
+        assert_eq!(entry["source"].as_str(), Some("bank"));
+        let expect_ref = format!("tx:{income_id}");
+        assert_eq!(entry["source_ref"].as_str(), Some(expect_ref.as_str()));
+        assert_eq!(transaction["state"].as_str(), Some("matched"));
+        assert_eq!(entry["postings"].as_array().unwrap().len(), 2);
+
+        let (_, expense_entry) = post_from_transaction(
+            &d,
+            expense["id"].as_i64().unwrap(),
+            "4300",
+            "human:erik",
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            expense_entry["postings"][1]["account_code"].as_str(),
+            Some("4300")
+        );
+    }
+
+    #[test]
+    fn post_from_transaction_refuses_already_matched_transactions() {
+        let d = db();
+        let txs = import_camt(&d);
+        let id = txs[0]["id"].as_i64().unwrap();
+        post_from_transaction(&d, id, "8000", "human:erik", true).unwrap();
+        assert_eq!(
+            post_from_transaction(&d, id, "8000", "human:erik", true)
+                .unwrap_err()
+                .code,
+            "ALREADY_MATCHED"
+        );
+    }
+
+    #[test]
+    fn link_transaction_links_a_posted_entry_and_guards() {
+        let d = db();
+        let txs = import_camt(&d);
+        let id = txs[0]["id"].as_i64().unwrap();
+        let amt = txs[0]["amount_cents"].as_i64().unwrap();
+        let entry_id = post_entry_at(
+            &d,
+            "2026-06-01",
+            "Factuur 2026-001",
+            vec![spec("1100", amt), spec("8000", -amt)],
+        );
+
+        let linked =
+            link_transaction(&d, id, entry_id, "exact", Some(0.99), "agent:test", false).unwrap();
+        assert_eq!(linked["state"].as_str(), Some("matched"));
+        assert_eq!(
+            link_transaction(&d, id, entry_id, "exact", None, "agent:test", false)
+                .unwrap_err()
+                .code,
+            "ALREADY_MATCHED"
+        );
+
+        let draft = crate::entries::create_entry(
+            &d,
+            crate::entries::CreateEntry {
+                date: "2026-06-01",
+                description: "draft",
+                postings: vec![spec("1100", 100), spec("3000", -100)],
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        )
+        .unwrap();
+        let tx2 = list_transactions(&d, Some("unmatched"), None, 200).unwrap()[0]["id"]
+            .as_i64()
+            .unwrap();
+        assert_eq!(
+            link_transaction(&d, tx2, draft.id, "exact", None, "human:erik", false)
+                .unwrap_err()
+                .code,
+            "NOT_POSTED"
+        );
+    }
+
+    #[test]
+    fn auto_match_exact_then_fuzzy_dry_run_writes_nothing() {
+        let d = db();
+        import_camt(&d);
+        let entry_id = post_entry_at(
+            &d,
+            "2026-06-01",
+            "Factuur 2026-001",
+            vec![spec("1100", 10000), spec("8000", -10000)],
+        );
+
+        let dry = auto_match(&d, 5, "human:erik", true).unwrap();
+        assert_eq!(dry["matched"].as_array().unwrap().len(), 1);
+        assert_eq!(dry["matched"][0]["method"].as_str(), Some("exact"));
+        assert_eq!(dry["matched"][0]["entry_id"].as_i64(), Some(entry_id));
+        assert_eq!(
+            list_transactions(&d, Some("matched"), None, 200)
+                .unwrap()
+                .len(),
+            0
+        );
+
+        let real = auto_match(&d, 5, "agent:test", false).unwrap();
+        assert_eq!(real["matched"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            list_transactions(&d, Some("matched"), None, 200)
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // fuzzy: an entry five days away
+        let tx2 = list_transactions(&d, Some("unmatched"), None, 200).unwrap()[0].clone();
+        let amt = tx2["amount_cents"].as_i64().unwrap();
+        post_entry_at(
+            &d,
+            "2026-06-07",
+            "late entry",
+            vec![spec("1100", amt), spec("4300", -amt)],
+        );
+        let fuzzy = auto_match(&d, 5, "human:erik", false).unwrap();
+        assert_eq!(fuzzy["matched"].as_array().unwrap().len(), 1);
+        assert_eq!(fuzzy["matched"][0]["method"].as_str(), Some("fuzzy"));
+    }
+
+    #[test]
+    fn two_same_amount_transactions_never_claim_the_same_entry_in_one_run() {
+        // two incoming €100 transfers in the window, one €100 entry — the first
+        // claims it; the second must stay unmatched (books €100, bank €200)
+        let d = db();
+        let txs = vec![
+            BankTx {
+                date: "2026-06-01".into(),
+                amount_cents: 10000,
+                counterparty: Some("A".into()),
+                description: Some("p1".into()),
+                ..Default::default()
+            },
+            BankTx {
+                date: "2026-06-02".into(),
+                amount_cents: 10000,
+                counterparty: Some("B".into()),
+                description: Some("p2".into()),
+                ..Default::default()
+            },
+        ];
+        import_transactions(&d, IBAN, &txs, None, "1100", "human:erik").unwrap();
+        let entry_id = post_entry_at(
+            &d,
+            "2026-06-01",
+            "Factuur",
+            vec![spec("1100", 10000), spec("8000", -10000)],
+        );
+
+        let r = auto_match(&d, 5, "agent:test", false).unwrap();
+        assert_eq!(r["matched"].as_array().unwrap().len(), 1);
+        assert_eq!(r["matched"][0]["kind"].as_str(), Some("entry"));
+        assert_eq!(r["matched"][0]["entry_id"].as_i64(), Some(entry_id));
+        assert_eq!(r["unmatched_remaining"].as_i64(), Some(1));
+        let recs: i64 = d
+            .query_row(
+                "SELECT COUNT(*) FROM reconciliations WHERE target_type = 'entry' AND target_id = ?1",
+                [entry_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(recs, 1);
+        assert_eq!(
+            list_transactions(&d, Some("matched"), None, 200)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            list_transactions(&d, Some("unmatched"), None, 200)
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn two_same_amount_transactions_match_two_distinct_entries() {
+        // regression for the usedEntryIds parameter-order bug: with the
+        // exclusion active the SQL got the bank account id where the used-entry
+        // list belonged, so the second same-amount transaction re-matched the
+        // first entry. Only visible when the entry ids differ from the account id.
+        let d = db();
+        let txs = vec![
+            BankTx {
+                date: "2026-07-01".into(),
+                amount_cents: -50000,
+                counterparty: Some("Leverancier".into()),
+                description: Some("F1".into()),
+                bank_ref: Some("REF-A".into()),
+                ..Default::default()
+            },
+            BankTx {
+                date: "2026-07-02".into(),
+                amount_cents: -50000,
+                counterparty: Some("Leverancier".into()),
+                description: Some("F2".into()),
+                bank_ref: Some("REF-B".into()),
+                ..Default::default()
+            },
+        ];
+        import_transactions(&d, IBAN, &txs, None, "1100", "human:erik").unwrap();
+        for (date, desc) in [("2026-06-25", "Betaling A"), ("2026-06-26", "Betaling B")] {
+            post_entry_at(
+                &d,
+                date,
+                desc,
+                vec![spec("1100", -50000), spec("4300", 50000)],
+            );
+        }
+        let r = auto_match(&d, 10, "agent:test", false).unwrap();
+        assert_eq!(r["matched"].as_array().unwrap().len(), 2);
+        let targets: Vec<i64> = r["matched"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|m| m["entry_id"].as_i64())
+            .collect();
+        let uniq: std::collections::HashSet<i64> = targets.iter().cloned().collect();
+        assert_eq!(
+            uniq.len(),
+            2,
+            "each transaction must match a DISTINCT entry, got {targets:?}"
+        );
+        // each entry reconciled exactly once
+        let mut stmt = d
+            .prepare(
+                "SELECT COUNT(*) FROM reconciliations WHERE target_type='entry' GROUP BY target_id",
+            )
+            .unwrap();
+        let counts: Vec<i64> = stmt
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        assert!(
+            counts.iter().all(|c| *c == 1),
+            "no entry may carry two bank legs: {counts:?}"
+        );
+    }
+
+    #[test]
+    fn outside_the_window_stays_unmatched() {
+        let d = db();
+        import_camt(&d);
+        // a draft entry must not be matched either
+        crate::entries::create_entry(
+            &d,
+            crate::entries::CreateEntry {
+                date: "2026-01-01",
+                description: "old entry",
+                postings: vec![spec("1100", 10000), spec("8000", -10000)],
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        )
+        .unwrap();
+        post_entry_at(
+            &d,
+            "2026-01-01",
+            "old entry posted",
+            vec![spec("1100", 10000), spec("8000", -10000)],
+        );
+        let result = auto_match(&d, 5, "human:erik", false).unwrap();
+        assert_eq!(result["matched"].as_array().unwrap().len(), 0);
+        assert_eq!(result["unmatched_remaining"].as_i64(), Some(2));
+    }
+
+    #[test]
+    fn set_transaction_state_ignores_and_reopens() {
+        let d = db();
+        let txs = import_camt(&d);
+        let id = txs[0]["id"].as_i64().unwrap();
+        set_transaction_state(&d, id, "ignored", "human:erik", false).unwrap();
+        assert_eq!(
+            list_transactions(&d, Some("ignored"), None, 200)
+                .unwrap()
+                .len(),
+            1
+        );
+        set_transaction_state(&d, id, "unmatched", "human:erik", false).unwrap();
+        assert_eq!(
+            list_transactions(&d, Some("ignored"), None, 200)
+                .unwrap()
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn suggest_unmatched_proposes_expense_and_income_accounts() {
+        let d = db();
+        import_camt(&d);
+        let suggestions = suggest_unmatched(&d).unwrap();
+        assert_eq!(suggestions.len(), 2);
+        let income = suggestions
+            .iter()
+            .find(|s| s["amount_cents"].as_i64().unwrap() > 0)
+            .unwrap();
+        assert_eq!(income["suggested_account"].as_str(), Some("8000"));
+        let expense = suggestions
+            .iter()
+            .find(|s| s["amount_cents"].as_i64().unwrap() < 0)
+            .unwrap();
+        assert_eq!(expense["suggested_account"].as_str(), Some("4300"));
     }
 }

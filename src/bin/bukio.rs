@@ -1606,7 +1606,19 @@ fn cmd_bank_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
 fn cmd_bank_list(db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let accounts = bukio::bank::list_bank_accounts(&db)?;
-    Ok(json!({ "accounts": accounts }))
+    // the JS CLI projects exactly these seven keys (no id, no created_*)
+    let data: Vec<Value> = accounts
+        .iter()
+        .map(|a| {
+            json!({
+                "iban": a["iban"], "name": a["name"], "account_code": a["account_code"],
+                "transaction_count": a["transaction_count"],
+                "unmatched_count": a["unmatched_count"],
+                "balance_cents": a["balance_cents"], "balance": a["balance"],
+            })
+        })
+        .collect();
+    Ok(json!({ "accounts": data }))
 }
 
 fn cmd_bank_import(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
@@ -1619,24 +1631,62 @@ fn cmd_bank_import(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
     let account_code = arg(argv, "--account-code").unwrap_or_else(|| "1100".into());
     let content = std::fs::read_to_string(&file)
         .map_err(|e| BukioError::new("FILE_ERROR", format!("cannot read {file}: {e}")))?;
-    let transactions = if content.trim_start().starts_with('<') {
-        bukio::bank::parse_camt053(&content)
-            .map_err(|e| BukioError::new("PARSE_ERROR", e.message.clone()))?
+    let (transactions, skipped, from_csv) = if content.trim_start().starts_with('<') {
+        (
+            bukio::bank::parse_camt053(&content)
+                .map_err(|e| BukioError::new("PARSE_ERROR", e.message.clone()))?,
+            Vec::new(),
+            false,
+        )
     } else {
-        bukio::bank::parse_bank_csv(&content, &iban)
-            .map_err(|e| BukioError::new("PARSE_ERROR", e.message.clone()))?
+        let parsed = bukio::bank::parse_bank_csv(&content, &iban)
+            .map_err(|e| BukioError::new("PARSE_ERROR", e.message.clone()))?;
+        (parsed.transactions, parsed.skipped, true)
     };
     if dry_run {
-        bukio::bank::preview_import(&db, &iban, &transactions)
+        // the JS plan carries the first ten parsed rows (with a human amount)
+        // plus the preview counts
+        let preview = bukio::bank::preview_import(&db, &iban, &transactions)?;
+        let first: Vec<Value> = transactions
+            .iter()
+            .take(10)
+            .map(|t| {
+                let mut v = serde_json::to_value(t).unwrap_or(Value::Null);
+                // the JS CSV parser sets no bank_ref at all; the camt one does
+                if from_csv {
+                    if let Some(o) = v.as_object_mut() {
+                        o.remove("bank_ref");
+                    }
+                }
+                v["amount"] = json!(bukio::money::format_amount(t.amount_cents));
+                v
+            })
+            .collect();
+        let mut out = json!({
+            "action": "import bank transactions", "file": file,
+            "transactions": first, "dryRun": true,
+        });
+        if let (Some(obj), Some(p)) = (out.as_object_mut(), preview.as_object()) {
+            for (k, v) in p {
+                obj.insert(k.clone(), v.clone());
+            }
+        }
+        Ok(out)
     } else {
-        bukio::bank::import_transactions(
+        let mut result = bukio::bank::import_transactions(
             &db,
             &iban,
             &transactions,
             name.as_deref(),
             &account_code,
             actor,
-        )
+        )?;
+        // rows the parser had to skip (never dropped silently)
+        if !skipped.is_empty() {
+            result["skipped"] = json!(skipped);
+        }
+        result["dryRun"] = json!(false);
+        Ok(result)
     }
 }
 
@@ -1647,7 +1697,20 @@ fn cmd_bank_transactions(argv: &[String], db_path: &str) -> Result<Value> {
     let limit: i64 = parse_limit(argv, 200)?;
     let transactions =
         bukio::bank::list_transactions(&db, state.as_deref(), iban.as_deref(), limit)?;
-    Ok(json!({ "transactions": transactions }))
+    // the JS CLI's fmtTx projection (drops bank_account_id, adds the human amount)
+    let data: Vec<Value> = transactions
+        .iter()
+        .map(|t| {
+            json!({
+                "id": t["id"], "date": t["date"], "amount_cents": t["amount_cents"],
+                "amount": t["amount"], "counterparty": t["counterparty"],
+                "description": t["description"], "iban_counter": t["iban_counter"],
+                "iban": t["iban"], "account_code": t["account_code"],
+                "state": t["state"], "hash": t["hash"],
+            })
+        })
+        .collect();
+    Ok(json!({ "transactions": data }))
 }
 
 fn cmd_bank_match_auto(
@@ -1673,13 +1736,33 @@ fn cmd_bank_match_auto(
             "--window-days must not be negative",
         ));
     }
-    bukio::bank::auto_match(&db, window, actor, dry_run)
+    let mut result = bukio::bank::auto_match(&db, window, actor, dry_run)?;
+    // the JS CLI adds the human amount per match and the dryRun flag
+    if let Some(arr) = result["matched"].as_array_mut() {
+        for m in arr.iter_mut() {
+            let amt = m["amount_cents"].as_i64().unwrap_or(0);
+            m["amount"] = json!(bukio::money::format_amount(amt));
+        }
+    }
+    result["dryRun"] = json!(dry_run);
+    Ok(result)
 }
 
 fn cmd_bank_match_suggest(db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let suggestions = bukio::bank::suggest_unmatched(&db)?;
-    Ok(json!({ "suggestions": suggestions }))
+    // the JS CLI drops the internal bank_account_id from the row
+    let data: Vec<Value> = suggestions
+        .iter()
+        .map(|s| {
+            let mut v = s.clone();
+            if let Some(o) = v.as_object_mut() {
+                o.remove("bank_account_id");
+            }
+            v
+        })
+        .collect();
+    Ok(json!({ "suggestions": data }))
 }
 
 fn cmd_bank_match_link(
