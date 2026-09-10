@@ -24,7 +24,7 @@ ureq = "3"
 quick-xml = "0.37"
 ring = "0.17"
 scrypt = "0.11"
-lettre = { version = "0.11", features = ["builder", "hostname"] }
+lettre = { version = "0.11", features = ["builder", "hostname", "native-tls"] }
 mime_guess = "2"
 regex = "1"
 tiny_http = "0.12"

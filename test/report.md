@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 19:22:18 UTC — **✅ 431 passing · 0 failing (431 tests)**
+**Latest run:** 2026-09-10 19:45:45 UTC — **✅ 416 passing · 0 failing (416 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -475,26 +475,6 @@
     - ✅ unreachable server: clean REMOTE_UNREACHABLE error
     - ✅ server token rejects a bad --ttl-hours value
     - ✅ envelope can carry the --db of the CLIENT but the server DB is authoritative
-
-### smtp.test.js — zero-dependency SMTP client + invoice email: auth, STARTTLS, MIME/PDF attachment, dry-run, audit
-
-15 passing · 0 failing
-
-    - ✅ sendMail: happy path delivers, captures the MIME with the PDF attachment
-    - ✅ sendMail: auth failure → SMTP_AUTH_FAILED
-    - ✅ sendMail: rcpt rejection → SMTP_SEND_FAILED with server text
-    - ✅ sendMail: STARTTLS advertised but rejected → SMTP_CONNECT_FAILED (branch exercised)
-    - ✅ sendMail: connection refused → SMTP_CONNECT_FAILED; bad greeting → SMTP_CONNECT_FAILED
-    - ✅ smtpConfig/smtpValidate: env-driven; missing host/from → SMTP_NOT_CONFIGURED
-    - ✅ buildMime: non-ASCII subject → UTF-8 encoded-word; attachment boundary present
-    - ✅ buildMime: CR/LF in to/subject/filename cannot inject headers
-    - ✅ sendMail: dot-stuffed payload — a body line starting with "." survives
-    - ✅ emailInvoice: delivers to the contact email and audits
-    - ✅ emailInvoice: guards — draft, missing email, unconfigured SMTP
-    - ✅ emailInvoice: dry-run renders the plan, makes no connection, audits nothing
-    - ✅ emailInvoice: PDF attachment is rendered and decodes to %PDF
-    - ✅ cli: invoice email e2e with SMTP env + audit row
-    - ✅ mcp: invoice_email dry-run parity (no connection) + execute
 
 ---
 _Regenerated automatically on every `npm test`._
