@@ -1946,7 +1946,7 @@ mod tests {
     use super::*;
     use crate::accounts::{create_account, seed_default_chart, NewAccount};
     use crate::db::open_db;
-    use crate::entries::{create_entry, post_entry, CreateEntry, PostingSpec};
+    use crate::entries::{create_entry, post_entry, reverse_entry, CreateEntry, PostingSpec};
 
     fn books() -> Connection {
         let db = open_db(":memory:").unwrap();
@@ -1983,6 +1983,104 @@ mod tests {
             post_entry(db, e.id, "human:erik").unwrap();
         }
         e.id
+    }
+
+    // ── ported from test/trial-balance.test.js ──
+
+    #[test]
+    fn tb_per_account_totals() {
+        let db = books();
+        add(
+            &db,
+            "2026-01-10",
+            "Startkapitaal",
+            &[("1100", 1000000), ("3000", -1000000)],
+            true,
+        );
+        add(
+            &db,
+            "2026-01-15",
+            "Kantoorartikelen",
+            &[("4300", 50000), ("1100", -50000)],
+            true,
+        );
+
+        let tb = trial_balance(&db, None).unwrap();
+        assert_eq!(tb["balanced"], true);
+        let net = |code: &str| -> i64 {
+            tb["accounts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|a| a["code"] == code)
+                .unwrap_or_else(|| panic!("account {code} missing"))["net_cents"]
+                .as_i64()
+                .unwrap_or(0)
+        };
+        assert_eq!(net("1100"), 950000);
+        assert_eq!(net("3000"), -1000000);
+        assert_eq!(net("4300"), 50000);
+        assert_eq!(tb["total_debit_cents"], 1050000);
+        assert_eq!(tb["total_credit_cents"], 1050000);
+    }
+
+    #[test]
+    fn tb_year_filter() {
+        let db = books();
+        add(
+            &db,
+            "2026-01-10",
+            "y2026",
+            &[("1100", 100), ("3000", -100)],
+            true,
+        );
+        add(
+            &db,
+            "2025-12-31",
+            "y2025",
+            &[("1100", 500), ("3000", -500)],
+            true,
+        );
+
+        assert_eq!(
+            trial_balance(&db, Some("2026")).unwrap()["total_debit_cents"],
+            100
+        );
+        assert_eq!(
+            trial_balance(&db, Some("2025")).unwrap()["total_debit_cents"],
+            500
+        );
+        assert_eq!(trial_balance(&db, None).unwrap()["total_debit_cents"], 600);
+    }
+
+    #[test]
+    fn tb_excludes_drafts_and_nets_out_reversals() {
+        let db = books();
+        // never posted — must not appear
+        add(
+            &db,
+            "2026-02-01",
+            "draft only",
+            &[("1100", 999), ("3000", -999)],
+            false,
+        );
+        let posted = add(
+            &db,
+            "2026-02-02",
+            "Omzet",
+            &[("1100", 12100), ("8000", -12100)],
+            true,
+        );
+        reverse_entry(&db, posted, "human:erik", Some("credit note")).unwrap();
+
+        let tb = trial_balance(&db, None).unwrap();
+        assert_eq!(tb["balanced"], true);
+        assert_eq!(tb["total_debit_cents"], tb["total_credit_cents"]);
+        assert!(tb["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|a| a["net_cents"] == 0));
     }
 
     #[test]
