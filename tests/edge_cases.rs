@@ -3012,3 +3012,558 @@ fn invoice_html_and_pdf_are_native_documents() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ==== ported from test/fiscal-year.test.js, test/company.test.js, ===========
+// ==== and test/review-round3.test.js (all CLI-level) =======================
+
+/// a fresh file DB initialised through the CLI, like the JS suites do
+fn cli_db(tag: &str, init_args: &[&str]) -> (std::path::PathBuf, String) {
+    let dir = temp_dir(tag);
+    let file = dir.join("test.db");
+    let f = file.to_str().unwrap().to_string();
+    let mut args = vec!["--json", "init", "--name", "Test Coaching"];
+    args.extend_from_slice(init_args);
+    args.extend_from_slice(&["--db", &f]);
+    let (_, ok, out) = run_cli(&args);
+    assert!(ok, "init failed: {out}");
+    (dir, f)
+}
+
+// ---- fiscal-year (7) -------------------------------------------------------
+
+/// company with fiscal_year_end 03-31 and one entry in each half:
+/// 2026-01-15 (previous FY) and 2026-11-15 (this FY)
+fn fiscal_db(tag: &str) -> (std::path::PathBuf, String) {
+    let (dir, f) = cli_db(tag, &["--registration-id", "12345678", "--vat", "off"]);
+    {
+        let d = bukio::db::open_db(&f).unwrap();
+        d.execute("UPDATE company SET fiscal_year_end = '03-31'", [])
+            .unwrap();
+        for (date, desc, amt) in [
+            ("2026-01-15", "jan 2026 (prev FY)", 10000i64),
+            ("2026-11-15", "nov 2026 (this FY)", 20000),
+        ] {
+            let e = create_entry(
+                &d,
+                bukio::entries::CreateEntry {
+                    date: date.into(),
+                    description: desc.into(),
+                    postings: specs(&[("1100", amt), ("8000", -amt)]),
+                    source: "manual",
+                    source_ref: None,
+                    actor: "agent:test",
+                },
+            )
+            .unwrap();
+            post_entry(&d, e.id, "agent:test").unwrap();
+        }
+    }
+    (dir, f)
+}
+
+#[test]
+fn fiscal_year_window_for_march_year_end_spans_previous_april_to_march() {
+    let (dir, f) = fiscal_db("fy");
+    let d = bukio::db::open_db(&f).unwrap();
+    let (from, to) = bukio::year_end::fiscal_year_window(&d, "2026").unwrap();
+    assert_eq!(from, "2025-04-01");
+    assert_eq!(to, "2026-03-31");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn report_pnl_year_uses_the_fiscal_window() {
+    let (dir, f) = fiscal_db("fypnl");
+    let (v, ok, out) = run_cli(&["--json", "report", "pnl", "--year", "2026", "--db", &f]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["from"], json!("2025-04-01"), "{v}");
+    assert_eq!(v["data"]["to"], json!("2026-03-31"), "{v}");
+    assert_eq!(
+        v["data"]["result_cents"].as_i64(),
+        Some(10000),
+        "only the Jan entry is in window"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn report_journal_year_uses_the_fiscal_window() {
+    let (dir, f) = fiscal_db("fyjrnl");
+    let (v, ok, out) = run_cli(&["--json", "report", "journal", "--year", "2026", "--db", &f]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["from"], json!("2025-04-01"), "{v}");
+    assert_eq!(v["data"]["to"], json!("2026-03-31"), "{v}");
+    let rows = v["data"]["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "one posting pair of the jan entry: {v}");
+    assert!(rows.iter().all(|r| {
+        let d = r["date"].as_str().unwrap_or("");
+        d >= "2025-04-01" && d <= "2026-03-31"
+    }));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn report_trial_balance_year_uses_the_fiscal_window() {
+    let (dir, f) = fiscal_db("fytb");
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "report",
+        "trial-balance",
+        "--year",
+        "2026",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    let bank = v["data"]["accounts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|a| a["code"] == json!("1100"))
+        .cloned()
+        .unwrap_or_else(|| panic!("no 1100: {v}"));
+    assert_eq!(bank["net_cents"].as_i64(), Some(10000));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn pnl_and_journal_with_explicit_dates_ignore_the_fiscal_window() {
+    let (dir, f) = fiscal_db("fyexplicit");
+    let d = bukio::db::open_db(&f).unwrap();
+    let p = bukio::reports::pnl(&d, "2026-01-01", "2026-12-31").unwrap();
+    assert_eq!(
+        p["result_cents"].as_i64(),
+        Some(30000),
+        "calendar window still works"
+    );
+    let j = bukio::reports::journal(&d, "2026-01-01", "2026-12-31", None).unwrap();
+    assert_eq!(j.len(), 4, "both entries' postings");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn sales_uses_the_fiscal_window() {
+    let (dir, f) = cli_db(
+        "fysales",
+        &[
+            "--registration-id",
+            "12345678",
+            "--vat",
+            "off",
+            // finalizing needs a complete supplier, like the JS suite's seed
+            "--address",
+            "Teststraat 1",
+            "--postal-code",
+            "1000 AA",
+            "--city",
+            "Amsterdam",
+        ],
+    );
+    {
+        let d = bukio::db::open_db(&f).unwrap();
+        d.execute("UPDATE company SET fiscal_year_end = '03-31'", [])
+            .unwrap();
+        let c = bukio::contacts::create_contact(
+            &d,
+            "Acme BV",
+            Some("Straat 1"),
+            Some("1000 AA"),
+            Some("Amsterdam"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap()["id"]
+            .as_i64()
+            .unwrap();
+        for (date, line) in [
+            ("2026-01-20", "1x Werk @ 50.00"),
+            ("2026-11-20", "1x Werk2 @ 70.00"),
+        ] {
+            let inv = create_invoice(
+                &d,
+                c,
+                date,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                &lines(&[line]),
+                "agent:test",
+                false,
+            )
+            .unwrap();
+            finalize_invoice(&d, inv["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+        }
+        let s = bukio::reports::sales(&d, "2026", "contact").unwrap();
+        assert_eq!(
+            s["totals"]["net_cents"].as_i64(),
+            Some(5000),
+            "only the Jan invoice is in window"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mcp_pnl_reports_the_fiscal_window() {
+    let (dir, f) = fiscal_db("fymcp");
+    let d = bukio::db::open_db(&f).unwrap();
+    let (from, to) = bukio::year_end::fiscal_year_window(&d, "2026").unwrap();
+    let p = bukio::reports::pnl(&d, &from, &to).unwrap();
+    assert_eq!(p["result_cents"].as_i64(), Some(10000));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---- company (6) -----------------------------------------------------------
+
+#[test]
+fn company_update_sets_fields_and_audits() {
+    let (dir, f) = cli_db(
+        "co1",
+        &[
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "eenmanszaak",
+            "--vat",
+            "off",
+        ],
+    );
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--address",
+        "Teststraat 1",
+        "--postal-code",
+        "1000 AA",
+        "--city",
+        "Amsterdam",
+        "--iban",
+        "NL91ABNA0417164300",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(
+        v["data"]["company"]["address"],
+        json!("Teststraat 1"),
+        "{v}"
+    );
+    let d = bukio::db::open_db(&f).unwrap();
+    let (postal, city, iban): (Option<String>, Option<String>, Option<String>) = d
+        .query_row(
+            "SELECT postal_code, city, iban FROM company WHERE id = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(postal.as_deref(), Some("1000 AA"));
+    assert_eq!(city.as_deref(), Some("Amsterdam"));
+    assert_eq!(iban.as_deref(), Some("NL91ABNA0417164300"));
+    let (actor, command): (String, String) = d
+        .query_row(
+            "SELECT actor, command FROM audit_log WHERE action = 'company.update' ORDER BY id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(actor, "agent:test");
+    assert_eq!(command, "company update");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn company_update_dry_run_writes_nothing() {
+    let (dir, f) = cli_db("co2", &["--registration-id", "12345678", "--vat", "off"]);
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--address",
+        "Teststraat 1",
+        "--city",
+        "Amsterdam",
+        "--dry-run",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    let d = bukio::db::open_db(&f).unwrap();
+    let (addr, city): (Option<String>, Option<String>) = d
+        .query_row("SELECT address, city FROM company WHERE id = 1", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
+    assert_eq!(addr, None);
+    assert_eq!(city, None);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn company_update_without_options_is_rejected() {
+    let (dir, f) = cli_db("co3", &["--registration-id", "12345678", "--vat", "off"]);
+    let (v, ok, out) = run_cli(&["--json", "company", "update", "--db", &f]);
+    assert!(!ok, "{out}");
+    assert_eq!(v["error"]["code"], json!("NOTHING_TO_UPDATE"), "{v}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn company_update_rejects_an_invalid_iban() {
+    let (dir, f) = cli_db("co4", &["--registration-id", "12345678", "--vat", "off"]);
+    let (v, ok, out) = run_cli(&["--json", "company", "update", "--iban", "nope", "--db", &f]);
+    assert!(!ok, "{out}");
+    assert_eq!(v["error"]["code"], json!("INVALID_IBAN"), "{v}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn company_show_returns_the_record() {
+    let (dir, f) = cli_db("co5", &["--registration-id", "12345678", "--vat", "off"]);
+    run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--city",
+        "Amsterdam",
+        "--db",
+        &f,
+    ]);
+    let (v, ok, out) = run_cli(&["--json", "company", "show", "--db", &f]);
+    assert!(ok, "{out}");
+    let c = &v["data"]["company"];
+    assert_eq!(c["name"], json!("Test Coaching"));
+    assert_eq!(c["registration_id"], json!("12345678"));
+    assert_eq!(c["city"], json!("Amsterdam"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn company_show_without_a_company_row_is_refused() {
+    let (dir, f) = cli_db("co6", &["--registration-id", "12345678", "--vat", "off"]);
+    {
+        let d = bukio::db::open_db(&f).unwrap();
+        d.execute("DELETE FROM company", []).unwrap();
+    }
+    let (v, ok, out) = run_cli(&["--json", "company", "show", "--db", &f]);
+    assert!(!ok, "{out}");
+    assert_eq!(v["ok"], json!(false));
+    assert_eq!(v["error"]["code"], json!("NO_COMPANY"), "{v}");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("run bukio init"),
+        "{v}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---- review-round3 (4) -----------------------------------------------------
+
+#[test]
+fn recurring_pause_and_resume_dry_run_render_a_plan() {
+    let (dir, f) = cli_db("r3a", &["--registration-id", "12345678", "--vat", "off"]);
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "recurring",
+        "add",
+        "--name",
+        "Huur",
+        "--postings",
+        "4300:1000.00,1100:-1000.00",
+        "--frequency",
+        "monthly",
+        "--start",
+        "2026-01-01",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+
+    // the dry-run plan must render (used to crash rendering a plan with no postings)
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "recurring",
+        "pause",
+        "--id",
+        "1",
+        "--dry-run",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["template"]["dryRun"], json!(true), "{v}");
+    assert_eq!(
+        v["data"]["template"]["action"],
+        json!("recurring.paused"),
+        "{v}"
+    );
+    assert_eq!(v["data"]["template"]["id"], json!("1"), "{v}");
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "recurring",
+        "resume",
+        "--id",
+        "1",
+        "--dry-run",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["template"]["dryRun"], json!(true), "{v}");
+    assert_eq!(
+        v["data"]["template"]["action"],
+        json!("recurring.active"),
+        "{v}"
+    );
+    assert_eq!(v["data"]["template"]["id"], json!("1"), "{v}");
+
+    let (v, ok, out) = run_cli(&["--json", "recurring", "pause", "--id", "1", "--db", &f]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["template"]["status"], json!("paused"), "{v}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn audit_format_json_prints_json_without_the_global_flag() {
+    let (dir, f) = cli_db("r3b", &["--registration-id", "12345678", "--vat", "off"]);
+    // NOTE: no --json at all — --format json must be enough
+    let (v, ok, out) = run_cli(&["audit", "--format", "json", "--db", &f]);
+    assert!(ok, "{out}");
+    assert_eq!(v["ok"], json!(true), "{v}");
+    let entries = v["data"]["entries"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{v}"));
+    assert!(!entries.is_empty(), "{v}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn bank_match_post_dry_run_rejects_matched_tx_and_missing_account() {
+    let (dir, f) = cli_db("r3c", &["--registration-id", "12345678", "--vat", "off"]);
+    {
+        let d = bukio::db::open_db(&f).unwrap();
+        d.execute(
+            "INSERT INTO bank_accounts (iban, account_code, name) VALUES (?1, '1100', 'Betaalrekening')",
+            ["NL91ABNA0417164300"],
+        )
+        .unwrap();
+        bukio::bank::import_transactions(
+            &d,
+            "NL91ABNA0417164300",
+            &[bukio::bank::BankTx {
+                date: "2026-07-01".into(),
+                amount_cents: -50000,
+                counterparty: Some("Leverancier".into()),
+                description: Some("F1".into()),
+                iban_counter: None,
+                bank_ref: Some("REF-A".into()),
+                iban: Some("NL91ABNA0417164300".into()),
+            }],
+            Some("Betaalrekening"),
+            "1100",
+            "agent:test",
+        )
+        .unwrap();
+        let e = create_entry(
+            &d,
+            bukio::entries::CreateEntry {
+                date: "2026-06-25".into(),
+                description: "Betaling A".into(),
+                postings: specs(&[("1100", -50000), ("4300", 50000)]),
+                source: "manual",
+                source_ref: None,
+                actor: "agent:test",
+            },
+        )
+        .unwrap();
+        post_entry(&d, e.id, "agent:test").unwrap();
+        d.execute(
+            "UPDATE bank_transactions SET state = 'matched' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+    }
+
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "bank",
+        "match",
+        "post",
+        "--tx",
+        "1",
+        "--account",
+        "4300",
+        "--dry-run",
+        "--db",
+        &f,
+    ]);
+    assert!(!ok, "{out}");
+    assert_eq!(v["error"]["code"], json!("ALREADY_MATCHED"), "{v}");
+
+    {
+        let d = bukio::db::open_db(&f).unwrap();
+        d.execute(
+            "UPDATE bank_transactions SET state = 'unmatched' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+    }
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "bank",
+        "match",
+        "post",
+        "--tx",
+        "1",
+        "--account",
+        "9999",
+        "--dry-run",
+        "--db",
+        &f,
+    ]);
+    assert!(!ok, "{out}");
+    assert_eq!(v["error"]["code"], json!("ACCOUNT_NOT_FOUND"), "{v}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn vat_book_dry_run_rejects_unbalanced_postings() {
+    let (dir, f) = cli_db(
+        "r3d",
+        &[
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "bv",
+            "--vat",
+            "on",
+        ],
+    );
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "vat",
+        "book",
+        "--date",
+        "2026-01-10",
+        "--desc",
+        "x",
+        "--postings",
+        "8000:-100.00@21",
+        "--dry-run",
+        "--db",
+        &f,
+    ]);
+    assert!(!ok, "{out}");
+    assert_eq!(v["error"]["code"], json!("UNBALANCED"), "{v}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

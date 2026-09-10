@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 17:34:23 UTC — **✅ 508 passing · 0 failing (508 tests)**
+**Latest run:** 2026-09-10 17:40:56 UTC — **✅ 491 passing · 0 failing (491 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -195,17 +195,6 @@
     - ✅ stage 11: year-end close, jaarrekening micro, ICP readout
     - ✅ stage 12: final verification — balanced books, bank, audit, backup
 
-### company.test.js — company show/update
-
-6 passing · 0 failing
-
-    - ✅ company update: sets address/iban/city and audits
-    - ✅ company update: dry-run writes nothing
-    - ✅ company update: no options -> NOTHING_TO_UPDATE
-    - ✅ company update: invalid IBAN rejected
-    - ✅ company show: returns the company record
-    - ✅ company show: NO_COMPANY on a database without a company row
-
 ### direct-debit.test.js — SEPA direct debit: mandate register, pain.008.001.02 export, FRST/RCUR, CORE/B2B split
 
 8 passing · 0 failing
@@ -233,18 +222,6 @@
     - ✅ audit: csv format exports rows with headers
     - ✅ audit: xlsx format requires --out and writes a workbook
     - ✅ export xaf: unknown-year-only drafts → EXPORT_EMPTY_YEAR via CLI
-
-### fiscal-year.test.js — 
-
-7 passing · 0 failing
-
-    - ✅ fiscalYearWindow: year 2026 for FYE 03-31 spans 2025-04-01..2026-03-31
-    - ✅ report pnl --year uses the fiscal window (jan prev-FY in, nov this-FY out)
-    - ✅ report journal --year uses the fiscal window
-    - ✅ report trial-balance --year uses the fiscal window
-    - ✅ pnl() module with explicit from/to is untouched by the fiscal change
-    - ✅ sales() uses the fiscal window for --year
-    - ✅ MCP pnl tool reports the fiscal window
 
 ### hardening.test.js — 
 
@@ -573,15 +550,6 @@
     - ✅ unreachable server: clean REMOTE_UNREACHABLE error
     - ✅ server token rejects a bad --ttl-hours value
     - ✅ envelope can carry the --db of the CLIENT but the server DB is authoritative
-
-### review-round3.test.js — 
-
-4 passing · 0 failing
-
-    - ✅ recurring pause --dry-run and resume --dry-run render a plan (no fmtTemplate crash)
-    - ✅ audit --format json prints JSON even without the global --json flag
-    - ✅ bank match post --dry-run rejects an already-matched transaction and a missing account
-    - ✅ vat book --dry-run rejects unbalanced postings (parity with entry add)
 
 ### smtp.test.js — zero-dependency SMTP client + invoice email: auth, STARTTLS, MIME/PDF attachment, dry-run, audit
 
