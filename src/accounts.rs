@@ -123,7 +123,9 @@ fn valid_taxonomy(t: &str) -> bool {
 pub fn create_account(db: &Connection, a: &NewAccount<'_>) -> Result<Value> {
     validate_account(a)?;
     let profile = resolve_profile(db)?;
-    let taxonomy: Option<&str> = profile["reporting"]["taxonomy"].as_str().filter(|s| !s.is_empty());
+    let taxonomy: Option<&str> = profile["reporting"]["taxonomy"]
+        .as_str()
+        .filter(|s| !s.is_empty());
     let insert = db.execute(
         "INSERT INTO accounts (code, name, type, taxonomy_code, normal_balance, taxonomy) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![a.code, a.name.trim(), a.type_, non_empty(a.taxonomy_code), a.normal_balance, taxonomy],
@@ -166,6 +168,32 @@ pub fn get_account_by_code(db: &Connection, code: &str) -> Option<Value> {
         row_to_account,
     )
     .ok()
+}
+
+/// The RAW row (JS `getAccount`: `SELECT *`) — `account reactivate` nests this
+/// under `account`, unlike its siblings which emit the slim projection.
+pub fn get_account_row_by_code(db: &Connection, code: &str) -> Option<Value> {
+    db.query_row(
+        "SELECT id, code, name, type, taxonomy_code, normal_balance, active, created_at, taxonomy \
+         FROM accounts WHERE code = ?1",
+        [code],
+        row_to_account_raw,
+    )
+    .ok()
+}
+
+fn row_to_account_raw(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    Ok(json!({
+        "id": r.get::<_, i64>(0)?,
+        "code": r.get::<_, String>(1)?,
+        "name": r.get::<_, String>(2)?,
+        "type": r.get::<_, String>(3)?,
+        "taxonomy_code": r.get::<_, Option<String>>(4)?,
+        "normal_balance": r.get::<_, String>(5)?,
+        "active": r.get::<_, i64>(6)?,
+        "created_at": r.get::<_, Option<String>>(7)?,
+        "taxonomy": r.get::<_, Option<String>>(8)?,
+    }))
 }
 
 fn row_to_account(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
@@ -312,26 +340,45 @@ pub fn create_cost_center(db: &Connection, code: &str, name: &str) -> Result<Val
         .ok_or_else(|| BukioError::new("INTERNAL", "cost center vanished"))
 }
 
+/// The RAW row (JS `getCostCenter`: `SELECT *`) — deactivate/reactivate nest it.
+fn row_to_cost_center(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
+    Ok(json!({
+        "id": r.get::<_, i64>(0)?,
+        "code": r.get::<_, String>(1)?,
+        "name": r.get::<_, String>(2)?,
+        "active": r.get::<_, i64>(3)?,
+        "created_at": r.get::<_, Option<String>>(4)?,
+    }))
+}
+
+/// JS CLI `serialize(cc)`: slim shape with a boolean `active`.
+pub fn serialize_cost_center(v: &Value) -> Value {
+    json!({
+        "id": v["id"],
+        "code": v["code"],
+        "name": v["name"],
+        "active": v["active"].as_i64().unwrap_or(0) == 1,
+    })
+}
+
 pub fn get_cost_center_by_code(db: &Connection, code: &str) -> Option<Value> {
     db.query_row(
-        "SELECT code, name, active FROM cost_centers WHERE code = ?1",
+        "SELECT id, code, name, active, created_at FROM cost_centers WHERE code = ?1",
         [code],
-        |r| Ok(json!({ "code": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?, "active": r.get::<_, i64>(2)? == 1 })),
+        row_to_cost_center,
     )
     .ok()
 }
 
 pub fn list_cost_centers(db: &Connection, include_inactive: bool) -> Result<Vec<Value>> {
     let sql = if include_inactive {
-        "SELECT code, name, active FROM cost_centers ORDER BY code"
+        "SELECT id, code, name, active, created_at FROM cost_centers ORDER BY code"
     } else {
-        "SELECT code, name, active FROM cost_centers WHERE active = 1 ORDER BY code"
+        "SELECT id, code, name, active, created_at FROM cost_centers WHERE active = 1 ORDER BY code"
     };
     let mut stmt = db.prepare(sql).map_err(sql_err)?;
     let rows = stmt
-        .query_map([], |r| {
-            Ok(json!({ "code": r.get::<_, String>(0)?, "name": r.get::<_, String>(1)?, "active": r.get::<_, i64>(2)? == 1 }))
-        })
+        .query_map([], row_to_cost_center)
         .map_err(sql_err)?
         .filter_map(|x| x.ok())
         .collect();
@@ -350,7 +397,7 @@ pub fn set_cost_center_active(
             format!("cost center '{code}' does not exist"),
         )
     })?;
-    if cc["active"].as_bool().unwrap_or(false) == want {
+    if (cc["active"].as_i64().unwrap_or(0) == 1) == want {
         let err_code = if want {
             "ALREADY_ACTIVE"
         } else {
@@ -654,13 +701,19 @@ mod tests {
     fn cost_center_lifecycle() {
         let db = company_db();
         let cc = create_cost_center(&db, "HQ", "Hoofdkantoor").unwrap();
-        assert_eq!(cc["active"], true);
+        // the accessor returns the RAW row (JS getCostCenter: SELECT *), with the
+        // integer flag; the CLI serializes it to `active: bool` for add/list/show.
+        assert_eq!(cc["active"], 1);
+        assert!(cc["id"].as_i64().unwrap_or(0) > 0);
+        assert!(cc["created_at"].is_string());
+        assert_eq!(serialize_cost_center(&cc)["active"], true);
         assert_eq!(
             create_cost_center(&db, "HQ", "again").unwrap_err().code,
             "COST_CENTER_EXISTS"
         );
         let off = set_cost_center_active(&db, "HQ", false, false).unwrap();
-        assert_eq!(off["active"], false);
+        assert_eq!(off["active"], 0);
+        assert_eq!(serialize_cost_center(&off)["active"], false);
         assert_eq!(
             set_cost_center_active(&db, "HQ", false, false)
                 .unwrap_err()
