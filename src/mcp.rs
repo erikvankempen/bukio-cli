@@ -86,6 +86,15 @@ fn tool_defs() -> Vec<Value> {
         json!({"name": "payments_mandate_list", "description": "list SEPA direct-debit mandates (optionally per contact)", "inputSchema": {"type": "object", "properties": {"contact_id": {"type": "integer"}}}}),
         json!({"name": "payments_batch_create", "description": "create a SEPA batch: type transfer (pain.001) or direct_debit (pain.008, each line needs a contact mandate)", "inputSchema": {"type": "object", "properties": {"payable_ids": {"type": "array", "items": {"type": "integer"}}, "batch_date": {"type": "string"}, "type": {"type": "string"}, "mode": {"type": "string"}, "actor": {"type": "string"}}}}),
         json!({"name": "payments_batch_export", "description": "export a draft batch as SEPA XML (pain.001 for transfer, pain.008.001.02 for direct-debit) — one export per batch, marks it exported", "inputSchema": {"type": "object", "properties": {"batch_id": {"type": "integer"}, "mode": {"type": "string"}, "actor": {"type": "string"}}, "required": ["batch_id"]}}),
+        // — tools that existed in the JS MCP surface but were never exposed here
+        json!({"name": "icp_readout", "description": "ICP listing: EU reverse-charge supplies per customer", "inputSchema": {"type": "object", "properties": {"period": {"type": "string"}}, "required": ["period"]}}),
+        json!({"name": "year_end_status", "description": "is the year closed? what is the result?", "inputSchema": {"type": "object", "properties": {"year": {"type": "string"}}, "required": ["year"]}}),
+        json!({"name": "recurring_run", "description": "generate due recurring entries / draft invoices (idempotent, backfills)", "inputSchema": {"type": "object", "properties": {"as_of": {"type": "string"}, "template_id": {"type": "integer"}, "actor": {"type": "string"}, "mode": {"type": "string"}}}}),
+        json!({"name": "assets_register", "description": "fixed asset register: cost, cumulative depreciation, book value per asset", "inputSchema": {"type": "object", "properties": {"as_of": {"type": "string"}}}}),
+        json!({"name": "asset_dispose", "description": "dispose of an asset (sale or scrap): books the full entry, status -> disposed", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "date": {"type": "string"}, "proceeds": {"type": "string"}, "bank_account": {"type": "string"}, "result_account": {"type": "string"}, "actor": {"type": "string"}, "mode": {"type": "string"}}, "required": ["id", "date"]}}),
+        json!({"name": "attachment_list", "description": "attachments for an invoice or entry (metadata only — never the file bytes)", "inputSchema": {"type": "object", "properties": {"kind": {"type": "string"}, "ref_id": {"type": "integer"}}, "required": ["kind", "ref_id"]}}),
+        json!({"name": "attachment_add", "description": "store a source document (pdf/jpg/png/xml/eml/...) against an invoice or entry; mode db (default) = BLOB in the database, file = path in <db>-attachments/", "inputSchema": {"type": "object", "properties": {"kind": {"type": "string"}, "ref_id": {"type": "integer"}, "file_path": {"type": "string"}, "store": {"type": "string"}, "note": {"type": "string"}, "actor": {"type": "string"}, "mode": {"type": "string"}}, "required": ["kind", "ref_id", "file_path"]}}),
+        json!({"name": "attachment_remove", "description": "remove an attachment (file-mode copies on disk are deleted too)", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "actor": {"type": "string"}, "mode": {"type": "string"}}, "required": ["id"]}}),
     ]
 }
 
@@ -252,6 +261,10 @@ fn is_mutating_tool(tool: &str) -> bool {
             | "import_contacts"
             | "journal_import"
             | "import_journal"
+            | "recurring_run"
+            | "asset_dispose"
+            | "attachment_add"
+            | "attachment_remove"
     )
 }
 
@@ -528,6 +541,100 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 false,
             )?;
             Ok(json!({"ok": true, "action": "assets.add", "asset": action}))
+        }
+        "icp_readout" => {
+            let period = arg_str(args, "period")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "period required"))?;
+            crate::reports::icp_readout(db, &period)
+        }
+        "year_end_status" => {
+            // JS tolerates a numeric year here; accept both
+            let year = arg_str(args, "year")
+                .or_else(|| arg_i64(args, "year").map(|v| v.to_string()))
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "year required"))?;
+            // JS MCP returns the status raw (the CLI wraps it as {status})
+            crate::year_end::year_end_status(db, &year)
+        }
+        "recurring_run" => {
+            let as_of = arg_str(args, "as_of");
+            let template_id = arg_i64(args, "template_id");
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            let dry_run = mode != "execute";
+            let mut data =
+                crate::recurring::run_due(db, as_of.as_deref(), template_id, actor, dry_run)?;
+            if let Some(o) = data.as_object_mut() {
+                o.insert(
+                    "mode".to_string(),
+                    json!(if dry_run { "dry-run" } else { "execute" }),
+                );
+            }
+            Ok(data)
+        }
+        "assets_register" => {
+            let as_of = arg_str(args, "as_of");
+            crate::assets::register(db, as_of.as_deref(), actor)
+        }
+        "asset_dispose" => {
+            let id =
+                arg_i64(args, "id").ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
+            let date = arg_str(args, "date")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "date required"))?;
+            let proceeds = arg_str(args, "proceeds")
+                .unwrap_or_else(|| "0".into())
+                .replace(',', ".");
+            let proceeds_cents = crate::money::parse_amount(&proceeds)?;
+            let bank = arg_str(args, "bank_account");
+            let result = arg_str(args, "result_account");
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            let dry_run = mode != "execute";
+            crate::assets::dispose_asset(
+                db,
+                id,
+                &date,
+                proceeds_cents,
+                bank.as_deref(),
+                result.as_deref(),
+                None,
+                actor,
+                dry_run,
+            )
+        }
+        "attachment_list" => {
+            let kind = arg_str(args, "kind")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "kind required"))?;
+            let ref_id = arg_i64(args, "ref_id")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "ref_id required"))?;
+            let rows = crate::attachments::list_attachments(db, &kind, ref_id)?;
+            Ok(json!({ "attachments": rows }))
+        }
+        "attachment_add" => {
+            let kind = arg_str(args, "kind")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "kind required"))?;
+            let ref_id = arg_i64(args, "ref_id")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "ref_id required"))?;
+            let file_path = arg_str(args, "file_path")
+                .ok_or_else(|| BukioError::new("MISSING_ARG", "file_path required"))?;
+            let store = arg_str(args, "store").unwrap_or_else(|| "db".into());
+            let note = arg_str(args, "note");
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            let dry_run = mode != "execute";
+            crate::attachments::add_attachment(
+                db,
+                &kind,
+                ref_id,
+                &file_path,
+                note.as_deref(),
+                &store,
+                actor,
+                dry_run,
+            )
+        }
+        "attachment_remove" => {
+            let id =
+                arg_i64(args, "id").ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
+            let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            let dry_run = mode != "execute";
+            crate::attachments::remove_attachment(db, id, actor, dry_run)
         }
         "assets_run" => {
             let period = arg_str(args, "period")
