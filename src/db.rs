@@ -268,6 +268,137 @@ mod tests {
         assert_eq!(int_of(&db, "SELECT COUNT(*) FROM company"), 1);
     }
 
+    // ── ported from test/audit.test.js (its migration-018/019 cases) ──
+
+    fn table_names(db: &Connection) -> Vec<String> {
+        let mut stmt = db
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|x| x.ok())
+            .collect()
+    }
+
+    const SIG_COLUMNS: [&str; 6] = [
+        "digest_hash",
+        "sig_keyid",
+        "sig_nonce",
+        "sig_ts",
+        "sig",
+        "sig_status",
+    ];
+
+    #[test]
+    fn a_fresh_db_gains_the_signature_columns_actor_keys_and_settings() {
+        let db = open_db(":memory:").unwrap();
+        let cols = columns_of(&db, "audit_log");
+        for c in SIG_COLUMNS {
+            assert!(cols.iter().any(|x| x == c), "{c} missing");
+        }
+        let tables = table_names(&db);
+        assert!(tables.contains(&"actor_keys".to_string()));
+        assert!(tables.contains(&"settings".to_string()));
+        assert_eq!(int_of(&db, "PRAGMA user_version"), 26); // 001-026
+    }
+
+    #[test]
+    fn actor_keys_gains_a_composite_actor_keyid_primary_key() {
+        let db = open_db(":memory:").unwrap();
+        let mut stmt = db.prepare("PRAGMA table_info(actor_keys)").unwrap();
+        let mut pk: Vec<(i64, String)> = stmt
+            .query_map([], |r| Ok((r.get::<_, i64>(5)?, r.get::<_, String>(1)?)))
+            .unwrap()
+            .filter_map(|x| x.ok())
+            .filter(|(order, _)| *order > 0)
+            .collect();
+        pk.sort();
+        let names: Vec<String> = pk.into_iter().map(|(_, n)| n).collect();
+        assert_eq!(names, vec!["actor", "keyid"]);
+    }
+
+    #[test]
+    fn a_v18_db_with_a_single_actor_keys_row_upgrades_without_data_loss() {
+        let db = Connection::open_in_memory().unwrap();
+        db.pragma_update(None, "foreign_keys", "ON").unwrap();
+        apply_migrations_upto(&db, 18);
+        let keyid = "ab".repeat(16);
+        db.execute(
+            "INSERT INTO actor_keys (actor, keyid, public_key, enrolled_at, revoked_at, revoked_reason)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                "agent:bartholomeus",
+                keyid,
+                "PUBKEY-PEM",
+                "2026-08-10T00:00:00.000Z",
+                "2026-08-10T01:00:00.000Z",
+                "test"
+            ],
+        )
+        .unwrap();
+
+        migrate(&db).unwrap();
+
+        let (got_keyid, public_key, reason): (String, String, Option<String>) = db
+            .query_row(
+                "SELECT keyid, public_key, revoked_reason FROM actor_keys
+                 WHERE actor = 'agent:bartholomeus'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(got_keyid, keyid);
+        assert_eq!(public_key, "PUBKEY-PEM");
+        assert_eq!(reason.as_deref(), Some("test"));
+        // the composite PK lets the same keyid be enrolled for a second actor
+        db.execute(
+            "INSERT INTO actor_keys (actor, keyid, public_key, enrolled_at) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                "agent:other",
+                keyid,
+                "PUBKEY-PEM-2",
+                "2026-08-10T02:00:00.000Z"
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_v17_db_keeps_legacy_audit_rows_as_unsigned() {
+        let db = Connection::open_in_memory().unwrap();
+        db.pragma_update(None, "foreign_keys", "ON").unwrap();
+        apply_migrations_upto(&db, 17);
+        // the audit_log at 017 is the legacy shape; 018 adds the sig columns
+        db.execute(
+            "INSERT INTO audit_log (actor, action, outcome) VALUES (?1, ?2, ?3)",
+            rusqlite::params!["human:erik", "company.init", "ok"],
+        )
+        .unwrap();
+
+        migrate(&db).unwrap();
+
+        let cols = columns_of(&db, "audit_log");
+        for c in SIG_COLUMNS {
+            assert!(cols.iter().any(|x| x == c), "{c} missing");
+        }
+        let tables = table_names(&db);
+        assert!(tables.contains(&"actor_keys".to_string()));
+        assert!(tables.contains(&"settings".to_string()));
+
+        let rows = crate::audit::list(&db, None, None, 50).unwrap();
+        assert_eq!(rows[0]["actor"], "human:erik");
+        assert_eq!(rows[0]["sig_status"], "unsigned");
+        assert!(rows[0]["digest_hash"].is_null());
+    }
+
+    #[test]
+    fn rerunning_migrate_on_the_current_version_is_a_noop() {
+        let db = open_db(":memory:").unwrap();
+        let before = int_of(&db, "PRAGMA user_version");
+        migrate(&db).unwrap();
+        assert_eq!(int_of(&db, "PRAGMA user_version"), before);
+    }
+
     #[test]
     fn fresh_memory_db_reaches_latest_migration() {
         let db = open_db(":memory:").unwrap();

@@ -1484,7 +1484,17 @@ fn cmd_audit_list(argv: &[String], db_path: &str) -> Result<Value> {
 
 fn cmd_audit_verify(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let result = bukio::audit::verify_trail(&db)?;
+    let since = arg(argv, "--since").filter(|s| !s.is_empty());
+    let limit: Option<i64> = match arg(argv, "--limit") {
+        Some(raw) => Some(raw.parse::<i64>().map_err(|_| {
+            BukioError::new(
+                "INVALID_LIMIT",
+                format!("limit must be a non-negative integer, got '{raw}'"),
+            )
+        })?),
+        None => None,
+    };
+    let result = bukio::audit::verify_trail(&db, since.as_deref(), limit)?;
     let tampered = result["summary"]["tampered"].as_i64().unwrap_or(0);
     let invalid_sig = result["summary"]["invalid_signature"].as_i64().unwrap_or(0);
     let unknown_key = result["summary"]["unknown_key"].as_i64().unwrap_or(0);
@@ -3431,7 +3441,7 @@ fn cmd_actor_verify_key(db_path: &str, actor: &str) -> Result<Value> {
 
 fn cmd_actor_verify(db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    bukio::audit::verify_trail(&db)
+    bukio::audit::verify_trail(&db, None, None)
 }
 
 fn cmd_actor_who_can(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
