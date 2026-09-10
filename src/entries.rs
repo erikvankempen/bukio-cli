@@ -121,6 +121,9 @@ pub struct Posting {
     pub account_type: String,
     pub amount_cents: i64,
     pub vat_code: Option<String>,
+    /// VAT amount carried alongside the base (JS posting rows expose this; the
+    /// invoice/entry JSON is where callers read the per-posting VAT).
+    pub vat_amount_cents: Option<i64>,
     pub cost_center_code: Option<String>,
     pub cost_center_name: Option<String>,
 }
@@ -149,7 +152,7 @@ pub fn get_entry(db: &Connection, id: i64) -> Option<Entry> {
         .ok()?;
     let mut stmt = db
         .prepare(
-            "SELECT p.id, a.code, a.name, a.type, p.amount_cents, vc.code, cc.code, cc.name
+            "SELECT p.id, a.code, a.name, a.type, p.amount_cents, vc.code, p.vat_amount_cents, cc.code, cc.name
              FROM postings p
              JOIN accounts a ON a.id = p.account_id
              LEFT JOIN vat_codes vc ON vc.id = p.vat_code_id
@@ -166,8 +169,9 @@ pub fn get_entry(db: &Connection, id: i64) -> Option<Entry> {
                 account_type: r.get(3)?,
                 amount_cents: r.get(4)?,
                 vat_code: r.get(5)?,
-                cost_center_code: r.get(6)?,
-                cost_center_name: r.get(7)?,
+                vat_amount_cents: r.get(6)?,
+                cost_center_code: r.get(7)?,
+                cost_center_name: r.get(8)?,
             })
         })
         .ok()?

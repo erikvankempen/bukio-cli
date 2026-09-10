@@ -2365,13 +2365,24 @@ fn cmd_contact_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         actor,
         dry_run,
     )?;
-    Ok(updated)
+    // the JS wraps the updated contact: { contact: c }
+    Ok(json!({ "contact": updated }))
 }
 
 fn cmd_contact_list(db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let rows = bukio::contacts::list_contacts(&db)?;
-    Ok(json!({ "contacts": rows }))
+    // the JS CLI projects five keys (src/cli/invoice.js)
+    let contacts: Vec<Value> = rows
+        .iter()
+        .map(|c| {
+            json!({
+                "id": c["id"], "name": c["name"], "city": c["city"],
+                "vat_id": c["vat_id"], "email": c["email"],
+            })
+        })
+        .collect();
+    Ok(json!({ "contacts": contacts }))
 }
 
 fn cmd_contact_statement(argv: &[String], db_path: &str) -> Result<Value> {
@@ -2442,7 +2453,7 @@ fn cmd_invoice_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool
     if dry_run {
         Ok(invoice)
     } else {
-        Ok(json!({ "invoice": invoice }))
+        Ok(json!({ "invoice": bukio::invoice::fmt_invoice(&invoice), "dryRun": false }))
     }
 }
 
@@ -2456,7 +2467,14 @@ fn cmd_invoice_finalize(
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
     let inv = bukio::invoice::finalize_invoice(&db, id, actor, dry_run)?;
-    Ok(inv)
+    if dry_run {
+        return Ok(inv); // the JS echoes the plan raw
+    }
+    Ok(json!({
+        "invoice": bukio::invoice::fmt_invoice(&inv["invoice"]),
+        "entry": { "id": inv["entry"]["id"], "state": inv["entry"]["state"] },
+        "dryRun": false,
+    }))
 }
 
 fn cmd_invoice_list(argv: &[String], db_path: &str) -> Result<Value> {
@@ -2464,15 +2482,15 @@ fn cmd_invoice_list(argv: &[String], db_path: &str) -> Result<Value> {
     let status = arg(argv, "--status");
     let invoice_type = arg(argv, "--type");
     let rows = bukio::invoice::list_invoices(&db, status.as_deref(), invoice_type.as_deref())?;
-    Ok(json!({ "invoices": rows }))
+    Ok(json!({ "invoices": rows.iter().map(bukio::invoice::fmt_invoice).collect::<Vec<_>>() }))
 }
 
 fn cmd_invoice_show(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
     let inv = bukio::invoice::get_invoice(&db, id)?
-        .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} not found")))?;
-    Ok(json!({ "invoice": inv }))
+        .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} does not exist")))?;
+    Ok(json!({ "invoice": bukio::invoice::fmt_invoice(&inv) }))
 }
 
 fn cmd_invoice_credit(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
@@ -2489,13 +2507,10 @@ fn cmd_invoice_credit(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         actor,
         dry_run,
     )?;
-    // Wrap to match JS shape: { invoice: { ...invoice_type: ... } }
-    let mut data = inv;
-    // JS uses 'invoice_type' key, Rust uses 'type'
-    if let Some(t) = data.get("type").cloned() {
-        data["invoice_type"] = t;
+    if dry_run {
+        return Ok(inv); // the JS echoes the plan raw
     }
-    Ok(json!({ "invoice": data }))
+    Ok(json!({ "invoice": bukio::invoice::fmt_invoice(&inv), "dryRun": false }))
 }
 
 fn cmd_invoice_pay(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
@@ -2509,7 +2524,7 @@ fn cmd_invoice_pay(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
     } else {
         // Full outstanding — get from invoice
         let inv = bukio::invoice::get_invoice(&db, id)?
-            .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} not found")))?;
+            .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} does not exist")))?;
         inv["outstanding_cents"].as_i64().unwrap_or(0)
     };
     let inv = bukio::invoice::mark_paid(
@@ -2524,7 +2539,7 @@ fn cmd_invoice_pay(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
     if inv.get("dryRun").and_then(|v| v.as_bool()).unwrap_or(false) {
         Ok(json!({ "plan": inv }))
     } else {
-        Ok(json!({ "invoice": inv }))
+        Ok(json!({ "invoice": bukio::invoice::fmt_invoice(&inv) }))
     }
 }
 

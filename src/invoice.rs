@@ -45,25 +45,38 @@ fn parse_dutch_amount(s: &str) -> Option<i64> {
 pub fn parse_line_spec(spec: &str) -> Result<Value> {
     let s = spec.trim();
     // Try to extract quantity prefix
-    let (qty_milli, rest) = if let Some(idx) = s.find("x") {
+    // Try to extract quantity prefix — only when the text before the 'x' is a
+    // number. The old code used the FIRST 'x' anywhere, so a description
+    // containing an x ("x @ 1 @21", "Box @ 10") was read as a broken quantity
+    // and the line was dropped.
+    let (qty_milli, rest) = if let Some(idx) = s.find('x') {
         let qty_str = s[..idx].trim();
-        if qty_str.starts_with('-') {
-            return Err(invoice_error(
-                "INVALID_LINE",
-                format!("line '{spec}': quantity must be positive"),
-            ));
+        let numeric = !qty_str.is_empty()
+            && qty_str
+                .trim_start_matches('-')
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == '.' || c == ',');
+        if !numeric {
+            (1000, s)
+        } else {
+            if qty_str.starts_with('-') {
+                return Err(invoice_error(
+                    "INVALID_LINE",
+                    format!("line '{spec}': quantity must be positive"),
+                ));
+            }
+            let qty_f: f64 = qty_str.replace(',', ".").parse().map_err(|_| {
+                invoice_error("INVALID_LINE", format!("line '{spec}': invalid quantity"))
+            })?;
+            let q = (qty_f * 1000.0).round() as i64;
+            if q < 1 {
+                return Err(invoice_error(
+                    "INVALID_LINE",
+                    format!("line '{spec}': quantity must be positive"),
+                ));
+            }
+            (q, s[idx + 1..].trim_start())
         }
-        let qty_f: f64 = qty_str.parse().map_err(|_| {
-            invoice_error("INVALID_LINE", format!("line '{spec}': invalid quantity"))
-        })?;
-        let q = (qty_f * 1000.0).round() as i64;
-        if q < 1 {
-            return Err(invoice_error(
-                "INVALID_LINE",
-                format!("line '{spec}': quantity must be positive"),
-            ));
-        }
-        (q, s[idx + 2..].trim())
     } else {
         (1000, s)
     };
@@ -144,22 +157,49 @@ pub fn parse_line_spec(spec: &str) -> Result<Value> {
     }
 
     Ok(json!({
-        "qty_milli": qty_milli, "qty": qty_milli as f64 / 1000.0,
-        "description": description, "price_cents": price_cents,
-        "vat_code": vat_code, "discount_type": discount_type, "discount_value": discount_value,
+        "qtyMilli": qty_milli, "qty": qty_milli as f64 / 1000.0,
+        "description": description, "priceCents": price_cents,
+        "vatCode": vat_code, "discountType": discount_type, "discountValue": discount_value,
     }))
 }
 
+/// Normalise a parsed/object line to the engine's internal snake_case keys.
+/// The JS accepts object lines in camelCase ({qtyMilli, priceCents, glAccount})
+/// while our DB rows are snake_case — both must work.
+fn to_snake_line(line: Value) -> Value {
+    let mut o = line;
+    if let Some(map) = o.as_object_mut() {
+        for (camel, snake) in [
+            ("qtyMilli", "qty_milli"),
+            ("priceCents", "price_cents"),
+            ("vatCode", "vat_code"),
+            ("discountType", "discount_type"),
+            ("discountValue", "discount_value"),
+            ("glAccount", "gl_account"),
+            ("itemId", "item_id"),
+        ] {
+            if !map.contains_key(snake) {
+                if let Some(v) = map.get(camel).cloned() {
+                    map.insert(snake.to_string(), v);
+                }
+            }
+        }
+    }
+    o
+}
+
 pub fn split_line_specs(lines: &[Value]) -> Vec<Value> {
+    // the JS only SPLITS here (String(spec).split(',').map(trim).filter(Boolean));
+    // the parsing happens in create_invoice and MUST propagate. This used to
+    // parse and silently drop failures, so a typo'd line vanished from the
+    // invoice instead of raising INVALID_LINE.
     let mut result = Vec::new();
     for line in lines {
         if let Some(s) = line.as_str() {
             for part in s.split(',') {
                 let trimmed = part.trim();
                 if !trimmed.is_empty() {
-                    if let Ok(parsed) = parse_line_spec(trimmed) {
-                        result.push(parsed);
-                    }
+                    result.push(Value::String(trimmed.to_string()));
                 }
             }
         } else {
@@ -355,7 +395,7 @@ pub fn compute_invoice_totals(
     discount_value: Option<i64>,
 ) -> Value {
     // Compute line nets
-    let line_nets: Vec<Value> = lines
+    let mut line_nets: Vec<Value> = lines
         .iter()
         .map(|l| {
             let disc = line_discount_cents(l);
@@ -431,6 +471,25 @@ pub fn compute_invoice_totals(
         }
     }
 
+    // Propagate the per-line VAT back onto lineNets. The groups hold CLONES of
+    // the lines, so without this every stored invoice line kept vat 0 and the
+    // line-level VAT never reached the DB (createInvoice writes lineNets).
+    let mut vat_by_line: std::collections::HashMap<i64, i64> = std::collections::HashMap::new();
+    for g in &groups {
+        if let Some(arr) = g["lines"].as_array() {
+            for l in arr {
+                if let (Some(no), Some(v)) = (l["line_no"].as_i64(), l["vatAmount"].as_i64()) {
+                    vat_by_line.insert(no, v);
+                }
+            }
+        }
+    }
+    for ln in line_nets.iter_mut() {
+        if let Some(no) = ln["line_no"].as_i64() {
+            ln["vatAmount"] = json!(vat_by_line.get(&no).copied().unwrap_or(0));
+        }
+    }
+
     let net: i64 = groups
         .iter()
         .map(|g| g["discountedNet"].as_i64().unwrap_or(0))
@@ -484,7 +543,7 @@ fn serialize_invoice_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
     let total: Option<i64> = row.get(14)?;
     Ok(json!({
         "id": id,
-        "type": inv_type,
+        "invoice_type": inv_type,
         "invoice_number": inv_number,
         "contact_id": row.get::<_, Option<i64>>(3)?,
         "date": row.get::<_, Option<String>>(4)?,
@@ -539,6 +598,91 @@ fn get_invoice_payments(db: &Connection, invoice_id: i64) -> Result<Vec<Value>> 
         }))
     }).map_err(sql_err)?;
     Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// The JS CLI's fmtLine projection (src/cli/invoice.js).
+pub fn fmt_line(l: &Value) -> Value {
+    let qty = l["quantity"].as_i64().unwrap_or(1000);
+    let opt = |k: &str| {
+        if l[k].is_null() {
+            Value::Null
+        } else {
+            l[k].clone()
+        }
+    };
+    json!({
+        "line_no": l["line_no"], "description": l["description"],
+        "quantity": format_qty(qty), "quantity_milli": qty,
+        "unit": opt("unit"), "item_id": opt("item_id"),
+        "unit_price_cents": l["unit_price_cents"],
+        "unit_price": format_amount(l["unit_price_cents"].as_i64().unwrap_or(0)),
+        "vat_code": l["vat_code"], "vat_rate_bp": l["vat_rate_bp"],
+        "discount_type": l["discount_type"], "discount_value": l["discount_value"],
+        "amount_cents": l["amount_cents"],
+        "amount": format_amount(l["amount_cents"].as_i64().unwrap_or(0)),
+        "vat_amount_cents": l["vat_amount_cents"],
+        "vat_amount": format_amount(l["vat_amount_cents"].as_i64().unwrap_or(0)),
+    })
+}
+
+/// The JS CLI's fmtInvoice projection (src/cli/invoice.js) — every invoice
+/// command emits this shape, NOT the raw row from get_invoice.
+pub fn fmt_invoice(i: &Value) -> Value {
+    let net = i["net_cents"].as_i64().unwrap_or(0);
+    let vat = i["vat_cents"].as_i64().unwrap_or(0);
+    let gross = i["gross_cents"].as_i64().unwrap_or(0);
+    let paid = i["paid_cents"].as_i64().unwrap_or(0);
+    let lines: Vec<Value> = i["lines"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(fmt_line)
+        .collect();
+    let breakdown: Vec<Value> = i["vat_breakdown"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|b| {
+            let bp = b["rate_bp"].as_i64().unwrap_or(0);
+            json!({
+                "rate_bp": bp,
+                "rate": if bp % 100 == 0 { json!(bp / 100) } else { json!(bp as f64 / 100.0) },
+                "base": format_amount(b["base_cents"].as_i64().unwrap_or(0)),
+                "vat": format_amount(b["vat_cents"].as_i64().unwrap_or(0)),
+            })
+        })
+        .collect();
+    let payments: Vec<Value> = i["payments"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .map(|p| {
+            json!({
+                "date": p["date"],
+                "amount": format_amount(p["amount_cents"].as_i64().unwrap_or(0)),
+                "method": p["method"],
+            })
+        })
+        .collect();
+    let contact_name = i["contact"].get("name").cloned().unwrap_or(Value::Null);
+    json!({
+        "id": i["id"], "invoice_number": i["invoice_number"], "invoice_type": i["invoice_type"],
+        "contact_id": i["contact_id"], "contact_name": contact_name,
+        "date": i["date"], "due_date": i["due_date"], "delivery_date": i["delivery_date"],
+        "status": i["status"], "reference": i["reference"], "notes": i["notes"],
+        "language": if i["language"].is_null() { json!("nl") } else { i["language"].clone() },
+        "entry_id": i["entry_id"], "credit_for_invoice_id": i["credit_for_invoice_id"],
+        "net_cents": net, "vat_cents": vat, "gross_cents": gross,
+        "discount_type": i["discount_type"], "discount_value": i["discount_value"],
+        "discount_cents": i["discount_cents"],
+        "paid_cents": paid, "outstanding_cents": gross - paid,
+        "net": format_amount(net), "vat": format_amount(vat),
+        "gross": format_amount(gross), "paid": format_amount(paid),
+        "lines": lines, "vat_breakdown": breakdown, "payments": payments,
+    })
 }
 
 pub fn get_invoice(db: &Connection, id: i64) -> Result<Option<Value>> {
@@ -700,7 +844,12 @@ fn posting_defaults(db: &Connection) -> Result<Value> {
 pub fn build_invoice_postings(db: &Connection, invoice: &Value) -> Result<Vec<Value>> {
     let pd = posting_defaults(db)?;
     let vat_on = is_vat_enabled(db);
-    let is_credit = invoice["type"].as_str() == Some("credit");
+    // the JS keys the sign off invoice_type (a credit note row carries
+    // invoice_type: 'credit'); fall back to `type` for raw row shapes
+    let is_credit = match invoice["invoice_type"].as_str() {
+        Some(t) => t == "credit",
+        None => invoice["type"].as_str() == Some("credit"),
+    };
     let sign = if is_credit { 1i64 } else { -1i64 };
     let gross = invoice["gross_cents"].as_i64().unwrap_or(0);
     let mut postings: Vec<Value> = Vec::new();
@@ -762,16 +911,33 @@ pub fn validate_compliance(db: &Connection, invoice: &Value) -> Result<()> {
     if rule_key.is_empty() {
         return Err(invoice_error(
             "FORMAT_NOT_SUPPORTED",
-            "no invoice compliance rule set for this profile",
+            "no invoice compliance rule set for this profile yet (a B-milestone; \
+             registered: nl-12-vereisten, eu-invoice-vereisten, lu-invoice-vereisten)",
         ));
     }
+    // the JS has one validator per rule, each with its own wording (NL counts
+    // the 12 vereisten, the EU rule cites art. 226 and labels taxId "tax id")
+    let is_nl = rule_key == "nl-12-vereisten";
+    let (supplier_msg, tax_label) = if is_nl {
+        ("supplier details missing (requirements 1-3)", "btw-id")
+    } else {
+        (
+            "supplier details missing (art. 226(a)-(c) EU VAT Directive)",
+            "tax id",
+        )
+    };
     // Simplified: check supplier and customer party fields
-    let company = db.query_row("SELECT * FROM company WHERE id = 1", [], |r| {
+    // select by NAME: the positional `SELECT *` indices drifted from the live
+    // schema (migration 021 rebuilt the table), so the address was never seen
+    // and an incomplete supplier passed validation
+    let company = db.query_row(
+        "SELECT name, tax_id, registration_id, address, postal_code, city, vat_module FROM company WHERE id = 1",
+        [], |r| {
         Ok(json!({
-            "name": r.get::<_, Option<String>>(1)?, "tax_id": r.get::<_, Option<String>>(5)?,
-            "registration_id": r.get::<_, Option<String>>(2)?, "address": r.get::<_, Option<String>>(10)?,
-            "postal_code": r.get::<_, Option<String>>(11)?, "city": r.get::<_, Option<String>>(12)?,
-            "vat_module": r.get::<_, Option<i64>>(7)?,
+            "name": r.get::<_, Option<String>>(0)?, "tax_id": r.get::<_, Option<String>>(1)?,
+            "registration_id": r.get::<_, Option<String>>(2)?, "address": r.get::<_, Option<String>>(3)?,
+            "postal_code": r.get::<_, Option<String>>(4)?, "city": r.get::<_, Option<String>>(5)?,
+            "vat_module": r.get::<_, Option<i64>>(6)?,
         }))
     }).map_err(sql_err)?;
 
@@ -782,7 +948,7 @@ pub fn validate_compliance(db: &Connection, invoice: &Value) -> Result<()> {
     let supplier_has_vat =
         company["vat_module"].as_i64() == Some(1) || company["tax_id"].as_str().is_some();
     if supplier_has_vat && company["tax_id"].as_str().is_none() {
-        missing.push("tax id");
+        missing.push(tax_label);
     }
     if company["registration_id"].as_str().is_none() {
         missing.push("registration number");
@@ -800,7 +966,8 @@ pub fn validate_compliance(db: &Connection, invoice: &Value) -> Result<()> {
         return Err(invoice_error(
             "SUPPLIER_INCOMPLETE",
             format!(
-                "supplier details missing: {} — set them with init/company update",
+                "{}: {} — set them with init/company update",
+                supplier_msg,
                 missing.join(", ")
             ),
         ));
@@ -814,7 +981,11 @@ pub fn validate_compliance(db: &Connection, invoice: &Value) -> Result<()> {
         {
             return Err(invoice_error(
                 "CUSTOMER_INCOMPLETE",
-                "customer details missing: name, address and city are required",
+                if is_nl {
+                    "customer details missing (requirement 6): name, address and city are required"
+                } else {
+                    "customer details missing (art. 226(5) EU VAT Directive): name, address and city are required"
+                },
             ));
         }
     }
@@ -830,7 +1001,11 @@ pub fn validate_compliance(db: &Connection, invoice: &Value) -> Result<()> {
             if c.get("vat_id").and_then(|v| v.as_str()).is_none() {
                 return Err(invoice_error(
                     "CUSTOMER_VAT_REQUIRED",
-                    "reverse-charge invoice: the customer VAT id is required",
+                    if is_nl {
+                        "reverse-charge invoice: the customer VAT id is required (requirement 7)"
+                    } else {
+                        "reverse-charge invoice: the customer VAT id is required (art. 226(14) EU VAT Directive)"
+                    },
                 ));
             }
         }
@@ -890,6 +1065,8 @@ pub fn create_invoice(
         } else {
             spec.clone()
         };
+        // both the JS camelCase shape and our snake_case must resolve
+        let p = to_snake_line(p);
         let desc = p["description"].as_str().unwrap_or("");
         let price = p["price_cents"].as_i64().unwrap_or(0);
         if desc.is_empty() || price <= 0 {
@@ -946,7 +1123,8 @@ pub fn create_invoice(
         }
     }
 
-    // Compute due date
+    // Compute due date — the JS defaults dueDays to 30 when the caller omits it
+    let due_days = Some(due_days.unwrap_or(30));
     let due_date = due_days.map(|dd| {
         let y: i64 = date[..4].parse().unwrap_or(2026);
         let m: i64 = date[5..7].parse().unwrap_or(1);
@@ -1102,7 +1280,10 @@ pub fn finalize_invoice(db: &Connection, id: i64, actor: &str, dry_run: bool) ->
         })() {
             Ok(result) => return Ok(result),
             Err(e) => {
-                if e.message.contains("UNIQUE constraint failed") && attempts < 5 {
+                if e.message
+                    .contains("UNIQUE constraint failed: invoices.invoice_number")
+                    && attempts < 5
+                {
                     attempts += 1;
                     continue;
                 }
@@ -1122,7 +1303,7 @@ pub fn credit_invoice(
 ) -> Result<Value> {
     let original = get_invoice(db, id)?
         .ok_or_else(|| invoice_error("NOT_FOUND", format!("invoice {id} does not exist")))?;
-    if original["type"].as_str() != Some("sales") {
+    if original["invoice_type"].as_str() != Some("sales") {
         return Err(invoice_error(
             "NOT_SALES_INVOICE",
             "only sales invoices can be credited",
@@ -1173,7 +1354,11 @@ pub fn credit_invoice(
             "Credit note for {}",
             original["invoice_number"].as_str().unwrap_or("")
         ))),
-        original["reference"].as_str(),
+        // carry the buyer reference (klantkenmerk) so BT-10 on the credit note
+        // matches the original; fall back to the original invoice number
+        original["reference"]
+            .as_str()
+            .or_else(|| original["invoice_number"].as_str()),
         None,
         None, // no discount on credit
         None,
@@ -1184,7 +1369,7 @@ pub fn credit_invoice(
 
     let credit_id = credit["id"].as_i64().unwrap_or(0);
     db.execute(
-        "UPDATE invoices SET invoice_type = 'credit', credit_for_invoice_id = ?1 WHERE id = ?2",
+        "UPDATE invoices SET invoice_type = 'credit', credit_for_invoice_id = ?1, due_date = NULL WHERE id = ?2",
         rusqlite::params![id, credit_id],
     )
     .map_err(sql_err)?;
@@ -1258,15 +1443,19 @@ pub fn mark_paid(
         }));
     }
 
-    db.execute(
+    // the payment and the status flip must be one unit: a failure between them
+    // used to leave the payment recorded with the invoice still 'sent'
+    let tx = crate::entries::begin(db)?;
+    tx.execute(
         "INSERT INTO invoice_payments (invoice_id, date, amount_cents, method, created_by) VALUES (?1, ?2, ?3, ?4, ?5)",
         rusqlite::params![id, date, amount_cents, method, actor],
     ).map_err(sql_err)?;
 
     if paid + amount_cents >= gross {
-        db.execute("UPDATE invoices SET status = 'paid' WHERE id = ?1", [id])
+        tx.execute("UPDATE invoices SET status = 'paid' WHERE id = ?1", [id])
             .map_err(sql_err)?;
     }
+    tx.commit()?;
 
     record(
         db,
@@ -1373,17 +1562,17 @@ mod tests {
     #[test]
     fn parse_line_basic() {
         let r = parse_line_spec("2x Consultancy @ 150.00 @21").unwrap();
-        assert_eq!(r["qty_milli"], 2000);
+        assert_eq!(r["qtyMilli"], 2000);
         assert_eq!(r["description"], "Consultancy");
-        assert_eq!(r["price_cents"], 15000);
-        assert_eq!(r["vat_code"], "21");
+        assert_eq!(r["priceCents"], 15000);
+        assert_eq!(r["vatCode"], "21");
     }
 
     #[test]
     fn parse_line_with_discount() {
         let r = parse_line_spec("1x Service @ 100.00 @9 @-10%").unwrap();
-        assert_eq!(r["discount_type"], "pct");
-        assert_eq!(r["discount_value"], 1000);
+        assert_eq!(r["discountType"], "pct");
+        assert_eq!(r["discountValue"], 1000);
     }
 
     #[test]
@@ -1434,5 +1623,610 @@ mod tests {
         // Empty table -> 2026-0001
         let n = next_invoice_number(&d, 2026).unwrap();
         assert_eq!(n, "2026-0001");
+    }
+
+    // ==== ported from test/invoice.test.js ==================================
+
+    fn company_db(vat: bool, complete: bool) -> Connection {
+        let db = crate::db::open_db(":memory:").unwrap();
+        crate::accounts::seed_default_chart(&db).unwrap();
+        let address = if complete {
+            Some("Industrieweg 12")
+        } else {
+            None
+        };
+        db.execute(
+            "INSERT INTO company (name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module) \
+             VALUES ('Demo BV', '12345678', 'bv', 'NL123456789B01', 'NL91ABNA0417164300', ?1, '2712 CD', 'Zoetermeer', ?2)",
+            rusqlite::params![address, if vat { 1 } else { 0 }],
+        )
+        .unwrap();
+        if vat {
+            crate::vat::enable_vat_module(&db, "human:erik").unwrap();
+        }
+        db
+    }
+
+    fn mk_contact(db: &Connection, vat_id: Option<&str>) -> i64 {
+        crate::contacts::create_contact(
+            db,
+            "ACME B.V.",
+            Some("Straat 1"),
+            Some("1000 AA"),
+            Some("Amsterdam"),
+            None,
+            None,
+            vat_id,
+            None,
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap()["id"]
+            .as_i64()
+            .unwrap()
+    }
+
+    fn days_from_now(days: i64) -> String {
+        (chrono::Local::now().date_naive() + chrono::Duration::days(days))
+            .format("%Y-%m-%d")
+            .to_string()
+    }
+
+    const DEFAULT_LINE: &str = "2x Consultancy @ 150.00 @21";
+
+    fn new_invoice(db: &Connection, contact_id: i64, date: &str, lines: &[Value]) -> Result<Value> {
+        create_invoice(
+            db,
+            contact_id,
+            date,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            lines,
+            "agent:test",
+            false,
+        )
+    }
+
+    fn mk_invoice(db: &Connection) -> Value {
+        new_invoice(db, 1, &days_from_now(-2), &[json!(DEFAULT_LINE)]).unwrap()
+    }
+
+    /// The JS test reads postings through getEntry (the ENGINE shape), which
+    /// carries the per-posting VAT; the CLI's entry projection does not.
+    fn entry_json(db: &Connection, id: i64) -> Value {
+        serde_json::to_value(crate::entries::get_entry(db, id).unwrap()).unwrap()
+    }
+
+    fn postings_of<'a>(entry: &'a Value, code: &str) -> Option<&'a Value> {
+        entry["postings"]
+            .as_array()?
+            .iter()
+            .find(|p| p["account_code"].as_str() == Some(code))
+    }
+
+    #[test]
+    fn parse_line_spec_qty_description_price_vat() {
+        let l = parse_line_spec("2x Consultancy @ 150.00 @21").unwrap();
+        assert_eq!(l["qtyMilli"].as_i64(), Some(2000));
+        assert_eq!(l["qty"].as_f64(), Some(2.0));
+        assert_eq!(l["description"].as_str(), Some("Consultancy"));
+        assert_eq!(l["priceCents"].as_i64(), Some(15000));
+        assert_eq!(l["vatCode"].as_str(), Some("21"));
+        assert!(l["discountType"].is_null());
+
+        let l2 = parse_line_spec("Kantoorartikelen @ 45,50").unwrap();
+        assert_eq!(l2["qtyMilli"].as_i64(), Some(1000));
+        assert_eq!(l2["priceCents"].as_i64(), Some(4550));
+        assert!(l2["vatCode"].is_null());
+
+        assert_eq!(parse_line_spec("garbage").unwrap_err().code, "INVALID_LINE");
+    }
+
+    #[test]
+    fn create_invoice_draft_line_math_and_due_date() {
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        let inv = create_invoice(
+            &db,
+            1,
+            "2026-07-10",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &[json!("2x Consultancy @ 150.00 @21")],
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(inv["status"].as_str(), Some("draft"));
+        assert!(inv["invoice_number"].is_null());
+        assert_eq!(inv["lines"].as_array().unwrap().len(), 1);
+        assert_eq!(inv["lines"][0]["amount_cents"].as_i64(), Some(30000));
+        assert_eq!(inv["lines"][0]["vat_amount_cents"].as_i64(), Some(6300));
+        assert_eq!(inv["net_cents"].as_i64(), Some(30000));
+        assert_eq!(inv["vat_cents"].as_i64(), Some(6300));
+        assert_eq!(inv["gross_cents"].as_i64(), Some(36300));
+        assert_eq!(inv["due_date"].as_str(), Some("2026-08-09")); // +30 days (NL profile)
+    }
+
+    #[test]
+    fn create_invoice_guards() {
+        // unknown contact
+        let db = company_db(true, true);
+        assert_eq!(
+            new_invoice(&db, 99, "2026-07-10", &[json!("x @ 1 @21")])
+                .unwrap_err()
+                .code,
+            "CONTACT_NOT_FOUND"
+        );
+        mk_contact(&db, None);
+        assert_eq!(
+            new_invoice(&db, 1, "2026-07-10", &[]).unwrap_err().code,
+            "NO_LINES"
+        );
+        assert_eq!(
+            new_invoice(&db, 1, "bad", &[json!("x @ 1")])
+                .unwrap_err()
+                .code,
+            "INVALID_DATE"
+        );
+        // a vat code with the module off
+        let off = company_db(false, true);
+        mk_contact(&off, None);
+        assert_eq!(
+            new_invoice(&off, 1, &days_from_now(-2), &[json!(DEFAULT_LINE)])
+                .unwrap_err()
+                .code,
+            "VAT_MODULE_OFF"
+        );
+        // unknown vat code (module on)
+        let on = company_db(true, true);
+        mk_contact(&on, None);
+        assert_eq!(
+            new_invoice(&on, 1, "2026-07-10", &[json!("x @ 1 @99")])
+                .unwrap_err()
+                .code,
+            "VAT_CODE_NOT_FOUND"
+        );
+    }
+
+    #[test]
+    fn validate_compliance_requires_supplier_and_customer_data() {
+        // missing supplier address
+        let db = company_db(true, false);
+        mk_contact(&db, None);
+        let inv = new_invoice(&db, 1, "2026-07-10", &[json!("x @ 1 @21")]).unwrap();
+        assert_eq!(
+            validate_compliance(&db, &inv).unwrap_err().code,
+            "SUPPLIER_INCOMPLETE"
+        );
+        // missing customer address
+        let db = company_db(true, true);
+        crate::contacts::create_contact(
+            &db,
+            "Zonder Adres",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        let inv = new_invoice(&db, 1, "2026-07-10", &[json!("x @ 1 @21")]).unwrap();
+        assert_eq!(
+            validate_compliance(&db, &inv).unwrap_err().code,
+            "CUSTOMER_INCOMPLETE"
+        );
+        // reverse-charged (verlegd) needs the customer's vat id
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        let inv = new_invoice(&db, 1, "2026-07-10", &[json!("x @ 1 @R")]).unwrap();
+        assert_eq!(
+            validate_compliance(&db, &inv).unwrap_err().code,
+            "CUSTOMER_VAT_REQUIRED"
+        );
+        // complete passes
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        let inv = mk_invoice(&db);
+        assert!(validate_compliance(&db, &inv).is_ok());
+    }
+
+    #[test]
+    fn finalize_assigns_a_sequential_number_and_books_the_invoice() {
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        let inv = mk_invoice(&db);
+        let r = finalize_invoice(&db, inv["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+        assert_eq!(r["invoice"]["invoice_number"].as_str(), Some("2026-0001"));
+        assert_eq!(r["invoice"]["status"].as_str(), Some("sent"));
+        assert_eq!(r["invoice"]["entry_id"].as_i64(), r["entry"]["id"].as_i64());
+
+        let entry = entry_json(&db, r["entry"]["id"].as_i64().unwrap());
+        let entry = &entry;
+        assert_eq!(entry["source"].as_str(), Some("invoice"));
+        assert_eq!(entry["state"].as_str(), Some("posted"));
+        assert_eq!(
+            postings_of(entry, "1200").unwrap()["amount_cents"].as_i64(),
+            Some(36300)
+        ); // debiteuren
+        assert_eq!(
+            postings_of(entry, "8000").unwrap()["amount_cents"].as_i64(),
+            Some(-30000)
+        );
+        assert_eq!(
+            postings_of(entry, "8000").unwrap()["vat_amount_cents"].as_i64(),
+            Some(-6300)
+        );
+        assert_eq!(
+            postings_of(entry, "2500").unwrap()["amount_cents"].as_i64(),
+            Some(-6300)
+        );
+
+        // the second invoice continues the sequence
+        let inv2 = mk_invoice(&db);
+        finalize_invoice(&db, inv2["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+        let shown = get_invoice(&db, inv2["id"].as_i64().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(shown["invoice_number"].as_str(), Some("2026-0002"));
+    }
+
+    #[test]
+    fn finalize_multiple_vat_rates_gives_per_rate_postings_with_exact_vat() {
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        let inv = create_invoice(
+            &db,
+            1,
+            "2026-07-10",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &[
+                json!("1x Dienstverlening @ 100.00 @21"),
+                json!("2x Maaltijd @ 25.00 @9"),
+            ],
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        let r = finalize_invoice(&db, inv["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+        let entry = entry_json(&db, r["entry"]["id"].as_i64().unwrap());
+        let omzet: Vec<&Value> = entry["postings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|p| p["account_code"].as_str() == Some("8000"))
+            .collect();
+        assert_eq!(omzet.len(), 2);
+        assert!(omzet
+            .iter()
+            .any(|p| p["vat_amount_cents"].as_i64() == Some(-2100)));
+        assert!(omzet
+            .iter()
+            .any(|p| p["vat_amount_cents"].as_i64() == Some(-450)));
+        // gross = 100 + 21 + 50 + 4.50
+        assert_eq!(
+            postings_of(&entry, "1200").unwrap()["amount_cents"].as_i64(),
+            Some(17550)
+        );
+    }
+
+    #[test]
+    fn finalize_with_the_vat_module_off_books_net_only() {
+        let db = company_db(false, true);
+        mk_contact(&db, None);
+        let inv = new_invoice(&db, 1, "2026-07-10", &[json!("1x Dienst @ 100.00")]).unwrap();
+        let r = finalize_invoice(&db, inv["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+        let entry = entry_json(&db, r["entry"]["id"].as_i64().unwrap());
+        let postings = entry["postings"].as_array().unwrap();
+        assert_eq!(postings.len(), 2);
+        assert_eq!(
+            postings_of(&entry, "1200").unwrap()["amount_cents"].as_i64(),
+            Some(10000)
+        );
+        assert_eq!(
+            postings_of(&entry, "8000").unwrap()["amount_cents"].as_i64(),
+            Some(-10000)
+        );
+    }
+
+    #[test]
+    fn finalize_rejects_a_finalized_invoice_and_a_dry_run_writes_nothing() {
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        let inv = mk_invoice(&db);
+        finalize_invoice(&db, inv["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+        assert_eq!(
+            finalize_invoice(&db, inv["id"].as_i64().unwrap(), "agent:test", false)
+                .unwrap_err()
+                .code,
+            "ALREADY_FINALIZED"
+        );
+
+        let inv2 = mk_invoice(&db);
+        let plan = finalize_invoice(&db, inv2["id"].as_i64().unwrap(), "agent:test", true).unwrap();
+        assert_eq!(plan["dryRun"].as_bool(), Some(true));
+        assert_eq!(plan["invoice_number"].as_str(), Some("2026-0002"));
+        let after = get_invoice(&db, inv2["id"].as_i64().unwrap())
+            .unwrap()
+            .unwrap();
+        assert!(after["invoice_number"].is_null());
+        let entries: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM journal_entries WHERE source = 'invoice'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(entries, 1);
+    }
+
+    #[test]
+    fn credit_note_reverses_the_booking_and_the_sequence_continues() {
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        let inv = mk_invoice(&db);
+        finalize_invoice(&db, inv["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+
+        let credit = credit_invoice(
+            &db,
+            inv["id"].as_i64().unwrap(),
+            None,
+            Some("verkeerde tarief"),
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(credit["invoice_type"].as_str(), Some("credit"));
+        assert_eq!(credit["credit_for_invoice_id"].as_i64(), inv["id"].as_i64());
+        assert_eq!(credit["reference"].as_str(), Some("2026-0001"));
+        assert_eq!(credit["lines"].as_array().unwrap().len(), 1);
+
+        let r = finalize_invoice(&db, credit["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+        assert_eq!(r["invoice"]["invoice_number"].as_str(), Some("2026-0002"));
+        let entry = entry_json(&db, r["entry"]["id"].as_i64().unwrap());
+        assert_eq!(
+            postings_of(&entry, "1200").unwrap()["amount_cents"].as_i64(),
+            Some(-36300)
+        ); // debiteuren credit
+        assert_eq!(
+            postings_of(&entry, "8000").unwrap()["amount_cents"].as_i64(),
+            Some(30000)
+        ); // omzet debit
+        assert_eq!(
+            postings_of(&entry, "2500").unwrap()["amount_cents"].as_i64(),
+            Some(6300)
+        ); // vat debit
+    }
+
+    #[test]
+    fn payments_partial_then_full_then_overpayment_is_rejected() {
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        let inv = mk_invoice(&db);
+        let id = inv["id"].as_i64().unwrap();
+        finalize_invoice(&db, id, "agent:test", false).unwrap();
+
+        let partial = mark_paid(
+            &db,
+            id,
+            &days_from_now(-1),
+            20000,
+            "bank",
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(partial["status"].as_str(), Some("sent"));
+        assert_eq!(partial["paid_cents"].as_i64(), Some(20000));
+
+        let paid = mark_paid(
+            &db,
+            id,
+            &days_from_now(-1),
+            16300,
+            "bank",
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(paid["status"].as_str(), Some("paid"));
+
+        assert_eq!(
+            mark_paid(
+                &db,
+                id,
+                &days_from_now(-1),
+                100,
+                "bank",
+                "agent:test",
+                false
+            )
+            .unwrap_err()
+            .code,
+            "NOT_PAYABLE"
+        );
+
+        let inv2 = mk_invoice(&db);
+        let id2 = inv2["id"].as_i64().unwrap();
+        finalize_invoice(&db, id2, "agent:test", false).unwrap();
+        assert_eq!(
+            mark_paid(
+                &db,
+                id2,
+                &days_from_now(-1),
+                40000,
+                "bank",
+                "agent:test",
+                false
+            )
+            .unwrap_err()
+            .code,
+            "OVERPAYMENT"
+        );
+    }
+
+    #[test]
+    fn next_invoice_number_is_year_scoped() {
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        assert_eq!(next_invoice_number(&db, 2026).unwrap(), "2026-0001");
+        let inv = mk_invoice(&db);
+        finalize_invoice(&db, inv["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+        assert_eq!(next_invoice_number(&db, 2026).unwrap(), "2026-0002");
+        assert_eq!(next_invoice_number(&db, 2027).unwrap(), "2027-0001");
+    }
+
+    #[test]
+    fn mark_paid_payment_and_status_update_are_atomic() {
+        // the JS simulates a crash between the payment INSERT and the status
+        // UPDATE by monkey-patching db.prepare; rusqlite cannot be patched, so
+        // the same failure is forced with a SQLite trigger — if the port ever
+        // loses the transaction, the payment survives and this fails.
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        let inv = mk_invoice(&db);
+        let id = inv["id"].as_i64().unwrap();
+        finalize_invoice(&db, id, "agent:test", false).unwrap();
+
+        db.execute(
+            "CREATE TRIGGER boom BEFORE UPDATE ON invoices BEGIN SELECT RAISE(ABORT, 'simulated crash'); END",
+            [],
+        )
+        .unwrap();
+        let result = mark_paid(
+            &db,
+            id,
+            &days_from_now(-1),
+            36300,
+            "bank",
+            "agent:test",
+            false,
+        );
+        db.execute("DROP TRIGGER boom", []).unwrap();
+        assert!(result.is_err());
+
+        let payments: i64 = db
+            .query_row("SELECT COUNT(*) FROM invoice_payments", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            payments, 0,
+            "the payment must not survive a failed status update"
+        );
+        let after = get_invoice(&db, id).unwrap().unwrap();
+        assert_eq!(after["status"].as_str(), Some("sent"));
+    }
+
+    #[test]
+    fn finalize_never_reuses_an_existing_invoice_number() {
+        // the JS test monkey-patches the first UPDATE to throw a UNIQUE error,
+        // which Rust cannot do. Instead a row holds the number the sequence
+        // would compute while sitting outside the year the sequence scans: the
+        // retry (or the MAX read) must still land on a free number, never
+        // surfacing a raw constraint error and never double-booking.
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        db.execute(
+            "INSERT INTO invoices (contact_id, date, status, invoice_number, invoice_type, created_by) \
+             VALUES (1, '2025-07-01', 'sent', '2026-0001', 'sales', 'agent:test')",
+            [],
+        )
+        .unwrap();
+        let inv = mk_invoice(&db);
+        let r = finalize_invoice(&db, inv["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+        let number = r["invoice"]["invoice_number"].as_str().unwrap().to_string();
+        assert_ne!(number, "2026-0001", "a taken number must not be reused");
+        assert_eq!(r["invoice"]["status"].as_str(), Some("sent"));
+        let entries: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM journal_entries WHERE source = 'invoice'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(entries, 1, "exactly one booking entry");
+    }
+
+    #[test]
+    fn build_invoice_postings_sales_vs_credit_sign_flip() {
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        let inv = mk_invoice(&db);
+        let sales = build_invoice_postings(&db, &inv).unwrap();
+        assert_eq!(
+            sales
+                .iter()
+                .find(|p| p["code"].as_str() == Some("1200"))
+                .unwrap()["amountCents"]
+                .as_i64(),
+            Some(36300)
+        );
+        let mut credit = inv.clone();
+        credit["invoice_type"] = json!("credit");
+        let reversed = build_invoice_postings(&db, &credit).unwrap();
+        assert_eq!(
+            reversed
+                .iter()
+                .find(|p| p["code"].as_str() == Some("1200"))
+                .unwrap()["amountCents"]
+                .as_i64(),
+            Some(-36300)
+        );
+    }
+
+    #[test]
+    fn build_invoice_postings_honours_the_line_gl_account_with_the_vat_module_off() {
+        let db = company_db(false, true);
+        mk_contact(&db, None);
+        let inv = new_invoice(
+            &db,
+            1,
+            "2026-07-10",
+            &[json!({
+                "qtyMilli": 1000, "description": "Zonder btw",
+                "priceCents": 10000, "glAccount": "8050"
+            })],
+        )
+        .unwrap();
+        let postings = build_invoice_postings(&db, &inv).unwrap();
+        assert_eq!(
+            postings
+                .iter()
+                .find(|p| p["code"].as_str() == Some("1200"))
+                .unwrap()["amountCents"]
+                .as_i64(),
+            Some(10000)
+        );
+        assert_eq!(
+            postings
+                .iter()
+                .find(|p| p["code"].as_str() == Some("8050"))
+                .unwrap()["amountCents"]
+                .as_i64(),
+            Some(-10000),
+            "the line GL must be honoured with the VAT module off"
+        );
+        assert!(
+            !postings.iter().any(|p| p["code"].as_str() == Some("8000")),
+            "the hardcoded 8000 default must not be used when a line GL exists"
+        );
     }
 }
