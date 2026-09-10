@@ -56,6 +56,7 @@ pub struct ResolvedKey {
 }
 
 /// Result of signature bundle verification.
+#[derive(Debug, Clone)]
 pub struct VerifyResult {
     pub ok: bool,
     pub status: &'static str, // "verified" | "unsigned"
@@ -118,17 +119,47 @@ fn read_nonces() -> HashMap<String, HashMap<String, String>> {
     serde_json::from_str(&raw).unwrap_or_default()
 }
 
+/// Serialise the nonce store's read-modify-write. Two concurrent bukio
+/// processes (or threads) otherwise lose each other's nonces on the last
+/// writer wins, which silently weakens replay protection.
+fn with_nonce_lock<T>(f: impl FnOnce() -> T) -> T {
+    let lock_path = nonces_path().with_extension("lock");
+    if let Some(parent) = lock_path.parent() {
+        fs::create_dir_all(parent).ok();
+    }
+    match fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+    {
+        Ok(file) => {
+            let _ = file.lock();
+            let out = f();
+            let _ = file.unlock();
+            out
+        }
+        // no lock file: proceed unlocked rather than failing the command
+        Err(_) => f(),
+    }
+}
+
 /// Check if a nonce was already used for a given keyid.
 pub fn is_nonce_used(keyid: &str, nonce: &str) -> bool {
-    let nonces = read_nonces();
-    nonces
-        .get(keyid)
-        .map(|by_key| by_key.contains_key(nonce))
-        .unwrap_or(false)
+    with_nonce_lock(|| {
+        read_nonces()
+            .get(keyid)
+            .map(|by_key| by_key.contains_key(nonce))
+            .unwrap_or(false)
+    })
 }
 
 /// Remember a nonce with timestamp, pruning entries older than 24h.
 pub fn remember_nonce(keyid: &str, nonce: &str) {
+    with_nonce_lock(|| remember_nonce_locked(keyid, nonce))
+}
+
+fn remember_nonce_locked(keyid: &str, nonce: &str) {
     let now_ms = current_ts_ms();
     let cutoff_ms = now_ms - NONCE_RETENTION_MS;
     let cutoff_iso = ms_to_iso(cutoff_ms);
@@ -267,10 +298,17 @@ pub fn verify_signature_bundle(
         // Distinguish never-enrolled from revoked
         if let Some(any) = get_any_actor_key(db, actor) {
             if any.revoked_at.is_some() {
+                // record mode tolerates a revoked key like any other unusable
+                // one (the command still runs, logged unsigned); only an
+                // enforced company refuses it
                 return VerifyResult {
-                    ok: false,
+                    ok: !enforce,
                     status: "unsigned",
-                    code: Some("ACTOR_KEY_REVOKED"),
+                    code: if enforce {
+                        Some("ACTOR_KEY_REVOKED")
+                    } else {
+                        None
+                    },
                 };
             }
         }
@@ -815,8 +853,24 @@ mod tests {
             &uuid_v4(),
             false, // enforce off
         );
-        assert!(!result.ok);
-        assert_eq!(result.code, Some("ACTOR_KEY_REVOKED"));
+        // record mode tolerates it: the command runs, logged unsigned
+        assert!(result.ok);
+        assert_eq!(result.status, "unsigned");
+        assert_eq!(result.code, None);
+
+        // an enforced company refuses the revoked key
+        let enforced = verify_signature_bundle(
+            &db,
+            "human:erik",
+            "digest",
+            "sig",
+            "kid123",
+            &now_iso(),
+            &uuid_v4(),
+            true,
+        );
+        assert!(!enforced.ok);
+        assert_eq!(enforced.code, Some("ACTOR_KEY_REVOKED"));
     }
 
     #[test]

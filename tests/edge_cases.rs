@@ -8953,3 +8953,1706 @@ fn export_xaf_for_a_year_with_nothing_posted_is_export_empty_year_via_cli() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+// ==== actor / signing gate (ported from test/actor.test.js) ================
+
+use std::os::unix::fs::PermissionsExt;
+
+/// The JS runCli: no inherited actor/config, ALWAYS a scratch DB so a forgotten
+/// --db can never reach the live company DB.
+fn acli(args: &[&str], env: &[(&str, &str)]) -> (Value, bool, String) {
+    let exe = env!("CARGO_BIN_EXE_bukio");
+    let scratch = std::env::temp_dir().join(format!(
+        "bukio-actor-scratch-{}-{}.db",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut cmd = std::process::Command::new(exe);
+    for k in [
+        "BUKIO_ACTOR",
+        "BUKIO_SIGNING_PASSPHRASE",
+        "BUKIO_CONFIG_DIR",
+        "BUKIO_DB",
+        "BUKIO_SERVER",
+    ] {
+        cmd.env_remove(k);
+    }
+    cmd.env("BUKIO_DB", scratch.to_string_lossy().to_string());
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd.args(args).output().unwrap();
+    let _ = std::fs::remove_file(&scratch);
+    (
+        serde_json::from_slice(&out.stdout).unwrap_or(Value::Null),
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+    )
+}
+
+struct ActorCfg {
+    dir: std::path::PathBuf,
+    cfg: String,
+    db: String,
+}
+
+fn actor_cfg(tag: &str) -> ActorCfg {
+    let dir = temp_dir(tag);
+    let cfg = dir.join("cfg");
+    std::fs::create_dir_all(&cfg).unwrap();
+    ActorCfg {
+        cfg: cfg.to_string_lossy().to_string(),
+        db: dir.join(format!("{tag}.db")).to_string_lossy().to_string(),
+        dir,
+    }
+}
+
+/// BUKIO_CONFIG_DIR + BUKIO_ACTOR='' (actor comes from --actor).
+fn base_of(cfg: &str) -> Vec<(&'static str, &str)> {
+    vec![("BUKIO_CONFIG_DIR", cfg), ("BUKIO_ACTOR", "")]
+}
+
+fn key_file(cfg: &str, actor: &str) -> std::path::PathBuf {
+    std::path::Path::new(cfg)
+        .join("keys")
+        .join(format!("{}.key", actor.replace(':', "-")))
+}
+
+fn setup_enrolled_agent(cfg: &str, db: &str) {
+    let base = base_of(cfg);
+    let (_, ok, out) = acli(
+        &["--actor", "human:erik", "init", "--name", "X", "--db", db],
+        &base,
+    );
+    assert!(ok, "{out}");
+    acli(
+        &["--json", "--actor", "agent:bartholomeus", "actor", "keygen"],
+        &[("BUKIO_CONFIG_DIR", cfg)],
+    );
+    let (_, ok, out) = acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "register",
+            "--db",
+            db,
+        ],
+        &base,
+    );
+    assert!(ok, "register failed: {out}");
+}
+
+#[test]
+fn actor_is_valid_actor_role_name_formats() {
+    for good in [
+        "agent:bartholomeus",
+        "human:erik",
+        "system:close",
+        "agent:a.b_c-1",
+    ] {
+        assert!(bukio::actor::is_valid_actor(good), "{good} must be valid");
+    }
+    for bad in [
+        "human",
+        "agent",
+        "agent:",
+        ":erik",
+        "human erik",
+        "human:john smith",
+        "",
+    ] {
+        assert!(
+            !bukio::actor::is_valid_actor(bad),
+            "{bad:?} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn actor_error_messages_for_missing_and_malformed_actors() {
+    let missing = bukio::actor::actor_error(None).unwrap();
+    assert_eq!(missing.code, "ACTOR_REQUIRED");
+    assert!(
+        missing.message.contains("agent:bartholomeus"),
+        "{missing:?}"
+    );
+    let bad = bukio::actor::actor_error(Some("human")).unwrap();
+    assert_eq!(bad.code, "INVALID_ACTOR");
+    assert!(bad.message.contains("'<role>:<name>'"), "{bad:?}");
+    assert!(bukio::actor::actor_error(Some("human:erik")).is_none());
+}
+
+#[test]
+fn actor_cli_missing_actor_is_actor_required() {
+    let t = actor_cfg("ac3");
+    let (_, ok, out) = acli(
+        &["init", "--name", "X", "--db", &t.db],
+        &[("BUKIO_ACTOR", ""), ("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    assert!(!ok);
+    assert!(out.contains("ACTOR_REQUIRED"), "{out}");
+    assert!(out.contains("human:erik"), "{out}");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_cli_bare_role_is_rejected() {
+    let t = actor_cfg("ac4");
+    let (_, ok, out) = acli(
+        &["--actor", "human", "init", "--name", "X", "--db", &t.db],
+        &[("BUKIO_ACTOR", ""), ("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    assert!(!ok);
+    assert!(out.contains("INVALID_ACTOR"), "{out}");
+    assert!(out.contains("human:erik"), "{out}");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_cli_named_actor_works_and_json_errors_have_the_shape() {
+    let t = actor_cfg("ac5");
+    let env = base_of(&t.cfg);
+    let (_, ok, out) = acli(
+        &[
+            "--actor",
+            "human:erik",
+            "init",
+            "--name",
+            "X",
+            "--db",
+            &t.db,
+        ],
+        &env,
+    );
+    assert!(ok, "{out}");
+
+    let bad_db = t.dir.join("y.db").to_string_lossy().to_string();
+    let (r, ok, out) = acli(
+        &[
+            "--json", "--actor", "human", "init", "--name", "Y", "--db", &bad_db,
+        ],
+        &env,
+    );
+    assert!(!ok, "{out}");
+    assert_eq!(r["ok"], json!(false));
+    assert_eq!(r["error"]["code"], json!("INVALID_ACTOR"));
+    assert_eq!(
+        r["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("agent:bartholomeus"),
+        true,
+        "{r}"
+    );
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_cli_env_actor_satisfies_the_requirement() {
+    let t = actor_cfg("ac6");
+    let (_, ok, out) = acli(
+        &["init", "--name", "X", "--db", &t.db],
+        &[("BUKIO_ACTOR", "human:erik"), ("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    assert!(ok, "{out}");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_cli_env_actor_is_recorded_in_the_audit_trail() {
+    let t = actor_cfg("ac7");
+    let env = [
+        ("BUKIO_ACTOR", "human:erik"),
+        ("BUKIO_CONFIG_DIR", t.cfg.as_str()),
+    ];
+    let (_, ok, out) = acli(&["init", "--name", "X", "--db", &t.db], &env);
+    assert!(ok, "{out}");
+    let (audit, ok, out) = acli(&["audit", "--db", &t.db, "--json", "--limit", "50"], &env);
+    assert!(ok, "{out}");
+    let rows = audit["data"]["entries"].as_array().unwrap();
+    assert!(!rows.is_empty());
+    for row in rows {
+        assert_eq!(
+            row["actor"],
+            json!("human:erik"),
+            "audit row {} must carry the env actor",
+            row["id"]
+        );
+    }
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_keygen_agent_writes_a_plain_0600_key_file() {
+    let t = actor_cfg("ac8");
+    let (r, ok, out) = acli(
+        &["--json", "--actor", "agent:bartholomeus", "actor", "keygen"],
+        &[("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(r["data"]["actor"], json!("agent:bartholomeus"));
+    assert_eq!(r["data"]["encrypted"], json!(false));
+    let keyid = r["data"]["keyid"].as_str().unwrap();
+    assert_eq!(keyid.len(), 32);
+    assert!(keyid.chars().all(|c| c.is_ascii_hexdigit()), "{keyid}");
+
+    let file = key_file(&t.cfg, "agent:bartholomeus");
+    assert!(file.exists(), "key file written");
+    assert_eq!(
+        std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let pem = std::fs::read_to_string(&file).unwrap();
+    assert!(pem.contains("-----BEGIN PRIVATE KEY-----"), "{pem:.120}");
+    assert!(!pem.contains("ENCRYPTED"));
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_keygen_human_key_is_passphrase_encrypted() {
+    let t = actor_cfg("ac9");
+    let (r, ok, out) = acli(
+        &["--json", "--actor", "human:erik", "actor", "keygen"],
+        &[
+            ("BUKIO_CONFIG_DIR", &t.cfg),
+            ("BUKIO_SIGNING_PASSPHRASE", "hunter2"),
+        ],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(r["data"]["encrypted"], json!(true));
+    let pem = std::fs::read_to_string(key_file(&t.cfg, "human:erik")).unwrap();
+    assert!(
+        pem.contains("-----BEGIN ENCRYPTED PRIVATE KEY-----"),
+        "{pem:.120}"
+    );
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_keygen_refuses_to_overwrite_and_force_replaces() {
+    let t = actor_cfg("ac10");
+    let env = [("BUKIO_CONFIG_DIR", t.cfg.as_str())];
+    let args = ["--json", "--actor", "agent:bartholomeus", "actor", "keygen"];
+    let (_, ok, out) = acli(&args, &env);
+    assert!(ok, "{out}");
+    let (dup, ok, _) = acli(&args, &env);
+    assert!(!ok);
+    assert_eq!(dup["error"]["code"], json!("KEY_ALREADY_EXISTS"), "{dup}");
+    let (_, ok, out) = acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "keygen",
+            "--force",
+        ],
+        &env,
+    );
+    assert!(ok, "{out}");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_keygen_human_without_a_passphrase_is_passphrase_required() {
+    let t = actor_cfg("ac11");
+    let (r, ok, _) = acli(
+        &["--json", "--actor", "human:erik", "actor", "keygen"],
+        &[("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    assert!(!ok);
+    assert_eq!(r["error"]["code"], json!("PASSPHRASE_REQUIRED"), "{r}");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_register_enrols_the_local_key_and_audits_it() {
+    let t = actor_cfg("ac12");
+    let base = base_of(&t.cfg);
+    let (_, ok, out) = acli(
+        &[
+            "--actor",
+            "human:erik",
+            "init",
+            "--name",
+            "X",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert!(ok, "{out}");
+    acli(
+        &["--json", "--actor", "agent:bartholomeus", "actor", "keygen"],
+        &[("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    let (reg, ok, out) = acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "register",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert!(ok, "{out}");
+    assert_eq!(reg["data"]["enrolled"], json!(true));
+    let keyid = reg["data"]["keyid"].as_str().unwrap();
+    assert_eq!(keyid.len(), 32);
+
+    let db = bukio::db::open_db(&t.db).unwrap();
+    let (row_keyid, revoked): (String, Option<String>) = db
+        .query_row(
+            "SELECT keyid, revoked_at FROM actor_keys WHERE actor = ?1",
+            ["agent:bartholomeus"],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(row_keyid, keyid);
+    assert_eq!(revoked, None);
+    let (actor, n): (String, i64) = db
+        .query_row(
+            "SELECT actor, COUNT(*) FROM audit_log WHERE action = 'actor.register'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(n, 1, "register writes one audit row");
+    assert_eq!(actor, "agent:bartholomeus");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_revoke_requires_a_reason_and_marks_the_row() {
+    let t = actor_cfg("ac13");
+    let base = base_of(&t.cfg);
+    acli(
+        &[
+            "--actor",
+            "human:erik",
+            "init",
+            "--name",
+            "X",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    acli(
+        &["--json", "--actor", "agent:bartholomeus", "actor", "keygen"],
+        &[("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "register",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+
+    let (no_reason, ok, _) = acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "revoke",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert!(!ok);
+    assert_eq!(
+        no_reason["error"]["code"],
+        json!("INVALID_REASON"),
+        "{no_reason}"
+    );
+
+    let (_, ok, out) = acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "revoke",
+            "--db",
+            &t.db,
+            "--reason",
+            "test rotation",
+        ],
+        &base,
+    );
+    assert!(ok, "{out}");
+    let db = bukio::db::open_db(&t.db).unwrap();
+    let (revoked, reason): (Option<String>, Option<String>) = db
+        .query_row(
+            "SELECT revoked_at, revoked_reason FROM actor_keys WHERE actor = ?1",
+            ["agent:bartholomeus"],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert!(revoked.is_some(), "revoked_at is set");
+    assert_eq!(reason.as_deref(), Some("test rotation"));
+    let n: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'actor.revoke'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_enforce_toggles_the_company_flag_and_audits_it() {
+    let t = actor_cfg("ac14");
+    setup_enrolled_agent(&t.cfg, &t.db);
+    let base = base_of(&t.cfg);
+
+    let (on, ok, out) = acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "enforce",
+            "--on",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert!(ok, "{out}");
+    assert_eq!(on["data"]["enforce"], json!("on"));
+    let (off, ok, out) = acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "enforce",
+            "--off",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert!(ok, "{out}");
+    assert_eq!(off["data"]["enforce"], json!("off"));
+
+    let db = bukio::db::open_db(&t.db).unwrap();
+    let value: String = db
+        .query_row(
+            "SELECT value FROM settings WHERE key = 'signing_enforce'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(value, "off");
+    let n: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'actor.enforce'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 2, "both flips are audited");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_unlock_wrong_passphrase_then_session_then_lock() {
+    let t = actor_cfg("ac15");
+    let env = [
+        ("BUKIO_CONFIG_DIR", t.cfg.as_str()),
+        ("BUKIO_SIGNING_PASSPHRASE", "correct horse"),
+    ];
+    let (_, ok, out) = acli(
+        &["--json", "--actor", "human:erik", "actor", "keygen"],
+        &env,
+    );
+    assert!(ok, "{out}");
+
+    let (wrong, ok, _) = acli(
+        &["--json", "--actor", "human:erik", "actor", "unlock"],
+        &[
+            ("BUKIO_CONFIG_DIR", &t.cfg),
+            ("BUKIO_SIGNING_PASSPHRASE", "battery staple"),
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(
+        wrong["error"]["code"],
+        json!("PASSPHRASE_INVALID"),
+        "{wrong}"
+    );
+
+    let (ok_r, ok, out) = acli(
+        &["--json", "--actor", "human:erik", "actor", "unlock"],
+        &env,
+    );
+    assert!(ok, "{out}");
+    let session = std::path::Path::new(&t.cfg)
+        .join("sessions")
+        .join("human-erik.key");
+    assert_eq!(
+        ok_r["data"]["sessionFile"],
+        json!(session.to_string_lossy())
+    );
+    let raw: Value = serde_json::from_str(&std::fs::read_to_string(&session).unwrap()).unwrap();
+    assert!(raw["keyPem"]
+        .as_str()
+        .unwrap()
+        .contains("-----BEGIN PRIVATE KEY-----"));
+    assert_eq!(
+        std::fs::metadata(&session).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+
+    let (lock, ok, out) = acli(
+        &["--json", "--actor", "human:erik", "actor", "lock"],
+        &[("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(lock["data"]["removed"], json!(true));
+    assert!(!session.exists());
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_unlock_is_not_applicable_to_agent_keys() {
+    let t = actor_cfg("ac16");
+    let env = [("BUKIO_CONFIG_DIR", t.cfg.as_str())];
+    acli(
+        &["--json", "--actor", "agent:bartholomeus", "actor", "keygen"],
+        &env,
+    );
+    let (r, ok, _) = acli(
+        &["--json", "--actor", "agent:bartholomeus", "actor", "unlock"],
+        &env,
+    );
+    assert!(!ok);
+    assert_eq!(r["error"]["code"], json!("UNLOCK_NOT_APPLICABLE"), "{r}");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_list_shows_enrolled_and_revoked_actors() {
+    let t = actor_cfg("ac17");
+    let base = base_of(&t.cfg);
+    acli(
+        &[
+            "--actor",
+            "human:erik",
+            "init",
+            "--name",
+            "X",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    acli(
+        &["--json", "--actor", "agent:bartholomeus", "actor", "keygen"],
+        &[("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "register",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "revoke",
+            "--db",
+            &t.db,
+            "--reason",
+            "test",
+        ],
+        &base,
+    );
+
+    let (r, ok, out) = acli(
+        &[
+            "--json",
+            "--actor",
+            "human:erik",
+            "actor",
+            "list",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert!(ok, "{out}");
+    let actors = r["data"]["actors"].as_array().unwrap();
+    assert_eq!(actors.len(), 1, "{r}");
+    assert_eq!(actors[0]["actor"], json!("agent:bartholomeus"));
+    assert_eq!(actors[0]["active"], json!(false), "revoked");
+    assert!(!actors[0]["revoked_at"].is_null());
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_verify_reports_key_state_against_the_registry() {
+    let t = actor_cfg("ac18");
+    let base = base_of(&t.cfg);
+    acli(
+        &[
+            "--actor",
+            "human:erik",
+            "init",
+            "--name",
+            "X",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    acli(
+        &["--json", "--actor", "agent:bartholomeus", "actor", "keygen"],
+        &[("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "register",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+
+    let (v1, ok, out) = acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "verify",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert!(ok, "{out}");
+    assert_eq!(v1["data"]["registered"], json!(true), "{v1}");
+    assert_eq!(v1["data"]["active"], json!(true));
+    assert_eq!(v1["data"]["keyFileExists"], json!(true));
+
+    acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "revoke",
+            "--db",
+            &t.db,
+            "--reason",
+            "test",
+        ],
+        &base,
+    );
+    let (v2, _, _) = acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "verify",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert_eq!(v2["data"]["active"], json!(false));
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_commands_reject_invalid_actor_strings() {
+    let t = actor_cfg("ac19");
+    let (r, ok, _) = acli(
+        &["--json", "--actor", "human", "actor", "keygen"],
+        &[("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    assert!(!ok);
+    assert_eq!(r["error"]["code"], json!("INVALID_ACTOR"), "{r}");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn actor_read_session_key_treats_missing_and_expired_files_as_locked() {
+    let t = actor_cfg("ac20");
+    let saved = std::env::var("BUKIO_CONFIG_DIR").ok();
+    std::env::set_var("BUKIO_CONFIG_DIR", &t.cfg);
+    let result = (|| {
+        assert!(
+            bukio::actor_cli::read_session_key("human:erik").is_none(),
+            "no file yet"
+        );
+        let session = std::path::Path::new(&t.cfg)
+            .join("sessions")
+            .join("human-erik.key");
+        std::fs::create_dir_all(session.parent().unwrap()).unwrap();
+        std::fs::write(
+            &session,
+            r#"{"keyPem":"x","expiresAt":"2000-01-01T00:00:00.000Z"}"#,
+        )
+        .unwrap();
+        assert!(
+            bukio::actor_cli::read_session_key("human:erik").is_none(),
+            "expired counts as locked"
+        );
+    })();
+    match saved {
+        Some(v) => std::env::set_var("BUKIO_CONFIG_DIR", v),
+        None => std::env::remove_var("BUKIO_CONFIG_DIR"),
+    }
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+// --- sign gate --------------------------------------------------------------
+
+const ENTRY_ARGS: [&str; 9] = [
+    "entry",
+    "add",
+    "--date",
+    "2026-08-10",
+    "--desc",
+    "Gate test",
+    "--postings",
+    "1100:100.00,8000:-100.00",
+    "--post",
+];
+
+fn last_audit_row(db_path: &str) -> Value {
+    let db = bukio::db::open_db(db_path).unwrap();
+    let (sig_status, digest_hash, sig_keyid, sig, sig_nonce, sig_ts): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = db
+        .query_row(
+            "SELECT sig_status, digest_hash, sig_keyid, sig, sig_nonce, sig_ts FROM audit_log ORDER BY id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+        )
+        .unwrap();
+    json!({
+        "sig_status": sig_status, "digest_hash": digest_hash, "sig_keyid": sig_keyid,
+        "sig": sig, "sig_nonce": sig_nonce, "sig_ts": sig_ts,
+    })
+}
+
+fn entry_count(db_path: &str) -> i64 {
+    let db = bukio::db::open_db(db_path).unwrap();
+    db.query_row("SELECT COUNT(*) FROM journal_entries", [], |r| r.get(0))
+        .unwrap()
+}
+
+#[test]
+fn sign_gate_record_mode_with_an_enrolled_key_marks_the_row_verified() {
+    let t = actor_cfg("ac21");
+    setup_enrolled_agent(&t.cfg, &t.db);
+    let mut args = vec!["--json", "--actor", "agent:bartholomeus"];
+    args.extend(ENTRY_ARGS);
+    args.extend(["--db", &t.db]);
+    let (_, ok, out) = acli(&args, &base_of(&t.cfg));
+    assert!(ok, "{out}");
+
+    let row = last_audit_row(&t.db);
+    assert_eq!(row["sig_status"], json!("verified"), "{row}");
+    let digest = row["digest_hash"].as_str().unwrap();
+    assert_eq!(digest.len(), 64, "sha256 hex");
+    assert!(digest.chars().all(|c| c.is_ascii_hexdigit()));
+    let keyid = row["sig_keyid"].as_str().unwrap();
+    assert_eq!(keyid.len(), 32);
+    assert!(!row["sig"].is_null());
+    assert!(!row["sig_nonce"].is_null());
+    assert!(!row["sig_ts"].is_null());
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn sign_gate_record_mode_without_a_key_logs_unsigned() {
+    let t = actor_cfg("ac22");
+    let base = base_of(&t.cfg);
+    acli(
+        &[
+            "--actor",
+            "human:erik",
+            "init",
+            "--name",
+            "X",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    let mut args = vec!["--json", "--actor", "system:month-end"];
+    args.extend(ENTRY_ARGS);
+    args.extend(["--db", &t.db]);
+    let (_, ok, out) = acli(&args, &base);
+    assert!(ok, "{out}");
+    let row = last_audit_row(&t.db);
+    assert_eq!(row["sig_status"], json!("unsigned"), "{row}");
+    assert!(row["sig"].is_null());
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn sign_gate_enforce_without_a_key_is_signature_required_and_mutates_nothing() {
+    let t = actor_cfg("ac23");
+    setup_enrolled_agent(&t.cfg, &t.db);
+    let base = base_of(&t.cfg);
+    let (_, ok, out) = acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "enforce",
+            "--on",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert!(ok, "{out}");
+
+    let mut args = vec!["--json", "--actor", "system:month-end"];
+    args.extend(ENTRY_ARGS);
+    args.extend(["--db", &t.db]);
+    let (r, ok, _) = acli(&args, &base);
+    assert!(!ok);
+    assert_eq!(r["error"]["code"], json!("SIGNATURE_REQUIRED"), "{r}");
+    assert_eq!(entry_count(&t.db), 0, "nothing mutated");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn sign_gate_enforce_with_a_rotated_unregistered_key_is_signature_invalid() {
+    let t = actor_cfg("ac24");
+    setup_enrolled_agent(&t.cfg, &t.db);
+    let base = base_of(&t.cfg);
+    acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "enforce",
+            "--on",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    // rotate the local key WITHOUT re-registering -> local key != registered key
+    acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "keygen",
+            "--force",
+        ],
+        &[("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    let mut args = vec!["--json", "--actor", "agent:bartholomeus"];
+    args.extend(ENTRY_ARGS);
+    args.extend(["--db", &t.db]);
+    let (r, ok, _) = acli(&args, &base);
+    assert!(!ok);
+    assert_eq!(r["error"]["code"], json!("SIGNATURE_INVALID"), "{r}");
+    assert_eq!(entry_count(&t.db), 0);
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn sign_gate_locked_human_key_is_passphrase_required_then_env_unlocks() {
+    let t = actor_cfg("ac25");
+    let with_pass = [
+        ("BUKIO_CONFIG_DIR", t.cfg.as_str()),
+        ("BUKIO_SIGNING_PASSPHRASE", "hunter2"),
+    ];
+    let base = base_of(&t.cfg);
+    let (_, ok, out) = acli(
+        &[
+            "--actor",
+            "human:erik",
+            "init",
+            "--name",
+            "X",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert!(ok, "{out}");
+    for cmd in [
+        vec!["--json", "--actor", "human:erik", "actor", "keygen"],
+        vec![
+            "--json",
+            "--actor",
+            "human:erik",
+            "actor",
+            "register",
+            "--db",
+            t.db.as_str(),
+        ],
+        vec![
+            "--json",
+            "--actor",
+            "human:erik",
+            "actor",
+            "enforce",
+            "--on",
+            "--db",
+            t.db.as_str(),
+        ],
+    ] {
+        let (_, ok, out) = acli(&cmd, &with_pass);
+        assert!(ok, "{}: {out}", cmd.join(" "));
+    }
+
+    let mut args = vec!["--json", "--actor", "human:erik"];
+    args.extend(ENTRY_ARGS);
+    args.extend(["--db", &t.db]);
+    let (locked, ok, _) = acli(&args, &base);
+    assert!(!ok);
+    assert_eq!(
+        locked["error"]["code"],
+        json!("PASSPHRASE_REQUIRED"),
+        "{locked}"
+    );
+
+    let (_, ok, out) = acli(&args, &with_pass);
+    assert!(ok, "{out}");
+    assert_eq!(last_audit_row(&t.db)["sig_status"], json!("verified"));
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn sign_gate_unknown_actor_key_is_actor_key_unknown() {
+    let t = actor_cfg("ac26");
+    setup_enrolled_agent(&t.cfg, &t.db);
+    let base = base_of(&t.cfg);
+    acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "enforce",
+            "--on",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    // a key file exists for this actor, but it was never registered
+    acli(
+        &["--json", "--actor", "system:cron", "actor", "keygen"],
+        &[("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    let mut args = vec!["--json", "--actor", "system:cron"];
+    args.extend(ENTRY_ARGS);
+    args.extend(["--db", &t.db]);
+    let (r, ok, _) = acli(&args, &base);
+    assert!(!ok);
+    assert_eq!(r["error"]["code"], json!("ACTOR_KEY_UNKNOWN"), "{r}");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn sign_gate_revoked_key_is_actor_key_revoked() {
+    let t = actor_cfg("ac27");
+    setup_enrolled_agent(&t.cfg, &t.db);
+    let base = base_of(&t.cfg);
+    acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "enforce",
+            "--on",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    // the gate verifies BEFORE the action, so the actor can revoke its own key
+    let (_, ok, out) = acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "revoke",
+            "--db",
+            &t.db,
+            "--reason",
+            "test",
+        ],
+        &base,
+    );
+    assert!(ok, "{out}");
+    let mut args = vec!["--json", "--actor", "agent:bartholomeus"];
+    args.extend(ENTRY_ARGS);
+    args.extend(["--db", &t.db]);
+    let (r, ok, _) = acli(&args, &base);
+    assert!(!ok);
+    assert_eq!(r["error"]["code"], json!("ACTOR_KEY_REVOKED"), "{r}");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn sign_gate_dry_run_fails_identically_before_any_mutation() {
+    let t = actor_cfg("ac28");
+    setup_enrolled_agent(&t.cfg, &t.db);
+    let base = base_of(&t.cfg);
+    acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "enforce",
+            "--on",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    let (r, ok, _) = acli(
+        &[
+            "--json",
+            "--actor",
+            "system:month-end",
+            "entry",
+            "add",
+            "--date",
+            "2026-08-10",
+            "--desc",
+            "X",
+            "--postings",
+            "1100:100.00,8000:-100.00",
+            "--dry-run",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert!(!ok);
+    assert_eq!(r["error"]["code"], json!("SIGNATURE_REQUIRED"), "{r}");
+    assert_eq!(entry_count(&t.db), 0);
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn sign_gate_keygen_stays_exempt_and_enforce_off_needs_an_enrolled_actor() {
+    let t = actor_cfg("ac29");
+    setup_enrolled_agent(&t.cfg, &t.db);
+    let base = base_of(&t.cfg);
+    acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "enforce",
+            "--on",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    // keygen is exempt (its own key does not exist yet)
+    let (_, ok, out) = acli(
+        &["--json", "--actor", "system:new", "actor", "keygen"],
+        &[("BUKIO_CONFIG_DIR", &t.cfg)],
+    );
+    assert!(ok, "{out}");
+    // enforce --off is NOT exempt: system:new has a key file but is not enrolled
+    let (off, ok, _) = acli(
+        &[
+            "--json",
+            "--actor",
+            "system:new",
+            "actor",
+            "enforce",
+            "--off",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert!(!ok);
+    assert_eq!(off["error"]["code"], json!("ACTOR_KEY_UNKNOWN"), "{off}");
+    // the enrolled agent CAN disable enforcement
+    let (_, ok, out) = acli(
+        &[
+            "--json",
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "enforce",
+            "--off",
+            "--db",
+            &t.db,
+        ],
+        &base,
+    );
+    assert!(ok, "{out}");
+    // enforcement is off again: unsigned commands run
+    let mut args = vec!["--json", "--actor", "system:new"];
+    args.extend(ENTRY_ARGS);
+    args.extend(["--db", &t.db]);
+    let (_, ok, out) = acli(&args, &base);
+    assert!(ok, "{out}");
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+// --- verify_signature_bundle unit checks ------------------------------------
+
+#[test]
+fn verify_bundle_stale_timestamp_is_signature_stale_under_enforce() {
+    let db = bukio::db::open_db(":memory:").unwrap();
+    let (public, private, keyid) = bukio::sign::generate_key_pair();
+    bukio::actor::enrol_actor(&db, "agent:bartholomeus", &keyid, &public).unwrap();
+    let ts = "2026-08-10T12:00:00.000Z";
+    let digest = bukio::canonical::build_digest(
+        "agent:bartholomeus",
+        "entry add",
+        &json!({}),
+        ts,
+        "fresh-1",
+    );
+    let sig = bukio::sign::sign(digest.as_bytes(), &private).unwrap();
+    let r = bukio::sign_gate::verify_signature_bundle(
+        &db,
+        "agent:bartholomeus",
+        &digest,
+        &sig,
+        &keyid,
+        ts,
+        "fresh-1",
+        true,
+    );
+    assert!(!r.ok, "{r:?}");
+    assert_eq!(r.code, Some("SIGNATURE_STALE"), "{r:?}");
+}
+
+#[test]
+fn verify_bundle_reused_nonce_is_nonce_reused_even_in_record_mode() {
+    let now = bukio::actor::now_iso();
+    let t = actor_cfg("ac31");
+    let saved = std::env::var("BUKIO_CONFIG_DIR").ok();
+    std::env::set_var("BUKIO_CONFIG_DIR", &t.cfg);
+    let db = bukio::db::open_db(":memory:").unwrap();
+    let (public, private, keyid) = bukio::sign::generate_key_pair();
+    bukio::actor::enrol_actor(&db, "agent:bartholomeus", &keyid, &public).unwrap();
+    let ts = now.as_str();
+    let digest = bukio::canonical::build_digest(
+        "agent:bartholomeus",
+        "entry add",
+        &json!({}),
+        ts,
+        "same-nonce",
+    );
+    let sig = bukio::sign::sign(digest.as_bytes(), &private).unwrap();
+    let first = bukio::sign_gate::verify_signature_bundle(
+        &db,
+        "agent:bartholomeus",
+        &digest,
+        &sig,
+        &keyid,
+        ts,
+        "same-nonce",
+        false,
+    );
+    let second = bukio::sign_gate::verify_signature_bundle(
+        &db,
+        "agent:bartholomeus",
+        &digest,
+        &sig,
+        &keyid,
+        ts,
+        "same-nonce",
+        false,
+    );
+    let (used, code) = (
+        bukio::sign_gate::is_nonce_used(&keyid, "same-nonce"),
+        second.code,
+    );
+    match saved {
+        Some(v) => std::env::set_var("BUKIO_CONFIG_DIR", v),
+        None => std::env::remove_var("BUKIO_CONFIG_DIR"),
+    }
+    assert!(first.ok, "{first:?}");
+    assert_eq!(first.status, "verified");
+    assert!(used, "the nonce is recorded");
+    assert!(!second.ok, "a replay must be refused: {second:?}");
+    assert_eq!(code, Some("NONCE_REUSED"));
+    let _ = std::fs::remove_dir_all(&t.dir);
+}
+
+#[test]
+fn verify_bundle_record_mode_tolerates_unknown_revoked_and_invalid_as_unsigned() {
+    let now = bukio::actor::now_iso();
+    let ts = now.as_str();
+    // unknown actor -> unsigned, still ok
+    {
+        let db = bukio::db::open_db(":memory:").unwrap();
+        let (_, private, keyid) = bukio::sign::generate_key_pair();
+        let digest = bukio::canonical::build_digest(
+            "agent:bartholomeus",
+            "entry add",
+            &json!({}),
+            ts,
+            "n-unk",
+        );
+        let sig = bukio::sign::sign(digest.as_bytes(), &private).unwrap();
+        let r = bukio::sign_gate::verify_signature_bundle(
+            &db,
+            "agent:bartholomeus",
+            &digest,
+            &sig,
+            &keyid,
+            ts,
+            "n-unk",
+            false,
+        );
+        assert!(r.ok, "{r:?}");
+        assert_eq!(r.status, "unsigned");
+    }
+    // revoked -> unsigned
+    {
+        let db = bukio::db::open_db(":memory:").unwrap();
+        let (public, private, keyid) = bukio::sign::generate_key_pair();
+        bukio::actor::enrol_actor(&db, "agent:bartholomeus", &keyid, &public).unwrap();
+        bukio::actor::revoke_actor_reason(&db, "agent:bartholomeus", "test").unwrap();
+        let digest = bukio::canonical::build_digest(
+            "agent:bartholomeus",
+            "entry add",
+            &json!({}),
+            ts,
+            "n-rev",
+        );
+        let sig = bukio::sign::sign(digest.as_bytes(), &private).unwrap();
+        let r = bukio::sign_gate::verify_signature_bundle(
+            &db,
+            "agent:bartholomeus",
+            &digest,
+            &sig,
+            &keyid,
+            ts,
+            "n-rev",
+            false,
+        );
+        assert!(r.ok, "{r:?}");
+        assert_eq!(r.status, "unsigned");
+    }
+    // signed by a key that is not the enrolled one -> unsigned
+    {
+        let db = bukio::db::open_db(":memory:").unwrap();
+        let enrolled = bukio::sign::generate_key_pair();
+        let imposter = bukio::sign::generate_key_pair();
+        bukio::actor::enrol_actor(&db, "agent:bartholomeus", &enrolled.2, &enrolled.0).unwrap();
+        let digest = bukio::canonical::build_digest(
+            "agent:bartholomeus",
+            "entry add",
+            &json!({}),
+            ts,
+            "n-wrong",
+        );
+        let sig = bukio::sign::sign(digest.as_bytes(), &imposter.1).unwrap();
+        let r = bukio::sign_gate::verify_signature_bundle(
+            &db,
+            "agent:bartholomeus",
+            &digest,
+            &sig,
+            &imposter.2,
+            ts,
+            "n-wrong",
+            false,
+        );
+        assert!(r.ok, "{r:?}");
+        assert_eq!(r.status, "unsigned");
+    }
+}
+
+// --- full Tier 0 lifecycle --------------------------------------------------
+
+#[test]
+fn actor_lifecycle_across_two_companies() {
+    let dir = temp_dir("aclife");
+    let db_a = dir.join("a.db").to_string_lossy().to_string();
+    let db_b = dir.join("b.db").to_string_lossy().to_string();
+    let cfg = dir.join("cfg");
+    std::fs::create_dir_all(&cfg).unwrap();
+    let cfgs = cfg.to_string_lossy().to_string();
+    let base: Vec<(&str, &str)> = vec![("BUKIO_CONFIG_DIR", &cfgs), ("BUKIO_ACTOR", "agent:test")];
+    const PASS: &str = "lifecycle-passphrase-42";
+
+    let run = |db: &str, args: &[&str], extra: &[(&str, &str)]| -> Value {
+        let mut all: Vec<(&str, &str)> = base.clone();
+        all.extend_from_slice(extra);
+        let mut full = vec!["--db", db, "--json"];
+        full.extend_from_slice(args);
+        let (r, ok, out) = acli(&full, &all);
+        assert!(ok, "expected ok for {}: {out}", args.join(" "));
+        r
+    };
+    let run_fail = |db: &str, args: &[&str], extra: &[(&str, &str)]| -> Value {
+        let mut all: Vec<(&str, &str)> = base.clone();
+        all.extend_from_slice(extra);
+        let mut full = vec!["--db", db, "--json"];
+        full.extend_from_slice(args);
+        let (r, ok, out) = acli(&full, &all);
+        assert!(!ok, "expected failure for {}: {out}", args.join(" "));
+        r
+    };
+    let sig_counts = |db: &str| -> std::collections::HashMap<String, i64> {
+        let h = bukio::db::open_db(db).unwrap();
+        let mut stmt = h
+            .prepare("SELECT sig_status, COUNT(*) FROM audit_log GROUP BY sig_status")
+            .unwrap();
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?))
+            })
+            .unwrap();
+        rows.map(|r| {
+            let (k, v) = r.unwrap();
+            (k.unwrap_or_else(|| "null".into()), v)
+        })
+        .collect()
+    };
+    let post_entry = |who: &str, desc: &str, db: &str, extra: &[(&str, &str)]| {
+        run(
+            db,
+            &[
+                "--actor",
+                who,
+                "entry",
+                "add",
+                "--date",
+                "2026-08-10",
+                "--desc",
+                desc,
+                "--postings",
+                "1100:100.00,8000:-100.00",
+                "--post",
+            ],
+            extra,
+        );
+    };
+
+    // 1. init companies A and B
+    run(
+        &db_a,
+        &["--actor", "human:erik", "init", "--name", "A"],
+        &[],
+    );
+    run(
+        &db_b,
+        &["--actor", "human:erik", "init", "--name", "B"],
+        &[],
+    );
+    // 2. keygen: agent plain, human passphrase-encrypted
+    run(
+        &db_a,
+        &["--actor", "agent:bartholomeus", "actor", "keygen"],
+        &[],
+    );
+    run(
+        &db_a,
+        &["--actor", "human:erik", "actor", "keygen"],
+        &[("BUKIO_SIGNING_PASSPHRASE", PASS)],
+    );
+    // 3. unlock the human key into a session
+    run(
+        &db_a,
+        &[
+            "--actor",
+            "human:erik",
+            "actor",
+            "unlock",
+            "--ttl-hours",
+            "12",
+        ],
+        &[("BUKIO_SIGNING_PASSPHRASE", PASS)],
+    );
+    // 4. register both actors in company A
+    run(
+        &db_a,
+        &["--actor", "agent:bartholomeus", "actor", "register"],
+        &[],
+    );
+    run(
+        &db_a,
+        &["--actor", "human:erik", "actor", "register"],
+        &[("BUKIO_SIGNING_PASSPHRASE", PASS)],
+    );
+    // 5. enforce signing in A
+    run(
+        &db_a,
+        &["--actor", "human:erik", "actor", "enforce", "--on"],
+        &[("BUKIO_SIGNING_PASSPHRASE", PASS)],
+    );
+    // 6. signed commands run: agent via key file, human via the session
+    post_entry("agent:bartholomeus", "signed by agent", &db_a, &[]);
+    post_entry("human:erik", "signed by human", &db_a, &[]);
+    let after = sig_counts(&db_a);
+    assert!(
+        after.get("verified").copied().unwrap_or(0) >= 4,
+        "both actors' rows verified: {after:?}"
+    );
+    // 7. an actor without key material is refused
+    let refused = run_fail(
+        &db_a,
+        &[
+            "--actor",
+            "agent:test",
+            "entry",
+            "add",
+            "--date",
+            "2026-08-10",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:10.00,8000:-10.00",
+        ],
+        &[],
+    );
+    assert_eq!(
+        refused["error"]["code"],
+        json!("SIGNATURE_REQUIRED"),
+        "{refused}"
+    );
+    // 8. lock the session: refused without the passphrase, works with it
+    run(&db_a, &["--actor", "human:erik", "actor", "lock"], &[]);
+    let locked = run_fail(
+        &db_a,
+        &[
+            "--actor",
+            "human:erik",
+            "entry",
+            "add",
+            "--date",
+            "2026-08-10",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:10.00,8000:-10.00",
+        ],
+        &[],
+    );
+    assert_eq!(
+        locked["error"]["code"],
+        json!("PASSPHRASE_REQUIRED"),
+        "{locked}"
+    );
+    post_entry(
+        "human:erik",
+        "signed with passphrase after lock",
+        &db_a,
+        &[("BUKIO_SIGNING_PASSPHRASE", PASS)],
+    );
+    assert!(
+        sig_counts(&db_a).get("verified").copied().unwrap_or(0) >= 6,
+        "passphrase path verifies after lock"
+    );
+    // 9. self-revoke: the agent is refused afterwards
+    run(
+        &db_a,
+        &[
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "revoke",
+            "--reason",
+            "rotation",
+        ],
+        &[],
+    );
+    let revoked = run_fail(
+        &db_a,
+        &[
+            "--actor",
+            "agent:bartholomeus",
+            "entry",
+            "add",
+            "--date",
+            "2026-08-10",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:10.00,8000:-10.00",
+        ],
+        &[],
+    );
+    assert_eq!(
+        revoked["error"]["code"],
+        json!("ACTOR_KEY_REVOKED"),
+        "{revoked}"
+    );
+    // 10. rotation: new key on disk, enrolled as a fresh row
+    run(
+        &db_a,
+        &[
+            "--actor",
+            "agent:bartholomeus",
+            "actor",
+            "keygen",
+            "--force",
+        ],
+        &[],
+    );
+    run(
+        &db_a,
+        &["--actor", "agent:bartholomeus", "actor", "register"],
+        &[],
+    );
+    post_entry("agent:bartholomeus", "signed with rotated key", &db_a, &[]);
+    // 11. audit verify is clean
+    let verify = run(
+        &db_a,
+        &["--actor", "agent:bartholomeus", "audit", "verify"],
+        &[],
+    );
+    let summary = &verify["data"]["summary"];
+    assert_eq!(summary["tampered"], json!(0), "{summary}");
+    assert_eq!(summary["invalid_signature"], json!(0));
+    assert_eq!(summary["unknown_key"], json!(0));
+    assert!(
+        summary["ok"].as_i64().unwrap() >= 3,
+        "new rows verified: {summary}"
+    );
+    assert!(
+        summary["revoked"].as_i64().unwrap() >= 2,
+        "old rows revoked: {summary}"
+    );
+
+    // 12. company B is independent: enrolment and enforcement do not leak
+    run(
+        &db_b,
+        &["--actor", "human:erik", "actor", "register"],
+        &[("BUKIO_SIGNING_PASSPHRASE", PASS)],
+    );
+    run(
+        &db_b,
+        &["--actor", "human:erik", "actor", "enforce", "--on"],
+        &[("BUKIO_SIGNING_PASSPHRASE", PASS)],
+    );
+    let not_enrolled = run_fail(
+        &db_b,
+        &[
+            "--actor",
+            "agent:bartholomeus",
+            "entry",
+            "add",
+            "--date",
+            "2026-08-10",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:10.00,8000:-10.00",
+        ],
+        &[],
+    );
+    assert_eq!(
+        not_enrolled["error"]["code"],
+        json!("ACTOR_KEY_UNKNOWN"),
+        "{not_enrolled}"
+    );
+    let first_register = run_fail(
+        &db_b,
+        &["--actor", "agent:bartholomeus", "actor", "register"],
+        &[],
+    );
+    assert_eq!(
+        first_register["error"]["code"],
+        json!("ACTOR_KEY_UNKNOWN"),
+        "first enrolment under enforce is operator-gated"
+    );
+    let off_refused = run_fail(
+        &db_b,
+        &["--actor", "agent:test", "actor", "enforce", "--off"],
+        &[],
+    );
+    assert_eq!(
+        off_refused["error"]["code"],
+        json!("SIGNATURE_REQUIRED"),
+        "enforce --off requires an enrolled actor"
+    );
+    run(
+        &db_b,
+        &["--actor", "human:erik", "actor", "enforce", "--off"],
+        &[("BUKIO_SIGNING_PASSPHRASE", PASS)],
+    );
+    run(
+        &db_b,
+        &["--actor", "agent:bartholomeus", "actor", "register"],
+        &[],
+    );
+    run(
+        &db_b,
+        &["--actor", "human:erik", "actor", "enforce", "--on"],
+        &[("BUKIO_SIGNING_PASSPHRASE", PASS)],
+    );
+    post_entry("agent:bartholomeus", "signed in company B", &db_b, &[]);
+    let b_counts = sig_counts(&db_b);
+    assert!(
+        b_counts.get("verified").copied().unwrap_or(0) >= 2,
+        "B verifies the same rotated key: {b_counts:?}"
+    );
+    let b_verify = run(
+        &db_b,
+        &["--actor", "agent:bartholomeus", "audit", "verify"],
+        &[],
+    );
+    assert_eq!(
+        b_verify["data"]["summary"]["revoked"],
+        json!(0),
+        "B has no revoked rows (fresh registry)"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -1,47 +1,9 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 20:23:13 UTC — **✅ 382 passing · 0 failing (382 tests)**
+**Latest run:** 2026-09-10 20:47:13 UTC — **✅ 349 passing · 0 failing (349 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
-
-### actor.test.js — named-actor enforcement, actor identity CLI + sign-and-verify gate (record/enforce modes, stale/replay/registry refusals) + full Tier 0 lifecycle (enrol→enforce→lock→revoke→rotate→verify→company B)
-
-33 passing · 0 failing
-
-    - ✅ isValidActor: role:name formats
-    - ✅ actorError: helpful messages for missing and malformed actors
-    - ✅ CLI: missing actor fails with ACTOR_REQUIRED
-    - ✅ CLI: bare role without a name is rejected (INVALID_ACTOR)
-    - ✅ CLI: named actor works; JSON error shape on --json
-    - ✅ CLI: BUKIO_ACTOR env satisfies the requirement
-    - ✅ CLI: BUKIO_ACTOR env is recorded in the audit trail
-    - ✅ actor keygen: agent key writes a plain 0600 key file (BUKIO_CONFIG_DIR respected)
-    - ✅ actor keygen: human key is passphrase-encrypted via BUKIO_SIGNING_PASSPHRASE
-    - ✅ actor keygen: refuses to overwrite; --force replaces (rotation)
-    - ✅ actor keygen: human key without a passphrase in a non-interactive shell fails PASSPHRASE_REQUIRED
-    - ✅ actor register: enrols the local key into the current company DB and audits it
-    - ✅ actor revoke: requires a reason; revoke marks the row and audits it
-    - ✅ actor enforce: --on/--off toggles the per-company flag and audits it
-    - ✅ actor unlock: wrong passphrase -> PASSPHRASE_INVALID; correct -> session key with expiry; lock clears it
-    - ✅ actor unlock: agent keys are not unlocked per session
-    - ✅ actor list: shows enrolled and revoked actors
-    - ✅ actor verify: reports key state against the current company registry
-    - ✅ actor commands reject invalid actor strings with INVALID_ACTOR
-    - ✅ readSessionKey: expired or missing session files count as locked
-    - ✅ sign gate: record mode + enrolled key -> command runs, audit row verified
-    - ✅ sign gate: record mode + no key -> runs, logged unsigned
-    - ✅ sign gate: enforce on + no key -> SIGNATURE_REQUIRED, nothing mutated (JSON contract)
-    - ✅ sign gate: enforce on + wrong key -> SIGNATURE_INVALID
-    - ✅ sign gate: locked human key -> PASSPHRASE_REQUIRED; env passphrase unlocks
-    - ✅ sign gate: unknown actor key -> ACTOR_KEY_UNKNOWN
-    - ✅ sign gate: revoked key -> ACTOR_KEY_REVOKED
-    - ✅ sign gate: --dry-run fails identically before any mutation
-    - ✅ sign gate: keygen stays exempt under enforcement; enforce --off needs an enrolled actor
-    - ✅ verifySignatureBundle: stale timestamp -> SIGNATURE_STALE under enforce
-    - ✅ verifySignatureBundle: reused nonce -> NONCE_REUSED even in record mode
-    - ✅ verifySignatureBundle: record mode tolerates unknown/revoked/invalid as unsigned
-    - ✅ lifecycle: keygen(unlock)→register→enforce→signed→refused→lock→revoke→rotate→verify→company B
 
 ### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar, MCP signed execution (verified rows, enforce refusal, nonces, per-DB registry)
 
