@@ -404,7 +404,7 @@ fn try_match_cmd(
         ["attach", "remove"] => cmd_attach_remove(argv, db_path, actor, dry_run),
 
         // ── update ────────────────────────────────────────────────────
-        ["update"] => cmd_update(argv),
+        ["update"] => cmd_update(argv, db_path, actor),
 
         // ── actor ─────────────────────────────────────────────────────
         ["actor"] | ["actor", "--help"] | ["actor", "-h"] => {
@@ -3423,7 +3423,7 @@ fn cmd_item_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
     )
 }
 
-fn cmd_update(argv: &[String]) -> Result<Value> {
+fn cmd_update(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     let repo = arg(argv, "--repo").unwrap_or_else(|| ".".into());
     let yes = has_flag(argv, "--yes");
     let dry_run = has_flag(argv, "--dry-run");
@@ -3444,7 +3444,10 @@ fn cmd_update(argv: &[String]) -> Result<Value> {
                 ),
             ));
         }
-        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+        // trailing-only trim: porcelain output KEEPS its leading space column
+        // (" M file"); a full trim would eat it and slice(3) would then drop the
+        // filename's first character on the first line
+        Ok(String::from_utf8_lossy(&out.stdout).trim_end().to_string())
     };
     // A bare git dir is not a clone; the fixture's origin.git is bare
     let git_dir_ok = std::process::Command::new("git")
@@ -3459,10 +3462,18 @@ fn cmd_update(argv: &[String]) -> Result<Value> {
         ));
     }
     let url = git(&["remote", "get-url", "origin"])?;
-    if !url.contains("github.com/erikvankempen/bukio-cli") && !trust_remote {
+    // ANCHORED like the JS's regex — a substring test would accept
+    // https://evil.com/github.com:erikvankempen/bukio-cli.git
+    let official = regex::Regex::new(
+        r"(?i)^(?:[a-z][a-z0-9+.\-]*://)?(?:[^@\s/]+@)?github\.com[:/]erikvankempen/bukio-cli(?:\.git)?$",
+    )
+    .expect("static regex");
+    if !official.is_match(&url) && !trust_remote {
         return Err(BukioError::new(
-            "UNTRUSTED_REMOTE",
-            format!("remote URL {url} does not match expected repository"),
+            "UPDATE_WRONG_REMOTE",
+            format!(
+                "remote URL {url} is not the official bukio-cli repository — refusing to update from it (pass --trust-remote to override)"
+            ),
         ));
     }
     git(&["fetch", "origin", "main"])?;
@@ -3563,6 +3574,20 @@ fn cmd_update(argv: &[String]) -> Result<Value> {
         }
     }
     let to_sha = git(&["rev-parse", "HEAD"])?;
+    // mirror the JS: record an audit row when a company db is present
+    if let Ok(db) = open_existing(db_path) {
+        let _ = bukio::audit::record(
+            &db,
+            bukio::audit::RecordArgs {
+                actor,
+                action: "update",
+                command: Some("update"),
+                args: Some(json!({ "commits": incoming.len() })),
+                outcome: "ok",
+                entry_ids: vec![],
+            },
+        );
+    }
     let version_after = std::fs::read_to_string(format!("{repo}/package.json"))
         .ok()
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())

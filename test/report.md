@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 16:19:28 UTC — **✅ 590 passing · 0 failing (590 tests)**
+**Latest run:** 2026-09-10 16:25:52 UTC — **✅ 579 passing · 0 failing (579 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -662,22 +662,6 @@
     - ✅ emailInvoice: PDF attachment is rendered and decodes to %PDF
     - ✅ cli: invoice email e2e with SMTP env + audit row
     - ✅ mcp: invoice_email dry-run parity (no connection) + execute
-
-### update.test.js — 
-
-11 passing · 0 failing
-
-    - ✅ update plan: a non-clone directory is refused
-    - ✅ update plan: a non-official remote is refused
-    - ✅ update plan: a URL embedding the official path as substring is refused (anchored regex)
-    - ✅ update plan: shows the incoming commit and current version without warning
-    - ✅ update plan: local modifications are reported as overwrite warnings
-    - ✅ update: refuses to run without --yes
-    - ✅ update: --yes resets the working tree to origin/main
-    - ✅ update: --yes overwrites a local customization (tracked modification)
-    - ✅ update: --yes drops local commits (warned in the plan)
-    - ✅ update: reinstalls dependencies when package.json changed
-    - ✅ update: records an audit row when a company db exists
 
 ### year-end.test.js — annual close, jaarrekening micro/klein, ICP
 
