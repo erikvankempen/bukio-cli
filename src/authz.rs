@@ -178,6 +178,52 @@ pub const CLI_CAPABILITIES: &[(&str, &str)] = &[
     ("fx show", "report.read"),
 ];
 
+/// MCP tool name -> capability (JS: MCP_CAPABILITIES). `entry_add` is dynamic
+/// and handled in capability_of. Unmapped tools fail closed.
+const MCP_CAPABILITIES: &[(&str, &str)] = &[
+    ("company_info", "report.read"),
+    ("trial_balance", "report.read"),
+    ("balance_sheet", "report.read"),
+    ("pnl", "report.read"),
+    ("journal", "report.read"),
+    ("accounts", "report.read"),
+    ("audit", "report.read"),
+    ("compliance", "vat.book"),
+    ("invoices", "report.read"),
+    ("entry_post", "entry.post"),
+    ("entry_reverse", "entry.post"),
+    ("vat_book", "vat.book"),
+    ("vat_readout", "vat.book"),
+    ("icp_readout", "vat.book"),
+    ("invoice_create", "invoice.manage"),
+    ("invoice_finalize", "invoice.manage"),
+    ("invoice_credit", "invoice.manage"),
+    ("invoice_pay", "invoice.manage"),
+    ("invoice_email", "invoice.manage"),
+    ("invoice_import", "admin.company"),
+    ("item_add", "entry.draft"),
+    ("item_update", "entry.draft"),
+    ("item_list", "report.read"),
+    ("attachment_add", "admin.backup"),
+    ("attachment_remove", "admin.backup"),
+    ("attachment_list", "report.read"),
+    ("report_aging", "report.read"),
+    ("report_sales", "report.read"),
+    ("payments_mandate_add", "payments.sepa"),
+    ("payments_mandate_list", "report.read"),
+    ("payments_batch_create", "payments.sepa"),
+    ("payments_batch_export", "payments.sepa"),
+    ("recurring_run", "recurring.manage"),
+    ("year_end_close", "close.year"),
+    ("year_end_status", "close.year"),
+    ("fx_set", "fx.manage"),
+    ("contact_add", "contacts.manage"),
+    ("assets_register", "assets.manage"),
+    ("asset_add", "assets.manage"),
+    ("assets_run", "assets.manage"),
+    ("asset_dispose", "assets.manage"),
+];
+
 const SOD_PAIRS: &[(&[&str], &str)] = &[
     (
         &["bookkeeper", "payments"],
@@ -247,9 +293,15 @@ pub fn sod_warnings(roles: &[String]) -> Vec<String> {
 
 /// Map a command path to its capability. `entry add` is resolved by opts.post.
 pub fn capability_of(cmd: &str, post: bool) -> Option<&'static str> {
-    if cmd.starts_with("mcp:") {
-        // MCP tools not yet mapped — return None (fail closed)
-        return None;
+    if let Some(tool) = cmd.strip_prefix("mcp:") {
+        // entry_add is the one dynamic tool (post flips the capability)
+        if tool == "entry_add" {
+            return Some(if post { "entry.post" } else { "entry.draft" });
+        }
+        return MCP_CAPABILITIES
+            .iter()
+            .find(|(t, _)| *t == tool)
+            .map(|(_, c)| *c);
     }
     if cmd == "entry add" {
         return Some(if post { "entry.post" } else { "entry.draft" });
@@ -316,8 +368,18 @@ pub fn check_authz(
     has_target: bool,
     post: bool,
 ) -> Result<(), BukioError> {
-    let is_owner_kill = cmd == "actor revoke" && has_target;
-    if !is_owner_kill && is_authz_exempt(cmd, has_target) {
+    // The exemption list and the owner-kill rule match the command PATH
+    // (JS: commandPathOf) — `cmd` carries positional args, so
+    // 'actor can entry add' is still 'actor can' and
+    // 'actor revoke agent:x' is still 'actor revoke'.
+    let path: String = cmd
+        .split_whitespace()
+        .take(2)
+        .collect::<Vec<&str>>()
+        .join(" ");
+    let path: &str = if path.is_empty() { cmd } else { &path };
+    let is_owner_kill = path == "actor revoke" && has_target;
+    if !is_owner_kill && is_authz_exempt(path, has_target) {
         return Ok(());
     }
     if !get_authz(db) && !is_owner_kill {

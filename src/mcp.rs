@@ -173,6 +173,17 @@ fn dispatch(db: &Connection, actor: &str, msg: &Value) -> Result<String> {
                     }
                 }
             }
+            // Tier 0.5 authz gate (JS parity): mutating tools carry the same
+            // capabilities as their CLI counterparts — 'mcp:entry_add' with
+            // post:true is entry.post. Read-only tools stay ungated.
+            if mutating {
+                if let Some(e) = mcp_authz_refusal(db, &eff_actor, tool_name, args) {
+                    return Ok(rpc_response(
+                        id.clone(),
+                        rpc_error_content(&e.code, &e.message),
+                    ));
+                }
+            }
             let result = call_tool(db, &eff_actor, tool_name, args);
             if mutating {
                 crate::audit::set_pending_signature(None);
@@ -195,6 +206,19 @@ fn dispatch(db: &Connection, actor: &str, msg: &Value) -> Result<String> {
             &format!("method not found: {method}"),
         )),
     }
+}
+
+/// The MCP authz gate: the effective actor must carry the tool's capability.
+/// Returns the refusal (AUTHZ_DENIED) or None. Mutating tools only — readers
+/// stay ungated (JS parity). Unmapped tools fail closed.
+fn mcp_authz_refusal(
+    db: &Connection,
+    actor: &str,
+    tool: &str,
+    args: &Value,
+) -> Option<BukioError> {
+    let post = args.get("post").and_then(|v| v.as_bool()).unwrap_or(false);
+    crate::authz::check_authz(db, actor, &format!("mcp:{tool}"), false, post).err()
 }
 
 /// Tools that mutate the books — these are signed and refused in read-only mode.

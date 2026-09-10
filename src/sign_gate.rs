@@ -498,7 +498,7 @@ pub fn sign_command(
             if let Some(ref db) = db {
                 if crate::actor::get_authz(db) {
                     // Authz is on — let authz gate deny, not signing gate
-                    check_authz(db, actor, cmd, argv.iter().any(|a| a == "--target"), false)?;
+                    check_authz(db, actor, cmd, argv.iter().any(|a| a == "--target" || a == "--for"), false)?;
                     // If we get here, authz passed (shouldn't happen for missing key)
                     return Ok(None);
                 }
@@ -536,7 +536,7 @@ pub fn sign_command(
 
     // Tier 0.5 authz gate
     if let Some(ref db) = db {
-        let has_target = argv.iter().any(|a| a == "--target");
+        let has_target = argv.iter().any(|a| a == "--target" || a == "--for");
         check_authz(db, actor, cmd, has_target, false)?;
     }
 

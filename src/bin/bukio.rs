@@ -415,7 +415,7 @@ fn try_match_cmd(
         ["actor", "unlock"] => cmd_actor_unlock(argv, actor),
         ["actor", "lock"] => cmd_actor_lock(argv, actor),
         ["actor", "authz"] => cmd_actor_authz(argv, db_path, dry_run),
-        ["actor", "roles"] => cmd_actor_roles(db_path),
+        ["actor", "roles"] => cmd_actor_roles(argv, db_path, actor),
         ["actor", "grant"] => cmd_actor_grant(argv, db_path, actor),
         ["actor", "roles", "grant"] => cmd_actor_grant(argv, db_path, actor),
         ["actor", "revoke-role"] => cmd_actor_revoke_role(argv, db_path, actor),
@@ -3260,7 +3260,9 @@ fn cmd_actor_list(db_path: &str) -> Result<Value> {
 fn cmd_actor_revoke(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     let reason = arg(argv, "--reason");
-    bukio::actor_cli::cmd_revoke(db_path, actor, reason.as_deref(), dry_run)
+    // --target <who> kills another actor; without it the caller revokes itself
+    let target = arg(argv, "--target").unwrap_or_else(|| actor.to_string());
+    bukio::actor_cli::cmd_revoke(db_path, &target, actor, reason.as_deref(), dry_run)
 }
 
 fn cmd_actor_enforce(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
@@ -3307,8 +3309,9 @@ fn cmd_actor_authz(argv: &[String], db_path: &str, dry_run: bool) -> Result<Valu
     )
 }
 
-fn cmd_actor_roles(db_path: &str) -> Result<Value> {
-    bukio::actor_cli::cmd_roles(db_path, &std::env::var("BUKIO_ACTOR").unwrap_or_default())
+fn cmd_actor_roles(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
+    require_actor(actor)?;
+    bukio::actor_cli::cmd_roles(db_path, actor, arg(argv, "--for").as_deref())
 }
 
 fn cmd_actor_grant(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
@@ -3324,13 +3327,14 @@ fn cmd_actor_revoke_role(argv: &[String], db_path: &str, actor: &str) -> Result<
         .or_else(|| positional_after(argv, "revoke"))
         .ok_or_else(|| missing_arg("role"))?;
     let for_who = arg(argv, "--for").ok_or_else(|| missing_arg("--for"))?;
-    bukio::actor_cli::cmd_revoke_role(db_path, &for_who, &role)
+    bukio::actor_cli::cmd_revoke_role(db_path, &for_who, &role, actor)
 }
 
 fn cmd_actor_can(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     require_actor(actor)?;
     let action = positional_after(argv, "can").ok_or_else(|| missing_arg("command"))?;
-    bukio::actor_cli::cmd_can(db_path, actor, &action)
+    let who = arg(argv, "--for").unwrap_or_else(|| actor.to_string());
+    bukio::actor_cli::cmd_can(db_path, actor, &who, &action)
 }
 
 fn cmd_actor_verify_key(db_path: &str, actor: &str) -> Result<Value> {
@@ -3346,12 +3350,36 @@ fn cmd_actor_verify(db_path: &str) -> Result<Value> {
 fn cmd_actor_who_can(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     require_actor(actor)?;
     let db = open_existing(db_path)?;
-    let mut results = Vec::new();
-    for &(cmd, cap) in bukio::authz::CLI_CAPABILITIES {
-        let allowed = bukio::authz::can_act(&db, actor, cap);
-        results.push(json!({ "command": cmd, "capability": cap, "allowed": allowed }));
+    let action = positional_after(argv, "who-can").ok_or_else(|| missing_arg("command"))?;
+    let tokens: Vec<&str> = action.split_whitespace().collect();
+    let path = tokens
+        .iter()
+        .filter(|t| !t.starts_with('-'))
+        .copied()
+        .collect::<Vec<&str>>()
+        .join(" ");
+    let post = tokens.iter().any(|t| *t == "--post");
+    let capability = bukio::authz::capability_of(&path, post);
+    // every actor that holds a role, plus every enrolled actor (JS parity)
+    let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for sql in ["SELECT DISTINCT actor FROM actor_roles", "SELECT DISTINCT actor FROM actor_keys"] {
+        if let Ok(mut stmt) = db.prepare(sql) {
+            if let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) {
+                for name in rows.flatten() {
+                    names.insert(name);
+                }
+            }
+        }
     }
-    Ok(json!({ "actor": actor, "commands": results }))
+    let actors: Vec<Value> = names
+        .iter()
+        .map(|a| {
+            let roles = bukio::actor::get_roles(&db, a);
+            let allowed = capability.map_or(false, |c| bukio::authz::can_act(&db, a, c));
+            json!({ "actor": a, "roles": roles, "allowed": allowed })
+        })
+        .collect();
+    Ok(json!({ "command": action, "capability": capability, "actors": actors }))
 }
 
 /// Get the positional argument that comes right after a given command token.

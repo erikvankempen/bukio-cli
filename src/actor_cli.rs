@@ -158,9 +158,12 @@ pub fn cmd_list(db_path: &str) -> Result<Value> {
 }
 
 /// Revoke an actor's key.
+/// Revoke an actor's key. `actor` is the TARGET; `revoked_by` is the caller
+/// (JS: `actor revoke --target <who>` → {actor: target, revoked_by: caller}).
 pub fn cmd_revoke(
     db_path: &str,
     actor: &str,
+    revoked_by: &str,
     reason: Option<&str>,
     dry_run: bool,
 ) -> Result<Value> {
@@ -175,14 +178,16 @@ pub fn cmd_revoke(
         _ => return Err(BukioError::new("INVALID_REASON", "--reason is required")),
     };
     if dry_run {
-        return Ok(json!({"actor": actor, "reason": reason_str, "dryRun": true}));
+        return Ok(json!({
+            "actor": actor, "revoked_by": revoked_by, "reason": reason_str, "dryRun": true,
+        }));
     }
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
     let row = revoke_actor_reason(&db, actor, reason_str)?;
     record(
         &db,
         RecordArgs {
-            actor,
+            actor: revoked_by,
             action: "actor.revoke",
             command: Some("actor revoke"),
             args: Some(json!({"actor": actor, "reason": reason_str})),
@@ -190,9 +195,13 @@ pub fn cmd_revoke(
             entry_ids: vec![],
         },
     )?;
-    Ok(
-        json!({"actor": actor, "keyid": row.keyid, "revoked_at": row.revoked_at, "reason": reason_str}),
-    )
+    Ok(json!({
+        "actor": actor,
+        "revoked_by": revoked_by,
+        "keyid": row.keyid,
+        "revoked_at": row.revoked_at,
+        "reason": reason_str,
+    }))
 }
 
 /// Enforce mode on/off.
@@ -329,32 +338,120 @@ pub fn read_session_key(actor: &str) -> Option<String> {
     None
 }
 
-/// Grant role.
+/// Grant role. JS CLI validates, writes the audit row and returns the
+/// actor's RESULTING roles + SoD warnings (not a single warning string).
 pub fn cmd_grant(db_path: &str, actor: &str, role: &str, granted_by: &str) -> Result<Value> {
+    if !crate::authz::ROLES.contains(&role) {
+        return Err(BukioError::new(
+            "INVALID_ROLE",
+            format!("'{role}' is not a role — use one of {}", crate::authz::ROLES.join("|")),
+        ));
+    }
+    if !is_valid_actor(actor) {
+        return Err(BukioError::new(
+            "INVALID_ACTOR",
+            format!("'{actor}' is not a valid '<role>:<name>' actor"),
+        ));
+    }
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
     grant_role(&db, actor, role, granted_by)?;
-    Ok(json!({"actor": actor, "role": role, "granted_by": granted_by, "warning": null}))
+    record(
+        &db,
+        RecordArgs {
+            actor: granted_by,
+            action: "actor.roles.grant",
+            command: Some("actor roles grant"),
+            args: Some(json!({ "role": role, "actor": actor })),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
+    let mut roles = get_roles(&db, actor);
+    roles.sort();
+    Ok(json!({
+        "actor": actor,
+        "role": role,
+        "roles": roles,
+        "warnings": crate::authz::sod_warnings(&roles),
+    }))
 }
 
-/// Revoke role.
-pub fn cmd_revoke_role(db_path: &str, actor: &str, role: &str) -> Result<Value> {
+/// Revoke role. `revoked_by` is the CALLER (the audit row names the caller,
+/// the args name the target) — JS parity.
+pub fn cmd_revoke_role(db_path: &str, actor: &str, role: &str, revoked_by: &str) -> Result<Value> {
+    if !crate::authz::ROLES.contains(&role) {
+        return Err(BukioError::new(
+            "INVALID_ROLE",
+            format!("'{role}' is not a role — use one of {}", crate::authz::ROLES.join("|")),
+        ));
+    }
+    if !is_valid_actor(actor) {
+        return Err(BukioError::new(
+            "INVALID_ACTOR",
+            format!("'{actor}' is not a valid '<role>:<name>' actor"),
+        ));
+    }
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
     revoke_role(&db, actor, role)?;
-    Ok(json!({"actor": actor, "role": role, "revoked": true}))
+    record(
+        &db,
+        RecordArgs {
+            actor: revoked_by,
+            action: "actor.roles.revoke",
+            command: Some("actor roles revoke"),
+            args: Some(json!({ "role": role, "actor": actor })),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
+    let mut roles = get_roles(&db, actor);
+    roles.sort();
+    Ok(json!({ "actor": actor, "role": role, "roles": roles }))
 }
 
-/// List role grants.
-pub fn cmd_roles(db_path: &str, actor: &str) -> Result<Value> {
+/// List role grants — your own, or another actor's via `--for` (the authz
+/// gate refuses a non-owner `--for` before we get here).
+pub fn cmd_roles(db_path: &str, actor: &str, for_who: Option<&str>) -> Result<Value> {
+    let who = for_who.unwrap_or(actor);
+    if !is_valid_actor(who) {
+        return Err(BukioError::new(
+            "INVALID_ACTOR",
+            format!("'{who}' is not a valid '<role>:<name>' actor"),
+        ));
+    }
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
-    let roles = get_roles(&db, actor);
-    Ok(json!({"actor": actor, "roles": roles}))
+    Ok(json!({ "actor": who, "roles": get_roles(&db, who) }))
 }
 
-/// Can: check if actor can perform action.
-pub fn cmd_can(db_path: &str, actor: &str, action: &str) -> Result<Value> {
+/// Can: capability check against the ACTUAL mutation (`--post` flips
+/// entry.draft -> entry.post; `mcp:<tool>` maps through the MCP table).
+pub fn cmd_can(db_path: &str, actor: &str, who: &str, action: &str) -> Result<Value> {
+    let tokens: Vec<&str> = action.split_whitespace().collect();
+    let path = tokens
+        .iter()
+        .filter(|t| !t.starts_with('-'))
+        .copied()
+        .collect::<Vec<&str>>()
+        .join(" ");
+    let post = tokens.iter().any(|t| *t == "--post");
+    let capability = crate::authz::capability_of(&path, post);
     let db = open_db(db_path).map_err(|e| BukioError::new("DB_ERROR", e.to_string()))?;
-    let allowed = can_act_enrolled(&db, actor);
-    Ok(json!({"actor": actor, "action": action, "allowed": allowed}))
+    let allowed = capability.map_or(false, |c| crate::authz::can_act(&db, who, c));
+    let roles = get_roles(&db, who);
+    let mut out = json!({
+        "actor": who,
+        "command": action,
+        "capability": capability,
+        "allowed": allowed,
+        "roles": roles,
+    });
+    if !allowed {
+        out["denied_reason"] = json!(match capability {
+            Some(c) => format!("no capability '{c}'"),
+            None => "no capability mapping (fail closed)".to_string(),
+        });
+    }
+    Ok(out)
 }
 
 /// Verify: check actor's key state against the company registry.
