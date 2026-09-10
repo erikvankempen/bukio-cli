@@ -414,7 +414,7 @@ fn try_match_cmd(
         ["actor", "enforce"] => cmd_actor_enforce(argv, db_path, actor, dry_run),
         ["actor", "unlock"] => cmd_actor_unlock(argv, actor),
         ["actor", "lock"] => cmd_actor_lock(argv, actor),
-        ["actor", "authz"] => cmd_actor_authz(argv, db_path, dry_run),
+        ["actor", "authz"] => cmd_actor_authz(argv, db_path, actor, dry_run),
         ["actor", "roles"] => cmd_actor_roles(argv, db_path, actor),
         ["actor", "grant"] => cmd_actor_grant(argv, db_path, actor),
         ["actor", "roles", "grant"] => cmd_actor_grant(argv, db_path, actor),
@@ -3286,7 +3286,7 @@ fn cmd_actor_lock(argv: &[String], actor: &str) -> Result<Value> {
     bukio::actor_cli::cmd_lock(actor)
 }
 
-fn cmd_actor_authz(argv: &[String], db_path: &str, dry_run: bool) -> Result<Value> {
+fn cmd_actor_authz(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     let on = has_flag(argv, "--on");
     let off = has_flag(argv, "--off");
     if on && off {
@@ -3301,12 +3301,10 @@ fn cmd_actor_authz(argv: &[String], db_path: &str, dry_run: bool) -> Result<Valu
             "pass exactly one of --on or --off",
         ));
     }
-    bukio::actor_cli::cmd_authz(
-        db_path,
-        &std::env::var("BUKIO_ACTOR").unwrap_or_default(),
-        on,
-        dry_run,
-    )
+    // the resolved --actor is the flipper (D3 grants THEM owner) — never the
+    // env var, and never an empty string
+    require_actor(actor)?;
+    bukio::actor_cli::cmd_authz(db_path, actor, on, dry_run)
 }
 
 fn cmd_actor_roles(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
