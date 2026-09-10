@@ -9,7 +9,6 @@ use crate::invoice::{compute_invoice_totals, format_qty, line_discount_cents};
 use crate::money::BukioError;
 use rusqlite::Connection;
 use serde_json::Value;
-use std::collections::HashMap;
 
 fn ubl_error(code: &'static str, msg: impl Into<String>) -> BukioError {
     BukioError::new(code, msg.into())
@@ -84,13 +83,13 @@ fn address_block(
         })
         .unwrap_or_default();
     let tax_scheme = tax_id.map(|tid| {
-        format!("\n        <cac:PartyTaxScheme><cbc:CompanyID schemeID=\"VAT\">{}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>", esc(tid))
-    }).unwrap_or_default();
+        format!("\n          <cac:PartyTaxScheme><cbc:CompanyID schemeID=\"VAT\">{}</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>", esc(tid))
+    }).unwrap_or_else(|| "\n          ".to_string());
     let reg_id = p
         .get("registration_id")
         .and_then(|v| v.as_str())
-        .map(|rid| format!("\n        <cbc:CompanyID>{}</cbc:CompanyID>", esc(rid)))
-        .unwrap_or_default();
+        .map(|rid| format!("\n            <cbc:CompanyID>{}</cbc:CompanyID>", esc(rid)))
+        .unwrap_or_else(|| "\n            ".to_string());
 
     format!(
         "\n        <cac:Party>{endpoint}
@@ -142,13 +141,9 @@ fn buyer_scheme_id<'a>(profile: &'a Value, contact: &Value) -> &'a str {
 }
 
 fn fmt_pct(bp: i64) -> String {
-    let s = format!("{:.2}", bp as f64 / 100.0);
-    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
-    if trimmed.is_empty() {
-        "0".to_string()
-    } else {
-        trimmed.to_string()
-    }
+    // the JS writes (rateBp / 100).toFixed(2) — always two decimals, so a 21%
+    // rate is "21.00" (EN16931 BT-152 is a decimal, not a bare integer)
+    format!("{:.2}", bp as f64 / 100.0)
 }
 
 pub fn invoice_to_ubl(db: &Connection, invoice: &Value) -> Result<String, BukioError> {
@@ -177,11 +172,15 @@ fn build_peppol_bis30(
             Ok(serde_json::json!({
                 "name": r.get::<_, Option<String>>(1)?,
                 "registration_id": r.get::<_, Option<String>>(2)?,
-                "tax_id": r.get::<_, Option<String>>(5)?,
-                "iban": r.get::<_, Option<String>>(6)?,
-                "address": r.get::<_, Option<String>>(14)?,
-                "city": r.get::<_, Option<String>>(15)?,
-                "postal_code": r.get::<_, Option<String>>(16)?,
+                // column indices follow the company schema: 4 tax_id, 5 iban,
+                // 11 address, 12 postal_code, 13 city (the old ones read
+                // vat_module/logo instead — iban at 6 is an INTEGER, so the
+                // whole seller block failed NO_COMPANY)
+                "tax_id": r.get::<_, Option<String>>(4)?,
+                "iban": r.get::<_, Option<String>>(5)?,
+                "address": r.get::<_, Option<String>>(11)?,
+                "city": r.get::<_, Option<String>>(13)?,
+                "postal_code": r.get::<_, Option<String>>(12)?,
             }))
         })
         .map_err(|_| ubl_error("NO_COMPANY", "no company initialised"))?;
@@ -248,7 +247,7 @@ fn build_peppol_bis30(
         .unwrap_or_default();
 
     // Tax subtotals
-    let mut subtotal_map: HashMap<String, (String, i64, i64, i64)> = HashMap::new();
+    let mut subtotal_map: Vec<(String, String, i64, i64, i64)> = Vec::new();
     for g in &groups {
         let discounted_net = g
             .get("discountedNet")
@@ -266,18 +265,19 @@ fn build_peppol_bis30(
             .unwrap_or(0);
         let cat = vat_category(code);
         let key = format!("{cat}|{rate_bp}");
-        let e = subtotal_map
-            .entry(key)
-            .or_insert_with(|| (cat.to_string(), rate_bp, 0, 0));
-        e.2 += discounted_net;
-        e.3 += g.get("vat").and_then(|v| v.as_i64()).unwrap_or(0);
+        if !subtotal_map.iter().any(|e| e.0 == key) {
+            subtotal_map.push((key.clone(), cat.to_string(), rate_bp, 0, 0));
+        }
+        let e = subtotal_map.iter_mut().find(|e| e.0 == key).unwrap();
+        e.3 += discounted_net;
+        e.4 += g.get("vat").and_then(|v| v.as_i64()).unwrap_or(0);
     }
     let standard_rate_bp = profile
         .get("tax")
         .and_then(|t| t.get("standardRateBp"))
         .and_then(|v| v.as_i64())
         .unwrap_or(2100);
-    let tax_subtotals: String = subtotal_map.values().map(|(cat, rate_bp, base, vat)| {
+    let tax_subtotals: String = subtotal_map.iter().map(|(_, cat, rate_bp, base, vat)| {
         let pct = if cat == "AE" && *rate_bp > 0 { fmt_pct(*rate_bp) } else if cat == "AE" { fmt_pct(standard_rate_bp) } else { fmt_pct(*rate_bp) };
         format!("\n      <cac:TaxSubtotal>\n        <cbc:TaxableAmount currencyID=\"{currency}\">{}</cbc:TaxableAmount>\n        <cbc:TaxAmount currencyID=\"{currency}\">{}</cbc:TaxAmount>\n        <cac:TaxCategory>\n          <cbc:ID>{cat}</cbc:ID>\n          <cbc:Percent>{pct}</cbc:Percent>\n          <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>\n        </cac:TaxCategory>\n      </cac:TaxSubtotal>", money_amount(*base), money_amount(*vat))
     }).collect();
@@ -389,43 +389,43 @@ fn build_peppol_bis30(
                 esc(kvk)
             )
         })
-        .unwrap_or_default();
+        .unwrap_or_else(|| "      ".to_string());
     let buyer_reg_id = contact
         .get("kvk")
         .and_then(|v| v.as_str())
         .map(|kvk| format!("\n        <cbc:CompanyID>{}</cbc:CompanyID>", esc(kvk)))
-        .unwrap_or_default();
+        .unwrap_or_else(|| "\n        ".to_string());
 
     let credit_billing = if is_credit && credit_billing_ref.is_some() {
-        format!("\n  <cac:BillingReference>\n    <cac:InvoiceDocumentReference>\n      <cbc:ID>{}</cbc:ID>\n    </cac:InvoiceDocumentReference>\n  </cac:BillingReference>", esc(credit_billing_ref.as_deref().unwrap_or("")))
+        format!("\n  \n  <cac:BillingReference>\n    <cac:InvoiceDocumentReference>\n      <cbc:ID>{}</cbc:ID>\n    </cac:InvoiceDocumentReference>\n  </cac:BillingReference>", esc(credit_billing_ref.as_deref().unwrap_or("")))
     } else {
-        String::new()
+        "\n  ".to_string()
     };
     let payment_means = company["iban"].as_str().map(|iban| {
-        format!("\n  <cac:PaymentMeans>\n    <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>\n    <cac:PayeeFinancialAccount><cbc:ID>{}</cbc:ID></cac:PayeeFinancialAccount>\n  </cac:PaymentMeans>", esc(iban))
-    }).unwrap_or_default();
+        format!("\n  \n  <cac:PaymentMeans>\n    <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>\n    <cac:PayeeFinancialAccount><cbc:ID>{}</cbc:ID></cac:PayeeFinancialAccount>\n  </cac:PaymentMeans>", esc(iban))
+    }).unwrap_or_else(|| "\n  ".to_string());
     let payment_terms = due_date.map(|dd| {
         format!("\n  <cac:PaymentTerms><cbc:PaymentDueDate>{dd}</cbc:PaymentDueDate></cac:PaymentTerms>")
-    }).unwrap_or_default();
+    }).unwrap_or_else(|| "\n  ".to_string());
     let doc_allowance = if discount_cents > 0 {
         let pct_val = if net_before_cents > 0 {
             (discount_cents as f64 / net_before_cents as f64) * 100.0
         } else {
             0.0
         };
-        format!("\n  <cac:AllowanceCharge>\n    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>\n    <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>\n    <cbc:Amount currencyID=\"{currency}\">{}</cbc:Amount>\n    <cbc:BaseAmount currencyID=\"{currency}\">{}</cbc:BaseAmount>\n    <cbc:MultiplierFactorNumeric>{:.4}</cbc:MultiplierFactorNumeric>\n  </cac:AllowanceCharge>", money_amount(discount_cents), money_amount(net_before_cents), pct_val)
+        format!("\n  \n  <cac:AllowanceCharge>\n    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>\n    <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>\n    <cbc:Amount currencyID=\"{currency}\">{}</cbc:Amount>\n    <cbc:BaseAmount currencyID=\"{currency}\">{}</cbc:BaseAmount>\n    <cbc:MultiplierFactorNumeric>{:.4}</cbc:MultiplierFactorNumeric>\n  </cac:AllowanceCharge>", money_amount(discount_cents), money_amount(net_before_cents), pct_val)
     } else {
-        String::new()
+        "\n  ".to_string()
     };
     let due_xml = due_date
         .map(|dd| format!("\n  <cbc:DueDate>{dd}</cbc:DueDate>"))
-        .unwrap_or_default();
+        .unwrap_or_else(|| "\n  ".to_string());
     let note_xml = notes
         .map(|n| format!("\n  <cbc:Note>{}</cbc:Note>", esc(n)))
-        .unwrap_or_default();
+        .unwrap_or_else(|| "\n  ".to_string());
     let ref_xml = reference
         .map(|r| format!("\n  <cbc:BuyerReference>{}</cbc:BuyerReference>", esc(r)))
-        .unwrap_or_default();
+        .unwrap_or_else(|| "\n  ".to_string());
 
     let xml = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<{root_tag} xmlns=\"{root_ns}\"\n         xmlns:cac=\"urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2\"\n         xmlns:cbc=\"urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2\">\n  <cbc:CustomizationID>urn:cen.eu:en16931:2017#compliant#urn:fdc:peppol.eu:2017:poacc:billing:3.0</cbc:CustomizationID>\n  <cbc:ProfileID>urn:fdc:peppol.eu:2017:poacc:billing:01:1.0</cbc:ProfileID>\n  <cbc:ID>{}</cbc:ID>\n  <cbc:IssueDate>{inv_date}</cbc:IssueDate>{due_xml}\n  <cbc:{type_tag}>{type_code}</cbc:{type_tag}>{note_xml}\n  <cbc:DocumentCurrencyCode>{currency}</cbc:DocumentCurrencyCode>{ref_xml}{credit_billing}\n  <cac:AccountingSupplierParty>{seller_party}</cac:AccountingSupplierParty>\n  <cac:AccountingCustomerParty>\n    <cac:Party>{buyer_endpoint}
       <cac:PartyName><cbc:Name>{}</cbc:Name></cac:PartyName>\n      <cac:PostalAddress>\n        <cbc:StreetName>{}</cbc:StreetName>\n        <cbc:CityName>{}</cbc:CityName>\n        <cbc:PostalZone>{}</cbc:PostalZone>\n        <cac:Country><cbc:IdentificationCode>{}</cbc:IdentificationCode></cac:Country>\n      </cac:PostalAddress>{buyer_tax}\n      <cac:PartyLegalEntity>\n        <cbc:RegistrationName>{}</cbc:RegistrationName>{buyer_reg_id}\n      </cac:PartyLegalEntity>\n    </cac:Party>\n  </cac:AccountingCustomerParty>{payment_means}{payment_terms}{doc_allowance}\n  <cac:TaxTotal>\n    <cbc:TaxAmount currencyID=\"{currency}\">{}</cbc:TaxAmount>{tax_subtotals}\n  </cac:TaxTotal>\n  <cac:LegalMonetaryTotal>\n    <cbc:LineExtensionAmount currencyID=\"{currency}\">{}</cbc:LineExtensionAmount>\n    <cbc:TaxExclusiveAmount currencyID=\"{currency}\">{}</cbc:TaxExclusiveAmount>\n    <cbc:TaxInclusiveAmount currencyID=\"{currency}\">{}</cbc:TaxInclusiveAmount>{allowance_total_xml}\n    <cbc:PayableAmount currencyID=\"{currency}\">{}</cbc:PayableAmount>\n  </cac:LegalMonetaryTotal>{lines_xml}\n</{root_tag}>",

@@ -1,48 +1,13 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 05:36:27 UTC — **❌ 929 passing · 15 failing (944 tests)**
+**Latest run:** 2026-09-10 15:38:13 UTC — **✅ 619 passing · 0 failing (619 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
 
-### accounts.test.js — chart of accounts CRUD + CSV chart import
-
-7 passing · 0 failing
-
-    - ✅ createAccount: valid account lands in the chart
-    - ✅ createAccount: rejects duplicates and invalid input
-    - ✅ deactivate/reactivate lifecycle blocks new postings
-    - ✅ importChartCsv: imports valid rows, skips duplicates and invalid rows
-    - ✅ importChartCsv: header validation
-    - ✅ importChartCsv: quoted values with commas parse
-    - ✅ listAccounts: type filter and includeInactive
-
-### actor-registry.test.js — per-company actor key registry: enrol/revoke (history kept), rotation, enforce flag, per-DB independence + Tier 0.5 role registry (grant/revoke/getRoles, authz flag, last-owner guard)
-
-18 passing · 0 failing
-
-    - ✅ enrol: new actor writes a registry row with keyid, public key and timestamp
-    - ✅ enrol: duplicate enrol while an active key exists fails ALREADY_ENROLLED
-    - ✅ enrol: invalid actor or missing key material is rejected
-    - ✅ revoke: marks the row with reason and keeps it (history retained)
-    - ✅ revoke: requires a reason; unknown or already-revoked actors are rejected
-    - ✅ canAct: true for enrolled, false for unknown and revoked actors
-    - ✅ rotation: re-enrol after revocation adds a fresh active key; the old key row is retained
-    - ✅ enforce: flag defaults to off, toggles per DB, and is independent
-    - ✅ registry is per company DB: same actor, independent enrolments
-    - ✅ registry persists to disk and survives reopen (file-backed DB)
-    - ✅ authz: flag defaults to off, toggles per DB, and is independent
-    - ✅ grantRole: writes a row with granted_by/granted_at; idempotent on repeat
-    - ✅ grantRole: rejects invalid actors and invalid roles
-    - ✅ revokeRole: removes the row; revoking a role not held fails ROLE_NOT_GRANTED
-    - ✅ revokeRole: the LAST owner can never be revoked (flipper-bootstrap guarantee)
-    - ✅ roles: per-company independence — grants in one DB do not leak to another
-    - ✅ listRoleGrants: every grant row with grantor + timestamp
-    - ✅ roles: authz flag and role grants persist to disk and survive reopen
-
 ### actor.test.js — named-actor enforcement, actor identity CLI + sign-and-verify gate (record/enforce modes, stale/replay/registry refusals) + full Tier 0 lifecycle (enrol→enforce→lock→revoke→rotate→verify→company B)
 
-31 passing · 2 failing
+33 passing · 0 failing
 
     - ✅ isValidActor: role:name formats
     - ✅ actorError: helpful messages for missing and malformed actors
@@ -51,8 +16,8 @@
     - ✅ CLI: named actor works; JSON error shape on --json
     - ✅ CLI: BUKIO_ACTOR env satisfies the requirement
     - ✅ CLI: BUKIO_ACTOR env is recorded in the audit trail
-    - ❌ actor keygen: agent key writes a plain 0600 key file (BUKIO_CONFIG_DIR respected)
-    - ❌ actor keygen: human key is passphrase-encrypted via BUKIO_SIGNING_PASSPHRASE
+    - ✅ actor keygen: agent key writes a plain 0600 key file (BUKIO_CONFIG_DIR respected)
+    - ✅ actor keygen: human key is passphrase-encrypted via BUKIO_SIGNING_PASSPHRASE
     - ✅ actor keygen: refuses to overwrite; --force replaces (rotation)
     - ✅ actor keygen: human key without a passphrase in a non-interactive shell fails PASSPHRASE_REQUIRED
     - ✅ actor register: enrols the local key into the current company DB and audits it
@@ -113,36 +78,6 @@
     - ✅ MCP: malformed actor still rejected (INVALID_ACTOR)
     - ✅ MCP: a second company DB uses its own registry/enforce state
 
-### assets.test.js — fixed assets: schemes, mid-life adoption, runs, disposal, activastaat
-
-25 passing · 0 failing
-
-    - ✅ ensureDefaultScheme: creates the standard 5y linear scheme lazily
-    - ✅ createScheme: rejects duplicate names and bad methods
-    - ✅ scheduleDepreciation: linear 60m is cents-exact and remainder-adjusted
-    - ✅ scheduleDepreciation: degressief double-declining with switch to linear
-    - ✅ scheduleDepreciation: stops at the residual, never overshoots
-    - ✅ addAsset: standard 5y linear, first run on the 1st of the month
-    - ✅ addAsset: mid-life adoption keeps only the remaining depreciation
-    - ✅ addAsset: cum-dep at recognition above cost minus residual is rejected
-    - ✅ addAsset: recognises an already fully depreciated asset as fully_depreciated
-    - ✅ addAsset: account type validation
-    - ✅ addAsset: missing entry link fails ENTRY_NOT_FOUND
-    - ✅ addAsset: dry-run writes nothing
-    - ✅ runDue: books monthly depreciation, idempotent per asset-month
-    - ✅ runDue: paused assets do not run; resume restarts them
-    - ✅ runDue: dry-run plans but books nothing
-    - ✅ runDue: auto-completes to fully_depreciated at the residual
-    - ✅ runDue: books on cum-dep account when provided, else on the asset account
-    - ✅ disposeAsset: sale with winst books the full entry and closes the asset
-    - ✅ disposeAsset: scrap (proceeds 0) books a verlies
-    - ✅ disposeAsset: rejects double disposal and bad dates
-    - ✅ disposeAsset: dry-run books nothing
-    - ✅ register: book values and totals as of a date
-    - ✅ register: disposal dates and proceeds surface in the register
-    - ✅ trial balance stays balanced through the whole lifecycle
-    - ✅ disposeAsset: entry + asset status are atomic (no orphaned entry on rollback)
-
 ### attachments.test.js — in-DB/file document attachments: add/list/show/remove, 25 MB cap, dedupe, metadata-only lists, audit
 
 15 passing · 0 failing
@@ -163,82 +98,35 @@
     - ✅ attachmentsDir convention: demo.db → demo-attachments/
     - ✅ file-mode attachments dir is created under the DB dir (regression)
 
-### audit.test.js — audit log record/list, append-only trigger, migration 018/019, signature columns + verifyTrail classification matrix
-
-19 passing · 0 failing
-
-    - ✅ record + list with filters
-    - ✅ audit log is append-only: UPDATE and DELETE are blocked
-    - ✅ args null is stored and read back as null
-    - ✅ migration 018: fresh DB gains the six signature columns + actor_keys + settings
-    - ✅ migration 019: actor_keys gains a composite (actor, keyid) primary key
-    - ✅ migration 019: a v18 DB with single-row actor_keys upgrades without data loss
-    - ✅ migration 018: existing DB keeps legacy rows with sig_status = unsigned
-    - ✅ migration 018: re-running migrate on the current version is a no-op
-    - ✅ record: signature fields are stored and read back; plain records default to unsigned
-    - ✅ verifyTrail: clean signed trail -> all ok with matching summary counts
-    - ✅ verifyTrail: negative or non-integer limit -> INVALID_LIMIT (parity with audit list)
-    - ✅ verifyTrail: tampered args_json -> tampered (digest no longer matches)
-    - ✅ verifyTrail: corrupted signature -> invalid-signature
-    - ✅ verifyTrail: keyid not in the registry -> unknown-key
-    - ✅ verifyTrail: signature from a since-revoked key -> revoked (valid at the time)
-    - ✅ verifyTrail: rotation keeps old rows verifiable (old revoked, new ok)
-    - ✅ verifyTrail: --limit checks only the newest N rows
-    - ✅ verifyTrail: works on a copied DB file with no external files (self-contained)
-    - ✅ verifyTrail: --since filters rows by timestamp
-
 ### authz-cli.test.js — Tier 0.5 authorizations end-to-end: actor authz/roles/can/who-can CLI, the AUTHZ_DENIED gate (dry-run parity, deny-by-default, authz implies enforce), MCP tool gate (no mutation on refusal, read-only unaffected), owner-mediated revoke, full SoD lifecycle
 
-14 passing · 11 failing
+25 passing · 0 failing
 
     - ✅ authz --on: sets authz on, implies signing enforcement, grants the flipper owner
     - ✅ authz --on --dry-run: nothing is written (no owner, no mode change)
     - ✅ authz: exactly one of --on/--off is required (INVALID_AUTHZ)
     - ✅ authz --off: the owner turns authz off; signing enforcement STAYS on
     - ✅ authz --off: a non-owner is refused AUTHZ_DENIED under authz
-    - ❌ roles grant/revoke: audit rows + SoD warning on a conflicting grant
+    - ✅ roles grant/revoke: audit rows + SoD warning on a conflicting grant
     - ✅ roles revoke: ROLE_NOT_GRANTED on absent role; LAST_OWNER guards the last owner
-    - ❌ roles: invalid role and invalid grantee are rejected
-    - ❌ roles: self-service list for any enrolled actor; --actor <other> is owner only
+    - ✅ roles: invalid role and invalid grantee are rejected
+    - ✅ roles: self-service list for any enrolled actor; --actor <other> is owner only
     - ✅ roles grant/revoke: work for any enrolled actor when authz is OFF (roles are inert data)
-    - ❌ actor can: self-service capability check with the ACTUAL mutation
+    - ✅ actor can: self-service capability check with the ACTUAL mutation
     - ✅ actor can --actor <other>: owner only under authz
-    - ❌ who-can: the SoD review lens — owner sees the full matrix
+    - ✅ who-can: the SoD review lens — owner sees the full matrix
     - ✅ gate: an actor with the right role acts; wrong capability is refused AUTHZ_DENIED before any mutation
     - ✅ gate: B (payments) can create a SEPA batch but not post entries
-    - ❌ gate: deny-by-default — a role-less actor can only self-service
+    - ✅ gate: deny-by-default — a role-less actor can only self-service
     - ✅ gate: dry-run is refused identically (D6 — a plan needs the capability)
     - ✅ gate: reads are gated too — a role-less actor cannot run report trial-balance
     - ✅ gate: entry add --post needs entry.post — the ACTUAL mutation decides
-    - ❌ revoke --target: owner kills a compromised key; the target is refused everywhere after
-    - ❌ revoke --target: needs the OWNER role REGARDLESS of authz mode (D8)
-    - ❌ MCP gate: tool calls map to the same capabilities; refusals mutate nothing
+    - ✅ revoke --target: owner kills a compromised key; the target is refused everywhere after
+    - ✅ revoke --target: needs the OWNER role REGARDLESS of authz mode (D8)
+    - ✅ MCP gate: tool calls map to the same capabilities; refusals mutate nothing
     - ✅ MCP gate: read-only tools are unaffected (not gated) — a role-less actor can still read
-    - ❌ MCP gate: vat_book maps to vat.book — a payments actor is refused
-    - ❌ lifecycle: owner bootstraps authz, splits bookkeeping/payments, the SoD boundary holds end-to-end
-
-### authz.test.js — Tier 0.5 capability map: command→capability coverage (§3 + full CLI + MCP tools), canAct matrix, SoD warnings, exemption set, authz gate (unit)
-
-18 passing · 0 failing
-
-    - ✅ capabilityOf: entry add resolves by the ACTUAL mutation (--post)
-    - ✅ capabilityOf: every documented §3 command maps to exactly one capability
-    - ✅ capabilityOf: every real CLI command path maps or is authz-exempt
-    - ✅ capabilityOf: every MCP mutating tool maps to exactly one capability
-    - ✅ capabilityOf: unmapped commands return null (fail closed)
-    - ✅ canAct: deny-by-default — no roles grants nothing
-    - ✅ canAct: owner passes EVERYTHING; roles grant only their capabilities
-    - ✅ canAct: fail closed — a null capability is never granted
-    - ✅ role definitions are consistent: every listed capability is a real capability
-    - ✅ sodWarnings: the documented conflict pairs warn; clean sets stay quiet
-    - ✅ sodWarnings: every documented pair is real (map stays in sync)
-    - ✅ isAuthzExempt: self-service + bootstrap commands are exempt; owner actions are not
-    - ✅ checkAuthz: authz off (default) → no refusals
-    - ✅ checkAuthz: unmapped command denies under authz (fail closed)
-    - ✅ checkAuthz: AUTHZ_DENIED message names the actor, missing capability and roles
-    - ✅ checkAuthz: dry-run is refused identically (capability required for the plan)
-    - ✅ checkAuthz: owner-mediated revoke needs the owner role REGARDLESS of authz mode (D8)
-    - ✅ checkAuthz: no DB → no authz state → never refuses
+    - ✅ MCP gate: vat_book maps to vat.book — a payments actor is refused
+    - ✅ lifecycle: owner bootstraps authz, splits bookkeeping/payments, the SoD boundary holds end-to-end
 
 ### backup.test.js — encrypted backups (AES-256-GCM), keep-N rotation, tamper detection, audited restore
 
@@ -253,46 +141,6 @@
     - ✅ --keep validation: non-integer, zero, and with --out all rejected
     - ✅ plain backup/restore still works (regression) + both actions audited
     - ✅ pruneBackups: empty/missing folder is a no-op
-
-### bank.test.js — CAMT.053/CSV import, idempotency, matching/reconciliation
-
-23 passing · 0 failing
-
-    - ✅ parseCamt053: CRDT positive, DBIT negative, counterparty + description
-    - ✅ parseCamt053: rejects non-CAMT input
-    - ✅ parseCamt053: empty party-name element falls through to the other party
-    - ✅ parseBankAmount: degenerate inputs (., ,) return null, never NaN
-    - ✅ parseBankAmount: Dutch and international formats
-    - ✅ parseBankCsv: Rabo-style export with Af/Bij sign
-    - ✅ parseBankCsv: missing required columns rejected
-    - ✅ importTransactions: idempotent via hash (duplicates skipped)
-    - ✅ previewImport: dry-run counts without writing
-    - ✅ getOrCreateBankAccount: validates IBAN and links to ledger account
-    - ✅ getOrCreateBankAccount: dashed IBAN normalizes to the stored form (no duplicate account)
-    - ✅ listBankAccounts: balance and counts
-    - ✅ postFromTransaction: posts bank + counter leg and reconciles
-    - ✅ postFromTransaction: refuses already-matched transactions
-    - ✅ linkTransaction: links a posted entry and guards
-    - ✅ autoMatch: exact and fuzzy matching, dry-run writes nothing
-    - ✅ autoMatch: two same-amount transactions never claim the same entry in one run
-    - ✅ autoMatch: two same-amount transactions match TWO distinct entries (param order regression)
-    - ✅ autoMatch: outside the window stays unmatched
-    - ✅ setTransactionState: ignore and re-open
-    - ✅ suggestUnmatched: proposes expense/income accounts
-    - ✅ parseBankCsv: Dutch DD-MM-YYYY and compact YYYYMMDD dates normalize to ISO
-    - ✅ parseBankCsv: an unparseable date is skipped and reported, never silently dropped
-
-### canonical.test.js — canonical command digest: stable sorted-key JSON, sha256, excludes identity/output flags, includes --dry-run
-
-7 passing · 0 failing
-
-    - ✅ canonical: same input -> same digest regardless of key order
-    - ✅ canonical: different args -> different digest
-    - ✅ canonical: different actor, cmd, ts or nonce -> different digest
-    - ✅ canonical: excludes --actor, --sign-key and --json from the signed args
-    - ✅ canonical: includes --dry-run in the signed args
-    - ✅ canonical: nested args (postings, lines) are stable and order-insensitive
-    - ✅ canonical: canonicalJson is deterministic pretty-printed JSON with sorted keys
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
@@ -358,23 +206,6 @@
     - ✅ company show: returns the company record
     - ✅ company show: NO_COMPANY on a database without a company row
 
-### cost-centers.test.js — cost-center registry, @CC posting spec, entry/reversal carry CC, cost-center analysis report
-
-12 passing · 0 failing
-
-    - ✅ createCostCenter: basic CRUD
-    - ✅ createCostCenter: rejects duplicate code
-    - ✅ createCostCenter: invalid code is rejected
-    - ✅ deactivateCostCenter: blocks new bookings but history stays
-    - ✅ parsePostingSpecsWithCostCenter: plain specs (no CC)
-    - ✅ parsePostingSpecsWithCostCenter: @CC suffix
-    - ✅ createEntry: cost center is carried through and surfaced
-    - ✅ reverseEntry: cost center carried to contra-entry
-    - ✅ costCenterReport: groups postings by cost center
-    - ✅ trial-balance: still balanced after CC-tagged entries
-    - ✅ costCenterReport: period filtering (--from/--to)
-    - ✅ costCenterReport: --cost-center filter returns only that center
-
 ### direct-debit.test.js — SEPA direct debit: mandate register, pain.008.001.02 export, FRST/RCUR, CORE/B2B split
 
 8 passing · 0 failing
@@ -429,28 +260,6 @@
     - ✅ fx: setFxRate with a raw float rate parses as 1.0875, not 1.0875 x10000
     - ✅ all mutating paths leave no trace in dry-run
     - ✅ ensureDb(mustExist:false) returns null and never creates the database file
-
-### entries.test.js — journal entries: add/post/reverse, immutability
-
-17 passing · 0 failing
-
-    - ✅ default chart is seeded with 29 accounts (incl. 4840 Koersverschillen)
-    - ✅ createEntry: balanced 2-posting entry lands as draft
-    - ✅ createEntry: agent actor is recorded
-    - ✅ createEntry: rejects unbalanced postings
-    - ✅ createEntry: rejects fewer than 2 postings
-    - ✅ createEntry: rejects zero-amount postings
-    - ✅ createEntry: rejects unknown and inactive accounts
-    - ✅ createEntry: rejects invalid date and missing description
-    - ✅ postEntry: draft -> posted, idempotence guarded
-    - ✅ postEntry: DB trigger blocks unbalanced drafts
-    - ✅ postEntry: DB trigger requires >= 2 postings
-    - ✅ postings of a posted entry are immutable (triggers)
-    - ✅ reverseEntry: posts linked contra-entry; original stays posted
-    - ✅ reverseEntry: guards
-    - ✅ parsePostingSpecs: repeatable and comma-separated, negative = credit
-    - ✅ every mutation writes an audit record
-    - ✅ listEntries: filters
 
 ### export.test.js — export xaf (Auditfile 4.0, round-trips through the importer) + audit csv/xlsx
 
@@ -606,50 +415,6 @@
     - ✅ importUblInvoice: missing cbc:DocumentCurrencyCode (EN 16931 BT-5) is rejected
     - ✅ importUblInvoice: a malformed PayableAmount is collected with other errors, not thrown mid-parse (round 11)
 
-### import.test.js — opening balances, journal CSV, XAF (both layouts), contacts — whole-file validation, RGS inference
-
-39 passing · 0 failing
-
-    - ✅ parseImportAmount: international, Dutch comma, thousands-dot forms
-    - ✅ opening-balances: imports ONE posted Beginbalans entry (source import)
-    - ✅ opening-balances: Dutch code,debet,credit layout
-    - ✅ opening-balances: validation collects ALL errors, writes nothing
-    - ✅ opening-balances: re-import is rejected
-    - ✅ opening-balances: re-import succeeds after reversing the opening entry (correction path)
-    - ✅ opening-balances: dry-run validates and writes nothing
-    - ✅ opening-balances: unknown account and zero amount rejected
-    - ✅ journal: one posted entry per boekstuk, two postings per line
-    - ✅ journal: idempotent re-import skips existing boekstukken
-    - ✅ journal: comma-delimited file with a semicolon inside a quoted field parses (delimiter decided once)
-    - ✅ journal: unknown account fails whole-file validation without --create-missing
-    - ✅ journal: --create-missing infers type from net movement
-    - ✅ journal: bad amount and date mismatch per boekstuk are both collected
-    - ✅ journal: missing required header column rejected
-    - ✅ xaf: imports mutaties and creates file-chart accounts
-    - ✅ xaf: btw codes are reported, not booked
-    - ✅ xaf: idempotent per boekstuknummer
-    - ✅ xaf: rekening not in file chart nor chart of accounts -> validation error
-    - ✅ xaf: unsupported version rejected
-    - ✅ xaf: COMPANY_MISMATCH blocks importing another company
-    - ✅ xaf: name mismatch is only a warning
-    - ✅ xaf: dry-run validates and writes nothing
-    - ✅ xaf (AuditFile layout): imports transaction, creates + renames chart accounts
-    - ✅ xaf (AuditFile layout): accounts with postings are NOT renamed
-    - ✅ xaf (AuditFile layout): unbalanced transaction fails whole-file validation
-    - ✅ xaf (AuditFile layout): idempotent per TransactionID
-    - ✅ xaf (AuditFile layout): dry-run lists renames and writes nothing
-    - ✅ xaf (AuditFile layout): 8-digit CompanyID mismatch is an error
-    - ✅ xaf (AuditFile layout): company name mismatch is only a warning
-    - ✅ import contacts: suppliers + customers mapped to contacts
-    - ✅ import contacts: idempotent by name
-    - ✅ import contacts: entry without a name fails whole-file validation
-    - ✅ inferRgs: keywords within type, then type-based fallbacks
-    - ✅ import xaf (AuditFile): created accounts carry inferred RGS codes
-    - ✅ import xaf: re-import backfills RGS codes on accounts that lack them
-    - ✅ import journal: --create-missing accounts also get RGS codes
-    - ✅ import chart CSV without an rgs column infers RGS codes
-    - ✅ import contacts: dry-run writes nothing
-
 ### invoice-features.test.js — 
 
 38 passing · 0 failing
@@ -692,40 +457,6 @@
     - ✅ company logo: set (PNG), extract round-trip, remove; audits
     - ✅ company logo: format, size and dimension guards
     - ✅ review fix: PDF reverse-charge label + email language follow the document language (no Dutch fallback)
-
-### invoice.test.js — invoicing: lifecycle, 12-vereisten, credit notes, payments, reminders
-
-29 passing · 0 failing
-
-    - ✅ parseLineSpec: qty, description, price, vat
-    - ✅ createInvoice: draft with line math (2x 150 @21 = 300 net, 63 vat)
-    - ✅ createInvoice: guards
-    - ✅ validateCompliance: 12 vereisten — supplier and customer data required
-    - ✅ finalize: assigns sequential number and books Debiteuren/Omzet/btw
-    - ✅ finalize: multiple VAT rates -> per-rate postings, exact vat
-    - ✅ finalize: VAT module off -> net-only booking, no vat postings
-    - ✅ finalize: already finalized is rejected; dry-run writes nothing
-    - ✅ credit note: reversed booking, sequence continues
-    - ✅ payments: partial then full -> paid; overpayment rejected
-    - ✅ nextInvoiceNumber: year-scoped sequence
-    - ✅ finalize: a number collision inside the transaction is retried, not thrown
-    - ✅ markPaid: payment insert + status update are atomic (rollback leaves no payment)
-    - ✅ UBL: Peppol BIS 3.0 structure
-    - ✅ UBL: seller + buyer EndpointID (BT-34/BT-49) when KVK numbers are present
-    - ✅ UBL: credit note uses CreditNote root + type 381 (Peppol BIS 3.0)
-    - ✅ UBL: both parties carry cac:PartyLegalEntity/RegistrationName (BT-27/BT-44, 1..1)
-    - ✅ UBL: no empty PayeeFinancialAccount when the company has no IBAN (BG-17 cbc:ID 1..1)
-    - ✅ UBL: credit note BT-10 buyer reference carries the original klantkenmerk (not the invoice number)
-    - ✅ UBL: XML control characters in descriptions are stripped (Peppol-safe)
-    - ✅ bank auto-match: incoming payment pays the invoice and posts Bank/Debiteuren
-    - ✅ buildInvoicePostings: sales vs credit sign flip
-    - ✅ buildInvoicePostings: VAT module off still honors per-line GL accounts (round 11)
-    - ✅ invoiceReminders: overdue + due-soon, excludes paid and far-future
-    - ✅ invoiceReminders: within-days controls the due-soon window
-    - ✅ invoiceReminders: credit notes are not reminder candidates
-    - ✅ validateCompliance: VAT-exempt company without btw-id can still invoice
-    - ✅ validateCompliance: VAT company without btw-id still fails SUPPLIER_INCOMPLETE
-    - ✅ createContact: dashed IBAN is stored in the canonical dash-free form (normalizer parity)
 
 ### jurisdictions.test.js — 
 
@@ -877,23 +608,6 @@
     - ✅ XK: getProfile returns the XK profile (EUR, sq, SKRFI convention chart)
     - ✅ XK: init --country XK creates a Kosovar company (language defaults to sq)
 
-### migration-021.test.js — 
-
-2 passing · 0 failing
-
-    - ✅ migrations 021-025 upgrade a 020 DB: new columns, CHECK removals, renames, backfill
-    - ✅ migration 021 keeps company data lossless across the rebuild
-
-### money.test.js — integer-cents money helpers
-
-5 passing · 0 failing
-
-    - ✅ parseAmount: valid inputs
-    - ✅ parseAmount: rejects invalid inputs
-    - ✅ parseAmount: rejects more than 2 decimals
-    - ✅ formatAmount: round-trips with parseAmount
-    - ✅ formatAmount: formatting
-
 ### month-end.test.js — month-end close check
 
 8 passing · 0 failing
@@ -907,81 +621,9 @@
     - ✅ month-end: invalid period rejected
     - ✅ month-end: draft invoices are warned (booked revenue may be uninvoiced)
 
-### payments.test.js — SEPA payment batches: payables, pain.001 export
-
-24 passing · 0 failing
-
-    - ✅ isValidIban: mod-97 check with normalization
-    - ✅ payables: add transfer + direct-debit, audit, list filters
-    - ✅ payables: unknown contact, bad amount, missing ref rejected
-    - ✅ payables: mark paid (dry-run writes nothing, real is audited)
-    - ✅ contacts: iban on create (validated) and update (audited)
-    - ✅ batch: explicit lines resolve contacts by name or id
-    - ✅ batch: company without IBAN fails with a hint
-    - ✅ batch: contact without IBAN fails with a hint and details
-    - ✅ batch: invalid iban, zero amount, missing name, long reference all collected
-    - ✅ batch: SEPA names longer than 70 chars are rejected (Max70Text)
-    - ✅ batch: payables path rejects a contact name longer than 70 chars
-    - ✅ batch: company name longer than 70 chars is rejected
-    - ✅ batch: from payables excludes direct-debit and marks payables in_batch
-    - ✅ batch: dry-run writes nothing; empty batch rejected
-    - ✅ batch CSV: comma and semicolon delimiters, Dutch amounts
-    - ✅ batch CSV: whole-file validation reports every bad line
-    - ✅ export: pain.001.001.03 XML with totals, SEPA level, escaping; re-export blocked
-    - ✅ export: escaping and .09 schema
-    - ✅ buildPain001: batch date lands in ReqdExctnDt
-    - ✅ delete: only drafts; payables released back to unpaid
-    - ✅ getPaymentBatch: serializes total + lines
-    - ✅ parseBatchCsv: comma-delimited rows keep the comma delimiter even when a field contains a semicolon
-    - ✅ addPayable: the same (contact, invoice_ref) twice is rejected while unpaid (double-payment guard)
-    - ✅ createPaymentBatch: direct-debit lines require a SEPA mandate (pain.008 MndtId)
-
-### recurring-invoice.test.js — subscription invoice templates
-
-11 passing · 0 failing
-
-    - ✅ invoice template: generates draft invoices on schedule (never auto-finalizes)
-    - ✅ invoice template: generated drafts finalize normally (compliance + number)
-    - ✅ invoice template: guards
-    - ✅ invoice template: entry templates keep working alongside
-    - ✅ invoice template: dry-run shows the invoice plan, writes nothing
-    - ✅ invoice template: runs limit completes the template
-    - ✅ peppol send: posts the UBL to the provider (mock server)
-    - ✅ peppol send: not configured / provider error / dry-run
-    - ✅ peppol send: buyer without a KVK number is rejected up front (BT-49)
-    - ✅ peppol send: invoice without a buyer reference is rejected up front (BT-10)
-    - ✅ UBL: BuyerReference (BT-10) emitted when the invoice has a reference
-
-### recurring.test.js — recurring entries engine: schedules, depreciation, accruals
-
-22 passing · 0 failing
-
-    - ✅ addPeriod: monthly/quarterly/yearly with day preserved
-    - ✅ createTemplate: validates postings, balances, accounts
-    - ✅ createTemplate: inactive account rejected
-    - ✅ createTemplate: first run normalized to day_of_period
-    - ✅ runDue: books one entry per period on schedule
-    - ✅ runDue: idempotent — nothing due means nothing generated
-    - ✅ runDue: runs limit completes the template
-    - ✅ runDue: end_date completes the template
-    - ✅ runDue: paused templates are skipped
-    - ✅ runDue: --template runs only that template
-    - ✅ runDue: dry-run writes nothing
-    - ✅ reverse_previous: accrual pattern — each run reverses the prior entry
-    - ✅ reverse_previous: completed accrual chain nets zero after final run
-    - ✅ reverse_previous: dry-run preview mirrors the execute shape (reversal + new entry)
-    - ✅ buildDepreciationTemplate: remainder-adjusted final run, cents-exact total
-    - ✅ buildDepreciationTemplate: validation
-    - ✅ vat-aware template: expansion stored, generation replays it
-    - ✅ vat-aware template: requires VAT module on
-    - ✅ vat-aware template: object postings mixed into a tagged list are kept, not dropped
-    - ✅ previewDue: read-only plan matches runDue
-    - ✅ listTemplates: status filter
-    - ✅ generated entries are immutable + trial balance stays balanced
-
 ### remote.test.js — 
 
-18 passing · 2 failing
+20 passing · 0 failing
 
     - ✅ server token: mints a single-use, actor-bound token (hashed at rest)
     - ✅ remote register: enrols a client-only key (private key never leaves the client)
@@ -996,13 +638,13 @@
     - ✅ replay: the SAME envelope twice is refused (NONCE_REUSED)
     - ✅ tamper: changing the signed argv breaks the signature (SIGNATURE_INVALID)
     - ✅ enforcement: an unsigned envelope is refused under enforce (SIGNATURE_REQUIRED)
-    - ❌ authz: a readonly actor is refused a mutation (AUTHZ_DENIED)
+    - ✅ authz: a readonly actor is refused a mutation (AUTHZ_DENIED)
     - ✅ local-only commands refuse under --server (LOCAL_ONLY)
     - ✅ health endpoint reports ok
     - ✅ unknown route is 404
     - ✅ unreachable server: clean REMOTE_UNREACHABLE error
     - ✅ server token rejects a bad --ttl-hours value
-    - ❌ envelope can carry the --db of the CLIENT but the server DB is authoritative
+    - ✅ envelope can carry the --db of the CLIENT but the server DB is authoritative
 
 ### reports-v014.test.js — aging buckets, contact statements, sales analytics (by contact/item)
 
@@ -1045,24 +687,6 @@
     - ✅ bank match post --dry-run rejects an already-matched transaction and a missing account
     - ✅ vat book --dry-run rejects unbalanced postings (parity with entry add)
 
-### sign.test.js — ed25519 sign/verify/keyid module: keygen (plain + passphrase-encrypted PKCS8), roundtrip, tamper/wrong-key rejection
-
-13 passing · 0 failing
-
-    - ✅ sign/verify: roundtrip with a plain key
-    - ✅ sign/verify: works with Buffer data too
-    - ✅ sign/verify: wrong key fails
-    - ✅ sign/verify: tampered message fails
-    - ✅ sign/verify: malformed signature or key does not throw, returns false
-    - ✅ keyid: stable 32-hex fingerprint of the public key
-    - ✅ keygen: writes SPKI public and PKCS8 private PEM
-    - ✅ keygen: passphrase-encrypted key refuses to sign without the passphrase
-    - ✅ keygen: passphrase-encrypted key signs with the right passphrase and verifies
-    - ✅ keyid: fingerprint is identical for plain and passphrase keys sharing a public key
-    - ✅ publicKeyFromPrivate: plain key derives its own public key (same keyid)
-    - ✅ publicKeyFromPrivate: encrypted key needs the passphrase, wrong one throws
-    - ✅ decryptPrivateKey: returns a plain PKCS8 PEM usable for signing; wrong passphrase throws
-
 ### smtp.test.js — zero-dependency SMTP client + invoice email: auth, STARTTLS, MIME/PDF attachment, dry-run, audit
 
 15 passing · 0 failing
@@ -1083,14 +707,6 @@
     - ✅ cli: invoice email e2e with SMTP env + audit row
     - ✅ mcp: invoice_email dry-run parity (no connection) + execute
 
-### trial-balance.test.js — trial balance invariants
-
-3 passing · 0 failing
-
-    - ✅ trial balance: startkapitaal + expense, per-account totals
-    - ✅ trial balance: year filter
-    - ✅ trial balance: drafts are excluded, reversals net out
-
 ### update.test.js — 
 
 11 passing · 0 failing
@@ -1106,47 +722,6 @@
     - ✅ update: --yes drops local commits (warned in the plan)
     - ✅ update: reinstalls dependencies when package.json changed
     - ✅ update: records an audit row when a company db exists
-
-### vat-settle.test.js — 
-
-18 passing · 0 failing
-
-    - ✅ vat file: owe — 2500 cleared, 2510 holds the exact-cents liability, audited
-    - ✅ vat file: refund position — 1500 cleared, 2510 debit (te ontvangen)
-    - ✅ vat file: nothing to file when the position is zero
-    - ✅ vat file: dry-run writes nothing and does not create the account
-    - ✅ vat settle: rounding in your favour (paid less than booked) books the gain to 4700
-    - ✅ vat settle: refund received in your favour (more than booked) books a gain
-    - ✅ vat settle: paying MORE than booked books a loss to the difference account
-    - ✅ vat settle: difference beyond €5 is rejected as the wrong amount
-    - ✅ vat settle: nothing to settle without a filed balance
-    - ✅ vat settle: direction guard — incoming tx cannot pay a te-betalen balance
-    - ✅ vat settle: invalid difference account is rejected
-    - ✅ vat settle: dry-run books nothing and leaves the tx unmatched
-    - ✅ vat settle: custom difference account (e.g. dedicated Afrondingsverschillen)
-    - ✅ vat file + settle round-trip: readout 5d agrees with the booked net position
-    - ✅ vat file: 2510 taken by another account falls to the next free code (2511)
-    - ✅ vat file: custom account 2515 is used when requested and settle cancels it
-    - ✅ vat file: dry-run plans the next free code without creating anything
-    - ✅ vat settle: an af-te-dragen account already reused from an earlier filing is settled on its own code
-
-### vat.test.js — optional VAT module: codes, vat book, OB readout 1a–5d
-
-13 passing · 0 failing
-
-    - ✅ enableVatModule: flag, accounts 1500/2500, 8 codes; idempotent
-    - ✅ enableVatModule: refuses on KOR company
-    - ✅ parseVatPostingSpecs: CODE:AMOUNT[@VATCODE]
-    - ✅ expandVatPostings: adds VAT leg, computes vat amount
-    - ✅ expandVatPostings: input side goes to 1500 te vorderen
-    - ✅ bookVatEntry: posts a 3-leg entry with vat fields persisted
-    - ✅ bookVatEntry: guards — module off, unknown code
-    - ✅ parsePeriod: quarters and months
-    - ✅ obReadout: full scenario fields 1a-5d
-    - ✅ obReadout: period isolation and drafts excluded
-    - ✅ obReadout: reverse charge fields 3a/4a (nets out via 5b)
-    - ✅ obReadout: guards — module off, invalid period
-    - ✅ markFiled: records the filing and its fields
 
 ### year-end.test.js — annual close, jaarrekening micro/klein, ICP
 

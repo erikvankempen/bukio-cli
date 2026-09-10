@@ -4236,12 +4236,31 @@ fn cmd_invoice_pdf(argv: &[String], db_path: &str) -> Result<Value> {
 
 // ── invoice ubl ──────────────────────────────────────────────────
 fn cmd_invoice_ubl(argv: &[String], db_path: &str) -> Result<Value> {
-    let _db = open_existing(db_path)?;
+    let db = open_existing(db_path)?;
     let id = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
-    Err(BukioError::new(
-        "NOT_SUPPORTED",
-        format!("invoice UBL for id {id} is not ported to Rust"),
-    ))
+    let inv = bukio::invoice::get_invoice(&db, id)?
+        .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} does not exist")))?;
+    if inv["invoice_number"].is_null() {
+        return Err(BukioError::new(
+            "NOT_FINALIZED",
+            "finalize the invoice first".to_string(),
+        ));
+    }
+    let xml = bukio::ubl::invoice_to_ubl(&db, &inv)?;
+    let out_path = arg(argv, "--out").unwrap_or_else(|| {
+        format!(
+            "{}.xml",
+            inv["invoice_number"].as_str().unwrap_or("invoice")
+        )
+    });
+    std::fs::write(&out_path, &xml).map_err(|e| {
+        BukioError::new("FILE_WRITE_ERROR", format!("cannot write {out_path}: {e}"))
+    })?;
+    let bytes = xml.chars().count();
+    if !has_flag(argv, "--json") {
+        println!("wrote {out_path} ({bytes} bytes)");
+    }
+    Ok(json!({ "path": out_path, "bytes": bytes }))
 }
 
 // ── invoice email ────────────────────────────────────────────────
@@ -4306,14 +4325,48 @@ fn cmd_invoice_peppol_send(
     argv: &[String],
     db_path: &str,
     _actor: &str,
-    _dry_run: bool,
+    dry_run: bool,
 ) -> Result<Value> {
-    let _db = open_existing(db_path)?;
+    let db = open_existing(db_path)?;
     let id = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
-    Err(BukioError::new(
-        "PEPPOL_NOT_AVAILABLE",
-        format!("Peppol send for invoice {id} requires network access"),
-    ))
+    let inv = bukio::invoice::get_invoice(&db, id)?
+        .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} does not exist")))?;
+    if inv["invoice_number"].is_null() {
+        return Err(BukioError::new(
+            "NOT_FINALIZED",
+            "finalize the invoice first".to_string(),
+        ));
+    }
+    let endpoint = arg(argv, "--endpoint");
+    let result = bukio::peppol::send_peppol_invoice(&db, &inv, endpoint.as_deref(), dry_run)?;
+    if !has_flag(argv, "--json") {
+        if result["dryRun"] == json!(true) {
+            println!(
+                "plan: POST UBL for {} ({} bytes) to {}{}",
+                result["invoice_number"].as_str().unwrap_or(""),
+                result["bytes"].as_i64().unwrap_or(0),
+                result["endpoint"].as_str().unwrap_or(""),
+                if result["configured"] == json!(true) {
+                    " (token set)"
+                } else {
+                    " (NO TOKEN — add BUKIO_PEPPOL_TOKEN)"
+                }
+            );
+            println!("(dry run — nothing sent)");
+        } else {
+            println!(
+                "sent {} to {} — HTTP {}{}",
+                result["invoice_number"].as_str().unwrap_or(""),
+                result["endpoint"].as_str().unwrap_or(""),
+                result["status"].as_i64().unwrap_or(0),
+                match result["response"].as_str() {
+                    Some(r) => format!(": {r}"),
+                    None => String::new(),
+                }
+            );
+        }
+    }
+    Ok(result)
 }
 
 // ── import xaf ──────────────────────────────────────────────────

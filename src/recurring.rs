@@ -198,6 +198,12 @@ pub fn create_template(
     let (invoice_spec, invoice_lines_raw, invoice_items_raw, due_days, mut vat_aware_flag) = if kind
         == "invoice"
     {
+        if reverse_previous {
+            return Err(recurring_error(
+                "INVALID_REVERSE",
+                "reverse-previous only applies to entry templates (accrual pattern)",
+            ));
+        }
         let v: Value = serde_json::from_str(postings_json).unwrap_or(Value::Null);
         let contact_id = v
             .get("contact_id")
@@ -288,7 +294,11 @@ pub fn create_template(
             let specs: Vec<Value> =
                 split_line_specs(&lines.iter().cloned().map(Value::String).collect::<Vec<_>>());
             for spec in specs {
-                let vc = spec["vat_code"].as_str().map(String::from);
+                let parsed = match spec.as_str() {
+                    Some(text) => crate::invoice::parse_line_spec(text)?,
+                    None => spec.clone(),
+                };
+                let vc = parsed["vatCode"].as_str().map(String::from);
                 if let Some(ref code) = vc {
                     vat_aware = true;
                     if !vat_on {
@@ -1754,6 +1764,589 @@ mod tests {
         assert_eq!(
             one(&d, "SELECT COALESCE(SUM(amount_cents),0) FROM postings"),
             0
+        );
+    }
+}
+
+// ==== ported from test/recurring-invoice.test.js ============================
+#[cfg(test)]
+mod recurring_invoice_tests {
+    use super::*;
+    use rusqlite::Connection;
+    use serde_json::{json, Value};
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+
+    /// Peppol tests read/write process env; tests run in threads, so serialise.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn idb() -> Connection {
+        let d = crate::db::open_db(":memory:").unwrap();
+        crate::accounts::seed_default_chart(&d).unwrap();
+        d.execute(
+            "INSERT INTO company (id, name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
+             VALUES (1,'Demo BV','12345678','bv','NL123456789B01','NL91ABNA0417164300','Industrieweg 12','2712 CD','Zoetermeer',1)",
+            [],
+        )
+        .unwrap();
+        crate::vat::enable_vat_module(&d, "agent:test").unwrap();
+        d
+    }
+
+    fn one_i(db: &Connection, sql: &str) -> i64 {
+        db.query_row(sql, [], |r| r.get::<_, Option<i64>>(0))
+            .unwrap()
+            .unwrap_or(0)
+    }
+
+    fn acme(db: &Connection) -> Value {
+        crate::contacts::create_contact(
+            db,
+            "ACME B.V.",
+            Some("Straat 1"),
+            Some("1000 AA"),
+            Some("Amsterdam"),
+            None,
+            None,
+            Some("NL999999999B01"),
+            Some("98765432"),
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap()
+    }
+
+    /// The JS test's createTemplate(db, {kind:'invoice', contactId, invoiceLines,
+    /// frequency, startDate, dueDays, runs, actor}) helper.
+    fn itpl(db: &Connection, over: Value) -> Result<Value> {
+        let mut o = json!({
+            "name": "SaaS abonnement", "frequency": "monthly", "startDate": "2026-08-01",
+            "invoiceLines": ["2x Premium @ 99.00 @21"],
+        });
+        if let Some(m) = over.as_object() {
+            for (k, v) in m {
+                o[k] = v.clone();
+            }
+        }
+        let spec = json!({
+            "contact_id": o["contactId"],
+            "lines": o["invoiceLines"],
+            "items": o["items"],
+            "due_days": o["dueDays"],
+        })
+        .to_string();
+        create_template(
+            db,
+            o["name"].as_str().unwrap(),
+            None,
+            o["frequency"].as_str().unwrap(),
+            1,
+            o["startDate"].as_str().unwrap(),
+            o["endDate"].as_str(),
+            o["runs"].as_i64(),
+            &spec,
+            o["reversePrevious"].as_bool().unwrap_or(false),
+            "agent:test",
+            "invoice",
+            false,
+        )
+    }
+
+    fn invoice_id(db: &Connection) -> i64 {
+        db.query_row("SELECT MIN(id) FROM invoices", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// A one-shot HTTP server: answers with `status`, captures the raw request.
+    fn mock_server(status: u16, ctype: &str, body: &str) -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink = captured.clone();
+        let body = body.to_string();
+        let ctype = ctype.to_string();
+        std::thread::spawn(move || {
+            if let Ok((mut sock, _)) = listener.accept() {
+                let _ = sock.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+                let mut data: Vec<u8> = Vec::new();
+                let mut buf = [0u8; 8192];
+                // read headers, then exactly Content-Length bytes of body
+                while !data.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match sock.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => data.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let head_end = data
+                    .windows(4)
+                    .position(|w| w == b"\r\n\r\n")
+                    .map(|i| i + 4)
+                    .unwrap_or(data.len());
+                let head = String::from_utf8_lossy(&data[..head_end]).to_lowercase();
+                let clen: usize = head
+                    .split("content-length:")
+                    .nth(1)
+                    .and_then(|s| s.split(['\r', '\n']).next())
+                    .and_then(|s| s.trim().parse().ok())
+                    .unwrap_or(0);
+                while data.len() < head_end + clen {
+                    match sock.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => data.extend_from_slice(&buf[..n]),
+                    }
+                }
+                sink.lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&data).to_string());
+                let resp = format!(
+                    "HTTP/1.1 {status} X\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = sock.write_all(resp.as_bytes());
+                let _ = sock.flush();
+            }
+        });
+        (format!("http://127.0.0.1:{port}"), captured)
+    }
+
+    fn set_env(k: &str, v: Option<&str>) {
+        match v {
+            Some(x) => std::env::set_var(k, x),
+            None => std::env::remove_var(k),
+        }
+    }
+
+    #[test]
+    fn invoice_template_generates_drafts_on_schedule() {
+        let d = idb();
+        let c = acme(&d);
+        let t = itpl(&d, json!({"contactId": c["id"], "dueDays": 14})).unwrap();
+        assert_eq!(t["kind"].as_str(), Some("invoice"));
+        assert_eq!(t["vat_aware"].as_i64(), Some(1));
+
+        let result = run_due(&d, Some("2026-09-30"), None, "agent:test", false).unwrap();
+        assert_eq!(result["templates"].as_array().unwrap().len(), 1);
+        // Aug 1 + Sep 1 (backfill)
+        assert_eq!(result["templates"][0]["runs"].as_array().unwrap().len(), 2);
+
+        let dates: Vec<String> = d
+            .prepare("SELECT date FROM invoices ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|x| x.unwrap())
+            .collect();
+        assert_eq!(dates, vec!["2026-08-01", "2026-09-01"]);
+        // drafts only — nothing booked, no numbers
+        assert_eq!(
+            one_i(&d, "SELECT COUNT(*) FROM invoices WHERE status='draft'"),
+            2
+        );
+        assert_eq!(
+            one_i(
+                &d,
+                "SELECT COUNT(*) FROM invoices WHERE invoice_number IS NULL"
+            ),
+            2
+        );
+        assert_eq!(
+            one_i(
+                &d,
+                "SELECT COUNT(*) FROM journal_entries WHERE source='invoice'"
+            ),
+            0
+        );
+
+        // lines + due date carried over
+        let inv = crate::invoice::get_invoice(&d, invoice_id(&d))
+            .unwrap()
+            .unwrap();
+        assert_eq!(inv["lines"][0]["description"].as_str(), Some("Premium"));
+        assert_eq!(inv["lines"][0]["quantity"].as_i64(), Some(2000)); // milli-units
+        assert_eq!(inv["lines"][0]["vat_amount_cents"].as_i64(), Some(4158)); // 198.00 @21%
+        assert_eq!(inv["due_date"].as_str(), Some("2026-08-15"));
+        assert_eq!(inv["contact"]["name"].as_str(), Some("ACME B.V."));
+    }
+
+    #[test]
+    fn invoice_template_generated_drafts_finalize_normally() {
+        let d = idb();
+        let c = acme(&d);
+        let today = crate::dates::today_iso();
+        let y = today[..4].to_string();
+        let m = today[5..7].to_string();
+        // due date = start + 14 days; run on the 10th so the invoice is not overdue
+        itpl(
+            &d,
+            json!({
+                "contactId": c["id"],
+                "invoiceLines": ["2x Premium @ 99.00 @21"],
+                "startDate": format!("{y}-{m}-01"),
+            }),
+        )
+        .unwrap();
+        run_due(&d, Some(&format!("{y}-{m}-10")), None, "agent:test", false).unwrap();
+        let draft_id = invoice_id(&d);
+        let result = crate::invoice::finalize_invoice(&d, draft_id, "agent:test", false).unwrap();
+        assert_eq!(
+            result["invoice"]["invoice_number"].as_str(),
+            Some(format!("{y}-0001").as_str())
+        );
+        assert_eq!(result["invoice"]["status"].as_str(), Some("sent"));
+        assert_eq!(result["entry"]["state"].as_str(), Some("posted"));
+    }
+
+    #[test]
+    fn invoice_template_guards() {
+        let d = idb();
+        acme(&d);
+        // reverse-previous is entry-only
+        let e = itpl(&d, json!({"contactId": 1, "reversePrevious": true})).unwrap_err();
+        assert_eq!(e.code, "INVALID_REVERSE");
+        // contact required + must exist
+        let e = itpl(&d, json!({"contactId": Value::Null})).unwrap_err();
+        assert_eq!(e.code, "INVALID_KIND");
+        let e = itpl(&d, json!({"contactId": 99})).unwrap_err();
+        assert_eq!(e.code, "CONTACT_NOT_FOUND");
+        // unknown vat code at creation
+        let e = itpl(
+            &d,
+            json!({"contactId": 1, "invoiceLines": ["1x A @ 10.00 @77"]}),
+        )
+        .unwrap_err();
+        assert_eq!(e.code, "VAT_CODE_NOT_FOUND");
+        // bad kind
+        let e = create_template(
+            &d,
+            "x",
+            None,
+            "monthly",
+            1,
+            "2026-08-01",
+            None,
+            None,
+            &json!({"lines": ["1100:1,3000:-1"]}).to_string(),
+            false,
+            "agent:test",
+            "ledger",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(e.code, "INVALID_KIND");
+    }
+
+    #[test]
+    fn invoice_template_keeps_entry_templates_working_alongside() {
+        let d = idb();
+        let c = acme(&d);
+        itpl(
+            &d,
+            json!({"contactId": c["id"], "invoiceLines": ["2x Premium @ 99.00 @21"]}),
+        )
+        .unwrap();
+        create_template(
+            &d,
+            "Huur kantoor",
+            None,
+            "monthly",
+            1,
+            "2026-08-01",
+            None,
+            None,
+            &json!(["4300:1000.00,1100:-1000.00"]).to_string(),
+            false,
+            "agent:test",
+            "entry",
+            false,
+        )
+        .unwrap();
+        let result = run_due(&d, Some("2026-08-31"), None, "agent:test", false).unwrap();
+        assert_eq!(result["templates"].as_array().unwrap().len(), 2);
+        let tpls = result["templates"].as_array().unwrap();
+        let find = |n: &str| {
+            tpls.iter()
+                .find(|t| t["name"].as_str() == Some(n))
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(
+            find("SaaS abonnement")["runs"][0]["generated"][0]["kind"].as_str(),
+            Some("invoice")
+        );
+        assert_eq!(
+            find("Huur kantoor")["runs"][0]["generated"][0]["kind"].as_str(),
+            Some("entry")
+        );
+        assert_eq!(one_i(&d, "SELECT COUNT(*) FROM invoices"), 1);
+        assert_eq!(
+            one_i(
+                &d,
+                "SELECT COUNT(*) FROM journal_entries WHERE source='recurring'"
+            ),
+            1
+        );
+    }
+
+    #[test]
+    fn invoice_template_dry_run_shows_the_plan_and_writes_nothing() {
+        let d = idb();
+        let c = acme(&d);
+        itpl(&d, json!({"contactId": c["id"], "invoiceLines": ["2x Premium @ 99.00 @21"], "dueDays": 14}))
+            .unwrap();
+        let result = run_due(&d, Some("2026-08-31"), None, "agent:test", true).unwrap();
+        let run = &result["templates"][0]["runs"][0];
+        assert_eq!(run["kind"].as_str(), Some("invoice"));
+        assert_eq!(run["invoice"]["date"].as_str(), Some("2026-08-01"));
+        assert_eq!(run["invoice"]["due_date"].as_str(), Some("2026-08-15"));
+        assert_eq!(run["invoice"]["contact_name"].as_str(), Some("ACME B.V."));
+        assert_eq!(one_i(&d, "SELECT COUNT(*) FROM invoices"), 0);
+    }
+
+    #[test]
+    fn invoice_template_runs_limit_completes_the_template() {
+        let d = idb();
+        acme(&d);
+        itpl(
+            &d,
+            json!({
+                "name": "Abonnement Q", "contactId": 1, "invoiceLines": ["2x Premium @ 99.00 @21"],
+                "frequency": "quarterly", "startDate": "2026-07-01", "runs": 2,
+            }),
+        )
+        .unwrap();
+        run_due(&d, Some("2026-12-31"), None, "agent:test", false).unwrap();
+        assert_eq!(one_i(&d, "SELECT COUNT(*) FROM invoices"), 2);
+        let t = get_template(&d, 1).unwrap().unwrap();
+        assert_eq!(t["status"].as_str(), Some("completed"));
+        assert_eq!(t["runs_done"].as_i64(), Some(2));
+    }
+
+    #[test]
+    fn peppol_send_posts_the_ubl_to_the_provider() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let d = idb();
+        let c = acme(&d);
+        let inv = crate::invoice::create_invoice(
+            &d,
+            c["id"].as_i64().unwrap(),
+            "2026-08-01",
+            None,
+            None,
+            Some("PO-2026-001"),
+            None,
+            None,
+            None,
+            &[json!("1x Premium @ 99.00 @21")],
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        crate::invoice::finalize_invoice(&d, inv["id"].as_i64().unwrap(), "agent:test", false)
+            .unwrap();
+
+        let (url, captured) = mock_server(202, "application/json", "{\"ok\":true}");
+        let old_ep = std::env::var("BUKIO_PEPPOL_ENDPOINT").ok();
+        let old_tok = std::env::var("BUKIO_PEPPOL_TOKEN").ok();
+        set_env("BUKIO_PEPPOL_ENDPOINT", Some(&format!("{url}/invoices")));
+        set_env("BUKIO_PEPPOL_TOKEN", Some("test-token-123"));
+        let invoice = crate::invoice::get_invoice(&d, inv["id"].as_i64().unwrap())
+            .unwrap()
+            .unwrap();
+        let result = crate::peppol::send_peppol_invoice(&d, &invoice, None, false);
+        set_env("BUKIO_PEPPOL_ENDPOINT", old_ep.as_deref());
+        set_env("BUKIO_PEPPOL_TOKEN", old_tok.as_deref());
+        let result = result.unwrap();
+        assert_eq!(result["status"].as_i64(), Some(202));
+        assert_eq!(result["invoice_number"].as_str(), Some("2026-0001"));
+
+        let reqs = captured.lock().unwrap();
+        assert_eq!(reqs.len(), 1);
+        let raw = &reqs[0];
+        assert!(raw.starts_with("POST /invoices"), "request line: {raw}");
+        assert!(raw.contains("Bearer test-token-123"), "auth header: {raw}");
+        let lower = raw.to_lowercase();
+        assert!(
+            lower.contains("content-type: application/xml"),
+            "ctype: {raw}"
+        );
+        assert!(
+            raw.contains("<cbc:ID>2026-0001</cbc:ID>"),
+            "ubl body: {raw}"
+        );
+    }
+
+    #[test]
+    fn peppol_send_not_configured_provider_error_and_dry_run() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let d = idb();
+        let c = acme(&d);
+        let inv = crate::invoice::create_invoice(
+            &d,
+            c["id"].as_i64().unwrap(),
+            "2026-08-01",
+            None,
+            None,
+            Some("REF-1"),
+            None,
+            None,
+            None,
+            &[json!("1x A @ 10.00 @21")],
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        crate::invoice::finalize_invoice(&d, inv["id"].as_i64().unwrap(), "agent:test", false)
+            .unwrap();
+        let invoice = crate::invoice::get_invoice(&d, inv["id"].as_i64().unwrap())
+            .unwrap()
+            .unwrap();
+
+        let old_ep = std::env::var("BUKIO_PEPPOL_ENDPOINT").ok();
+        let old_tok = std::env::var("BUKIO_PEPPOL_TOKEN").ok();
+        set_env("BUKIO_PEPPOL_ENDPOINT", None);
+        set_env("BUKIO_PEPPOL_TOKEN", None);
+        let e = crate::peppol::send_peppol_invoice(&d, &invoice, None, false).unwrap_err();
+        assert_eq!(e.code, "PEPPOL_NOT_CONFIGURED");
+
+        // provider returns 500
+        let (url, _cap) = mock_server(500, "text/plain", "provider exploded");
+        set_env("BUKIO_PEPPOL_ENDPOINT", Some(&url));
+        set_env("BUKIO_PEPPOL_TOKEN", Some("tok"));
+        let e = crate::peppol::send_peppol_invoice(&d, &invoice, None, false).unwrap_err();
+        assert_eq!(e.code, "PEPPOL_SEND_FAILED");
+        assert!(e.message.contains("500"), "message: {}", e.message);
+        // dry-run: no request, reports config
+        let plan = crate::peppol::send_peppol_invoice(&d, &invoice, None, true).unwrap();
+        assert_eq!(plan["dryRun"], json!(true));
+        assert_eq!(plan["configured"], json!(true));
+        assert!(plan["bytes"].as_i64().unwrap_or(0) > 0);
+
+        set_env("BUKIO_PEPPOL_ENDPOINT", old_ep.as_deref());
+        set_env("BUKIO_PEPPOL_TOKEN", old_tok.as_deref());
+    }
+
+    #[test]
+    fn peppol_buyer_without_kvk_is_rejected_up_front() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let d = idb();
+        let c = crate::contacts::create_contact(
+            &d,
+            "Geen KVK B.V.",
+            Some("Straat 1"),
+            Some("1000 AA"),
+            Some("Amsterdam"),
+            None,
+            None,
+            Some("NL888888888B01"),
+            None, // no kvk
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        let inv = crate::invoice::create_invoice(
+            &d,
+            c["id"].as_i64().unwrap(),
+            "2026-08-01",
+            None,
+            None,
+            Some("REF-1"),
+            None,
+            None,
+            None,
+            &[json!("1x A @ 10.00 @21")],
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        crate::invoice::finalize_invoice(&d, inv["id"].as_i64().unwrap(), "agent:test", false)
+            .unwrap();
+        let invoice = crate::invoice::get_invoice(&d, inv["id"].as_i64().unwrap())
+            .unwrap()
+            .unwrap();
+        let old_ep = std::env::var("BUKIO_PEPPOL_ENDPOINT").ok();
+        let old_tok = std::env::var("BUKIO_PEPPOL_TOKEN").ok();
+        set_env("BUKIO_PEPPOL_ENDPOINT", Some("http://127.0.0.1:9"));
+        set_env("BUKIO_PEPPOL_TOKEN", Some("tok"));
+        // fails BEFORE any network call — even dry-run validates like execute
+        for dry in [false, true] {
+            let e = crate::peppol::send_peppol_invoice(&d, &invoice, None, dry).unwrap_err();
+            assert_eq!(e.code, "PEPPOL_BUYER_MISSING_ID");
+        }
+        set_env("BUKIO_PEPPOL_ENDPOINT", old_ep.as_deref());
+        set_env("BUKIO_PEPPOL_TOKEN", old_tok.as_deref());
+    }
+
+    #[test]
+    fn peppol_invoice_without_buyer_reference_is_rejected_up_front() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let d = idb();
+        let c = acme(&d); // has kvk via fixture
+        let inv = crate::invoice::create_invoice(
+            &d,
+            c["id"].as_i64().unwrap(),
+            "2026-08-01",
+            None,
+            None,
+            None, // no reference
+            None,
+            None,
+            None,
+            &[json!("1x A @ 10.00 @21")],
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        crate::invoice::finalize_invoice(&d, inv["id"].as_i64().unwrap(), "agent:test", false)
+            .unwrap();
+        let invoice = crate::invoice::get_invoice(&d, inv["id"].as_i64().unwrap())
+            .unwrap()
+            .unwrap();
+        let old_ep = std::env::var("BUKIO_PEPPOL_ENDPOINT").ok();
+        let old_tok = std::env::var("BUKIO_PEPPOL_TOKEN").ok();
+        set_env("BUKIO_PEPPOL_ENDPOINT", Some("http://127.0.0.1:9"));
+        set_env("BUKIO_PEPPOL_TOKEN", Some("tok"));
+        for dry in [false, true] {
+            let e = crate::peppol::send_peppol_invoice(&d, &invoice, None, dry).unwrap_err();
+            assert_eq!(e.code, "PEPPOL_BUYER_REFERENCE_MISSING");
+        }
+        set_env("BUKIO_PEPPOL_ENDPOINT", old_ep.as_deref());
+        set_env("BUKIO_PEPPOL_TOKEN", old_tok.as_deref());
+    }
+
+    #[test]
+    fn ubl_buyer_reference_follows_document_currency_code() {
+        let d = idb();
+        let c = acme(&d);
+        let inv = crate::invoice::create_invoice(
+            &d,
+            c["id"].as_i64().unwrap(),
+            "2026-08-01",
+            None,
+            None,
+            Some("PO-2026-007"),
+            None,
+            None,
+            None,
+            &[json!("1x A @ 10.00 @21")],
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        crate::invoice::finalize_invoice(&d, inv["id"].as_i64().unwrap(), "agent:test", false)
+            .unwrap();
+        let invoice = crate::invoice::get_invoice(&d, inv["id"].as_i64().unwrap())
+            .unwrap()
+            .unwrap();
+        let xml = crate::ubl::invoice_to_ubl(&d, &invoice).unwrap();
+        assert!(xml.contains("<cbc:BuyerReference>PO-2026-007</cbc:BuyerReference>"));
+        let doc_idx = xml.find("<cbc:DocumentCurrencyCode>").unwrap();
+        let ref_idx = xml.find("<cbc:BuyerReference>").unwrap();
+        assert!(
+            ref_idx > doc_idx,
+            "BuyerReference must follow DocumentCurrencyCode"
         );
     }
 }

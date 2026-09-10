@@ -31,6 +31,7 @@ pub mod mcp;
 pub mod money;
 pub mod month_end;
 pub mod payments;
+pub mod peppol;
 pub mod recurring;
 pub mod reports;
 pub mod server;
