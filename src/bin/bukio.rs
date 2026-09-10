@@ -21,13 +21,14 @@ fn ok(data: Value) {
 }
 
 fn fail_json(err: &BukioError) -> ! {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(
-            &json!({ "ok": false, "error": { "code": err.code, "message": err.message } })
-        )
-        .unwrap()
-    );
+    let payload = match &err.details {
+        Some(d) => json!({
+            "ok": false,
+            "error": { "code": err.code, "message": err.message, "details": d }
+        }),
+        None => json!({ "ok": false, "error": { "code": err.code, "message": err.message } }),
+    };
+    println!("{}", serde_json::to_string_pretty(&payload).unwrap());
     std::process::exit(1);
 }
 

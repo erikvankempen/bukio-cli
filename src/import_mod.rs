@@ -301,13 +301,13 @@ pub fn import_opening_balances(
 pub fn import_journal_csv(
     db: &Connection,
     csv_text: &str,
-    _create_missing: bool,
+    create_missing: bool,
     actor: &str,
     dry_run: bool,
 ) -> Result<Value> {
     let rows = parse_csv_rows(csv_text);
     if rows.is_empty() {
-        return Err(import_err("EMPTY_CSV", "no data rows"));
+        return Err(import_err("EMPTY_CSV", "journal CSV has no data rows"));
     }
     let header = &rows[0].1;
     let find = |aliases: &[&str]| {
@@ -322,7 +322,7 @@ pub fn import_journal_csv(
     let ct = find(&["tegenrekening", "contra_account", "contra"]);
     let ca = find(&["bedrag", "amount", "amount_cents"]);
     let cdesc = find(&["omschrijving", "description", "desc"]);
-    let _cbtw = find(&["btwcode", "vat_code", "vat"]);
+    let cbtw = find(&["btwcode", "vat_code", "vat"]);
 
     let req = [
         ("date", cd),
@@ -339,15 +339,20 @@ pub fn import_journal_csv(
     if !missing.is_empty() {
         return Err(import_err(
             "INVALID_CSV_HEADER",
-            format!("missing: {}", missing.join(", ")),
+            format!(
+                "journal CSV is missing column(s): {} (got header: {})",
+                missing.join(", "),
+                header.join(",")
+            ),
         ));
     }
 
     let g = |cells: &[String], col: Option<usize>| {
         col.and_then(|c| cells.get(c).cloned()).unwrap_or_default()
     };
-    let mut errors = Vec::new();
+    let mut errors: Vec<Value> = Vec::new();
     let mut parsed: Vec<Value> = Vec::new();
+    let mut btw_codes: Vec<String> = Vec::new();
 
     for (ln, cells) in rows.iter().skip(1) {
         let date = g(cells, cd);
@@ -355,35 +360,79 @@ pub fn import_journal_csv(
         let rek = g(cells, cr);
         let teg = g(cells, ct);
         let bed = g(cells, ca);
-        if date.is_empty() && boek.is_empty() && rek.is_empty() {
-            continue;
+        if date.is_empty() && boek.is_empty() && rek.is_empty() && teg.is_empty() && bed.is_empty()
+        {
+            continue; // blank line
         }
         if !valid_date(&date) {
-            errors.push(format!("line {ln}: INVALID_DATE '{date}'"));
+            errors.push(json!({
+                "line": ln, "error": format!("INVALID_DATE: '{date}' must be yyyy-mm-dd"),
+            }));
         }
         if boek.is_empty() {
-            errors.push(format!("line {ln}: BOEKSTUK_REQUIRED"));
+            errors.push(json!({
+                "line": ln, "error": "BOEKSTUK_REQUIRED: every row needs a boekstuknummer",
+            }));
         }
         if !valid_code(&rek) {
-            errors.push(format!("line {ln}: INVALID_CODE '{rek}'"));
+            errors.push(json!({
+                "line": ln,
+                "error": format!("INVALID_CODE: rekening '{rek}' must be 1-6 digits"),
+            }));
         }
         if !valid_code(&teg) {
-            errors.push(format!("line {ln}: INVALID_CODE '{teg}'"));
+            errors.push(json!({
+                "line": ln,
+                "error": format!("INVALID_CODE: tegenrekening '{teg}' must be 1-6 digits"),
+            }));
         }
-        let bc = match parse_import_amount(&bed) {
-            Ok(v) => v,
-            Err(e) => {
-                errors.push(format!("line {ln}: {e}"));
-                0
+        let mut bc: Option<i64> = None;
+        match parse_import_amount(&bed) {
+            Ok(v) => bc = Some(v),
+            Err(e) => errors.push(json!({
+                "line": ln, "error": format!("{}: {}", e.code, e.message),
+            })),
+        }
+        if bc == Some(0) {
+            errors.push(json!({
+                "line": ln, "error": "INVALID_AMOUNT: bedrag must be non-zero",
+            }));
+        }
+        let bc = bc.unwrap_or(0);
+        // accounts must exist (unless --create-missing) and be active
+        for code in [&rek, &teg] {
+            if !valid_code(code) {
+                continue;
             }
-        };
-        if bc == 0 {
-            errors.push(format!("line {ln}: amount must be non-zero"));
+            match get_account_by_code(db, code) {
+                None if !create_missing => errors.push(json!({
+                    "line": ln,
+                    "error": format!(
+                        "ACCOUNT_NOT_FOUND: account {code} does not exist (use --create-missing to create it)"
+                    ),
+                })),
+                Some(a) if account_is_inactive(&a) => errors.push(json!({
+                    "line": ln,
+                    "error": format!("ACCOUNT_INACTIVE: account {code} is inactive"),
+                })),
+                _ => {}
+            }
         }
-        parsed.push(json!({"line": ln, "date": date, "boekstuk": boek, "rekening": rek, "tegenrekening": teg, "bedragCents": bc, "omschrijving": g(cells, cdesc)}));
+        let btw = g(cells, cbtw);
+        if !btw.is_empty() && !btw_codes.contains(&btw) {
+            btw_codes.push(btw.clone());
+        }
+        parsed.push(json!({
+            "line": ln, "date": date, "boekstuk": boek, "rekening": rek,
+            "tegenrekening": teg, "bedragCents": bc, "omschrijving": g(cells, cdesc),
+            "btwcode": btw,
+        }));
     }
     if parsed.is_empty() {
-        return Err(import_err("EMPTY_CSV", "no data after header"));
+        return Err(import_err(
+            "EMPTY_CSV",
+            "journal CSV has no data rows after the header",
+        ));
     }
 
     let mut groups: Vec<String> = Vec::new();
@@ -395,11 +444,23 @@ pub fn import_journal_csv(
         }
         by_b.entry(b.to_string()).or_default().push(p);
     }
+    // one date per boekstuk
     for b in &groups {
-        let ds: std::collections::HashSet<&str> =
-            by_b[b].iter().filter_map(|p| p["date"].as_str()).collect();
+        let mut ds: Vec<String> = Vec::new();
+        for p in &by_b[b] {
+            let d = p["date"].as_str().unwrap_or("").to_string();
+            if !ds.contains(&d) {
+                ds.push(d);
+            }
+        }
         if ds.len() > 1 {
-            errors.push(format!("DATE_MISMATCH: boekstuk '{b}'"));
+            errors.push(json!({
+                "line": 0,
+                "error": format!(
+                    "DATE_MISMATCH: boekstuk '{b}' has rows on different dates ({})",
+                    ds.join(", ")
+                ),
+            }));
         }
     }
     let existing: std::collections::HashSet<String> = db
@@ -412,9 +473,13 @@ pub fn import_journal_csv(
         .filter_map(|r| r.ok())
         .collect();
     if !errors.is_empty() {
-        return Err(import_err(
+        return Err(BukioError::with_details(
             "IMPORT_VALIDATION_FAILED",
-            format!("{} problem(s)", errors.len()),
+            format!(
+                "journal file has {} problem(s) — nothing imported",
+                errors.len()
+            ),
+            json!(errors),
         ));
     }
 
@@ -423,12 +488,38 @@ pub fn import_journal_csv(
         .filter(|b| existing.contains(&format!("journal:{b}")))
         .count();
     if dry_run {
-        return Ok(
-            json!({"action": "import journal", "boekstukken": groups.len(), "lines": parsed.len(), "duplicates": dupes, "dryRun": true}),
-        );
+        let entries: Vec<Value> = groups
+            .iter()
+            .map(|b| {
+                json!({
+                    "boekstuk": b,
+                    "date": by_b[b][0]["date"],
+                    "lines": by_b[b].len(),
+                })
+            })
+            .collect();
+        return Ok(json!({
+            "action": "import journal",
+            "boekstukken": groups.len(),
+            "lines": parsed.len(),
+            "entries": entries,
+            "create_missing": create_missing,
+            "ignored_btw_codes": btw_codes,
+            "duplicates": dupes,
+            "dryRun": true,
+        }));
     }
 
-    let mut imported = Vec::new();
+    let mut imported: Vec<Value> = Vec::new();
+    let mut accounts_created: Vec<Value> = Vec::new();
+    // net movement per code, for inferring the type of accounts we create
+    let mut net: HashMap<String, i64> = HashMap::new();
+    for p in &parsed {
+        *net.entry(p["rekening"].as_str().unwrap_or("").to_string())
+            .or_insert(0) += p["bedragCents"].as_i64().unwrap_or(0);
+        *net.entry(p["tegenrekening"].as_str().unwrap_or("").to_string())
+            .or_insert(0) -= p["bedragCents"].as_i64().unwrap_or(0);
+    }
     for b in &groups {
         let rf = format!("journal:{b}");
         if existing.contains(&rf) {
@@ -436,10 +527,42 @@ pub fn import_journal_csv(
         }
         let lines = &by_b[b];
         let date = lines[0]["date"].as_str().unwrap_or("");
+        if create_missing {
+            let mut codes: Vec<String> = Vec::new();
+            for l in lines.iter() {
+                for c in [
+                    l["rekening"].as_str().unwrap_or(""),
+                    l["tegenrekening"].as_str().unwrap_or(""),
+                ] {
+                    let c = c.to_string();
+                    if !codes.contains(&c) && get_account_by_code(db, &c).is_none() {
+                        codes.push(c.clone());
+                        let (t, nb) = infer_account_type(*net.get(&c).unwrap_or(&0));
+                        let name = format!("Rekening {c}");
+                        let rgs = infer_rgs(&t, &name);
+                        let acct = create_account(
+                            db,
+                            &NewAccount {
+                                code: &c,
+                                name: &name,
+                                type_: &t,
+                                normal_balance: &nb,
+                                taxonomy_code: rgs,
+                            },
+                        )?;
+                        accounts_created.push(json!({
+                            "code": acct["code"], "name": acct["name"], "type": acct["type"],
+                            "normal_balance": acct["normal_balance"], "taxonomy_code": acct["taxonomy_code"],
+                        }));
+                    }
+                }
+            }
+        }
         let desc = lines
             .iter()
             .find_map(|l| l["omschrijving"].as_str().filter(|s| !s.is_empty()))
-            .unwrap_or("B");
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("Boekstuk {b}"));
         let mut postings = Vec::new();
         for l in lines {
             let rek = l["rekening"].as_str().unwrap_or("");
@@ -464,7 +587,7 @@ pub fn import_journal_csv(
             db,
             CreateEntry {
                 date,
-                description: desc,
+                description: &desc,
                 postings,
                 source: "import",
                 source_ref: Some(&rf),
@@ -472,7 +595,10 @@ pub fn import_journal_csv(
             },
         )?;
         let posted = post_entry(db, entry.id, actor)?;
-        imported.push(json!({"id": posted.id, "date": date, "boekstuk": b}));
+        imported.push(json!({
+            "id": posted.id, "date": posted.date,
+            "description": posted.description, "boekstuk": b,
+        }));
     }
     record(
         db,
@@ -480,14 +606,23 @@ pub fn import_journal_csv(
             actor,
             action: "import.journal",
             command: Some("import journal"),
-            args: Some(json!({"boekstukken": imported.len(), "duplicates": dupes})),
+            args: Some(json!({
+                "boekstukken": imported.len(),
+                "duplicates": dupes,
+                "create_missing": create_missing,
+            })),
             outcome: "ok",
             entry_ids: imported.iter().filter_map(|e| e["id"].as_i64()).collect(),
         },
     )?;
-    Ok(
-        json!({"ok": true, "imported": imported.len(), "duplicates": dupes, "entries": imported, "dryRun": false}),
-    )
+    Ok(json!({
+        "imported": imported.len(),
+        "duplicates": dupes,
+        "entries": imported,
+        "accounts_created": accounts_created,
+        "ignored_btw_codes": btw_codes,
+        "dryRun": false,
+    }))
 }
 
 /// Import contacts from UBL XML.
@@ -1304,6 +1439,15 @@ fn xa(v: Option<&Value>) -> Vec<Value> {
         None | Some(Value::Null) => vec![],
         Some(Value::Array(a)) => a.clone(),
         Some(other) => vec![other.clone()],
+    }
+}
+
+/// `active` may arrive as 1/0 or true/false depending on the query path.
+fn account_is_inactive(a: &Value) -> bool {
+    match a.get("active") {
+        Some(Value::Bool(b)) => !*b,
+        Some(v) => v.as_i64() == Some(0),
+        None => false,
     }
 }
 
