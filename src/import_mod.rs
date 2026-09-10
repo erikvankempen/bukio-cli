@@ -678,7 +678,6 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
     // Rekeningen
     let mut file_codes: HashSet<String> = HashSet::new();
     let mut seen_rekening_codes: HashSet<String> = HashSet::new();
-    let mut has_accounts = false;
 
     // Current mutatie
     let mut cur_boekstuk = String::new();
@@ -689,13 +688,29 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
     let mut cur_rekening = String::new();
     let mut cur_tegenrekening = String::new();
     let mut cur_bedrag = String::new();
+    let mut cur_boeking_oms = String::new();
+
+    // Current rekening (file chart)
+    let mut cur_rek_code = String::new();
+    let mut cur_rek_oms = String::new();
+    let mut cur_rek_soort = String::new();
+
+    // Header extras (plan + report only)
+    let mut start_date = String::new();
+    let mut end_date = String::new();
+    let mut software_name = String::new();
+    let mut software_version = String::new();
+
+    // Collected file chart + parsed mutaties (validation stays inline)
+    let mut file_chart: Vec<Value> = Vec::new();
+    let mut parsed_mutaties: Vec<Value> = Vec::new();
+    let mut cur_postings: Vec<Value> = Vec::new();
 
     // Counters
-    let mut mutations_count = 0i64;
     let mut errors: Vec<String> = Vec::new();
 
     // Post-validation
-    let mut imported = 0i64;
+    let mut imported: Vec<Value> = Vec::new();
     let mut accounts_created: Vec<Value> = Vec::new();
     let mut duplicates = 0i64;
     let mut ignored_btw_codes: Vec<String> = Vec::new();
@@ -716,13 +731,12 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
                     "XafHeader" | "Header" => in_header = true,
                     "Rekeningen" => {
                         in_rekeningen = true;
-                        has_accounts = true;
                     }
                     "Mutatie" => {
                         in_mutatie = true;
-                        mutations_count += 1;
                         cur_boekstuk.clear();
                         cur_date.clear();
+                        cur_postings.clear();
                         boekingen_in_mutation = 0;
                     }
                     "Boeking" => {
@@ -744,9 +758,16 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
                         "CompanyID" if in_header => company_id = text,
                         "CompanyName" if in_header => company_name = text,
                         "FiscalYear" if in_header => fiscal_year = text,
+                        "StartDate" if in_header => start_date = text.trim().to_string(),
+                        "EndDate" if in_header => end_date = text.trim().to_string(),
+                        "SoftwareName" if in_header => software_name = text.trim().to_string(),
+                        "SoftwareVersion" if in_header => {
+                            software_version = text.trim().to_string()
+                        }
                         // Rekeningen section
                         "RekeningCode" if in_rekeningen && !in_mutatie => {
                             let code = text.trim().to_string();
+                            cur_rek_code = code.clone();
                             if !valid_code(&code) {
                                 errors.push(format!(
                                     "INVALID_CODE: rekening code '{code}' must be 1-6 digits"
@@ -759,6 +780,12 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
                                 seen_rekening_codes.insert(code.clone());
                                 file_codes.insert(code);
                             }
+                        }
+                        "RekeningOmschrijving" if in_rekeningen && !in_mutatie => {
+                            cur_rek_oms = text.trim().to_string()
+                        }
+                        "RekeningSoort" if in_rekeningen && !in_mutatie => {
+                            cur_rek_soort = text.trim().to_string()
                         }
                         // Mutatie fields
                         "Boekstuknummer" if in_mutatie && !in_boeking => {
@@ -776,6 +803,15 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
                         }
                         "Bedrag" if in_boeking => {
                             cur_bedrag = text.trim().to_string();
+                        }
+                        "Omschrijving" if in_boeking => {
+                            cur_boeking_oms = text.trim().to_string();
+                        }
+                        "BtwCode" if in_boeking => {
+                            let c = text.trim().to_string();
+                            if !c.is_empty() && !ignored_btw_codes.contains(&c) {
+                                ignored_btw_codes.push(c);
+                            }
                         }
                         _ => {}
                     }
@@ -832,7 +868,24 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
                             }
                             _ => {}
                         }
+                        // collect the posting — validation above has already run
+                        cur_postings.push(json!({
+                            "rekening": cur_rekening.trim(),
+                            "tegenrekening": cur_tegenrekening.trim(),
+                            "bedragCents": parse_import_amount(&cur_bedrag).unwrap_or(0),
+                            "omschrijving": std::mem::take(&mut cur_boeking_oms),
+                        }));
                         in_boeking = false;
+                    }
+                    "Rekening" if !in_mutatie => {
+                        file_chart.push(json!({
+                            "code": cur_rek_code.trim(),
+                            "name": cur_rek_oms.trim(),
+                            "soort": cur_rek_soort.trim(),
+                        }));
+                        cur_rek_code.clear();
+                        cur_rek_oms.clear();
+                        cur_rek_soort.clear();
                     }
                     "Mutatie" => {
                         let boekstuk_label = if cur_boekstuk.is_empty() {
@@ -857,6 +910,11 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
                                 "NO_BOEKINGEN: mutatie '{boekstuk_label}' has no <Boeking> rows"
                             ));
                         }
+                        parsed_mutaties.push(json!({
+                            "boekstuk": cur_boekstuk.trim(),
+                            "date": cur_date.trim(),
+                            "postings": std::mem::take(&mut cur_postings),
+                        }));
                         in_mutatie = false;
                         boekingen_in_mutation = 0;
                     }
@@ -884,15 +942,19 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
             root_element
         ));
     }
-    // Version
+    // Version — refuse immediately, like the JS importer: a file from another
+    // schema generation must not be half-read
     if !valid_version(&version) {
-        errors.push(format!(
-            "unsupported audit file version '{}' — expected 4.x",
-            if version.is_empty() {
-                "(missing)"
-            } else {
-                &version
-            }
+        return Err(import_err(
+            "INVALID_XAF",
+            format!(
+                "unsupported audit file version '{}' — expected 4.0",
+                if version.is_empty() {
+                    "(missing)"
+                } else {
+                    &version
+                }
+            ),
         ));
     }
     // Company KVK cross-check
@@ -912,8 +974,16 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
         let file_kvk = company_id.trim();
         let file_name = company_name.trim();
         if !file_kvk.is_empty() && !db_reg.is_empty() && file_kvk != db_reg {
-            errors.push(format!(
-                "COMPANY_MISMATCH: audit file is for {file_kvk} ({file_name}), database is for {db_reg} ({db_name})"
+            return Err(import_err(
+                "COMPANY_MISMATCH",
+                format!(
+                    "audit file is for {file_kvk} ({}), database is for {db_reg} ({db_name})",
+                    if file_name.is_empty() {
+                        "unknown"
+                    } else {
+                        file_name
+                    }
+                ),
             ));
         }
         if !file_kvk.is_empty() && db_reg.is_empty() {
@@ -925,50 +995,231 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
             ));
         }
     }
-    // Section presence
-    if !has_accounts && mutations_count > 0 {
-        errors.push("XAF has mutations but no <Rekeningen> section — nothing imported".into());
-    }
 
     // --- Phase 3: Report ---
     if !errors.is_empty() {
-        return Err(import_err(
+        return Err(BukioError::with_details(
             "IMPORT_VALIDATION_FAILED",
             format!(
-                "XAF validation: {} problem(s) — nothing imported",
+                "XAF file has {} problem(s) — nothing imported",
                 errors.len()
             ),
+            json!(errors
+                .iter()
+                .map(|e| json!({"line": 0, "error": e}))
+                .collect::<Vec<_>>()),
         ));
     }
 
+    // net movement per code (file chart + used codes) for type inference
+    let mut net: HashMap<String, i64> = HashMap::new();
+    for r in &file_chart {
+        net.insert(r["code"].as_str().unwrap_or("").to_string(), 0);
+    }
+    for m in &parsed_mutaties {
+        for p in m["postings"].as_array().unwrap_or(&vec![]) {
+            let cents = p["bedragCents"].as_i64().unwrap_or(0);
+            let rek = p["rekening"].as_str().unwrap_or("").to_string();
+            let teg = p["tegenrekening"].as_str().unwrap_or("").to_string();
+            *net.entry(rek).or_insert(0) += cents;
+            *net.entry(teg).or_insert(0) -= cents;
+        }
+    }
+
+    let existing_refs: HashSet<String> = {
+        let mut stmt = db
+            .prepare("SELECT source_ref FROM journal_entries WHERE source = 'xaf' AND source_ref IS NOT NULL")
+            .map_err(sql_err)?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .map_err(sql_err)?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    let val_or_null = |s: &str| {
+        if s.trim().is_empty() {
+            Value::Null
+        } else {
+            Value::String(s.trim().to_string())
+        }
+    };
+    let file_kvk = val_or_null(&company_id);
+    let file_name = val_or_null(&company_name);
+    let fiscal_year_v = val_or_null(&fiscal_year);
+    let start_date_v = val_or_null(&start_date);
+    let end_date_v = val_or_null(&end_date);
+    let software = if software_name.trim().is_empty() {
+        Value::Null
+    } else {
+        Value::String(
+            format!("{} {}", software_name.trim(), software_version.trim())
+                .trim()
+                .to_string(),
+        )
+    };
+
+    let plan = json!({
+        "action": "import xaf",
+        "company": {
+            "name": file_name,
+            "registration_id": file_kvk,
+            "fiscal_year": fiscal_year_v,
+            "period": format!("{}..{}", start_date.trim(), end_date.trim()),
+        },
+        "software": software,
+        "rekeningen": file_chart.len(),
+        "mutaties": parsed_mutaties.len(),
+        "duplicates": parsed_mutaties
+            .iter()
+            .filter(|m| existing_refs.contains(m["boekstuk"].as_str().unwrap_or("")))
+            .count(),
+        "accounts_to_create": file_chart
+            .iter()
+            .filter(|r| get_account_by_code(db, r["code"].as_str().unwrap_or("")).is_none())
+            .count(),
+        "accounts_to_rename": file_chart
+            .iter()
+            .map(|r| (
+                r["code"].as_str().unwrap_or("").trim().to_string(),
+                r["name"].as_str().unwrap_or("").trim().to_string(),
+            ))
+            .filter(|(code, name)| {
+                if name.is_empty() {
+                    return false;
+                }
+                match get_account_by_code(db, code) {
+                    Some(e) => xt(e.get("name")).to_lowercase() != name.to_lowercase(),
+                    None => false,
+                }
+            })
+            .map(|(code, name)| json!({"code": code, "name": name}))
+            .collect::<Vec<_>>(),
+        "company_mismatch": company_mismatch,
+        "ignored_btw_codes": ignored_btw_codes,
+        "dryRun": true,
+    });
     if dry_run {
-        return Ok(json!({
-            "dryRun": true,
-            "company": { "name": company_name, "registration_id": company_id },
-            "fiscal_year": fiscal_year,
-            "rekeningen": file_codes.len() as i64,
-            "mutaties": mutations_count,
-            "accounts_to_create": 0,
-            "accounts_to_rename": [],
-            "duplicates": duplicates,
-            "ignored_btw_codes": ignored_btw_codes,
-            "company_mismatch": company_mismatch,
-            "accounts_created": [],
-            "accounts_updated": [],
-            "accounts_rgs_backfilled": [],
-            "chart_warnings": [],
+        return Ok(plan);
+    }
+
+    let mut accounts_updated: Vec<Value> = Vec::new();
+    let mut rgs_backfilled: Vec<Value> = Vec::new();
+    let mut chart_warnings: Vec<String> = Vec::new();
+    let mut existing_refs = existing_refs;
+
+    // upsert the file's chart
+    for r in &file_chart {
+        let code = r["code"].as_str().unwrap_or("").trim().to_string();
+        let name = {
+            let n = r["name"].as_str().unwrap_or("").trim().to_string();
+            if n.is_empty() {
+                format!("Rekening {code}")
+            } else {
+                n
+            }
+        };
+        let hint = rekening_type(
+            r["soort"].as_str().unwrap_or(""),
+            *net.get(&code).unwrap_or(&0),
+        );
+        sync_account_from_file(
+            db,
+            &code,
+            &name,
+            Some(hint),
+            &mut accounts_created,
+            &mut accounts_updated,
+            &mut chart_warnings,
+            &mut rgs_backfilled,
+        )?;
+    }
+    for m in &parsed_mutaties {
+        let boekstuk = m["boekstuk"].as_str().unwrap_or("").to_string();
+        if existing_refs.contains(&boekstuk) {
+            // same-file duplicate boekstuknummer -> skip (parity with AuditFile)
+            duplicates += 1;
+            continue;
+        }
+        let mut postings: Vec<PostingSpec> = Vec::new();
+        for p in m["postings"].as_array().unwrap_or(&vec![]) {
+            let cents = p["bedragCents"].as_i64().unwrap_or(0);
+            postings.push(PostingSpec {
+                code: p["rekening"].as_str().unwrap_or("").to_string(),
+                amount_cents: cents,
+                cost_center_code: None,
+                vat_code: None,
+                vat_amount_cents: None,
+            });
+            postings.push(PostingSpec {
+                code: p["tegenrekening"].as_str().unwrap_or("").to_string(),
+                amount_cents: -cents,
+                cost_center_code: None,
+                vat_code: None,
+                vat_amount_cents: None,
+            });
+        }
+        let description = m["postings"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .find_map(|p| p["omschrijving"].as_str().filter(|s| !s.is_empty()))
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("XAF {boekstuk}"));
+        let entry = create_entry(
+            db,
+            CreateEntry {
+                date: m["date"].as_str().unwrap_or(""),
+                description: &description,
+                postings,
+                source: "xaf",
+                source_ref: Some(boekstuk.as_str()),
+                actor,
+            },
+        )?;
+        let posted = post_entry(db, entry.id, actor)?;
+        existing_refs.insert(boekstuk.clone());
+        imported.push(json!({
+            "id": posted.id, "date": posted.date,
+            "description": posted.description, "boekstuk": boekstuk,
         }));
     }
 
-    // Full import (unchanged stub for now)
+    record(
+        db,
+        RecordArgs {
+            actor,
+            action: "import.xaf",
+            command: Some("import xaf"),
+            args: Some(json!({
+                "mutaties": imported.len(), "duplicates": duplicates,
+                "accounts_created": accounts_created.len(),
+                "accounts_updated": accounts_updated.len(),
+                "accounts_rgs_backfilled": rgs_backfilled.len(),
+            })),
+            outcome: "ok",
+            entry_ids: imported.iter().filter_map(|e| e["id"].as_i64()).collect(),
+        },
+    )?;
+
     Ok(json!({
-        "imported": imported,
+        "imported": imported.len(),
         "duplicates": duplicates,
+        "entries": imported,
         "accounts_created": accounts_created,
-        "accounts_updated": [],
-        "accounts_rgs_backfilled": [],
+        "accounts_updated": accounts_updated,
+        "accounts_rgs_backfilled": rgs_backfilled,
+        "chart_warnings": chart_warnings,
+        "header": {
+            "company_name": file_name,
+            "company_registration_id": file_kvk,
+            "fiscal_year": fiscal_year_v,
+            "start_date": start_date_v,
+            "end_date": end_date_v,
+            "software": software,
+        },
+        "company_mismatch": company_mismatch,
         "ignored_btw_codes": ignored_btw_codes,
-        "chart_warnings": [],
+        "dryRun": false,
     }))
 }
 
@@ -1062,6 +1313,23 @@ fn is_audit_version(v: &str) -> bool {
 
 fn is_eight_digits(s: &str) -> bool {
     s.len() == 8 && s.chars().all(|c| c.is_ascii_digit())
+}
+
+/// XAF RekeningSoort -> account type (net movement decides asset vs liability).
+fn rekening_type(soort: &str, net_cents: i64) -> (String, String) {
+    let balans = soort.to_lowercase().contains("balans");
+    let credit = net_cents < 0;
+    if balans {
+        if credit {
+            ("liability".to_string(), "credit".to_string())
+        } else {
+            ("asset".to_string(), "debit".to_string())
+        }
+    } else if credit {
+        ("income".to_string(), "credit".to_string())
+    } else {
+        ("expense".to_string(), "debit".to_string())
+    }
 }
 
 /// Fallback type when the file gives none: net credit movement = income.
