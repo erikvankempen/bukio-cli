@@ -14,7 +14,7 @@ use quick_xml::events::Event;
 use quick_xml::Reader;
 use rusqlite::Connection;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
 fn import_err(code: &'static str, msg: impl Into<String>) -> BukioError {
@@ -710,100 +710,123 @@ pub fn import_contacts(
     actor: &str,
     dry_run: bool,
 ) -> Result<Value> {
-    let mut reader = Reader::from_str(xml_text);
-    let mut buf = Vec::new();
-    let mut contacts: Vec<HashMap<String, String>> = Vec::new();
-    let mut cur: HashMap<String, String> = HashMap::new();
-    let mut field = String::new();
-
-    loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                let t = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                match t.as_str() {
-                    "Supplier" | "Customer" | "Party" => {
-                        cur.clear();
-                    }
-                    "Name" | "StreetName" | "CityName" | "PostalZone" | "Country" | "CompanyID"
-                    | "EndpointID" | "Telephone" => {
-                        field = t;
-                    }
-                    _ => {}
-                }
-            }
-            Ok(Event::Text(e)) => {
-                let txt = e.unescape().map(|u| u.to_string()).unwrap_or_default();
-                if !field.is_empty() && !txt.trim().is_empty() {
-                    cur.insert(field.clone(), txt.trim().to_string());
-                }
-            }
-            Ok(Event::End(e)) => {
-                let t = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                if matches!(t.as_str(), "Supplier" | "Customer" | "Party") {
-                    if let Some(name) = cur.get("Name") {
-                        if !name.is_empty() {
-                            contacts.push(cur.clone());
-                        }
-                    }
-                    cur.clear();
-                }
-                field.clear();
-            }
-            Ok(Event::Eof) | Err(_) => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-    if contacts.is_empty() {
-        return Err(import_err("EMPTY_CONTACTS", "no contacts in XML"));
-    }
-
-    let existing: std::collections::HashSet<String> = db
-        .prepare("SELECT name FROM contacts")
-        .map_err(sql_err)?
-        .query_map([], |r| r.get::<_, String>(0))
-        .map_err(sql_err)?
-        .filter_map(|r| r.ok())
-        .map(|n| n.to_lowercase())
-        .collect();
-    let dupes = contacts
+    let tree = xml_tree(xml_text)?;
+    let root = ["Xaf", "XAF", "AuditFile"]
         .iter()
-        .filter(|c| existing.contains(&c.get("Name").unwrap_or(&String::new()).to_lowercase()))
-        .count();
+        .find_map(|k| tree.get(*k))
+        .ok_or_else(|| import_err("INVALID_XAF", "root element must be <Xaf> or <AuditFile>"))?;
+    let mf = root.get("MasterFiles").unwrap_or(root);
+    let suppliers = xa(mf.get("Suppliers").and_then(|s| s.get("Supplier")));
+    let customers = xa(mf.get("Customers").and_then(|c| c.get("Customer")));
+
+    let mut errors: Vec<Value> = Vec::new();
+    let mut rows: Vec<Value> = Vec::new();
+    for (kind, list, id_tag) in [
+        ("supplier", &suppliers, "SupplierID"),
+        ("customer", &customers, "CustomerID"),
+    ] {
+        for raw in list {
+            let id = xt(raw.get(id_tag));
+            let name = {
+                let n = xt(raw.get("CompanyName"));
+                if n.is_empty() {
+                    xt(raw.get("Contact"))
+                } else {
+                    n
+                }
+            };
+            if name.is_empty() {
+                errors.push(json!({
+                    "line": 0,
+                    "error": format!(
+                        "CONTACT_REQUIRED: {kind} '{}' has no CompanyName/Contact",
+                        if id.is_empty() { "?" } else { id.as_str() }
+                    ),
+                }));
+                continue;
+            }
+            let addr = raw.get("Address");
+            let street = xt(addr.and_then(|a| a.get("StreetName")));
+            let extra = xt(addr.and_then(|a| a.get("AdditionalAddressDetail")));
+            let address = if extra.is_empty() {
+                street
+            } else {
+                format!("{street}, {extra}")
+            };
+            let country = {
+                let c = xt(addr.and_then(|a| a.get("Country"))).to_uppercase();
+                if c.is_empty() {
+                    "NL".to_string()
+                } else {
+                    c
+                }
+            };
+            rows.push(json!({
+                "kind": kind,
+                "name": name,
+                "address": s_or_null(&address),
+                "postal_code": s_or_null(&xt(addr.and_then(|a| a.get("PostalCode")))),
+                "city": s_or_null(&xt(addr.and_then(|a| a.get("City")))),
+                "country": country,
+                "email": s_or_null(&xt(raw.get("Email"))),
+                "vat_id": s_or_null(&xt(raw.get("TaxRegistrationNumber"))),
+            }));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(BukioError::with_details(
+            "IMPORT_VALIDATION_FAILED",
+            format!(
+                "audit file has {} problem(s) — nothing imported",
+                errors.len()
+            ),
+            json!(errors),
+        ));
+    }
+
+    let existing: HashSet<String> = crate::contacts::list_contacts(db)?
+        .iter()
+        .map(|c| xt(c.get("name")).to_lowercase())
+        .collect();
+    let mut seen: HashSet<String> = HashSet::new();
+    let fresh: Vec<&Value> = rows
+        .iter()
+        .filter(|r| {
+            let key = r["name"].as_str().unwrap_or("").to_lowercase();
+            if seen.contains(&key) || existing.contains(&key) {
+                return false;
+            }
+            seen.insert(key);
+            true
+        })
+        .collect();
+    let duplicates = rows.len() - fresh.len();
 
     if dry_run {
-        return Ok(
-            json!({"action": "import contacts", "contacts": contacts.len(), "duplicates": dupes, "dryRun": true}),
-        );
+        return Ok(json!({
+            "suppliers": suppliers.len(), "customers": customers.len(),
+            "contacts": rows.len(), "contacts_to_create": fresh.len(),
+            "duplicates": duplicates, "dryRun": true,
+        }));
     }
 
-    let mut count = 0;
-    for c in &contacts {
-        let default_name = String::new();
-        let name = c.get("Name").unwrap_or(&default_name);
-        if existing.contains(&name.to_lowercase()) {
-            continue;
-        }
-        let postal = c.get("PostalZone").cloned().unwrap_or_default();
-        let street = c.get("StreetName").cloned();
-        let city = c.get("CityName").cloned();
-        let country = c.get("Country").cloned();
-        let kvk = c.get("CompanyID").or_else(|| c.get("EndpointID")).cloned();
-        create_contact(
+    let mut imported: Vec<Value> = Vec::new();
+    for r in &fresh {
+        let contact = create_contact(
             db,
-            name,
-            street.as_deref(),
-            Some(&postal),
-            city.as_deref(),
-            country.as_deref(),
+            r["name"].as_str().unwrap_or(""),
+            r["address"].as_str(),
+            r["postal_code"].as_str(),
+            r["city"].as_str(),
+            r["country"].as_str(),
+            r["email"].as_str(),
+            r["vat_id"].as_str(),
             None,
-            None,
-            kvk.as_deref(),
             None,
             actor,
             false,
         )?;
-        count += 1;
+        imported.push(json!({"id": contact["id"], "name": contact["name"], "kind": r["kind"]}));
     }
     record(
         db,
@@ -811,12 +834,18 @@ pub fn import_contacts(
             actor,
             action: "import.contacts",
             command: Some("import contacts"),
-            args: Some(json!({"contacts": count})),
+            args: Some(json!({
+                "imported": imported.len(), "duplicates": duplicates,
+                "suppliers": suppliers.len(), "customers": customers.len(),
+            })),
             outcome: "ok",
             entry_ids: vec![],
         },
     )?;
-    Ok(json!({"ok": true, "imported": count, "duplicates": dupes, "dryRun": false}))
+    Ok(json!({
+        "imported": imported.len(), "duplicates": duplicates, "contacts": imported,
+        "suppliers": suppliers.len(), "customers": customers.len(), "dryRun": false,
+    }))
 }
 
 pub fn read_import_file(path: &str) -> Result<String> {
@@ -1508,6 +1537,15 @@ fn xt(v: Option<&Value>) -> String {
         Some(Value::String(s)) => s.trim().to_string(),
         Some(Value::Null) | None => String::new(),
         Some(other) => other.to_string(),
+    }
+}
+
+/// Empty string -> JSON null (the JS importers normalise '' to null).
+fn s_or_null(s: &str) -> Value {
+    if s.is_empty() {
+        Value::Null
+    } else {
+        Value::String(s.to_string())
     }
 }
 
@@ -2435,5 +2473,933 @@ mod tests {
         assert!(parse_import_amount("").is_err());
         assert!(parse_import_amount("abc").is_err());
         assert!(parse_import_amount("12.345,678").is_err());
+    }
+
+    // ==== ported from test/import.test.js ====================================
+
+    use crate::accounts::{get_account_by_code, import_chart_csv, infer_rgs, seed_default_chart};
+    use crate::contacts::list_contacts;
+    use crate::db::open_db;
+    use crate::entries::{create_entry, get_entry, list_entries, post_entry, reverse_entry};
+    use crate::money::BukioError;
+
+    fn setup() -> Connection {
+        let db = open_db(":memory:").unwrap();
+        seed_default_chart(&db).unwrap();
+        db.execute(
+            "INSERT INTO company (name, legal_form, registration_id, tax_id, vat_module) \
+             VALUES ('Demo BV','bv','12345678','NL123456789B01',0)",
+            [],
+        )
+        .unwrap();
+        db
+    }
+
+    fn spec(items: &[(&str, i64)]) -> Vec<PostingSpec> {
+        items
+            .iter()
+            .map(|(c, a)| PostingSpec {
+                code: c.to_string(),
+                amount_cents: *a,
+                cost_center_code: None,
+                vat_code: None,
+                vat_amount_cents: None,
+            })
+            .collect()
+    }
+
+    /// The details[] of an IMPORT_VALIDATION_FAILED, as plain message strings.
+    fn details(err: &BukioError) -> Vec<String> {
+        err.details
+            .as_ref()
+            .and_then(|d| d.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|e| e["error"].as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn has_detail(err: &BukioError, needle: &str) -> bool {
+        details(err).iter().any(|d| d.contains(needle))
+    }
+
+    fn has_detail_prefix(err: &BukioError, prefix: &str) -> bool {
+        details(err).iter().any(|d| d.starts_with(prefix))
+    }
+
+    /// {account_code: cents} of a typed entry, keys sorted.
+    fn entry_sums(e: &crate::entries::Entry) -> Vec<(String, i64)> {
+        let mut m: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+        for p in &e.postings {
+            *m.entry(p.account_code.clone()).or_insert(0) += p.amount_cents;
+        }
+        m.into_iter().collect()
+    }
+
+    fn posted(db: &Connection) -> Vec<Value> {
+        list_entries(db, Some("posted"), None, None, 1000).unwrap()
+    }
+
+    /// The typed entry carrying this source_ref (`list_entries` omits source_ref).
+    fn entry_by_source_ref(db: &Connection, r: &str) -> crate::entries::Entry {
+        for e in list_entries(db, None, None, None, 1000).unwrap() {
+            if let Some(id) = e["id"].as_i64() {
+                if let Some(entry) = get_entry(db, id) {
+                    if entry.source_ref.as_deref() == Some(r) {
+                        return entry;
+                    }
+                }
+            }
+        }
+        panic!("no entry with source_ref {r}")
+    }
+
+    #[test]
+    fn parse_import_amount_international_dutch_and_thousands_dot() {
+        assert_eq!(parse_import_amount("1234.56").unwrap(), 123456);
+        assert_eq!(parse_import_amount("1234,56").unwrap(), 123456);
+        assert_eq!(parse_import_amount("1.234,56").unwrap(), 123456);
+        assert_eq!(parse_import_amount("0,50").unwrap(), 50);
+        assert_eq!(parse_import_amount("-12,50").unwrap(), -1250);
+        assert_eq!(
+            parse_import_amount("abc").unwrap_err().code,
+            "INVALID_AMOUNT"
+        );
+        assert_eq!(
+            parse_import_amount("1.234").unwrap_err().code,
+            "INVALID_AMOUNT"
+        );
+        assert_eq!(parse_import_amount("").unwrap_err().code, "INVALID_AMOUNT");
+    }
+
+    #[test]
+    fn opening_balances_imports_one_posted_beginbalans_entry() {
+        let db = setup();
+        let res = import_opening_balances(
+            &db,
+            "1100,10000.00\n3000,-10000.00\n",
+            Some("2026-01-01"),
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        assert_eq!(res["entry"]["state"].as_str(), Some("posted"));
+        assert_eq!(res["accounts"].as_i64(), Some(2));
+        let e = get_entry(&db, res["entry"]["id"].as_i64().unwrap()).unwrap();
+        assert_eq!(e.description, "Beginbalans");
+        assert_eq!(e.source, "import");
+        assert_eq!(e.source_ref.as_deref(), Some("opening-balances"));
+        assert_eq!(e.created_by, "agent:test");
+    }
+
+    #[test]
+    fn opening_balances_dutch_code_debet_credit_layout() {
+        let db = setup();
+        import_opening_balances(
+            &db,
+            "1100,10000.00,\n3000,,10000.00\n",
+            Some("2026-01-01"),
+            "human:erik",
+            false,
+        )
+        .unwrap();
+        let e = entry_by_source_ref(&db, "opening-balances");
+        assert_eq!(
+            entry_sums(&e),
+            vec![
+                ("1100".to_string(), 1000000),
+                ("3000".to_string(), -1000000)
+            ]
+        );
+    }
+
+    #[test]
+    fn opening_balances_validation_collects_all_errors_and_writes_nothing() {
+        let db = setup();
+        let err = import_opening_balances(
+            &db,
+            "1100,5000.00\n9999,3000.00\n1100,abc\n",
+            Some("2026-01-01"),
+            "human:erik",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "IMPORT_VALIDATION_FAILED");
+        assert_eq!(details(&err).len(), 3); // ACCOUNT_NOT_FOUND, INVALID_AMOUNT, UNBALANCED
+        assert!(has_detail(&err, "9999"));
+        assert!(has_detail(&err, "abc"));
+        assert!(has_detail_prefix(&err, "UNBALANCED"));
+        assert_eq!(list_entries(&db, None, None, None, 1000).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn opening_balances_reimport_is_rejected() {
+        let db = setup();
+        import_opening_balances(
+            &db,
+            "1100,1.00\n3000,-1.00\n",
+            Some("2026-01-01"),
+            "human:erik",
+            false,
+        )
+        .unwrap();
+        let err = import_opening_balances(
+            &db,
+            "1100,2.00\n3000,-2.00\n",
+            Some("2026-01-02"),
+            "human:erik",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "OPENING_ALREADY_IMPORTED");
+    }
+
+    #[test]
+    fn opening_balances_reimport_succeeds_after_reversing_the_opening_entry() {
+        let db = setup();
+        let res = import_opening_balances(
+            &db,
+            "1100,1.00\n3000,-1.00\n",
+            Some("2026-01-01"),
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        let first_id = res["entry"]["id"].as_i64().unwrap();
+        reverse_entry(&db, first_id, "agent:test", None).unwrap();
+        // the reversal nets the old balances to zero — a fresh import is allowed
+        let res2 = import_opening_balances(
+            &db,
+            "1100,2.00\n3000,-2.00\n",
+            Some("2026-01-02"),
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        let second_id = res2["entry"]["id"].as_i64().unwrap();
+        assert_ne!(second_id, first_id, "a NEW opening entry is created");
+        let e = get_entry(&db, second_id).unwrap();
+        assert_eq!(
+            entry_sums(&e),
+            vec![("1100".to_string(), 200), ("3000".to_string(), -200)]
+        );
+    }
+
+    #[test]
+    fn opening_balances_dry_run_validates_and_writes_nothing() {
+        let db = setup();
+        let plan = import_opening_balances(
+            &db,
+            "1100,1.00\n3000,-1.00\n",
+            Some("2026-01-01"),
+            "human:erik",
+            true,
+        )
+        .unwrap();
+        assert_eq!(plan["accounts"].as_i64(), Some(2));
+        assert_eq!(plan["total_debit_cents"].as_i64(), Some(100));
+        assert_eq!(plan["total_credit_cents"].as_i64(), Some(100));
+        assert_eq!(list_entries(&db, None, None, None, 1000).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn opening_balances_zero_amount_rejected() {
+        let db = setup();
+        let err = import_opening_balances(
+            &db,
+            "1100,0.00\n3000,-0.00\n",
+            Some("2026-01-01"),
+            "human:erik",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "IMPORT_VALIDATION_FAILED");
+        assert!(has_detail(&err, "non-zero"));
+    }
+
+    const JOURNAL: &str = "Datum;Boekstuknummer;Rekening;Tegenrekening;Bedrag;Omschrijving\n\
+2026-01-05;J1;1100;8000;1210,00;Verkoop 1\n\
+2026-01-05;J1;3000;1100;210,00;correctie eigen vermogen\n\
+2026-01-20;J2;1100;8000;605,00;Verkoop 2\n\
+2026-01-20;J2;3000;1100;105,00;correctie eigen vermogen";
+
+    #[test]
+    fn journal_one_posted_entry_per_boekstuk_two_postings_per_line() {
+        let db = setup();
+        let res = import_journal_csv(&db, JOURNAL, false, "agent:test", false).unwrap();
+        assert_eq!(res["imported"].as_i64(), Some(2));
+        let entries = posted(&db);
+        assert_eq!(entries.len(), 2);
+        let j1 = entry_by_source_ref(&db, "journal:J1");
+        assert_eq!(j1.source, "import");
+        assert_eq!(j1.description, "Verkoop 1");
+        assert_eq!(
+            entry_sums(&j1),
+            vec![
+                ("1100".to_string(), 100000),
+                ("3000".to_string(), 21000),
+                ("8000".to_string(), -121000),
+            ]
+        );
+    }
+
+    #[test]
+    fn journal_idempotent_reimport_skips_existing_boekstukken() {
+        let db = setup();
+        assert_eq!(
+            import_journal_csv(&db, JOURNAL, false, "human:erik", false).unwrap()["imported"]
+                .as_i64(),
+            Some(2)
+        );
+        let res = import_journal_csv(&db, JOURNAL, false, "human:erik", false).unwrap();
+        assert_eq!(res["imported"].as_i64(), Some(0));
+        assert_eq!(res["duplicates"].as_i64(), Some(2));
+        assert_eq!(list_entries(&db, None, None, None, 1000).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn journal_comma_delimited_with_semicolon_inside_a_quoted_field() {
+        let db = setup();
+        let csv = "datum,boekstuknummer,rekening,tegenrekening,bedrag,omschrijving\n\
+2026-01-05,J1,1100,8000,100.00,\"Consultancy; tweede termijn\"\n\
+2026-01-06,J2,1100,8000,50.00,Zonder puntkomma";
+        let res = import_journal_csv(&db, csv, false, "agent:test", false).unwrap();
+        assert_eq!(res["imported"].as_i64(), Some(2));
+        let entries = posted(&db);
+        assert_eq!(entries.len(), 2);
+        let j1 = entry_by_source_ref(&db, "journal:J1");
+        assert_eq!(
+            j1.description, "Consultancy; tweede termijn",
+            "the quoted field must survive intact"
+        );
+        assert_eq!(
+            entry_sums(&j1),
+            vec![("1100".to_string(), 10000), ("8000".to_string(), -10000)]
+        );
+    }
+
+    #[test]
+    fn journal_unknown_account_fails_whole_file_validation_without_create_missing() {
+        let db = setup();
+        let err = import_journal_csv(
+            &db,
+            &JOURNAL.replace("3000", "9999"),
+            false,
+            "human:erik",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "IMPORT_VALIDATION_FAILED");
+        assert!(has_detail(&err, "9999"));
+        assert_eq!(list_entries(&db, None, None, None, 1000).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn journal_create_missing_infers_type_from_net_movement() {
+        let db = setup();
+        let csv = JOURNAL.replace("3000", "9999").replace("8000", "9998");
+        let res = import_journal_csv(&db, &csv, true, "human:erik", false).unwrap();
+        assert_eq!(res["imported"].as_i64(), Some(2));
+        assert!(res["accounts_created"].as_array().unwrap().len() >= 2);
+        // 9999 net +315 (debet) -> expense; 9998 net -1815 (credit) -> income
+        assert_eq!(
+            get_account_by_code(&db, "9999").unwrap()["type"].as_str(),
+            Some("expense")
+        );
+        assert_eq!(
+            get_account_by_code(&db, "9998").unwrap()["type"].as_str(),
+            Some("income")
+        );
+    }
+
+    #[test]
+    fn journal_bad_amount_and_date_mismatch_are_both_collected() {
+        let db = setup();
+        let csv = "Datum;Boekstuknummer;Rekening;Tegenrekening;Bedrag\n\
+2026-01-05;J1;1100;8000;abc\n\
+2026-01-06;J1;1100;8000;10.00";
+        let err = import_journal_csv(&db, csv, false, "human:erik", false).unwrap_err();
+        assert_eq!(err.code, "IMPORT_VALIDATION_FAILED");
+        assert!(has_detail_prefix(&err, "INVALID_AMOUNT"));
+        assert!(has_detail_prefix(&err, "DATE_MISMATCH"));
+    }
+
+    #[test]
+    fn journal_missing_required_header_column_rejected() {
+        let db = setup();
+        let err = import_journal_csv(
+            &db,
+            "Datum;Boekstuknummer;Rekening;Bedrag\n2026-01-05;J1;1100;10.00",
+            false,
+            "human:erik",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID_CSV_HEADER");
+    }
+
+    // --- XAF 4.0 (Belastingdienst <Xaf> layout) -----------------------------
+
+    const XAF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<Xaf xmlns="http://www.auditfiles.nl/XAF/4.0">
+  <XafHeader>
+    <Version>4.0</Version>
+    <CompanyName>Demo BV</CompanyName>
+    <CompanyID>12345678</CompanyID>
+    <FiscalYear>2026</FiscalYear>
+    <StartDate>2026-01-01</StartDate>
+    <EndDate>2026-12-31</EndDate>
+    <SoftwareName>OudPakket</SoftwareName>
+    <SoftwareVersion>1.0</SoftwareVersion>
+  </XafHeader>
+  <Rekeningen>
+    <Rekening><RekeningCode>1250</RekeningCode><RekeningOmschrijving>Kas klein</RekeningOmschrijving><RekeningSoort>Balans</RekeningSoort></Rekening>
+    <Rekening><RekeningCode>8000</RekeningCode><RekeningOmschrijving>Omzet</RekeningOmschrijving><RekeningSoort>Winst en Verlies</RekeningSoort></Rekening>
+  </Rekeningen>
+  <Mutaties>
+    <Mutatie>
+      <Boekstuknummer>2026-0001</Boekstuknummer>
+      <Datum>2026-01-15</Datum>
+      <Boekingen>
+        <Boeking><RekeningCode>1250</RekeningCode><TegenrekeningCode>8000</TegenrekeningCode><Bedrag>100,00</Bedrag><BtwCode>0</BtwCode><Omschrijving>Contante verkoop</Omschrijving></Boeking>
+      </Boekingen>
+    </Mutatie>
+  </Mutaties>
+</Xaf>"#;
+
+    #[test]
+    fn xaf_imports_mutaties_and_creates_file_chart_accounts() {
+        let db = setup();
+        let res = import_xaf(&db, XAF, "agent:test", false).unwrap();
+        assert_eq!(res["imported"].as_i64(), Some(1));
+        assert_eq!(res["header"]["company_name"].as_str(), Some("Demo BV"));
+        assert_eq!(res["header"]["fiscal_year"].as_str(), Some("2026"));
+        // created from the file (debet net -> asset)
+        let kas = get_account_by_code(&db, "1250").expect("1250 Kas klein should be created");
+        assert_eq!(kas["type"].as_str(), Some("asset"));
+        assert!(res["accounts_created"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["code"].as_str() == Some("1250")));
+        let e = entry_by_source_ref(&db, "2026-0001");
+        assert_eq!(e.source, "xaf");
+    }
+
+    #[test]
+    fn xaf_btw_codes_are_reported_not_booked() {
+        let db = setup();
+        let res = import_xaf(&db, XAF, "human:erik", false).unwrap();
+        assert_eq!(res["ignored_btw_codes"], json!(["0"]));
+        let e = get_entry(
+            &db,
+            list_entries(&db, None, None, None, 1000).unwrap()[0]["id"]
+                .as_i64()
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(e.postings.iter().all(|p| p.vat_code.is_none()));
+    }
+
+    #[test]
+    fn xaf_idempotent_per_boekstuknummer() {
+        let db = setup();
+        import_xaf(&db, XAF, "human:erik", false).unwrap();
+        let res = import_xaf(&db, XAF, "human:erik", false).unwrap();
+        assert_eq!(res["imported"].as_i64(), Some(0));
+        assert_eq!(res["duplicates"].as_i64(), Some(1));
+    }
+
+    #[test]
+    fn xaf_rekening_not_in_file_chart_nor_chart_of_accounts_is_a_validation_error() {
+        let db = setup();
+        let bad = XAF.replace(
+            "</Boeking>",
+            "</Boeking><Boeking><RekeningCode>9999</RekeningCode><TegenrekeningCode>8000</TegenrekeningCode><Bedrag>50,00</Bedrag></Boeking>",
+        );
+        let err = import_xaf(&db, &bad, "human:erik", false).unwrap_err();
+        assert_eq!(err.code, "IMPORT_VALIDATION_FAILED");
+        assert!(has_detail(&err, "9999"));
+        assert_eq!(list_entries(&db, None, None, None, 1000).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn xaf_unsupported_version_rejected() {
+        let db = setup();
+        let err = import_xaf(
+            &db,
+            &XAF.replace("<Version>4.0</Version>", "<Version>3.1</Version>"),
+            "human:erik",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID_XAF");
+    }
+
+    #[test]
+    fn xaf_company_mismatch_blocks_importing_another_company() {
+        let db = setup();
+        let err = import_xaf(
+            &db,
+            &XAF.replace(
+                "<CompanyID>12345678</CompanyID>",
+                "<CompanyID>99999999</CompanyID>",
+            ),
+            "human:erik",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "COMPANY_MISMATCH");
+    }
+
+    #[test]
+    fn xaf_name_mismatch_is_only_a_warning() {
+        let db = setup();
+        let res = import_xaf(
+            &db,
+            &XAF.replace(
+                "<CompanyName>Demo BV</CompanyName>",
+                "<CompanyName>Demo B.V. Rotterdam</CompanyName>",
+            ),
+            "human:erik",
+            false,
+        )
+        .unwrap();
+        assert_eq!(res["imported"].as_i64(), Some(1));
+        assert!(res["company_mismatch"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("name differs")));
+    }
+
+    #[test]
+    fn xaf_dry_run_validates_and_writes_nothing() {
+        let db = setup();
+        let plan = import_xaf(&db, XAF, "human:erik", true).unwrap();
+        assert_eq!(plan["mutaties"].as_i64(), Some(1));
+        assert_eq!(plan["accounts_to_create"].as_i64(), Some(1));
+        assert_eq!(list_entries(&db, None, None, None, 1000).unwrap().len(), 0);
+        assert!(get_account_by_code(&db, "1250").is_none());
+    }
+
+    // --- XAF 4.0 AuditFile layout (root <AuditFile>) ------------------------
+
+    const AUDITFILE_XAF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<AuditFile xmlns="https://www.bukio.nl/xaf/4.0" version="4.0" exportedAt="2026-08-06T08:48:22Z">
+  <Header>
+    <AuditFileVersion>4.0</AuditFileVersion>
+    <CompanyID>1</CompanyID>
+    <CompanyName>Demo BV</CompanyName>
+    <FiscalYear>2026</FiscalYear>
+    <StartDate>2026-01-01</StartDate>
+    <EndDate>2026-12-31</EndDate>
+    <CurrencyCode>EUR</CurrencyCode>
+    <SoftwareDescription>Bukio</SoftwareDescription>
+  </Header>
+  <MasterFiles>
+    <GeneralLedgerAccounts>
+      <Account><AccountID>1100</AccountID><AccountDescription>Gebouwen</AccountDescription><AccountType>Asset</AccountType></Account>
+      <Account><AccountID>8000</AccountID><AccountDescription>Omzet</AccountDescription><AccountType>Revenue</AccountType></Account>
+      <Account><AccountID>5100</AccountID><AccountDescription>Crediteuren</AccountDescription><AccountType>Liability</AccountType></Account>
+      <Account><AccountID>7150</AccountID><AccountDescription>Platformkosten</AccountDescription><AccountType>Expense</AccountType></Account>
+    </GeneralLedgerAccounts>
+  </MasterFiles>
+  <GeneralLedgerEntries>
+    <Journal>
+      <JournalID>SAL</JournalID>
+      <Transaction>
+        <TransactionID>2026-00001</TransactionID>
+        <TransactionDate>2026-01-15</TransactionDate>
+        <Description>Factuur 2026-0001</Description>
+        <Line>
+          <RecordID>1</RecordID>
+          <AccountID>1100</AccountID>
+          <Description>Factuur 2026-0001</Description>
+          <DebitAmount>121.00</DebitAmount>
+          <TaxInformation><TaxType>VAT</TaxType><TaxCode>NOVAT</TaxCode><TaxPercentage>0.00</TaxPercentage></TaxInformation>
+        </Line>
+        <Line>
+          <RecordID>2</RecordID>
+          <AccountID>8000</AccountID>
+          <Description>Factuur 2026-0001</Description>
+          <CreditAmount>121.00</CreditAmount>
+        </Line>
+      </Transaction>
+    </Journal>
+  </GeneralLedgerEntries>
+</AuditFile>"#;
+
+    #[test]
+    fn auditfile_imports_transaction_creates_and_renames_chart_accounts() {
+        let db = setup();
+        // the dry-run plan must carry the renamed key (producer + CLI render agree)
+        let plan = import_xaf(&db, AUDITFILE_XAF, "human:erik", true).unwrap();
+        assert_eq!(plan["company"]["registration_id"].as_str(), Some("1")); // the file's <CompanyID>
+        assert!(plan["company"].get("kvk").is_none());
+        let res = import_xaf(&db, AUDITFILE_XAF, "agent:test", false).unwrap();
+        assert_eq!(res["imported"].as_i64(), Some(1));
+        assert_eq!(res["header"]["company_name"].as_str(), Some("Demo BV"));
+        assert_eq!(res["header"]["software"].as_str(), Some("Bukio"));
+        // file accounts missing from the starter chart are created with mapped types
+        assert_eq!(
+            get_account_by_code(&db, "5100").unwrap()["type"].as_str(),
+            Some("liability")
+        );
+        assert_eq!(
+            get_account_by_code(&db, "7150").unwrap()["type"].as_str(),
+            Some("expense")
+        );
+        // colliding codes are renamed on the empty ledger (1100 Bank -> Gebouwen)
+        assert_eq!(
+            get_account_by_code(&db, "1100").unwrap()["name"].as_str(),
+            Some("Gebouwen")
+        );
+        assert_eq!(
+            res["accounts_updated"],
+            json!([{
+                "code": "1100", "from": "Bank", "to": "Gebouwen", "type": "asset",
+                "normal_balance": "debit", "taxonomy_code": "BMVA.02",
+            }])
+        );
+        // NOVAT reported, not booked
+        assert_eq!(res["ignored_btw_codes"], json!(["NOVAT"]));
+        let e = entry_by_source_ref(&db, "2026-00001");
+        assert_eq!(e.source, "xaf");
+        assert_eq!(e.description, "Factuur 2026-0001");
+        assert_eq!(
+            entry_sums(&e),
+            vec![("1100".to_string(), 12100), ("8000".to_string(), -12100)]
+        );
+    }
+
+    #[test]
+    fn auditfile_accounts_with_postings_are_not_renamed() {
+        let db = setup();
+        let e = create_entry(
+            &db,
+            CreateEntry {
+                date: "2026-01-01",
+                description: "Bestaat al",
+                postings: spec(&[("1100", 100), ("3000", -100)]),
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        )
+        .unwrap();
+        post_entry(&db, e.id, "human:erik").unwrap();
+        let res = import_xaf(&db, AUDITFILE_XAF, "human:erik", false).unwrap();
+        assert_eq!(
+            get_account_by_code(&db, "1100").unwrap()["name"].as_str(),
+            Some("Bank")
+        );
+        assert!(res["chart_warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("1100")));
+    }
+
+    #[test]
+    fn auditfile_unbalanced_transaction_fails_whole_file_validation() {
+        let db = setup();
+        let bad = AUDITFILE_XAF.replace(
+            "<CreditAmount>121.00</CreditAmount>",
+            "<CreditAmount>100.00</CreditAmount>",
+        );
+        let err = import_xaf(&db, &bad, "human:erik", false).unwrap_err();
+        assert_eq!(err.code, "IMPORT_VALIDATION_FAILED");
+        assert!(has_detail_prefix(&err, "UNBALANCED"));
+        assert_eq!(list_entries(&db, None, None, None, 1000).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn auditfile_idempotent_per_transaction_id() {
+        let db = setup();
+        import_xaf(&db, AUDITFILE_XAF, "human:erik", false).unwrap();
+        let res = import_xaf(&db, AUDITFILE_XAF, "human:erik", false).unwrap();
+        assert_eq!(res["imported"].as_i64(), Some(0));
+        assert_eq!(res["duplicates"].as_i64(), Some(1));
+    }
+
+    #[test]
+    fn auditfile_dry_run_lists_renames_and_writes_nothing() {
+        let db = setup();
+        let plan = import_xaf(&db, AUDITFILE_XAF, "human:erik", true).unwrap();
+        assert_eq!(plan["mutaties"].as_i64(), Some(1));
+        assert_eq!(plan["accounts_to_create"].as_i64(), Some(2));
+        assert_eq!(
+            plan["accounts_to_rename"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["code"].as_str().unwrap_or(""))
+                .collect::<Vec<_>>(),
+            vec!["1100"]
+        );
+        assert_eq!(list_entries(&db, None, None, None, 1000).unwrap().len(), 0);
+        assert_eq!(
+            get_account_by_code(&db, "1100").unwrap()["name"].as_str(),
+            Some("Bank")
+        );
+    }
+
+    #[test]
+    fn auditfile_company_id_mismatch_is_an_error() {
+        let db = setup();
+        let err = import_xaf(
+            &db,
+            &AUDITFILE_XAF.replace(
+                "<CompanyID>1</CompanyID>",
+                "<CompanyID>99999999</CompanyID>",
+            ),
+            "human:erik",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "COMPANY_MISMATCH");
+    }
+
+    #[test]
+    fn auditfile_company_name_mismatch_is_only_a_warning() {
+        let db = setup();
+        let res = import_xaf(
+            &db,
+            &AUDITFILE_XAF.replace(
+                "<CompanyName>Demo BV</CompanyName>",
+                "<CompanyName>Demo B.V. Rotterdam</CompanyName>",
+            ),
+            "human:erik",
+            false,
+        )
+        .unwrap();
+        assert_eq!(res["imported"].as_i64(), Some(1));
+        assert!(res["company_mismatch"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("name differs")));
+    }
+
+    // --- contacts from audit files ------------------------------------------
+
+    const CONTACTS_XAF: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<AuditFile xmlns="https://www.bukio.nl/xaf/4.0" version="4.0">
+  <Header>
+    <AuditFileVersion>4.0</AuditFileVersion>
+    <CompanyName>Demo BV</CompanyName>
+  </Header>
+  <MasterFiles>
+    <Customers>
+      <Customer>
+        <CustomerID>1</CustomerID>
+        <CompanyName>Daan van der Leen</CompanyName>
+        <Email>daanleen@gmail.com</Email>
+        <Address>
+          <StreetName>Lamarckhof 9-1</StreetName>
+          <PostalCode>1098TK</PostalCode>
+          <City>Amsterdam</City>
+          <Country>NL</Country>
+        </Address>
+      </Customer>
+    </Customers>
+    <Suppliers>
+      <Supplier>
+        <SupplierID>13</SupplierID>
+        <CompanyName>Anomaly</CompanyName>
+        <Contact>Matt</Contact>
+        <Email>help@anoma.ly</Email>
+        <Address>
+          <StreetName>2443 Fillmore Street</StreetName>
+          <PostalCode>94115</PostalCode>
+          <City>San Francisco</City>
+          <Country>us</Country>
+        </Address>
+      </Supplier>
+      <Supplier>
+        <SupplierID>14</SupplierID>
+        <CompanyName>DeluxHost</CompanyName>
+        <Email></Email>
+      </Supplier>
+    </Suppliers>
+  </MasterFiles>
+</AuditFile>"#;
+
+    #[test]
+    fn import_contacts_suppliers_and_customers_mapped() {
+        let db = setup();
+        let res = import_contacts(&db, CONTACTS_XAF, "agent:test", false).unwrap();
+        assert_eq!(res["imported"].as_i64(), Some(3));
+        assert_eq!(res["suppliers"].as_i64(), Some(2));
+        assert_eq!(res["customers"].as_i64(), Some(1));
+        let contacts = list_contacts(&db).unwrap();
+        let find = |name: &str| {
+            contacts
+                .iter()
+                .find(|c| c["name"].as_str() == Some(name))
+                .unwrap_or_else(|| panic!("contact {name}"))
+        };
+        let daan = find("Daan van der Leen");
+        assert_eq!(daan["address"].as_str(), Some("Lamarckhof 9-1"));
+        assert_eq!(daan["postal_code"].as_str(), Some("1098TK"));
+        assert_eq!(daan["city"].as_str(), Some("Amsterdam"));
+        assert_eq!(daan["country"].as_str(), Some("NL"));
+        assert_eq!(daan["email"].as_str(), Some("daanleen@gmail.com"));
+        assert_eq!(find("Anomaly")["country"].as_str(), Some("US")); // normalised to uppercase
+        let delux = find("DeluxHost");
+        assert!(delux["address"].is_null()); // no address in the file
+        let actor: String = db
+            .query_row(
+                "SELECT actor FROM audit_log WHERE action = 'import.contacts' ORDER BY id DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(actor, "agent:test");
+    }
+
+    #[test]
+    fn import_contacts_idempotent_by_name() {
+        let db = setup();
+        import_contacts(&db, CONTACTS_XAF, "human:erik", false).unwrap();
+        let res = import_contacts(&db, CONTACTS_XAF, "human:erik", false).unwrap();
+        assert_eq!(res["imported"].as_i64(), Some(0));
+        assert_eq!(res["duplicates"].as_i64(), Some(3));
+    }
+
+    #[test]
+    fn import_contacts_entry_without_a_name_fails_whole_file_validation() {
+        let db = setup();
+        let bad = CONTACTS_XAF.replace("<CompanyName>DeluxHost</CompanyName>", "");
+        let err = import_contacts(&db, &bad, "human:erik", false).unwrap_err();
+        assert_eq!(err.code, "IMPORT_VALIDATION_FAILED");
+        assert!(has_detail_prefix(&err, "CONTACT_REQUIRED"));
+        assert_eq!(list_contacts(&db).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn import_contacts_dry_run_writes_nothing() {
+        let db = setup();
+        let plan = import_contacts(&db, CONTACTS_XAF, "human:erik", true).unwrap();
+        assert_eq!(plan["contacts_to_create"].as_i64(), Some(3));
+        assert_eq!(plan["duplicates"].as_i64(), Some(0));
+        assert_eq!(list_contacts(&db).unwrap().len(), 0);
+    }
+
+    // --- RGS enforcement on import ------------------------------------------
+
+    #[test]
+    fn infer_rgs_keywords_within_type_then_type_based_fallbacks() {
+        assert_eq!(infer_rgs("income", "Omzet diensten"), Some("WOVB.82")); // diensten before omzet
+        assert_eq!(infer_rgs("income", "Omzet goederen"), Some("WOMZ.80"));
+        assert_eq!(infer_rgs("income", "Overige opbrengsten"), Some("WOVB.82"));
+        assert_eq!(infer_rgs("expense", "Afschrijvingskosten"), Some("WAFS.41"));
+        assert_eq!(infer_rgs("expense", "Bankkosten"), Some("WFBE.84"));
+        assert_eq!(infer_rgs("expense", "Rentebaten"), Some("WFBE.84"));
+        assert_eq!(infer_rgs("expense", "Kosten IT"), Some("WBED.42"));
+        assert_eq!(infer_rgs("expense", "Inkoopwaarde"), Some("WKPR.70"));
+        assert_eq!(infer_rgs("expense", "Voorraadmutatie"), Some("WKPR.70"));
+        assert_eq!(
+            infer_rgs("expense", "Kosten uitbesteed werk"),
+            Some("WKPR.70")
+        );
+        assert_eq!(infer_rgs("expense", "Pensioenlasten"), Some("WPER.40"));
+        assert_eq!(infer_rgs("asset", "Bank Rabobank ZZP"), Some("BLIM.10"));
+        assert_eq!(infer_rgs("asset", "Hardware"), Some("BMVA.02"));
+        assert_eq!(
+            infer_rgs("asset", "Te vorderen btw hoog 21%"),
+            Some("BVOR.11")
+        );
+        assert_eq!(infer_rgs("asset", "Vraagposten"), Some("BVOR.11"));
+        assert_eq!(infer_rgs("asset", "Kruisposten"), Some("BVOR.11"));
+        assert_eq!(
+            infer_rgs("asset", "Cumulatieve afschrijvingen"),
+            Some("BMVA.02")
+        ); // contra-MVA
+        assert_eq!(infer_rgs("liability", "Crediteuren"), Some("BSCH.12"));
+        assert_eq!(infer_rgs("equity", "Privéstortingen"), Some("BEIV.05"));
+    }
+
+    #[test]
+    fn auditfile_created_accounts_carry_inferred_rgs_codes() {
+        let db = setup();
+        let res = import_xaf(&db, AUDITFILE_XAF, "agent:test", false).unwrap();
+        // 5100 Crediteuren + 7150 Platformkosten are new; 1100/8000 exist in the seed
+        assert_eq!(res["accounts_created"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            get_account_by_code(&db, "1100").unwrap()["taxonomy_code"].as_str(),
+            Some("BMVA.02")
+        ); // renamed Gebouwen: BLIM.10 -> BMVA.02
+        assert_eq!(
+            get_account_by_code(&db, "8000").unwrap()["taxonomy_code"].as_str(),
+            Some("WOMZ.80")
+        ); // Omzet (revenue)
+        assert_eq!(
+            get_account_by_code(&db, "5100").unwrap()["taxonomy_code"].as_str(),
+            Some("BSCH.12")
+        ); // Crediteuren
+        assert_eq!(
+            get_account_by_code(&db, "7150").unwrap()["taxonomy_code"].as_str(),
+            Some("WBED.42")
+        ); // Platformkosten
+    }
+
+    #[test]
+    fn import_xaf_reimport_backfills_rgs_codes_on_accounts_that_lack_them() {
+        let db = setup();
+        // pre-fix chart state: 8000 exists WITHOUT an rgs code
+        db.execute(
+            "UPDATE accounts SET taxonomy_code = NULL WHERE code = '8000'",
+            [],
+        )
+        .unwrap();
+        let res = import_xaf(&db, AUDITFILE_XAF, "agent:test", false).unwrap();
+        assert_eq!(
+            get_account_by_code(&db, "8000").unwrap()["taxonomy_code"].as_str(),
+            Some("WOMZ.80")
+        );
+        assert!(res["accounts_rgs_backfilled"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|a| a["code"].as_str() == Some("8000")
+                && a["taxonomy_code"].as_str() == Some("WOMZ.80")));
+        // idempotent: second re-run backfills nothing
+        let res2 = import_xaf(&db, AUDITFILE_XAF, "agent:test", false).unwrap();
+        assert_eq!(res2["accounts_rgs_backfilled"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn import_journal_create_missing_accounts_also_get_rgs_codes() {
+        let db = setup();
+        let csv = JOURNAL.replace("3000", "9999").replace("8000", "9998");
+        import_journal_csv(&db, &csv, true, "human:erik", false).unwrap();
+        assert_eq!(
+            get_account_by_code(&db, "9999").unwrap()["taxonomy_code"].as_str(),
+            Some("WBED.42")
+        ); // expense fallback
+        assert_eq!(
+            get_account_by_code(&db, "9998").unwrap()["taxonomy_code"].as_str(),
+            Some("WOVB.82")
+        ); // income fallback
+    }
+
+    #[test]
+    fn import_chart_csv_without_an_rgs_column_infers_rgs_codes() {
+        let db = setup();
+        let csv = "code,name,type,normal_balance\n1350,Hardware,asset,debit\n8300,Omzet diensten,income,credit";
+        let res = import_chart_csv(&db, csv).unwrap();
+        assert_eq!(res.created, 2);
+        assert_eq!(
+            get_account_by_code(&db, "1350").unwrap()["taxonomy_code"].as_str(),
+            Some("BMVA.02")
+        );
+        assert_eq!(
+            get_account_by_code(&db, "8300").unwrap()["taxonomy_code"].as_str(),
+            Some("WOVB.82")
+        );
     }
 }
