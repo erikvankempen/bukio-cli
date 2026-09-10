@@ -140,6 +140,40 @@ mod tests {
     }
 
     #[test]
+    fn parses_the_remaining_js_suite_cases() {
+        // ported from test/money.test.js (which imported ../src/core/money.js)
+        assert_eq!(parse_amount("0").unwrap(), 0);
+        assert_eq!(parse_amount("0.5").unwrap(), 50);
+        assert_eq!(parse_amount("1234").unwrap(), 123400);
+        assert_eq!(parse_amount("-12.34").unwrap(), -1234);
+        assert_eq!(parse_amount(" 42.10 ").unwrap(), 4210);
+        assert_eq!(parse_amount("1000000.01").unwrap(), 100000001);
+    }
+
+    #[test]
+    fn rejects_the_remaining_js_suite_cases() {
+        for bad in ["1.234,56", "1e3", "NaN", "Infinity", "0.001"] {
+            assert!(parse_amount(bad).is_err(), "should reject {bad:?}");
+        }
+        // JS also rejects non-strings (null, undefined, numbers) — the Rust
+        // signature takes &str, so those cannot be expressed at all.
+    }
+
+    #[test]
+    fn format_round_trips_with_parse() {
+        for cents in [0i64, 1, -1, 50, -50, 123456, -123456, 100000001] {
+            assert_eq!(parse_amount(&format_amount(cents)).unwrap(), cents);
+        }
+    }
+
+    #[test]
+    fn formats_sub_cent_values_as_zero_point_xx() {
+        assert_eq!(format_amount(5), "0.05");
+        assert_eq!(format_amount(1), "0.01");
+        assert_eq!(format_amount(-1), "-0.01");
+    }
+
+    #[test]
     fn formats_like_js() {
         assert_eq!(format_amount(123456), "1234.56");
         assert_eq!(format_amount(-10), "-0.10");
