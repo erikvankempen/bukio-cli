@@ -175,6 +175,111 @@ fn pem_decode(pem: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
 
+    // ── ported from test/sign.test.js ──
+    // (JS's separate "Buffer data" test is implicit here: Rust signs &[u8].)
+
+    #[test]
+    fn sign_verify_roundtrip_with_a_plain_key() {
+        let (public_pem, private_pem, _) = generate_key_pair();
+        let data = b"bukio entry add --date 2026-08-10";
+        let sig = sign(data, &private_pem).unwrap();
+        assert!(verify(data, &sig, &public_pem));
+    }
+
+    #[test]
+    fn sign_verify_wrong_key_fails() {
+        let (_pub_a, private_a, _) = generate_key_pair();
+        let (public_b, _, _) = generate_key_pair();
+        let sig = sign(b"data", &private_a).unwrap();
+        assert!(!verify(b"data", &sig, &public_b));
+    }
+
+    #[test]
+    fn sign_verify_tampered_message_fails() {
+        let (public_pem, private_pem, _) = generate_key_pair();
+        let sig = sign(b"the original command", &private_pem).unwrap();
+        assert!(!verify(b"the original commanD", &sig, &public_pem));
+    }
+
+    #[test]
+    fn malformed_signature_or_key_returns_false_and_never_panics() {
+        let (public_pem, _, _) = generate_key_pair();
+        assert!(!verify(b"data", "not-a-signature", &public_pem));
+        assert!(!verify(b"data", "", "not-a-public-key"));
+    }
+
+    #[test]
+    fn keyid_is_a_stable_32_hex_fingerprint() {
+        let (pub_a, _, _) = generate_key_pair();
+        let (pub_b, _, _) = generate_key_pair();
+        let id = keyid_of(&pub_a).unwrap();
+        assert_eq!(id, keyid_of(&pub_a).unwrap());
+        assert_eq!(id.len(), 32);
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(id, keyid_of(&pub_b).unwrap());
+    }
+
+    #[test]
+    fn keygen_writes_spki_public_and_pkcs8_private_pem() {
+        let (public_pem, private_pem, _) = generate_key_pair();
+        assert!(public_pem.contains("-----BEGIN PUBLIC KEY-----"));
+        assert!(private_pem.contains("-----BEGIN PRIVATE KEY-----"));
+        assert!(!is_encrypted(&private_pem));
+    }
+
+    #[test]
+    fn passphrase_key_refuses_to_sign_without_it_and_signs_with_it() {
+        let (public_pem, private_pem, _) = generate_key_pair_encrypted("correct horse").unwrap();
+        assert!(is_encrypted(&private_pem));
+        assert!(private_pem.contains("-----BEGIN ENCRYPTED PRIVATE KEY-----"));
+        assert!(sign(b"data", &private_pem).is_err());
+
+        let sig = sign_with_passphrase(b"data", &private_pem, Some("correct horse")).unwrap();
+        assert!(verify(b"data", &sig, &public_pem));
+        assert!(sign_with_passphrase(b"data", &private_pem, Some("wrong")).is_err());
+        assert!(sign_with_passphrase(b"data", &private_pem, None).is_err());
+    }
+
+    #[test]
+    fn keyid_identical_for_plain_and_encrypted_keys_sharing_a_public_key() {
+        // the two generators make different keypairs, so their fingerprints
+        // differ; the invariant is that the fingerprint depends only on the
+        // public key.
+        let (pub_plain, _, _) = generate_key_pair();
+        let (pub_enc, _, keyid_enc) = generate_key_pair_encrypted("x").unwrap();
+        assert_ne!(keyid_of(&pub_plain).unwrap(), keyid_of(&pub_enc).unwrap());
+        assert_eq!(keyid_enc, keyid_of(&pub_enc).unwrap());
+    }
+
+    #[test]
+    fn public_key_from_private_plain_key_derives_itself() {
+        let (public_pem, private_pem, _) = generate_key_pair();
+        let derived = public_key_from_private(&private_pem, None).unwrap();
+        assert_eq!(derived, public_pem);
+        assert_eq!(keyid_of(&derived).unwrap(), keyid_of(&public_pem).unwrap());
+    }
+
+    #[test]
+    fn public_key_from_private_encrypted_needs_the_passphrase() {
+        let (public_pem, private_pem, _) = generate_key_pair_encrypted("s3cret").unwrap();
+        assert_eq!(
+            public_key_from_private(&private_pem, Some("s3cret")).unwrap(),
+            public_pem
+        );
+        assert!(public_key_from_private(&private_pem, None).is_err());
+        assert!(public_key_from_private(&private_pem, Some("nope")).is_err());
+    }
+
+    #[test]
+    fn decrypt_private_key_yields_a_usable_plain_pem() {
+        let (public_pem, encrypted_pem, _) = generate_key_pair_encrypted("s3cret").unwrap();
+        let plain = decrypt_private_key_pem(&encrypted_pem, "s3cret").unwrap();
+        assert!(!is_encrypted(&plain));
+        let sig = sign(b"payload", &plain).unwrap();
+        assert!(verify(b"payload", &sig, &public_pem));
+        assert!(decrypt_private_key_pem(&encrypted_pem, "wrong").is_err());
+    }
+
     #[test]
     fn generated_pair_signs_and_verifies() {
         let (public_pem, private_pem, keyid) = generate_key_pair();
