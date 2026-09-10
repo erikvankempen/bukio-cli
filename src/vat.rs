@@ -1037,6 +1037,364 @@ mod tests {
         db
     }
 
+    // ── ported from test/vat.test.js ──
+    // NOTE: the Rust engine returns the entry directly from book_vat_entry (the
+    // JS engine wraps it as {entry}); the CLI wrappers match, which is what
+    // parity checks. JS's vatNetPosition has no public Rust equivalent — the
+    // position is computed inside vat_file/vat_settle — so that one assertion
+    // is not reproducible here.
+
+    fn specs(raw: &[&str]) -> Vec<VatSpec> {
+        let owned: Vec<String> = raw.iter().map(|s| s.to_string()).collect();
+        parse_vat_posting_specs(&owned).unwrap()
+    }
+
+    fn fresh_vat_company(kor: bool) -> Connection {
+        let db = open_db(":memory:").unwrap();
+        db.execute(
+            "INSERT INTO company (name, legal_form, kor_flag, vat_module) VALUES ('Test BV', 'bv', ?1, 0)",
+            rusqlite::params![if kor { 1 } else { 0 }],
+        )
+        .unwrap();
+        crate::accounts::seed_default_chart(&db).unwrap();
+        db
+    }
+
+    fn seed_q2_scenario(db: &Connection) {
+        // sale 121.00 incl 21%; purchase 60.50 incl 21%; sale 109.00 incl 9%
+        for (date, desc, raw) in [
+            (
+                "2026-04-10",
+                "Factuur 2026-001",
+                "1100:121.00,8000:-100.00@21",
+            ),
+            (
+                "2026-05-15",
+                "Kantoorartikelen",
+                "4300:50.00@21,1100:-60.50",
+            ),
+            (
+                "2026-06-01",
+                "Factuur 2026-002",
+                "1100:109.00,8000:-100.00@9",
+            ),
+        ] {
+            book_vat_entry(
+                db,
+                date,
+                desc,
+                &specs(&[raw]),
+                "manual",
+                None,
+                "human:erik",
+                true,
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn enable_seeds_accounts_and_codes_then_is_idempotent() {
+        let db = fresh_vat_company(false);
+        enable_vat_module(&db, "human:erik").unwrap();
+        assert!(is_vat_enabled(&db));
+        let name = |code: &str| {
+            crate::accounts::get_account_by_code(&db, code).unwrap()["name"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert_eq!(name("1500"), "Te vorderen omzetbelasting");
+        assert_eq!(name("2500"), "Te betalen omzetbelasting");
+        let codes = list_vat_codes(&db).unwrap();
+        assert_eq!(codes.len(), 8);
+        assert!(codes
+            .iter()
+            .any(|c| c["code"] == "21" && c["rate_bp"] == 2100 && c["type"] == "standard"));
+        assert!(codes
+            .iter()
+            .any(|c| c["code"] == "RE" && c["eu_reverse"] == true));
+        // idempotent
+        enable_vat_module(&db, "human:erik").unwrap();
+        assert_eq!(list_vat_codes(&db).unwrap().len(), 8);
+    }
+
+    #[test]
+    fn enable_refuses_on_a_kor_company() {
+        let db = fresh_vat_company(true);
+        assert_eq!(
+            enable_vat_module(&db, "human:erik").unwrap_err().code,
+            "KOR_ACTIVE"
+        );
+    }
+
+    #[test]
+    fn parse_specs_handles_the_vat_suffix() {
+        let parsed = specs(&["1100:121.00,8000:-100.00@21"]);
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].code, "1100");
+        assert_eq!(parsed[0].amount_cents, 12100);
+        assert_eq!(parsed[0].vat_code, None);
+        assert_eq!(parsed[1].code, "8000");
+        assert_eq!(parsed[1].amount_cents, -10000);
+        assert_eq!(parsed[1].vat_code.as_deref(), Some("21"));
+
+        let owned = vec!["nonsense".to_string()];
+        assert_eq!(
+            parse_vat_posting_specs(&owned).unwrap_err().code,
+            "INVALID_POSTING"
+        );
+    }
+
+    #[test]
+    fn expand_adds_the_output_vat_leg() {
+        let db = vat_company();
+        let (p, vat_info) =
+            expand_vat_postings(&db, &specs(&["1100:121.00,8000:-100.00@21"])).unwrap();
+        assert_eq!(p.len(), 3);
+        assert_eq!(p[0].code, "1100");
+        assert_eq!(p[0].amount_cents, 12100);
+        assert_eq!(p[0].vat_amount_cents, None);
+        assert_eq!(p[1].code, "8000");
+        assert_eq!(p[1].amount_cents, -10000);
+        assert_eq!(p[2].code, "2500"); // te betalen btw
+        assert_eq!(p[2].amount_cents, -2100);
+        assert_eq!(p.iter().map(|x| x.amount_cents).sum::<i64>(), 0);
+        // the Rust API carries the per-input VAT info in a SECOND vector
+        // (JS attaches vatCode/vatAmountCents inline on the posting); the CLI
+        // shapes agree.
+        assert_eq!(vat_info.len(), 2);
+        assert_eq!(vat_info[0], (None, None));
+        assert_eq!(vat_info[1], (Some("21".to_string()), Some(-2100)));
+    }
+
+    #[test]
+    fn expand_routes_the_input_side_to_1500() {
+        let db = vat_company();
+        let (p, _) = expand_vat_postings(&db, &specs(&["4340:100.00@21,1100:-121.00"])).unwrap();
+        let vat_leg = p.iter().find(|x| x.code == "1500").expect("1500 leg");
+        assert_eq!(vat_leg.amount_cents, 2100);
+        assert_eq!(p.iter().map(|x| x.amount_cents).sum::<i64>(), 0);
+    }
+
+    #[test]
+    fn book_posts_a_three_leg_entry_with_vat_fields_persisted() {
+        let db = vat_company();
+        let entry = book_vat_entry(
+            &db,
+            "2026-06-01",
+            "Factuur 2026-001",
+            &specs(&["1100:121.00,8000:-100.00@21"]),
+            "manual",
+            None,
+            "human:erik",
+            true,
+        )
+        .unwrap();
+        assert_eq!(entry["state"], "posted");
+        let postings = entry["postings"].as_array().unwrap();
+        assert_eq!(postings.len(), 3);
+        let omzet = postings
+            .iter()
+            .find(|p| p["account_code"] == "8000")
+            .expect("8000 posting");
+        assert_eq!(omzet["vat_amount_cents"], -2100);
+        assert!(omzet["vat_code"].is_string());
+    }
+
+    #[test]
+    fn book_guards_module_off_and_unknown_code() {
+        let off = fresh_vat_company(false);
+        assert_eq!(
+            book_vat_entry(
+                &off,
+                "2026-06-01",
+                "x",
+                &specs(&["1100:121.00,8000:-100.00@21"]),
+                "manual",
+                None,
+                "human:erik",
+                false
+            )
+            .unwrap_err()
+            .code,
+            "VAT_MODULE_OFF"
+        );
+
+        let db = vat_company();
+        assert_eq!(
+            book_vat_entry(
+                &db,
+                "2026-06-01",
+                "x",
+                &specs(&["1100:121.00,8000:-100.00@25"]),
+                "manual",
+                None,
+                "human:erik",
+                false
+            )
+            .unwrap_err()
+            .code,
+            "VAT_CODE_NOT_FOUND"
+        );
+    }
+
+    #[test]
+    fn parse_period_quarters_months_and_rejects() {
+        assert_eq!(
+            parse_period("2026-Q2").unwrap(),
+            ("2026-04-01".to_string(), "2026-06-30".to_string())
+        );
+        assert_eq!(
+            parse_period("2026-Q4").unwrap(),
+            ("2026-10-01".to_string(), "2026-12-31".to_string())
+        );
+        assert_eq!(
+            parse_period("2026-07").unwrap(),
+            ("2026-07-01".to_string(), "2026-07-31".to_string())
+        );
+        assert_eq!(parse_period("2026-Q5").unwrap_err().code, "INVALID_PERIOD");
+        assert_eq!(parse_period("2026").unwrap_err().code, "INVALID_PERIOD");
+    }
+
+    #[test]
+    fn ob_readout_full_scenario_fields() {
+        let db = vat_company();
+        seed_q2_scenario(&db);
+        let r = ob_readout(&db, "2026-Q2").unwrap();
+        let f = &r["fields"];
+        assert_eq!(f["1a"], 10000); // omzet 21%
+        assert_eq!(f["1b"], 10000); // omzet 9%
+        assert_eq!(f["1c"], 0);
+        assert_eq!(f["3a"], 5000); // inkopen 21%
+        assert_eq!(f["5a"], 3000); // 2100 + 900
+        assert_eq!(f["5b"], 1050); // voorbelasting
+        assert_eq!(f["5d"], 1950); // 3000 - 1050
+        assert_eq!(r["to_pay"], "19.50");
+    }
+
+    #[test]
+    fn ob_readout_is_period_isolated_and_ignores_drafts() {
+        let db = vat_company();
+        seed_q2_scenario(&db);
+        assert_eq!(ob_readout(&db, "2026-Q1").unwrap()["fields"]["5d"], 0);
+
+        // a balanced DRAFT carrying VAT fields must not leak into the readout
+        crate::entries::create_entry(
+            &db,
+            crate::entries::CreateEntry {
+                date: "2026-04-20",
+                description: "draft sale",
+                postings: vec![
+                    crate::entries::PostingSpec {
+                        code: "1100".into(),
+                        amount_cents: 12100,
+                        cost_center_code: None,
+                        vat_code: None,
+                        vat_amount_cents: None,
+                    },
+                    crate::entries::PostingSpec {
+                        code: "8000".into(),
+                        amount_cents: -10000,
+                        cost_center_code: None,
+                        vat_code: Some("21".into()),
+                        vat_amount_cents: Some(-2100),
+                    },
+                    crate::entries::PostingSpec {
+                        code: "2500".into(),
+                        amount_cents: -2100,
+                        cost_center_code: None,
+                        vat_code: Some("21".into()),
+                        vat_amount_cents: Some(-2100),
+                    },
+                ],
+                source: "manual",
+                source_ref: None,
+                actor: "human:erik",
+            },
+        )
+        .unwrap();
+
+        assert_eq!(ob_readout(&db, "2026-Q2").unwrap()["fields"]["5a"], 3000);
+    }
+
+    #[test]
+    fn ob_readout_reverse_charge_nets_out() {
+        let db = vat_company();
+        // reverse charge books NO auto VAT leg; the tagged posting feeds the readout
+        let entry = book_vat_entry(
+            &db,
+            "2026-06-01",
+            "Inkoop verlegd",
+            &specs(&["4300:100.00@R,1100:-100.00"]),
+            "manual",
+            None,
+            "human:erik",
+            true,
+        )
+        .unwrap();
+        let mut legs: Vec<String> = entry["postings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| {
+                format!(
+                    "{}:{}",
+                    p["account_code"].as_str().unwrap(),
+                    p["amount_cents"]
+                )
+            })
+            .collect();
+        legs.sort();
+        assert_eq!(legs, vec!["1100:-10000", "4300:10000"]);
+
+        let r = ob_readout(&db, "2026-Q2").unwrap();
+        assert_eq!(r["fields"]["3a"], 10000); // binnenlandse verlegde inkoop
+        assert_eq!(r["fields"]["4a"], 2100); // 21% derived from the tagged posting
+        assert_eq!(r["fields"]["5b"], 2100); // claimed back — nets out
+        assert_eq!(r["fields"]["5d"], 0);
+    }
+
+    #[test]
+    fn ob_readout_guards_module_off_and_bad_period() {
+        let off = fresh_vat_company(false);
+        assert_eq!(
+            ob_readout(&off, "2026-Q2").unwrap_err().code,
+            "VAT_MODULE_OFF"
+        );
+        let db = vat_company();
+        assert_eq!(ob_readout(&db, "2026").unwrap_err().code, "INVALID_PERIOD");
+    }
+
+    #[test]
+    fn mark_filed_records_the_filing_and_is_an_idempotent_upsert() {
+        let db = vat_company();
+        seed_q2_scenario(&db);
+        let result = mark_filed(&db, "2026-Q2", "agent:test").unwrap();
+        assert_eq!(result["status"], "filed");
+
+        let (status, fields_json): (String, Option<String>) = db
+            .query_row(
+                "SELECT status, fields_json FROM vat_returns WHERE type='OB' AND period='2026-Q2'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "filed");
+        let fields: Value = serde_json::from_str(&fields_json.unwrap()).unwrap();
+        assert_eq!(fields["5d"], 1950);
+
+        mark_filed(&db, "2026-Q2", "agent:test").unwrap();
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM vat_returns WHERE period='2026-Q2'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
     #[test]
     fn enable_is_idempotent_and_seeds_codes() {
         let db = vat_company();
