@@ -492,6 +492,7 @@ pub fn infer_rgs(type_: &str, name: &str) -> Option<&'static str> {
     }
 }
 
+#[derive(Debug)]
 pub struct ChartImportResult {
     pub created: usize,
     pub skipped: usize,
@@ -618,6 +619,178 @@ mod tests {
         assert!(accounts.iter().all(|a| a["taxonomy_code"].is_string()));
         // second seed is a no-op
         assert_eq!(seed_default_chart(&db).unwrap(), 0);
+    }
+
+    // ── ported from test/accounts.test.js ──
+
+    fn acct<'a>(code: &'a str, name: &'a str, type_: &'a str, nb: &'a str) -> NewAccount<'a> {
+        NewAccount {
+            code,
+            name,
+            type_,
+            normal_balance: nb,
+            taxonomy_code: None,
+        }
+    }
+
+    #[test]
+    fn create_account_valid_and_validation_codes() {
+        let db = company_db();
+        seed_default_chart(&db).unwrap();
+        assert_eq!(
+            create_account(&db, &acct("abc", "x", "asset", "debit"))
+                .unwrap_err()
+                .code,
+            "INVALID_CODE"
+        );
+        assert_eq!(
+            create_account(
+                &db,
+                &NewAccount {
+                    code: "5001",
+                    name: "x",
+                    type_: "expense",
+                    normal_balance: "debit",
+                    taxonomy_code: Some("BMVA"),
+                }
+            )
+            .unwrap_err()
+            .code,
+            "INVALID_RGS_CODE"
+        );
+        let a = create_account(&db, &acct("5000", "Testkosten", "expense", "debit")).unwrap();
+        assert_eq!(a["code"], "5000");
+        assert_eq!(
+            get_account_by_code(&db, "5000").unwrap()["name"],
+            "Testkosten"
+        );
+    }
+
+    #[test]
+    fn deactivate_reactivate_lifecycle_blocks_new_postings() {
+        use crate::entries::{create_entry, post_entry, CreateEntry, PostingSpec};
+        let db = company_db();
+        seed_default_chart(&db).unwrap();
+        create_account(&db, &acct("5000", "Testkosten", "expense", "debit")).unwrap();
+
+        deactivate_account(&db, "5000").unwrap();
+        assert_eq!(get_account_by_code(&db, "5000").unwrap()["active"], false);
+        assert_eq!(
+            deactivate_account(&db, "5000").unwrap_err().code,
+            "ALREADY_INACTIVE"
+        );
+        assert_eq!(
+            deactivate_account(&db, "9999").unwrap_err().code,
+            "ACCOUNT_NOT_FOUND"
+        );
+
+        let postings = || {
+            vec![
+                PostingSpec {
+                    code: "5000".into(),
+                    amount_cents: 100,
+                    cost_center_code: None,
+                    vat_code: None,
+                    vat_amount_cents: None,
+                },
+                PostingSpec {
+                    code: "1100".into(),
+                    amount_cents: -100,
+                    cost_center_code: None,
+                    vat_code: None,
+                    vat_amount_cents: None,
+                },
+            ]
+        };
+        let mk = || CreateEntry {
+            date: "2026-08-04",
+            description: "x",
+            postings: postings(),
+            source: "manual",
+            source_ref: None,
+            actor: "human:erik",
+        };
+        assert_eq!(
+            create_entry(&db, mk()).unwrap_err().code,
+            "ACCOUNT_INACTIVE"
+        );
+
+        reactivate_account(&db, "5000").unwrap();
+        assert_eq!(get_account_by_code(&db, "5000").unwrap()["active"], true);
+        assert_eq!(
+            reactivate_account(&db, "5000").unwrap_err().code,
+            "ALREADY_ACTIVE"
+        );
+        let e = create_entry(&db, mk()).unwrap();
+        post_entry(&db, e.id, "human:erik").unwrap();
+    }
+
+    #[test]
+    fn chart_csv_import_details_and_quoting() {
+        let db = company_db();
+        seed_default_chart(&db).unwrap();
+        let csv = "code,name,type,normal_balance,taxonomy_code\n\
+                   5000,Testkosten,expense,debit,WBED.42\n\
+                   5100,Andere kosten,expense,debit,WBED.42\n\
+                   5200,Verkeerd type,weird,debit,\n\
+                   1100,Bank duplicaat,asset,debit,BLIM.10\n";
+        let r = import_chart_csv(&db, csv).unwrap();
+        assert_eq!(r.created, 2);
+        assert_eq!(r.skipped, 2);
+        assert_eq!(r.total, 4);
+        assert_eq!(r.errors.len(), 2);
+        assert!(r.errors.iter().any(|(_, m)| m.contains("INVALID_TYPE")));
+        assert!(r.errors.iter().any(|(_, m)| m.contains("ACCOUNT_EXISTS")));
+        assert_eq!(
+            get_account_by_code(&db, "5100").unwrap()["name"],
+            "Andere kosten"
+        );
+
+        // header validation
+        assert_eq!(
+            import_chart_csv(&db, "foo,bar\n1,2\n").unwrap_err().code,
+            "INVALID_CSV_HEADER"
+        );
+        assert_eq!(
+            import_chart_csv(&db, "code,name,type,normal_balance\n")
+                .unwrap_err()
+                .code,
+            "EMPTY_CSV"
+        );
+
+        // quoted values containing commas (fresh DB — 5000 exists in the one above)
+        let db2 = company_db();
+        seed_default_chart(&db2).unwrap();
+        let one = import_chart_csv(
+            &db2,
+            "code,name,type,normal_balance,taxonomy_code\n\
+             \"5000\",\"Kosten, algemeen\",expense,debit,WBED.42\n",
+        )
+        .unwrap();
+        assert_eq!(one.created, 1);
+        assert_eq!(
+            get_account_by_code(&db2, "5000").unwrap()["name"],
+            "Kosten, algemeen"
+        );
+    }
+
+    #[test]
+    fn list_accounts_type_filter_and_include_inactive() {
+        let db = company_db();
+        seed_default_chart(&db).unwrap();
+        assert_eq!(list_accounts(&db, Some("income"), false).unwrap().len(), 2);
+        // 13 expense accounts in the NL chart, incl. 4840 Koersverschillen
+        assert_eq!(
+            list_accounts(&db, Some("expense"), false).unwrap().len(),
+            13
+        );
+        create_account(&db, &acct("5000", "x", "expense", "debit")).unwrap();
+        deactivate_account(&db, "5000").unwrap();
+        assert_eq!(
+            list_accounts(&db, Some("expense"), false).unwrap().len(),
+            13
+        );
+        assert_eq!(list_accounts(&db, Some("expense"), true).unwrap().len(), 14);
     }
 
     #[test]
