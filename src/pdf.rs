@@ -684,10 +684,37 @@ fn invoice_labels(lang: &str) -> std::collections::HashMap<&'static str, String>
         "reference",
         "date",
         "reverseCharge",
+        "vatOn",
     ] {
         m.insert(k, crate::i18n::label(k, lang));
     }
     m
+}
+
+/// The company logo as a data URI for the invoice header — empty when unset.
+fn logo_img(db: &Connection) -> String {
+    use base64::Engine;
+    match crate::company::get_logo(db) {
+        Ok((bytes, mime)) if !bytes.is_empty() => {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            format!("<img class=\"logo\" src=\"data:{mime};base64,{b64}\">")
+        }
+        _ => String::new(),
+    }
+}
+
+/// The default email subject for an invoice, in the document's language.
+pub fn default_subject(language: &str, number: &str, company: &str) -> String {
+    // not label(): that prefixes pdf., and this key lives in email.*
+    let lang = if crate::i18n::get_table(language).is_some() {
+        language
+    } else {
+        "en" // unknown language falls back to the English table, as the JS t() does
+    };
+    fill(
+        &crate::i18n::t("email.invoiceSubject", &[], lang),
+        &[("number", number), ("company", company)],
+    )
 }
 
 fn fill(template: &str, pairs: &[(&str, &str)]) -> String {
@@ -719,6 +746,7 @@ fn company_row(db: &Connection) -> Value {
 
 pub fn invoice_html(db: &Connection, invoice: &Value) -> String {
     let company = company_row(db);
+    let logo = logo_img(db);
     let contact = &invoice["contact"];
     let is_credit = invoice["invoice_type"] == serde_json::json!("credit");
     let lang = invoice["language"].as_str().unwrap_or("en");
@@ -858,6 +886,7 @@ pub fn invoice_html(db: &Connection, invoice: &Value) -> String {
 <body>
   <div class="header">
     <div class="supplier">
+      {logo}
       <div>
         <h1>{cname}</h1>
         <p>{caddr}</p>
@@ -901,6 +930,7 @@ pub fn invoice_html(db: &Connection, invoice: &Value) -> String {
 </body>
 </html>"#,
         lang = lang,
+        logo = logo_img(db),
         cname = esc(company.get("name")),
         caddr = esc(company.get("address")),
         cpost = esc(company.get("postal_code")),

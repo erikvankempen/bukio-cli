@@ -146,6 +146,18 @@ fn fmt_pct(bp: i64) -> String {
     format!("{:.2}", bp as f64 / 100.0)
 }
 
+/// The JS prints the allowance percentage as toFixed(4) with trailing zeros
+/// stripped, so a 10% discount is "10" — not "10.0000".
+fn mult_factor(pct: f64) -> String {
+    let formatted = format!("{pct:.4}");
+    let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 pub fn invoice_to_ubl(db: &Connection, invoice: &Value) -> Result<String, BukioError> {
     let profile = resolve_profile(db)?;
     let eformat = profile
@@ -321,7 +333,7 @@ fn build_peppol_bis30(
             let pct_val = if l.get("discountType").or_else(|| l.get("discount_type")).and_then(|v| v.as_str()) == Some("pct") {
                 l.get("discountValue").or_else(|| l.get("discount_value")).and_then(|v| v.as_i64()).unwrap_or(0) as f64 / 100.0
             } else if amount > 0 { (disc as f64 / amount as f64) * 100.0 } else { 0.0 };
-            format!("\n      <cac:AllowanceCharge>\n        <cbc:ChargeIndicator>false</cbc:ChargeIndicator>\n        <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>\n        <cbc:Amount currencyID=\"{currency}\">{}</cbc:Amount>\n        <cbc:BaseAmount currencyID=\"{currency}\">{}</cbc:BaseAmount>\n        <cbc:MultiplierFactorNumeric>{:.4}</cbc:MultiplierFactorNumeric>\n      </cac:AllowanceCharge>", money_amount(disc), money_amount(amount), pct_val)
+            format!("\n      <cac:AllowanceCharge>\n        <cbc:ChargeIndicator>false</cbc:ChargeIndicator>\n        <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>\n        <cbc:Amount currencyID=\"{currency}\">{}</cbc:Amount>\n        <cbc:BaseAmount currencyID=\"{currency}\">{}</cbc:BaseAmount>\n        <cbc:MultiplierFactorNumeric>{}</cbc:MultiplierFactorNumeric>\n      </cac:AllowanceCharge>", money_amount(disc), money_amount(amount), mult_factor(pct_val))
         } else { String::new() };
 
         format!("\n    <cac:{line_tag}>\n      <cbc:ID>{}</cbc:ID>\n      <cbc:{qty_tag} unitCode=\"{uc}\">{}</cbc:{qty_tag}>\n      <cbc:LineExtensionAmount currencyID=\"{currency}\">{}</cbc:LineExtensionAmount>{allowance}\n      <cac:Item>\n        <cbc:Name>{}</cbc:Name>\n        <cac:ClassifiedTaxCategory>\n          <cbc:ID>{cat}</cbc:ID>\n          <cbc:Percent>{pct}</cbc:Percent>\n          <cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>\n        </cac:ClassifiedTaxCategory>\n      </cac:Item>\n      <cac:Price>\n        <cbc:PriceAmount currencyID=\"{currency}\">{}</cbc:PriceAmount>\n      </cac:Price>\n    </cac:{line_tag}>",
@@ -413,7 +425,7 @@ fn build_peppol_bis30(
         } else {
             0.0
         };
-        format!("\n  \n  <cac:AllowanceCharge>\n    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>\n    <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>\n    <cbc:Amount currencyID=\"{currency}\">{}</cbc:Amount>\n    <cbc:BaseAmount currencyID=\"{currency}\">{}</cbc:BaseAmount>\n    <cbc:MultiplierFactorNumeric>{:.4}</cbc:MultiplierFactorNumeric>\n  </cac:AllowanceCharge>", money_amount(discount_cents), money_amount(net_before_cents), pct_val)
+        format!("\n  \n  <cac:AllowanceCharge>\n    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>\n    <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>\n    <cbc:Amount currencyID=\"{currency}\">{}</cbc:Amount>\n    <cbc:BaseAmount currencyID=\"{currency}\">{}</cbc:BaseAmount>\n    <cbc:MultiplierFactorNumeric>{}</cbc:MultiplierFactorNumeric>\n  </cac:AllowanceCharge>", money_amount(discount_cents), money_amount(net_before_cents), mult_factor(pct_val))
     } else {
         "\n  ".to_string()
     };

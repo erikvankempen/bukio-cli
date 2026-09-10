@@ -1035,6 +1035,26 @@ pub fn validate_compliance(db: &Connection, invoice: &Value) -> Result<()> {
     Ok(())
 }
 
+/// The company's default document language: the base of `company.locale`, when
+/// that base is an i18n table — otherwise 'en' (mirrors the JS).
+pub fn default_document_language(db: &Connection) -> String {
+    let locale: Option<String> = db
+        .query_row("SELECT locale FROM company WHERE id = 1", [], |r| r.get(0))
+        .ok()
+        .flatten();
+    match locale {
+        Some(l) => {
+            let base = l.split('-').next().unwrap_or("en").to_string();
+            if crate::i18n::get_table(&base).is_some() {
+                base
+            } else {
+                "en".to_string()
+            }
+        }
+        None => "en".to_string(),
+    }
+}
+
 pub fn create_invoice(
     db: &Connection,
     contact_id: i64,
@@ -1268,7 +1288,9 @@ pub fn create_invoice(
     db.execute(
         "INSERT INTO invoices (contact_id, date, due_date, description, reference, notes, discount_type, discount_value, language, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         // the column is NOT NULL; the JS default is 'nl' (get_invoice keeps the same fallback for old rows)
-        rusqlite::params![contact_id, date, due_date, description, reference, notes, discount_type, discount_value, language.unwrap_or("nl"), actor],
+        rusqlite::params![contact_id, date, due_date, description, reference, notes, discount_type, discount_value, language
+            .map(String::from)
+            .unwrap_or_else(|| default_document_language(db)), actor],
     ).map_err(sql_err)?;
     let invoice_id = db.last_insert_rowid();
 

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 19:03:24 UTC — **✅ 469 passing · 0 failing (469 tests)**
+**Latest run:** 2026-09-10 19:22:18 UTC — **✅ 431 passing · 0 failing (431 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -300,49 +300,6 @@
     - ✅ account add/deactivate/reactivate/import are audited (they mutated silently before)
     - ✅ every emitted error code in src/ is documented in AGENTS.md §7
     - ✅ MCP on a missing database errors NO_DATABASE instead of silently creating an empty company
-
-### invoice-features.test.js — 
-
-38 passing · 0 failing
-
-    - ✅ fractional quantities parse to milli-units
-    - ✅ line discounts parse (pct and amount)
-    - ✅ item specs parse (id, qty, overrides, discount)
-    - ✅ allocateLargestRemainder sums exactly and is deterministic
-    - ✅ item add/list/show/update/deactivate with audit
-    - ✅ item update: empty string clears vatCode/glAccount instead of keeping the old value (round 11)
-    - ✅ item guards: name/unit/price/vat/account
-    - ✅ item without a VAT code is allowed when the VAT module is off
-    - ✅ unit labels localize
-    - ✅ invoice create --items snapshots catalog values
-    - ✅ invoice create --items per-invoice overrides (price, VAT, discount)
-    - ✅ item guards on invoices: unknown, inactive, bad override, conflicting sources
-    - ✅ fractional quantity line math (1.5h @ 100 = 150.00)
-    - ✅ line discount pct and amount reduce net and VAT
-    - ✅ total discount: single rate, pct and amount
-    - ✅ total discount across mixed VAT rates allocates to the cent
-    - ✅ total discount with awkward split still balances (largest remainder)
-    - ✅ computeInvoiceTotals is deterministic across recomputes (getInvoice consistency)
-    - ✅ booking with discounts: omzet uses discounted nets, VAT per rate
-    - ✅ finalize with discounts books a balanced entry
-    - ✅ invoice language: nl default, any i18n table accepted, unknown rejected
-    - ✅ CLI: --discount-pct and --discount-amount together are rejected
-    - ✅ credit note inherits language, total discount and line discounts
-    - ✅ UBL: formatted quantity, unit code, language, discounted tax bases
-    - ✅ UBL: line-only discounts net LineExtensionAmount (BR-26); no doc allowance emitted; @V maps to E, @0 to Z
-    - ✅ UBL: zero-VAT categories (RE/V) still emit TaxSubtotal — EN 16931 1..n
-    - ✅ UBL: hour unit maps to HUR
-    - ✅ PDF: Dutch labels, unit column, VAT breakdown, discount row
-    - ✅ PDF: English labels + reverse-charge wording
-    - ✅ PDF: company logo renders as a data URI in the header
-    - ✅ PDF: renders through Chromium (skipped when no browser installed)
-    - ✅ recurring invoice template with items snapshots catalog prices per run
-    - ✅ MCP: item_add/item_list/item_update + invoice_create with items/discount/language
-    - ✅ bank autoMatch: incoming payment matches a DISCOUNTED invoice at its discounted gross
-    - ✅ bank autoMatch: discounted invoice does NOT match a partial/off payment
-    - ✅ company logo: set (PNG), extract round-trip, remove; audits
-    - ✅ company logo: format, size and dimension guards
-    - ✅ review fix: PDF reverse-charge label + email language follow the document language (no Dutch fallback)
 
 ### jurisdictions.test.js — 
 

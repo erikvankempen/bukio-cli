@@ -5731,13 +5731,14 @@ fn if_invoice_create_from_items_per_invoice_overrides() {
 }
 
 #[test]
-#[ignore = "PORT GAP: one of the four item guards on invoices (unknown item, @0.00 override, item+line mix, inactive item) does not raise yet"]
 fn if_item_guards_on_invoices() {
     let d = setup();
     let c = if_contact(&d, Some("NL999999999B01"));
     let item = if_item(&d, &[]);
     let id = item["id"].as_i64().unwrap();
     let mk = |items: &[&str], ls: &[&str]| {
+        let mut raw = item_spec(items);
+        raw.extend(lines(ls));
         bukio::invoice::create_invoice(
             &d,
             c,
@@ -5749,7 +5750,7 @@ fn if_item_guards_on_invoices() {
             None,
             None,
             None,
-            &item_spec(items),
+            &raw,
             "agent:test",
             false,
         )
@@ -6119,4 +6120,1019 @@ fn if_credit_note_inherits_language_and_discounts() {
     assert_eq!(credit["lines"][0]["discount_type"], json!("pct"));
     assert_eq!(credit["net_cents"], inv["net_cents"]);
     assert_eq!(credit["vat_cents"], inv["vat_cents"]);
+}
+
+// ==== invoice-features, second half (UBL / PDF / logo / recurring / MCP / bank)
+
+fn png_bytes(width: u32, height: u32) -> Vec<u8> {
+    let mut b = vec![0u8; 33];
+    b[0..8].copy_from_slice(&[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    b[8..12].copy_from_slice(&13u32.to_be_bytes());
+    b[12..16].copy_from_slice(b"IHDR");
+    b[16..20].copy_from_slice(&width.to_be_bytes());
+    b[20..24].copy_from_slice(&height.to_be_bytes());
+    b
+}
+
+fn jpeg_bytes(width: u16, height: u16) -> Vec<u8> {
+    let mut b = vec![0u8; 41];
+    b[0..2].copy_from_slice(&0xffd8u16.to_be_bytes());
+    b[2..4].copy_from_slice(&0xffe0u16.to_be_bytes());
+    b[4..6].copy_from_slice(&16u16.to_be_bytes());
+    b[6..11].copy_from_slice(b"JFIF\0");
+    b[20..22].copy_from_slice(&0xffc0u16.to_be_bytes());
+    b[22..24].copy_from_slice(&17u16.to_be_bytes());
+    b[24] = 8;
+    b[25..27].copy_from_slice(&height.to_be_bytes());
+    b[27..29].copy_from_slice(&width.to_be_bytes());
+    b
+}
+
+fn ubl_of(db: &Connection, inv: &Value) -> String {
+    let id = inv["id"].as_i64().unwrap();
+    bukio::invoice::finalize_invoice(db, id, "agent:test", false).unwrap();
+    let full = bukio::invoice::get_invoice(db, id).unwrap().unwrap();
+    bukio::ubl::invoice_to_ubl(db, &full).unwrap()
+}
+
+#[test]
+fn if_ubl_formatted_quantity_unit_code_language_and_discounted_bases() {
+    let d = setup();
+    let c = if_contact(&d, Some("NL999999999B01"));
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        Some("pct"),
+        Some(1000),
+        Some("en"),
+        &lines(&["1.5x Consultancy @ 100.00 @21 @-10%"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let xml = ubl_of(&d, &inv);
+    assert!(
+        xml.contains(r#"<cbc:InvoicedQuantity unitCode="C62">1.5</cbc:InvoicedQuantity>"#),
+        "{xml}"
+    );
+    // Peppol BIS 3.0 has NO top-level cbc:LanguageID (not in the UBL 2.1 content model)
+    assert!(
+        !xml.contains("<cbc:LanguageID>"),
+        "UBL must not carry cbc:LanguageID"
+    );
+    // element order: InvoiceTypeCode → Note → DocumentCurrencyCode
+    if let Some(note) = xml.find("<cbc:Note>") {
+        let cur = xml.find("<cbc:DocumentCurrencyCode>").unwrap_or(usize::MAX);
+        assert!(note < cur, "cbc:Note must precede cbc:DocumentCurrencyCode");
+    }
+    // the 10% line discount is a line allowance of 15.00
+    assert!(xml.contains("<cbc:ChargeIndicator>false</cbc:ChargeIndicator>"));
+    assert!(
+        xml.contains(r#"<cbc:Amount currencyID="EUR">15.00</cbc:Amount>"#),
+        "{xml}"
+    );
+    // BR-26: LineExtensionAmount is net of the line allowance
+    assert!(xml
+        .contains(r#"<cbc:LineExtensionAmount currencyID="EUR">135.00</cbc:LineExtensionAmount>"#));
+    // BT-107 covers only the document-level allowance
+    assert!(xml.contains(
+        r#"<cbc:AllowanceTotalAmount currencyID="EUR">13.50</cbc:AllowanceTotalAmount>"#
+    ));
+    // UBL 2.1 LegalMonetaryTotal child order
+    let lmt_start = xml.find("<cac:LegalMonetaryTotal>").unwrap();
+    let lmt_end = xml.find("</cac:LegalMonetaryTotal>").unwrap();
+    let lmt = &xml[lmt_start..lmt_end];
+    let mut last = 0usize;
+    for t in [
+        "LineExtensionAmount",
+        "TaxExclusiveAmount",
+        "TaxInclusiveAmount",
+        "AllowanceTotalAmount",
+        "PayableAmount",
+    ] {
+        let i = lmt
+            .find(&format!("<cbc:{t}"))
+            .unwrap_or_else(|| panic!("{t} missing from {lmt}"));
+        assert!(i >= last, "LegalMonetaryTotal children out of order at {t}");
+        last = i;
+    }
+    // BR-CO-11: the document allowance (reason 95, 10%) sits after PaymentTerms, before TaxTotal
+    assert!(xml.contains("<cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>"));
+    assert!(xml.contains("<cbc:MultiplierFactorNumeric>10</cbc:MultiplierFactorNumeric>"));
+    let pt = xml.find("<cac:PaymentTerms>").unwrap_or(0);
+    let ac = xml.find("<cac:AllowanceCharge>").unwrap();
+    let tt = xml.find("<cac:TaxTotal>").unwrap();
+    assert!(
+        ac > pt && ac < tt,
+        "document AllowanceCharge must sit between PaymentTerms and TaxTotal"
+    );
+    assert!(
+        xml.contains(r#"<cbc:TaxExclusiveAmount currencyID="EUR">121.50</cbc:TaxExclusiveAmount>"#)
+    );
+    assert!(xml.contains(r#"<cbc:TaxableAmount currencyID="EUR">121.50</cbc:TaxableAmount>"#));
+}
+
+#[test]
+fn if_ubl_line_only_discounts_and_category_mapping() {
+    let d = setup();
+    let c = if_contact(&d, Some("NL999999999B01"));
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(&["1.5x Consultancy @ 100.00 @21 @-10%"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let xml = ubl_of(&d, &inv);
+    // the line discount folds into the line net: 150 − 15 = 135
+    assert!(xml
+        .contains(r#"<cbc:LineExtensionAmount currencyID="EUR">135.00</cbc:LineExtensionAmount>"#));
+    // no document-level allowance -> no AllowanceTotalAmount element
+    assert!(!xml.contains("<cbc:AllowanceTotalAmount"), "{xml}");
+    assert!(
+        xml.contains(r#"<cbc:TaxExclusiveAmount currencyID="EUR">135.00</cbc:TaxExclusiveAmount>"#)
+    );
+
+    // category mapping: @0 -> Z, @V -> E, @21 -> S
+    let c2 = if_contact(&d, Some("NL888888888B01"));
+    let inv2 = bukio::invoice::create_invoice(
+        &d,
+        c2,
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(&[
+            "1x Nul @ 10.00 @0",
+            "1x Vrij @ 10.00 @V",
+            "1x Normaal @ 10.00 @21",
+        ]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let xml2 = ubl_of(&d, &inv2);
+    for cat in [
+        "<cbc:ID>Z</cbc:ID>",
+        "<cbc:ID>E</cbc:ID>",
+        "<cbc:ID>S</cbc:ID>",
+    ] {
+        assert!(xml2.contains(cat), "missing {cat} in {xml2}");
+    }
+}
+
+#[test]
+fn if_ubl_zero_vat_categories_still_emit_a_tax_subtotal() {
+    let d = setup();
+    let c = if_contact(&d, Some("NL999999999B01"));
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(&["1x Dienst @ 500.00 @RE", "1x Vrij @ 100.00 @V"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let xml = ubl_of(&d, &inv);
+    // BT-5: the document currency code is mandatory
+    assert!(xml.contains("<cbc:DocumentCurrencyCode>EUR</cbc:DocumentCurrencyCode>"));
+    for (base, cat) in [("500.00", "AE"), ("100.00", "E")] {
+        let marker = format!(r#"<cbc:TaxableAmount currencyID="EUR">{base}</cbc:TaxableAmount>"#);
+        let i = xml
+            .find(&marker)
+            .unwrap_or_else(|| panic!("no {cat} base {base} in {xml}"));
+        let rest = &xml[i..];
+        let j = rest.find("<cbc:TaxAmount").unwrap();
+        let zero = &rest[j..j + 60];
+        assert!(
+            zero.contains(">0.00<"),
+            "{cat} subtotal must carry a zero TaxAmount: {zero}"
+        );
+        assert!(rest[j..].contains(&format!("<cbc:ID>{cat}</cbc:ID>")));
+    }
+    assert!(
+        xml.contains(r#"<cbc:TaxExclusiveAmount currencyID="EUR">600.00</cbc:TaxExclusiveAmount>"#)
+    );
+    assert!(
+        xml.contains(r#"<cbc:TaxInclusiveAmount currencyID="EUR">600.00</cbc:TaxInclusiveAmount>"#)
+    );
+}
+
+#[test]
+fn if_ubl_hour_unit_maps_to_hur() {
+    let d = setup();
+    let c = if_contact(&d, Some("NL999999999B01"));
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(&["2x Coaching @ 50.00 @21"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    d.execute(
+        "UPDATE invoice_lines SET unit = ?1 WHERE invoice_id = ?2",
+        rusqlite::params!["h", inv["id"].as_i64().unwrap()],
+    )
+    .unwrap();
+    let xml = ubl_of(&d, &inv);
+    assert!(
+        xml.contains(r#"unitCode="HUR">2</cbc:InvoicedQuantity>"#),
+        "{xml}"
+    );
+}
+
+#[test]
+fn if_pdf_dutch_labels_unit_column_vat_breakdown_and_discount_row() {
+    let d = setup();
+    let c = if_contact(&d, Some("NL999999999B01"));
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        Some("pct"),
+        Some(500),
+        None,
+        &lines(&["2x Consultancy @ 100.00 @21 @-10%", "1x Maand @ 50.00 @9"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    d.execute(
+        "UPDATE invoice_lines SET unit = ?1 WHERE invoice_id = ?2 AND line_no = 1",
+        rusqlite::params!["h", inv["id"].as_i64().unwrap()],
+    )
+    .unwrap();
+    let full = bukio::invoice::get_invoice(&d, inv["id"].as_i64().unwrap())
+        .unwrap()
+        .unwrap();
+    let html = bukio::pdf::invoice_html(&d, &full);
+    for needle in [
+        "FACTUUR",
+        "Factuur aan",
+        "Omschrijving",
+        "Aantal",
+        "Eenheid",
+        "Btw over 21%",
+        "Btw over 9%",
+        "Totaal btw",
+        "Korting",
+        "Totaal (incl. btw)",
+    ] {
+        assert!(html.contains(needle), "missing {needle} in the Dutch PDF");
+    }
+    assert!(html.contains(">2<"), "formatted quantity, not 2000");
+    assert!(html.contains(">uur<"), "localized unit");
+    assert!(
+        !html.contains("2000</td>"),
+        "milli must never leak to the PDF"
+    );
+    let totals = bukio::invoice::compute_invoice_totals(
+        full["lines"].as_array().unwrap(),
+        full["discount_type"].as_str(),
+        full["discount_value"].as_i64(),
+    );
+    let net = bukio::money::format_amount(totals["net_before_cents"].as_i64().unwrap());
+    let gross = bukio::money::format_amount(totals["gross_cents"].as_i64().unwrap());
+    assert!(
+        html.contains(&net),
+        "net {net} missing from the rendered totals"
+    );
+    assert!(
+        html.contains(&gross),
+        "gross {gross} missing from the rendered totals"
+    );
+}
+
+#[test]
+fn if_pdf_english_labels() {
+    let d = setup();
+    let c = if_contact(&d, Some("NL999999999B01"));
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("en"),
+        &lines(&["1x Ding @ 100.00 @21"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let html = bukio::pdf::invoice_html(&d, &inv);
+    for needle in [
+        "INVOICE",
+        "Billed to",
+        "Description",
+        "Qty",
+        "Unit",
+        "Subtotal excl. VAT",
+        "Total (incl. VAT)",
+    ] {
+        assert!(html.contains(needle), "missing {needle} in the English PDF");
+    }
+}
+
+#[test]
+fn if_pdf_company_logo_renders_as_a_data_uri() {
+    let d = setup();
+    let c = if_contact(&d, Some("NL999999999B01"));
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(&["1x Ding @ 10.00"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let png = png_bytes(120, 60);
+    d.execute(
+        "UPDATE company SET logo = ?1, logo_mime = ?2 WHERE id = 1",
+        rusqlite::params![png, "image/png"],
+    )
+    .unwrap();
+    let html = bukio::pdf::invoice_html(&d, &inv);
+    assert!(
+        html.contains(r#"<img class="logo" src="data:image/png;base64,"#),
+        "{html}"
+    );
+    // and without a logo there is no <img>
+    d.execute(
+        "UPDATE company SET logo = NULL, logo_mime = NULL WHERE id = 1",
+        [],
+    )
+    .unwrap();
+    assert!(!bukio::pdf::invoice_html(&d, &inv).contains("<img"));
+}
+
+#[test]
+fn if_pdf_native_renderer_produces_a_valid_pdf() {
+    let d = setup();
+    let c = if_contact(&d, Some("NL999999999B01"));
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        Some("pct"),
+        Some(1000),
+        Some("en"),
+        &lines(&["1.5x Consultancy @ 100.00 @21 @-10%"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let dir = temp_dir("ifpdf");
+    let out = dir.join("inv.pdf");
+    let res = bukio::pdf::invoice_to_pdf(&d, &inv, Some(out.to_str().unwrap())).unwrap();
+    assert!(res["bytes"].as_u64().unwrap_or(0) > 1000, "{res}");
+    let bytes = std::fs::read(&out).unwrap();
+    assert!(bytes.len() > 1000);
+    assert!(bytes.starts_with(b"%PDF-"));
+    assert!(dir.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn if_recurring_invoice_template_snapshots_catalog_prices_per_run() {
+    let (dir, f) = cli_db("ifrec", &["--registration-id", "12345678", "--vat", "on"]);
+    run_cli(&[
+        "--json",
+        "contact",
+        "add",
+        "--name",
+        "ACME B.V.",
+        "--address",
+        "Straat 1",
+        "--city",
+        "Amsterdam",
+        "--db",
+        &f,
+    ]);
+    let (v, ok, out) = run_cli(&[
+        "--json", "item", "add", "--name", "SaaS", "--unit", "month", "--price", "99.00", "--vat",
+        "21", "--db", &f,
+    ]);
+    assert!(ok, "{out}");
+    let item_id = v["data"]["item_id"].as_i64().unwrap_or(1);
+
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "recurring",
+        "add",
+        "--kind",
+        "invoice",
+        "--name",
+        "SaaS abonnement",
+        "--contact",
+        "1",
+        "--items",
+        &format!("{item_id}:1"),
+        "--frequency",
+        "monthly",
+        "--start",
+        "2026-08-01",
+        "--due-days",
+        "14",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["template"]["vat_aware"], json!(1), "{v}");
+
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "recurring",
+        "run",
+        "--as-of",
+        "2026-08-31",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    let d = bukio::db::open_db(&f).unwrap();
+    let aug_id: i64 = d
+        .query_row("SELECT id FROM invoices ORDER BY id LIMIT 1", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    let aug = bukio::invoice::get_invoice(&d, aug_id).unwrap().unwrap();
+    assert_eq!(aug["lines"][0]["item_id"], json!(item_id));
+    assert_eq!(aug["lines"][0]["unit_price_cents"], json!(9900));
+    assert_eq!(aug["lines"][0]["quantity"], json!(1000));
+
+    // a price change applies from the NEXT run (snapshot semantics)
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "item",
+        "update",
+        "--id",
+        &item_id.to_string(),
+        "--price",
+        "119.00",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "recurring",
+        "run",
+        "--as-of",
+        "2026-09-30",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    let sep_id: i64 = d
+        .query_row(
+            "SELECT id FROM invoices WHERE date = '2026-09-01'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let sep = bukio::invoice::get_invoice(&d, sep_id).unwrap().unwrap();
+    assert_eq!(
+        sep["lines"][0]["unit_price_cents"],
+        json!(11900),
+        "the new price applies this run"
+    );
+    let aug_again = bukio::invoice::get_invoice(&d, aug_id).unwrap().unwrap();
+    assert_eq!(
+        aug_again["lines"][0]["unit_price_cents"],
+        json!(9900),
+        "past drafts untouched"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn if_mcp_item_tools_and_invoice_create_with_items_discount_and_language() {
+    let (dir, f) = cli_db("ifmcp", &["--registration-id", "12345678", "--vat", "on"]);
+    run_cli(&[
+        "--json",
+        "contact",
+        "add",
+        "--name",
+        "ACME B.V.",
+        "--address",
+        "Straat 1",
+        "--city",
+        "Amsterdam",
+        "--db",
+        &f,
+    ]);
+
+    let mut mcp = Mcp::start(&f);
+    let (added, is_err) = mcp.tool(
+        "item_add",
+        json!({ "name": "Consultancy", "unit": "h", "unit_price": "150.00", "vat_code": "21", "mode": "execute", "actor": "agent:mcp-test" }),
+    );
+    assert!(!is_err, "{added}");
+    assert_eq!(added["action"], json!("item.create"));
+
+    let (list, _) = mcp.tool("item_list", json!({}));
+    assert!(list.to_string().contains("Consultancy"), "{list}");
+
+    let (inv, is_err) = mcp.tool(
+        "invoice_create",
+        json!({ "contact_id": 1, "items": ["1:2@140.00"], "date": "2026-08-10", "discount_pct": 5, "language": "en", "mode": "execute", "actor": "agent:mcp-test" }),
+    );
+    assert!(!is_err, "{inv}");
+    assert_eq!(inv["invoice_id"], json!(1), "{inv}");
+    assert_eq!(inv["totals"]["discount"], json!(1400), "5% of 280.00");
+    assert_eq!(inv["totals"]["net"], json!(26600));
+    assert_eq!(inv["totals"]["vat"], json!(5586));
+
+    let (deact, _) = mcp.tool(
+        "item_update",
+        json!({ "id": 1, "deactivate": true, "mode": "execute", "actor": "agent:mcp-test" }),
+    );
+    assert_eq!(deact["active"], json!(false), "item_update must deactivate");
+
+    // item_add dry-run writes nothing
+    let (plan, _) = mcp.tool(
+        "item_add",
+        json!({ "name": "X", "unit_price": "10.00", "mode": "dry-run" }),
+    );
+    assert_eq!(plan["dryRun"], json!(true));
+    mcp.stop();
+
+    let check = bukio::db::open_db(&f).unwrap();
+    let n: i64 = check
+        .query_row("SELECT COUNT(*) FROM items", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 1, "dry-run wrote nothing");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn if_bank_auto_match_matches_a_discounted_invoice_at_its_discounted_gross() {
+    let d = setup();
+    let c = if_contact(&d, Some("NL999999999B01"));
+    // 2x 100 @21 with a 10% total discount -> gross 217.80 (line sums say 242.00)
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-01",
+        None,
+        None,
+        None,
+        None,
+        Some("pct"),
+        Some(1000),
+        None,
+        &lines(&["2x Dienst @ 100.00 @21"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let id = inv["id"].as_i64().unwrap();
+    bukio::invoice::finalize_invoice(&d, id, "agent:test", false).unwrap();
+    assert_eq!(
+        bukio::invoice::get_invoice(&d, id).unwrap().unwrap()["gross_cents"],
+        json!(21780)
+    );
+
+    bukio::bank::get_or_create_bank_account(&d, "NL91ABNA0417164300", None, "1100", false).unwrap();
+    let tx = vec![bukio::bank::BankTx {
+        date: "2026-08-05".into(),
+        amount_cents: 21780,
+        counterparty: Some("ACME B.V.".into()),
+        description: Some("betaling factuur".into()),
+        iban_counter: None,
+        bank_ref: None,
+        iban: None,
+    }];
+    bukio::bank::import_transactions(
+        &d,
+        "NL91ABNA0417164300",
+        &tx,
+        Some("Betaalrekening"),
+        "1100",
+        "agent:test",
+    )
+    .unwrap();
+
+    let dry = bukio::bank::auto_match(&d, 14, "agent:test", true).unwrap();
+    let matched = dry["matched"].as_array().unwrap();
+    assert_eq!(matched.len(), 1, "{dry}");
+    assert_eq!(matched[0]["kind"], json!("invoice"));
+    assert_eq!(matched[0]["fx_delta_cents"], json!(0));
+
+    bukio::bank::auto_match(&d, 14, "agent:test", false).unwrap();
+    let paid = bukio::invoice::get_invoice(&d, id).unwrap().unwrap();
+    assert_eq!(paid["status"], json!("paid"));
+    assert_eq!(paid["paid_cents"], json!(21780));
+    assert_eq!(
+        bukio::reports::trial_balance(&d, None).unwrap()["balanced"],
+        json!(true)
+    );
+}
+
+#[test]
+fn if_bank_auto_match_does_not_match_a_pre_discount_payment() {
+    let d = setup();
+    let c = if_contact(&d, Some("NL999999999B01"));
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-01",
+        None,
+        None,
+        None,
+        None,
+        Some("pct"),
+        Some(1000),
+        None,
+        &lines(&["2x Dienst @ 100.00 @21"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    bukio::invoice::finalize_invoice(&d, inv["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+    bukio::bank::get_or_create_bank_account(&d, "NL91ABNA0417164300", None, "1100", false).unwrap();
+    let tx = vec![bukio::bank::BankTx {
+        date: "2026-08-05".into(),
+        amount_cents: 24200,
+        counterparty: Some("ACME B.V.".into()),
+        description: Some("pre-discount amount".into()),
+        iban_counter: None,
+        bank_ref: None,
+        iban: None,
+    }];
+    bukio::bank::import_transactions(
+        &d,
+        "NL91ABNA0417164300",
+        &tx,
+        Some("Betaalrekening"),
+        "1100",
+        "agent:test",
+    )
+    .unwrap();
+    let dry = bukio::bank::auto_match(&d, 14, "agent:test", true).unwrap();
+    assert_eq!(
+        dry["matched"].as_array().unwrap().len(),
+        0,
+        "242.00 != 217.80 and outside tolerance: {dry}"
+    );
+}
+
+#[test]
+fn if_company_logo_set_extract_round_trip_and_remove() {
+    let (dir, f) = cli_db("iflogo", &["--registration-id", "12345678", "--vat", "on"]);
+    let logo = dir.join("logo.png");
+    let bytes = png_bytes(200, 80);
+    std::fs::write(&logo, &bytes).unwrap();
+
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--logo",
+        logo.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["company"]["logo_mime"], json!("image/png"), "{v}");
+    assert_eq!(v["data"]["company"]["logo_bytes"], json!(33));
+
+    let extract = dir.join("out.png");
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "company",
+        "logo",
+        "--out",
+        extract.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(
+        std::fs::read(&extract).unwrap(),
+        bytes,
+        "byte-identical round-trip"
+    );
+
+    let (_, ok, out) = run_cli(&["--json", "company", "update", "--remove-logo", "--db", &f]);
+    assert!(ok, "{out}");
+    let (v, ok, out) = run_cli(&["--json", "company", "show", "--db", &f]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["company"]["logo_mime"], Value::Null, "{v}");
+    assert_eq!(v["data"]["company"]["logo_bytes"], Value::Null, "{v}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn if_company_logo_format_size_and_dimension_guards() {
+    let (dir, f) = cli_db("iflogo2", &["--registration-id", "12345678", "--vat", "on"]);
+    let bad = dir.join("logo.txt");
+    std::fs::write(&bad, b"not an image at all").unwrap();
+    let (v, ok, _) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--logo",
+        bad.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(!ok);
+    assert_eq!(v["error"]["code"], json!("LOGO_UNSUPPORTED_FORMAT"), "{v}");
+
+    let big = dir.join("big.png");
+    std::fs::write(&big, png_bytes(4096, 100)).unwrap();
+    let (v, ok, _) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--logo",
+        big.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(!ok);
+    assert_eq!(
+        v["error"]["code"],
+        json!("LOGO_DIMENSIONS_TOO_LARGE"),
+        "{v}"
+    );
+
+    let huge = dir.join("huge.png");
+    let mut oversized = png_bytes(100, 100);
+    oversized.extend(std::iter::repeat(0u8).take(1_100_000));
+    std::fs::write(&huge, oversized).unwrap();
+    let (v, ok, _) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--logo",
+        huge.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(!ok);
+    assert_eq!(v["error"]["code"], json!("LOGO_TOO_LARGE"), "{v}");
+
+    let nope = dir.join("nope.png");
+    let (v, ok, _) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--logo",
+        nope.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(!ok);
+    assert_eq!(v["error"]["code"], json!("LOGO_FILE_NOT_FOUND"), "{v}");
+
+    // JPEG + SVG accepted; SVG dimensions come from width/height
+    let jpg = dir.join("logo.jpg");
+    std::fs::write(&jpg, jpeg_bytes(120, 60)).unwrap();
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--logo",
+        jpg.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(
+        v["data"]["company"]["logo_mime"],
+        json!("image/jpeg"),
+        "{v}"
+    );
+
+    let svg = dir.join("logo.svg");
+    std::fs::write(
+        &svg,
+        br#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"></svg>"#,
+    )
+    .unwrap();
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--logo",
+        svg.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(
+        v["data"]["company"]["logo_mime"],
+        json!("image/svg+xml"),
+        "{v}"
+    );
+
+    // an XML declaration + a long comment before <svg (real-world logo files)
+    let commented = dir.join("commented.svg");
+    std::fs::write(
+        &commented,
+        b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!-- a long comment block that pushes <svg far past the first 200 bytes of the file -->\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"100\" height=\"50\"></svg>",
+    )
+    .unwrap();
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--logo",
+        commented.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(
+        v["data"]["company"]["logo_mime"],
+        json!("image/svg+xml"),
+        "{v}"
+    );
+
+    let outpng = dir.join("x.png");
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "company",
+        "logo",
+        "--out",
+        outpng.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["mime"], json!("image/svg+xml"), "{v}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn if_review_fix_reverse_charge_label_and_email_language_follow_the_document() {
+    // an ES invoice with a reverse-charge line: the PDF must show the Spanish
+    // label, never the Dutch 'verlegd'
+    let (dir, f) = cli_db(
+        "ifes",
+        &[
+            "--country",
+            "ES",
+            "--legal-form",
+            "sl",
+            "--vat",
+            "on",
+            "--registration-id",
+            "M-123456",
+            "--tax-id",
+            "ESB12345678",
+            "--address",
+            "Calle 1",
+            "--postal-code",
+            "28001",
+            "--city",
+            "Madrid",
+        ],
+    );
+    let d = bukio::db::open_db(&f).unwrap();
+    let c = bukio::contacts::create_contact(
+        &d,
+        "Cliente SL",
+        Some("Calle 2"),
+        None,
+        Some("Barcelona"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        "agent:test",
+        false,
+    )
+    .unwrap()["id"]
+        .as_i64()
+        .unwrap();
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(&["Servicio @ 100.00 @R"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        inv["language"],
+        json!("es"),
+        "an ES company invoices in Spanish"
+    );
+    let html = bukio::pdf::invoice_html(&d, &inv);
+    assert!(html.contains("inversión del sujeto pasivo"), "{html}");
+    assert!(
+        !html.contains("verlegd"),
+        "no Dutch fallback on a Spanish PDF"
+    );
+
+    let en = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-11",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("en"),
+        &lines(&["Servicio @ 100.00 @R"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let en_html = bukio::pdf::invoice_html(&d, &en);
+    assert!(en_html.contains("reverse charge"));
+    assert!(!en_html.contains("inversión del sujeto pasivo"));
+
+    // invoice emails follow the document language too
+    assert_eq!(
+        bukio::pdf::default_subject("it", "2026-0001", "Rossi SRL"),
+        "Fattura 2026-0001 — Rossi SRL"
+    );
+    assert_eq!(
+        bukio::pdf::default_subject("es", "2026-0001", "Perez SL"),
+        "Factura 2026-0001 — Perez SL"
+    );
+    assert_eq!(
+        bukio::pdf::default_subject("de", "2026-0001", "Muster GmbH"),
+        "Rechnung 2026-0001 — Muster GmbH"
+    );
+    assert_eq!(
+        bukio::pdf::default_subject("nl", "2026-0001", "Demo BV"),
+        "Factuur 2026-0001 — Demo BV"
+    );
+    assert_eq!(
+        bukio::pdf::default_subject("xx", "2026-0001", "X"),
+        "Invoice 2026-0001 — X",
+        "unknown -> the English table"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
