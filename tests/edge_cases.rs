@@ -8139,3 +8139,428 @@ fn attach_file_mode_dir_is_created_next_to_a_nested_db() {
     assert!(std::path::Path::new(path).exists());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ==== backup (ported from test/backup.test.js) ==============================
+
+/// The CLI with an extra environment (HOME decides ~/.bukio/backups).
+fn run_cli_env(args: &[&str], env: &[(&str, &str)]) -> (Value, bool, String) {
+    let exe = env!("CARGO_BIN_EXE_bukio");
+    let mut cmd = std::process::Command::new(exe);
+    cmd.env("BUKIO_ACTOR", "agent:test");
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd.args(args).output().unwrap();
+    (
+        serde_json::from_slice(&out.stdout).unwrap_or(Value::Null),
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+    )
+}
+
+fn trial_balance_sum(file: &str) -> i64 {
+    let db = bukio::db::open_db(file).unwrap();
+    db.query_row(
+        "SELECT COALESCE(SUM(amount_cents),0) FROM postings p JOIN journal_entries e ON e.id = p.entry_id WHERE e.state = 'posted'",
+        [],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+/// init + one posted entry, the JS beforeEach.
+fn backup_env(tag: &str) -> (std::path::PathBuf, String) {
+    let dir = temp_dir(tag);
+    let file = dir.join("test.db");
+    let f = file.to_str().unwrap().to_string();
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "init",
+        "--name",
+        "Test Coaching",
+        "--registration-id",
+        "12345678",
+        "--legal-form",
+        "eenmanszaak",
+        "--vat",
+        "off",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "entry",
+        "add",
+        "--date",
+        "2026-08-10",
+        "--desc",
+        "Startkapitaal",
+        "--postings",
+        "1100:10000.00,3000:-10000.00",
+        "--post",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    (dir, f)
+}
+
+#[test]
+fn backup_encrypt_writes_the_magic_header_and_restores_byte_identical() {
+    let (dir, db_path) = backup_env("bk1");
+    let enc = dir.join("enc.db.enc");
+    let encs = enc.to_str().unwrap().to_string();
+
+    let (r, ok, out) = run_cli(&[
+        "--json",
+        "backup",
+        "--out",
+        &encs,
+        "--encrypt",
+        "--passphrase",
+        "hunter2",
+        "--db",
+        &db_path,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(r["data"]["encrypted"], json!(true), "{r}");
+    assert!(enc.exists());
+
+    // the on-disk format starts with the magic
+    let head = &std::fs::read(&enc).unwrap()[..9];
+    assert_eq!(head, b"BUKIOENC1", "encrypted backups start with the magic");
+    assert!(bukio::backup::is_encrypted_backup(&enc));
+
+    let restored = dir.join("restored.db");
+    let rs = restored.to_str().unwrap().to_string();
+    let (rr, ok, out) = run_cli(&[
+        "--json",
+        "restore",
+        "--from",
+        &encs,
+        "--to",
+        &rs,
+        "--passphrase",
+        "hunter2",
+        "--db",
+        &db_path,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(rr["data"]["encrypted"], json!(true), "{rr}");
+    assert_eq!(trial_balance_sum(&db_path), trial_balance_sum(&rs));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn restore_encrypted_needs_a_passphrase_and_rejects_a_wrong_one() {
+    let (dir, db_path) = backup_env("bk2");
+    let enc = dir.join("enc.db.enc");
+    let encs = enc.to_str().unwrap().to_string();
+    run_cli(&[
+        "--json",
+        "backup",
+        "--out",
+        &encs,
+        "--encrypt",
+        "--passphrase",
+        "hunter2",
+        "--db",
+        &db_path,
+    ]);
+    let restored = dir.join("r.db");
+    let rs = restored.to_str().unwrap().to_string();
+
+    let (no_pass, ok, _) = run_cli(&[
+        "--json", "restore", "--from", &encs, "--to", &rs, "--db", &db_path,
+    ]);
+    assert!(!ok);
+    assert_eq!(
+        no_pass["error"]["code"],
+        json!("BACKUP_PASSPHRASE_REQUIRED"),
+        "{no_pass}"
+    );
+    assert!(
+        !restored.exists(),
+        "a refused restore must not create the file"
+    );
+
+    let (wrong, ok, _) = run_cli(&[
+        "--json",
+        "restore",
+        "--from",
+        &encs,
+        "--to",
+        &rs,
+        "--passphrase",
+        "wrong",
+        "--db",
+        &db_path,
+    ]);
+    assert!(!ok);
+    assert_eq!(
+        wrong["error"]["code"],
+        json!("BACKUP_PASSPHRASE_WRONG"),
+        "{wrong}"
+    );
+    assert!(!restored.exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn restore_takes_the_passphrase_from_the_environment() {
+    let (dir, db_path) = backup_env("bk3");
+    let enc = dir.join("enc.db.enc");
+    let encs = enc.to_str().unwrap().to_string();
+    run_cli(&[
+        "--json",
+        "backup",
+        "--out",
+        &encs,
+        "--encrypt",
+        "--passphrase",
+        "envpass",
+        "--db",
+        &db_path,
+    ]);
+    let restored = dir.join("r.db");
+    let rs = restored.to_str().unwrap().to_string();
+    let (r, ok, out) = run_cli_env(
+        &[
+            "--json", "restore", "--from", &encs, "--to", &rs, "--db", &db_path,
+        ],
+        &[("BUKIO_BACKUP_PASSPHRASE", "envpass")],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(r["data"]["encrypted"], json!(true), "{r}");
+    assert_eq!(trial_balance_sum(&db_path), trial_balance_sum(&rs));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_tampered_encrypted_backup_is_a_passphrase_wrong() {
+    let (dir, db_path) = backup_env("bk4");
+    let enc = dir.join("enc.db.enc");
+    let encs = enc.to_str().unwrap().to_string();
+    run_cli(&[
+        "--json",
+        "backup",
+        "--out",
+        &encs,
+        "--encrypt",
+        "--passphrase",
+        "hunter2",
+        "--db",
+        &db_path,
+    ]);
+    let mut bytes = std::fs::read(&enc).unwrap();
+    let last = bytes.len() - 5;
+    bytes[last] ^= 0xff; // flip a ciphertext byte
+    std::fs::write(&enc, &bytes).unwrap();
+
+    let restored = dir.join("r.db");
+    let rs = restored.to_str().unwrap().to_string();
+    let (r, ok, _) = run_cli(&[
+        "--json",
+        "restore",
+        "--from",
+        &encs,
+        "--to",
+        &rs,
+        "--passphrase",
+        "hunter2",
+        "--db",
+        &db_path,
+    ]);
+    assert!(!ok);
+    // GCM authenticates, so tampering surfaces as the wrong-passphrase code
+    assert_eq!(r["error"]["code"], json!("BACKUP_PASSPHRASE_WRONG"), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn backup_encrypt_decrypt_unit_round_trip_and_wrong_key() {
+    let dir = temp_dir("bk5");
+    let plain = dir.join("plain.db");
+    let enc = dir.join("plain.db.enc");
+    std::fs::write(&plain, b"sqlite bytes 123").unwrap();
+
+    let size = bukio::backup::encrypt_file(&plain, &enc, "pass").unwrap();
+    assert!(size > 0);
+    let dec = bukio::backup::decrypt_bytes(&std::fs::read(&enc).unwrap(), "pass").unwrap();
+    assert_eq!(dec, b"sqlite bytes 123");
+    let err = bukio::backup::decrypt_bytes(&std::fs::read(&enc).unwrap(), "nope").unwrap_err();
+    assert_eq!(err.code, "BACKUP_PASSPHRASE_WRONG", "{err:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn backup_keep_prunes_the_oldest_and_a_dry_run_deletes_nothing() {
+    let (dir, db_path) = backup_env("bk6");
+    let home = dir.join("home");
+    let backup_dir = home.join(".bukio").join("backups");
+    std::fs::create_dir_all(&backup_dir).unwrap();
+    for n in [
+        "bukio-2026-08-01T00-00-00.db",
+        "bukio-2026-08-02T00-00-00.db",
+        "bukio-2026-08-03T00-00-00.db",
+        "bukio-2026-08-04T00-00-00.db",
+    ] {
+        std::fs::write(backup_dir.join(n), "x").unwrap();
+    }
+    // an unrelated file must never be pruned
+    std::fs::write(backup_dir.join("notes.txt"), "keep me").unwrap();
+    let home_s = home.to_str().unwrap().to_string();
+
+    let (dry, ok, out) = run_cli_env(
+        &[
+            "--json",
+            "backup",
+            "--keep",
+            "2",
+            "--dry-run",
+            "--db",
+            &db_path,
+        ],
+        &[("HOME", &home_s)],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(dry["data"]["pruned"].as_array().unwrap().len(), 2, "{dry}");
+    assert_eq!(
+        std::fs::read_dir(&backup_dir).unwrap().count(),
+        5,
+        "dry-run deletes nothing"
+    );
+
+    // the real run prunes AFTER the new backup exists — keep N TOTAL, not N+1
+    let (real, ok, out) = run_cli_env(
+        &["--json", "backup", "--keep", "2", "--db", &db_path],
+        &[("HOME", &home_s)],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(
+        real["data"]["pruned"].as_array().unwrap().len(),
+        3,
+        "{real}"
+    );
+    let mut remaining: Vec<String> = std::fs::read_dir(&backup_dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+        .collect();
+    remaining.sort();
+    for gone in [
+        "bukio-2026-08-01T00-00-00.db",
+        "bukio-2026-08-02T00-00-00.db",
+        "bukio-2026-08-03T00-00-00.db",
+    ] {
+        assert!(
+            !remaining.iter().any(|f| f == gone),
+            "{gone} should be pruned: {remaining:?}"
+        );
+    }
+    assert!(
+        remaining
+            .iter()
+            .any(|f| f == "bukio-2026-08-04T00-00-00.db"),
+        "{remaining:?}"
+    );
+    assert_eq!(
+        remaining
+            .iter()
+            .filter(|f| f.starts_with("bukio-") && f.ends_with(".db"))
+            .count(),
+        2,
+        "exactly the 2 newest remain: {remaining:?}"
+    );
+    assert!(remaining.iter().any(|f| f == "notes.txt"), "{remaining:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn backup_keep_validation_rejects_non_integer_zero_and_out() {
+    let (dir, db_path) = backup_env("bk7");
+    for bad in ["abc", "0"] {
+        let (r, ok, _) = run_cli(&["--json", "backup", "--keep", bad, "--db", &db_path]);
+        assert!(!ok);
+        assert_eq!(r["error"]["code"], json!("INVALID_KEEP"), "keep={bad}: {r}");
+    }
+    let x = dir.join("x.db");
+    let (r, ok, _) = run_cli(&[
+        "--json",
+        "backup",
+        "--keep",
+        "2",
+        "--out",
+        x.to_str().unwrap(),
+        "--db",
+        &db_path,
+    ]);
+    assert!(!ok);
+    assert_eq!(r["error"]["code"], json!("INVALID_KEEP"), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn backup_and_restore_plain_work_and_both_are_audited() {
+    let (dir, db_path) = backup_env("bk8");
+    let backup_path = dir.join("plain.db");
+    let bs = backup_path.to_str().unwrap().to_string();
+
+    let (r, ok, out) = run_cli(&["--json", "backup", "--out", &bs, "--db", &db_path]);
+    assert!(ok, "{out}");
+    assert_eq!(r["data"]["encrypted"], json!(false), "{r}");
+    assert!(!bukio::backup::is_encrypted_backup(&backup_path));
+
+    let restored = dir.join("restored-plain.db");
+    let rs = restored.to_str().unwrap().to_string();
+    let (_, ok, out) = run_cli(&[
+        "--json", "restore", "--from", &bs, "--to", &rs, "--db", &db_path,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(trial_balance_sum(&db_path), trial_balance_sum(&rs));
+
+    // audit rows in the SOURCE (backup) and the RESTORED (restore) DBs
+    let db = bukio::db::open_db(&db_path).unwrap();
+    let (actor, args): (String, String) = db
+        .query_row(
+            "SELECT actor, args_json FROM audit_log WHERE action = 'backup' ORDER BY id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(actor, "agent:test");
+    assert_eq!(
+        serde_json::from_str::<Value>(&args).unwrap()["encrypted"],
+        json!(false)
+    );
+
+    let db = bukio::db::open_db(&rs).unwrap();
+    let (actor, args): (String, String) = db
+        .query_row(
+            "SELECT actor, args_json FROM audit_log WHERE action = 'restore' ORDER BY id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(actor, "agent:test");
+    assert_eq!(
+        serde_json::from_str::<Value>(&args).unwrap()["encrypted"],
+        json!(false)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn prune_backups_on_a_missing_folder_is_a_noop() {
+    let dir = temp_dir("bk9");
+    let nohome = dir.join("nohome");
+    let saved = std::env::var("HOME").ok();
+    std::env::set_var("HOME", &nohome);
+    let r = bukio::backup::prune_backups(3, false).unwrap();
+    match saved {
+        Some(h) => std::env::set_var("HOME", h),
+        None => std::env::remove_var("HOME"),
+    }
+    assert_eq!(r.len(), 0, "{r:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

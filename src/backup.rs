@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 /// "BUKIOENC1" | salt(16) | iv(12) | tag(16) | ciphertext (JS parity)
 const BACKUP_MAGIC: &str = "BUKIOENC1";
 const SALT_LEN: usize = 16;
+const TAG_LEN: usize = 16;
 const IV_LEN: usize = 12;
 const KEY_LEN: usize = 32;
 const SCRYPT_LOG_N: u8 = 15; // N = 2^15, matches JS { N: 2**15, r: 8, p: 1 }
@@ -78,7 +79,7 @@ fn derive_key(pass: &str, salt: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// AES-256-GCM encrypt `src` into `dest`; returns the dest size.
-fn encrypt_file(src: &Path, dest: &Path, pass: &str) -> Result<u64> {
+pub fn encrypt_file(src: &Path, dest: &Path, pass: &str) -> Result<u64> {
     let plain = fs::read(src)
         .map_err(|e| BukioError::new("IO_ERROR", format!("cannot read {}: {e}", src.display())))?;
     encrypt_bytes(&plain, dest, pass)
@@ -98,14 +99,19 @@ fn encrypt_bytes(plain: &[u8], dest: &Path, pass: &str) -> Result<u64> {
         .map_err(|e| BukioError::new("DB_ERROR", format!("key: {e}")))?;
     let key = LessSafeKey::new(unbound);
     let nonce = Nonce::assume_unique_for_key(iv.clone().try_into().unwrap());
-    // ring appends the 16-byte tag after the ciphertext (matches JS layout)
     let mut in_out = plain.to_vec();
-    key.seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)
+    // the JS layout is MAGIC || salt || iv || TAG || ciphertext
+    // (Buffer.concat([MAGIC, salt, iv, cipher.getAuthTag(), enc])), so the tag
+    // goes BEFORE the ciphertext — not ring's default ct||tag
+    let tag = key
+        .seal_in_place_separate_tag(nonce, Aad::empty(), &mut in_out)
         .map_err(|e| BukioError::new("DB_ERROR", format!("seal: {e}")))?;
-    let mut out = Vec::with_capacity(BACKUP_MAGIC.len() + SALT_LEN + IV_LEN + in_out.len());
+    let mut out =
+        Vec::with_capacity(BACKUP_MAGIC.len() + SALT_LEN + IV_LEN + TAG_LEN + in_out.len());
     out.extend_from_slice(BACKUP_MAGIC.as_bytes());
     out.extend_from_slice(&salt);
     out.extend_from_slice(&iv);
+    out.extend_from_slice(tag.as_ref());
     out.extend_from_slice(&in_out);
     fs::write(dest, &out).map_err(|e| {
         BukioError::new("IO_ERROR", format!("cannot write {}: {e}", dest.display()))
@@ -115,7 +121,7 @@ fn encrypt_bytes(plain: &[u8], dest: &Path, pass: &str) -> Result<u64> {
 
 /// Decrypt an encrypted backup into a fresh Vec; wrong pass/tamper →
 /// BACKUP_PASSPHRASE_WRONG.
-fn decrypt_bytes(raw: &[u8], pass: &str) -> Result<Vec<u8>> {
+pub fn decrypt_bytes(raw: &[u8], pass: &str) -> Result<Vec<u8>> {
     if raw.len() < BACKUP_MAGIC.len() || &raw[..BACKUP_MAGIC.len()] != BACKUP_MAGIC.as_bytes() {
         return Err(BukioError::new(
             "INVALID_BACKUP",
@@ -127,21 +133,36 @@ fn decrypt_bytes(raw: &[u8], pass: &str) -> Result<Vec<u8>> {
     off += SALT_LEN;
     let iv: [u8; IV_LEN] = raw[off..off + IV_LEN].try_into().unwrap();
     off += IV_LEN;
+    if raw.len() < off + TAG_LEN {
+        return Err(BukioError::new(
+            "INVALID_BACKUP",
+            "encrypted backup is truncated",
+        ));
+    }
+    // JS layout: the 16-byte tag precedes the ciphertext; ring wants ct||tag
+    let tag = &raw[off..off + TAG_LEN];
+    off += TAG_LEN;
     let ct = &raw[off..];
     let key = derive_key(pass, salt)?;
     let unbound = UnboundKey::new(&AES_256_GCM, &key)
         .map_err(|e| BukioError::new("DB_ERROR", format!("key: {e}")))?;
     let key = LessSafeKey::new(unbound);
     let nonce = Nonce::assume_unique_for_key(iv);
-    let mut in_out = ct.to_vec();
-    key.open_in_place(nonce, Aad::empty(), &mut in_out)
+    let mut in_out = Vec::with_capacity(ct.len() + TAG_LEN);
+    in_out.extend_from_slice(ct);
+    in_out.extend_from_slice(tag);
+    // the returned slice IS the plaintext — returning the whole buffer would
+    // append the tag to every restored database (SQLite tolerates the trailing
+    // bytes, so the corruption hides)
+    let plain = key
+        .open_in_place(nonce, Aad::empty(), &mut in_out)
         .map_err(|_| {
             BukioError::new(
                 "BACKUP_PASSPHRASE_WRONG",
                 "wrong passphrase or corrupted backup — decryption failed",
             )
         })?;
-    Ok(in_out)
+    Ok(plain.to_vec())
 }
 
 fn validate_backup_file(path: &Path) -> Result<()> {

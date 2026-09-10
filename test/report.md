@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 20:01:13 UTC — **✅ 401 passing · 0 failing (401 tests)**
+**Latest run:** 2026-09-10 20:14:29 UTC — **✅ 392 passing · 0 failing (392 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -107,20 +107,6 @@
     - ✅ MCP gate: read-only tools are unaffected (not gated) — a role-less actor can still read
     - ✅ MCP gate: vat_book maps to vat.book — a payments actor is refused
     - ✅ lifecycle: owner bootstraps authz, splits bookkeeping/payments, the SoD boundary holds end-to-end
-
-### backup.test.js — encrypted backups (AES-256-GCM), keep-N rotation, tamper detection, audited restore
-
-9 passing · 0 failing
-
-    - ✅ backup --encrypt: magic header, round-trips byte-identical via restore
-    - ✅ restore: encrypted file without passphrase → BACKUP_PASSPHRASE_REQUIRED; wrong → BACKUP_PASSPHRASE_WRONG
-    - ✅ restore: passphrase from BUKIO_BACKUP_PASSPHRASE env works
-    - ✅ tampered encrypted backup → BACKUP_PASSPHRASE_WRONG
-    - ✅ unit: encrypt/decrypt round-trip and wrong key
-    - ✅ --keep N prunes oldest backups in the default folder; dry-run deletes nothing
-    - ✅ --keep validation: non-integer, zero, and with --out all rejected
-    - ✅ plain backup/restore still works (regression) + both actions audited
-    - ✅ pruneBackups: empty/missing folder is a no-op
 
 ### cli.test.js — CLI end-to-end: init, entries, reports, backup/restore
 
