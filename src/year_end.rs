@@ -32,11 +32,15 @@ pub fn fiscal_year_window(db: &Connection, year: &str) -> Result<(String, String
     }
     let end = format!("{year}-{mm:02}-{dd:02}");
     let y: i32 = year.parse().unwrap_or(2026);
-    let start = {
-        let d = chrono::NaiveDate::from_ymd_opt(y - 1, mm, dd + 1)
-            .unwrap_or_else(|| chrono::NaiveDate::from_ymd_opt(y - 1, mm, 1).unwrap());
-        d.format("%Y-%m-%d").to_string()
-    };
+    // The JS uses Date.UTC(y-1, mm-1, dd+1), which ROLLS OVER an impossible day
+    // (2025-06-31 -> 2025-07-01). chrono returns None for 06-31 and the old
+    // fallback silently picked the FIRST of the month — widening the fiscal year
+    // by a month, so an entry outside it was pulled into the close and the
+    // reported result was wrong for every non-calendar fiscal year.
+    let start = chrono::NaiveDate::from_ymd_opt(y - 1, mm, 1)
+        .and_then(|d| d.checked_add_days(chrono::Days::new(dd as u64)))
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_else(|| format!("{}-01-01", y - 1));
     Ok((start, end))
 }
 

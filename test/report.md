@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 16:40:36 UTC — **✅ 542 passing · 0 failing (542 tests)**
+**Latest run:** 2026-09-10 16:52:11 UTC — **✅ 521 passing · 0 failing (521 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -620,32 +620,6 @@
     - ✅ emailInvoice: PDF attachment is rendered and decodes to %PDF
     - ✅ cli: invoice email e2e with SMTP env + audit row
     - ✅ mcp: invoice_email dry-run parity (no connection) + execute
-
-### year-end.test.js — annual close, jaarrekening micro/klein, ICP
-
-21 passing · 0 failing
-
-    - ✅ year-end close: posts closing + appropriation, balanced, source closing
-    - ✅ year-end close: reversing the closing entries re-opens the year (documented undo)
-    - ✅ year-end close: guards — drafts block, empty year reports
-    - ✅ year-end close: dry-run writes nothing
-    - ✅ P&L still shows the year result after closing
-    - ✅ jaarrekening: klein model — statutory balans + W&V, balanced
-    - ✅ jaarrekening: klein model — resultaat counts inkoop ONCE and adds overige bedrijfsopbrengsten
-    - ✅ jaarrekening: after closing, result sits in equity (no onverdeeld)
-    - ✅ jaarrekening: klein P&L follows the FISCAL year, not the calendar year
-    - ✅ year-end close: follows the FISCAL year for non-calendar fiscal years
-    - ✅ jaarrekening: invalid model rejected
-    - ✅ jaarrekening: account-level amounts are numbers, never NaN
-    - ✅ jaarrekening: PDF html renders account detail without NaN
-    - ✅ jaarrekening: pnl includes the Afschrijvingen line for WAFS.41
-    - ✅ jaarrekening PDF: renders (playwright)
-    - ✅ jaarrekening PDF: esc() escapes double quotes (attribute-injection regression)
-    - ✅ OB readout: R purchase -> 3a/4a, RE purchase -> 3b/4b, RE sale -> 2a
-    - ✅ OB readout: verlegde EU sale (RE invoice) reports 2a
-    - ✅ ICP readout: EU customers with RE lines, totals per customer
-    - ✅ ICP readout: missing customer vat-id fails loudly
-    - ✅ ICP readout: no RE lines -> empty listing
 
 ---
 _Regenerated automatically on every `npm test`._

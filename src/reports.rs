@@ -1496,6 +1496,28 @@ fn flatten_sections(sections: &[Value]) -> Vec<Value> {
 }
 
 /// Statutory annual accounts (jaarrekening) — mirrors src/report/jaarrekening.js.
+/// JS parity: the statutory balans account rows expose `amount_cents` (the raw
+/// balans report uses `balance_cents`, the pnl report `amount_cents`; the
+/// jaarrekening's own rows are the ones consumers read). The port passed the
+/// raw balans rows through, so its activa rows had no amount_cents at all.
+fn with_amount_cents(rows: &[Value]) -> Vec<Value> {
+    rows.iter()
+        .cloned()
+        .map(|mut g| {
+            if let Some(accs) = g["accounts"].as_array_mut() {
+                for a in accs.iter_mut() {
+                    let amt = a["balance_cents"]
+                        .as_i64()
+                        .or_else(|| a["amount_cents"].as_i64())
+                        .unwrap_or(0);
+                    a["amount_cents"] = json!(amt);
+                }
+            }
+            g
+        })
+        .collect()
+}
+
 pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<Value> {
     let profile = crate::accounts::resolve_profile(db)?;
     let reporting = &profile["reporting"];
@@ -1664,17 +1686,18 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
         },
         "as_of": as_of,
         "balans": {
-            "activa": activa,
-            "passiva": passiva,
+            "activa": with_amount_cents(&activa),
+            "passiva": with_amount_cents(&passiva),
             "total_activa_cents": total_activa,
             "total_passiva_cents": total_passiva,
             "balanced": total_activa == total_passiva,
         },
     });
 
-    // P&L section (for klein micro, always; for lu-lsc always)
+    // JS parity: the W&V is emitted for klein (and always for the LU format);
+    // a MICRO jaarrekening has NO P&L at all (r.pnl is undefined in the JS)
     let lines_pnl = sa["lines"]["pnl"].as_array().cloned().unwrap_or_default();
-    if !lines_pnl.is_empty() {
+    if !lines_pnl.is_empty() && (model != "micro" || format == "lu-lsc") {
         let (pnl_from, pnl_to) = fiscal_year_window(db, year);
         let p = pnl(db, &pnl_from, &pnl_to)?;
         let pnl_sections = p["sections"].as_array().cloned().unwrap_or_default();
@@ -1775,7 +1798,7 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
             .sum();
 
         let mut pnl_out = serde_json::Map::new();
-        pnl_out.insert("lines".to_string(), Value::Array(pnl_lines));
+        pnl_out.insert("lines".to_string(), Value::Array(pnl_lines.clone()));
         // JS parity: LU emits resultat_cents, NL emits resultaat_cents
         let result_key = if format == "lu-lsc" {
             "resultat_cents"
@@ -1787,6 +1810,34 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
             "resultaat".to_string(),
             json!(crate::money::format_amount(resultaat_cents)),
         );
+        if format != "lu-lsc" {
+            // the statutory klein W&V also reports the aggregates the JS derives
+            // from the same lines: omzet / overige opbrengsten / inkoop (counted
+            // ONCE — not again inside kosten) / bruto marge / operating kosten
+            let line_total = |code: &str| -> i64 {
+                pnl_lines
+                    .iter()
+                    .find(|l| l["taxonomy_code"] == json!(code))
+                    .and_then(|l| l["total_cents"].as_i64())
+                    .unwrap_or(0)
+            };
+            let omzet = line_total("WOMZ.80");
+            let overige = line_total("WOVB.82");
+            let inkoop = line_total("WKPR.70");
+            let kosten: i64 = pnl_lines
+                .iter()
+                .filter(|l| {
+                    !["WOMZ.80", "WKPR.70", "WOVB.82"]
+                        .contains(&l["taxonomy_code"].as_str().unwrap_or(""))
+                })
+                .map(|l| l["total_cents"].as_i64().unwrap_or(0))
+                .sum();
+            pnl_out.insert("omzet_cents".into(), json!(omzet));
+            pnl_out.insert("overige_opbrengsten_cents".into(), json!(overige));
+            pnl_out.insert("inkoop_cents".into(), json!(inkoop));
+            pnl_out.insert("bruto_marge_cents".into(), json!(omzet - inkoop));
+            pnl_out.insert("kosten_cents".into(), json!(kosten));
+        }
         report["pnl"] = Value::Object(pnl_out);
     }
 

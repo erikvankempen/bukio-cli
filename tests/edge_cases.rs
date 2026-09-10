@@ -1356,3 +1356,702 @@ fn a_read_command_never_creates_a_missing_database() {
     assert!(!missing.exists(), "the file must not be created");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ==== ported from test/year-end.test.js =====================================
+// NOTE: 3 of the 21 JS tests assert the jaarrekening HTML/PDF renderer
+// (jaarrekeningHtml / jaarrekeningToPdf, playwright). The port has no renderer
+// (no pdf/html module), so those are an unported FEATURE, not a test failure.
+// The 18 engine tests below cover the accounting behaviour.
+
+#[test]
+fn year_end_close_posts_closing_and_appropriation() {
+    let d = setup();
+    entry(
+        &d,
+        "2026-03-01",
+        "Omzet A",
+        specs(&[("1100", 12100), ("8000", -10000), ("2500", -2100)]),
+    );
+    entry(
+        &d,
+        "2026-04-01",
+        "Software",
+        specs(&[("4300", 3000), ("1100", -3000)]),
+    );
+
+    let result = bukio::year_end::year_end_close(&d, "2026", "agent:test", false).unwrap();
+    assert_eq!(result["closed"], json!(true));
+    assert_eq!(result["result_cents"].as_i64(), Some(7000));
+
+    // 9900 created on demand (equity)
+    let acc = bukio::accounts::get_account_by_code(&d, "9900").expect("9900 created");
+    assert_eq!(acc["type"], json!("equity"));
+
+    // two closing entries, posted, tagged
+    let mut stmt = d
+        .prepare("SELECT id, date, description, state, source_ref FROM journal_entries WHERE source = 'closing' ORDER BY id")
+        .unwrap();
+    let closing: Vec<(i64, String, String, String, String)> = stmt
+        .query_map([], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert_eq!(closing.len(), 2, "{closing:?}");
+    assert!(closing.iter().all(|c| c.3 == "posted" && c.4 == "fy:2026"));
+    assert_eq!(closing[0].2, "Afsluiting boekjaar 2026");
+    assert_eq!(closing[1].2, "Resultaatbestemming 2026");
+
+    // income closed to zero, equity credited with the result, ledger balanced
+    let balance = |code: &str| -> i64 {
+        d.query_row(
+            "SELECT COALESCE(SUM(p.amount_cents),0) FROM postings p
+               JOIN journal_entries e ON e.id = p.entry_id
+              WHERE e.state = 'posted' AND p.account_id = (SELECT id FROM accounts WHERE code = ?1)",
+            [code],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(balance("8000"), 0, "omzet closed out");
+    assert_eq!(balance("3000"), -7000, "equity credited with the result");
+    let totals: i64 = d
+        .query_row(
+            "SELECT COALESCE(SUM(amount_cents),0) FROM postings",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(totals, 0);
+
+    // second close rejected
+    assert_eq!(
+        code_of(bukio::year_end::year_end_close(
+            &d,
+            "2026",
+            "agent:test",
+            false
+        )),
+        "ALREADY_CLOSED"
+    );
+}
+
+#[test]
+fn year_end_reversing_the_closing_entries_reopens_the_year() {
+    let d = setup();
+    entry(
+        &d,
+        "2026-03-01",
+        "Omzet",
+        specs(&[("1100", 12100), ("8000", -10000), ("2500", -2100)]),
+    );
+    let closed = bukio::year_end::year_end_close(&d, "2026", "agent:test", false).unwrap();
+    assert_eq!(closed["closed"], json!(true));
+    assert!(bukio::year_end::is_year_closed(&d, "2026").unwrap());
+
+    // the documented undo: reverse the closing entries
+    let ids: Vec<i64> = {
+        let mut stmt = d
+            .prepare("SELECT id FROM journal_entries WHERE source = 'closing' AND source_ref = 'fy:2026'")
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    };
+    for id in ids {
+        reverse_entry(&d, id, "agent:test", None).unwrap();
+    }
+
+    // regression: a reversed closing entry used to keep the year locked forever
+    assert!(
+        !bukio::year_end::is_year_closed(&d, "2026").unwrap(),
+        "reversing the closing entries must re-open the year"
+    );
+    let status = bukio::compliance::compliance_status(&d, 2026).unwrap();
+    let ar = status["obligations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["type"] == json!("JAARREKENING") && o["period"] == json!("2026"))
+        .cloned()
+        .unwrap_or_else(|| panic!("no JAARREKENING obligation: {status}"));
+    assert_eq!(
+        ar["books_closed"],
+        json!(false),
+        "calendar must show the year open"
+    );
+
+    // and the year can be closed again
+    let reopened = bukio::year_end::year_end_close(&d, "2026", "agent:test", false).unwrap();
+    assert_eq!(reopened["closed"], json!(true));
+}
+
+#[test]
+fn year_end_guards_drafts_block_and_empty_year_reports() {
+    let d = setup();
+    draft(
+        &d,
+        "2026-05-01",
+        "draft",
+        specs(&[("1100", 100), ("3000", -100)]),
+    );
+    assert_eq!(
+        code_of(bukio::year_end::year_end_close(
+            &d,
+            "2026",
+            "agent:test",
+            false
+        )),
+        "INCOMPLETE_YEAR"
+    );
+
+    let empty = bukio::year_end::year_end_close(&d, "2025", "agent:test", false).unwrap();
+    assert_eq!(empty["closed"], json!(false));
+    assert_eq!(empty["reason"], json!("EMPTY_YEAR"));
+    assert_eq!(
+        code_of(bukio::year_end::year_end_close(
+            &d,
+            "bad",
+            "agent:test",
+            false
+        )),
+        "INVALID_YEAR"
+    );
+}
+
+#[test]
+fn year_end_dry_run_writes_nothing() {
+    let d = setup();
+    entry(
+        &d,
+        "2026-03-01",
+        "Omzet",
+        specs(&[("1100", 12100), ("8000", -10000), ("2500", -2100)]),
+    );
+    let plan = bukio::year_end::year_end_close(&d, "2026", "agent:test", true).unwrap();
+    assert_eq!(plan["dryRun"], json!(true));
+    assert_eq!(plan["result_cents"].as_i64(), Some(10000));
+    assert_eq!(plan["create_9900"], json!(true));
+    assert_eq!(plan["entries"].as_array().unwrap().len(), 2);
+    let c: i64 = d
+        .query_row(
+            "SELECT COUNT(*) FROM journal_entries WHERE source = 'closing'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(c, 0);
+    assert!(bukio::accounts::get_account_by_code(&d, "9900").is_none());
+}
+
+#[test]
+fn pnl_still_shows_the_year_result_after_closing() {
+    let d = setup();
+    entry(
+        &d,
+        "2026-03-01",
+        "Omzet",
+        specs(&[("1100", 12100), ("8000", -10000), ("2500", -2100)]),
+    );
+    entry(
+        &d,
+        "2026-04-01",
+        "Kosten",
+        specs(&[("4300", 3000), ("1100", -3000)]),
+    );
+    bukio::year_end::year_end_close(&d, "2026", "agent:test", false).unwrap();
+    let r = bukio::reports::pnl(&d, "2026-01-01", "2026-12-31").unwrap();
+    assert_eq!(r["revenue_cents"].as_i64(), Some(10000));
+    assert_eq!(r["costs_cents"].as_i64(), Some(3000));
+    assert_eq!(r["result_cents"].as_i64(), Some(7000));
+}
+
+#[test]
+fn jaarrekening_klein_statutory_balans_and_wv() {
+    let d = setup();
+    entry(
+        &d,
+        "2026-03-01",
+        "Omzet",
+        specs(&[("1100", 12100), ("8000", -10000), ("2500", -2100)]),
+    );
+    entry(
+        &d,
+        "2026-04-01",
+        "Kosten",
+        specs(&[("4300", 3000), ("1100", -3000)]),
+    );
+
+    let r = bukio::reports::jaarrekening(&d, "2026", Some("klein")).unwrap();
+    assert_eq!(r["model"], json!("klein"));
+    assert_eq!(r["balans"]["balanced"], json!(true));
+    assert_eq!(
+        r["balans"]["total_activa_cents"].as_i64(),
+        r["balans"]["total_passiva_cents"].as_i64()
+    );
+    let labels: Vec<&str> = r["balans"]["activa"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| g["label"].as_str().unwrap_or(""))
+        .collect();
+    assert!(labels.contains(&"Liquide middelen"), "{labels:?}");
+    let ev = r["balans"]["passiva"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["taxonomy_code"] == json!("BEIV.05"))
+        .cloned()
+        .expect("BEIV.05 eigen vermogen");
+    assert_eq!(
+        ev["total_cents"].as_i64(),
+        Some(7000),
+        "onverdeeld resultaat pre-close"
+    );
+    assert_eq!(r["pnl"]["omzet_cents"].as_i64(), Some(10000));
+    assert_eq!(r["pnl"]["inkoop_cents"].as_i64(), Some(0));
+    assert_eq!(r["pnl"]["resultaat_cents"].as_i64(), Some(7000));
+}
+
+#[test]
+fn jaarrekening_klein_counts_inkoop_once_and_adds_overige_opbrengsten() {
+    let d = setup();
+    entry(
+        &d,
+        "2026-03-01",
+        "Omzet",
+        specs(&[("1100", 12100), ("8000", -10000), ("2500", -2100)]),
+    );
+    entry(
+        &d,
+        "2026-04-01",
+        "Inkoop",
+        specs(&[("4000", 4000), ("1100", -4000)]),
+    );
+    entry(
+        &d,
+        "2026-05-01",
+        "Overige opbrengst",
+        specs(&[("8100", -500), ("1100", 500)]),
+    );
+    entry(
+        &d,
+        "2026-06-01",
+        "Kosten",
+        specs(&[("4300", 2000), ("1100", -2000)]),
+    );
+
+    let r = bukio::reports::jaarrekening(&d, "2026", Some("klein")).unwrap();
+    let p = &r["pnl"];
+    assert_eq!(p["omzet_cents"].as_i64(), Some(10000));
+    assert_eq!(p["overige_opbrengsten_cents"].as_i64(), Some(500));
+    assert_eq!(p["inkoop_cents"].as_i64(), Some(4000));
+    assert_eq!(p["bruto_marge_cents"].as_i64(), Some(6000));
+    assert_eq!(
+        p["kosten_cents"].as_i64(),
+        Some(2000),
+        "operating costs only, no inkoop"
+    );
+    assert_eq!(p["resultaat_cents"].as_i64(), Some(4500));
+    assert_eq!(p["resultaat"], json!("45.00"));
+}
+
+#[test]
+fn jaarrekening_after_closing_result_sits_in_equity_and_micro_has_no_wv() {
+    let d = setup();
+    entry(
+        &d,
+        "2026-03-01",
+        "Omzet",
+        specs(&[("1100", 12100), ("8000", -10000), ("2500", -2100)]),
+    );
+    bukio::year_end::year_end_close(&d, "2026", "agent:test", false).unwrap();
+    let r = bukio::reports::jaarrekening(&d, "2026", Some("micro")).unwrap();
+    let ev = r["balans"]["passiva"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["taxonomy_code"] == json!("BEIV.05"))
+        .cloned()
+        .expect("BEIV.05");
+    assert_eq!(
+        ev["total_cents"].as_i64(),
+        Some(10000),
+        "result closed into equity"
+    );
+    assert!(
+        !ev["sections"]
+            .as_array()
+            .map(|ss| ss
+                .iter()
+                .any(|s| s["label"] == json!("Onverdeeld resultaat")))
+            .unwrap_or(false),
+        "no onverdeeld after the close: {ev}"
+    );
+    assert!(r.get("pnl").is_none(), "micro has no W&V");
+}
+
+#[test]
+fn jaarrekening_klein_pnl_follows_the_fiscal_year() {
+    let d = setup();
+    d.execute("UPDATE company SET fiscal_year_end = '06-30'", [])
+        .unwrap();
+    entry(
+        &d,
+        "2025-06-15",
+        "Omzet te vroeg",
+        specs(&[("1100", 1000), ("8000", -1000)]),
+    );
+    entry(
+        &d,
+        "2025-09-01",
+        "Omzet 1",
+        specs(&[("1100", 2000), ("8000", -2000)]),
+    );
+    entry(
+        &d,
+        "2026-06-30",
+        "Omzet 2",
+        specs(&[("1100", 3000), ("8000", -3000)]),
+    );
+    entry(
+        &d,
+        "2026-07-15",
+        "Omzet te laat",
+        specs(&[("1100", 4000), ("8000", -4000)]),
+    );
+
+    let r = bukio::reports::jaarrekening(&d, "2026", Some("klein")).unwrap();
+    assert_eq!(r["as_of"], json!("2026-06-30"));
+    assert_eq!(r["balans"]["balanced"], json!(true));
+    assert_eq!(
+        r["pnl"]["omzet_cents"].as_i64(),
+        Some(5000),
+        "fy window only"
+    );
+    assert_eq!(r["pnl"]["resultaat_cents"].as_i64(), Some(5000));
+}
+
+#[test]
+fn year_end_close_follows_the_fiscal_year() {
+    let d = setup();
+    d.execute("UPDATE company SET fiscal_year_end = '06-30'", [])
+        .unwrap();
+    entry(
+        &d,
+        "2025-06-15",
+        "Te vroeg",
+        specs(&[("1100", 1000), ("8000", -1000)]),
+    );
+    entry(
+        &d,
+        "2025-09-01",
+        "Omzet 1",
+        specs(&[("1100", 2000), ("8000", -2000)]),
+    );
+    entry(
+        &d,
+        "2026-06-30",
+        "Omzet 2",
+        specs(&[("1100", 3000), ("8000", -3000)]),
+    );
+    entry(
+        &d,
+        "2026-07-15",
+        "Te laat",
+        specs(&[("1100", 4000), ("8000", -4000)]),
+    );
+
+    bukio::year_end::year_end_close(&d, "2026", "agent:test", false).unwrap();
+    let first_date: String = d
+        .query_row(
+            "SELECT date FROM journal_entries WHERE source = 'closing' ORDER BY id LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(first_date, "2026-06-30", "dated at the FISCAL year end");
+    let status = bukio::year_end::year_end_status(&d, "2026").unwrap();
+    assert_eq!(
+        status["result_cents"].as_i64(),
+        Some(5000),
+        "in-window result only"
+    );
+
+    // outside-window entries were NOT closed
+    let leftover: i64 = d
+        .query_row(
+            "SELECT COALESCE(SUM(p.amount_cents),0) FROM postings p
+               JOIN journal_entries e ON e.id = p.entry_id AND e.state = 'posted' AND e.source != 'closing'
+               JOIN accounts a ON a.id = p.account_id WHERE a.code = '8000'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(leftover, -10000);
+}
+
+#[test]
+fn jaarrekening_invalid_model_rejected() {
+    let d = setup();
+    assert_eq!(
+        code_of(bukio::reports::jaarrekening(&d, "2026", Some("groot"))),
+        "INVALID_MODEL"
+    );
+}
+
+#[test]
+fn jaarrekening_account_amounts_are_numbers_never_nan() {
+    let d = setup();
+    entry(
+        &d,
+        "2026-03-01",
+        "Omzet",
+        specs(&[("1100", 12100), ("8000", -10000), ("2500", -2100)]),
+    );
+    entry(
+        &d,
+        "2026-03-05",
+        "Laptop",
+        specs(&[("1800", 537000), ("1100", -537000)]),
+    );
+    let r = bukio::reports::jaarrekening(&d, "2026", Some("klein")).unwrap();
+
+    let mut accounts: Vec<Value> = Vec::new();
+    for side in ["activa", "passiva"] {
+        for g in r["balans"][side].as_array().unwrap() {
+            accounts.extend(g["accounts"].as_array().cloned().unwrap_or_default());
+            for sec in g["sections"].as_array().unwrap_or(&vec![]) {
+                accounts.extend(sec["accounts"].as_array().cloned().unwrap_or_default());
+            }
+        }
+    }
+    if let Some(lines) = r
+        .get("pnl")
+        .and_then(|p| p.get("lines"))
+        .and_then(|l| l.as_array())
+    {
+        for l in lines {
+            for s in l["sections"].as_array().unwrap_or(&vec![]) {
+                accounts.extend(s["accounts"].as_array().cloned().unwrap_or_default());
+            }
+        }
+    }
+    assert!(
+        accounts.len() >= 3,
+        "expected account detail rows: {accounts:?}"
+    );
+    for a in &accounts {
+        let n = a["amount_cents"]
+            .as_i64()
+            .unwrap_or_else(|| panic!("{} amount_cents must be a number: {a}", a["name"]));
+        assert_ne!(n, i64::MIN);
+    }
+}
+
+#[test]
+fn jaarrekening_pnl_includes_the_afschrijvingen_line() {
+    let d = setup();
+    entry(
+        &d,
+        "2026-03-01",
+        "Afschr",
+        specs(&[("1800", -10000), ("4600", 10000)]),
+    );
+    let r = bukio::reports::jaarrekening(&d, "2026", Some("klein")).unwrap();
+    let line = r["pnl"]["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|l| l["taxonomy_code"] == json!("WAFS.41"))
+        .cloned()
+        .unwrap_or_else(|| panic!("WAFS.41 must map to an Afschrijvingen line: {r}"));
+    assert_eq!(line["label"], json!("Afschrijvingen"));
+    assert_eq!(line["total_cents"].as_i64(), Some(10000));
+}
+
+#[test]
+fn ob_readout_verlegde_inkoop_and_verkoop() {
+    let d = setup();
+    // binnenlandse verlegde inkoop
+    book_vat(
+        &d,
+        "Inkoop verlegd binnenland",
+        "4300:100.00@R,1100:-100.00,2500:-21.00",
+    );
+    let mut r = bukio::vat::ob_readout(&d, "2026-Q3").unwrap();
+    assert_eq!(r["fields"]["3a"].as_i64(), Some(10000));
+    assert_eq!(r["fields"]["4a"].as_i64(), Some(2100));
+    assert_eq!(r["fields"]["5b"].as_i64(), Some(2100));
+    assert_eq!(r["fields"]["5d"].as_i64(), Some(0));
+
+    // EU verlegde inkoop
+    book_vat(
+        &d,
+        "Inkoop verlegd EU",
+        "4300:500.00@RE,1100:-500.00,2500:-105.00",
+    );
+    r = bukio::vat::ob_readout(&d, "2026-Q3").unwrap();
+    assert_eq!(r["fields"]["3b"].as_i64(), Some(50000));
+    assert_eq!(r["fields"]["4b"].as_i64(), Some(10500));
+    assert_eq!(r["fields"]["5b"].as_i64(), Some(12600));
+    assert_eq!(r["fields"]["5d"].as_i64(), Some(0));
+}
+
+#[test]
+fn ob_readout_verlegde_eu_sale_reports_2a() {
+    let d = setup();
+    let c = bukio::contacts::create_contact(
+        &d,
+        "GmbH Berlin",
+        Some("Hauptstr 1"),
+        None,
+        Some("Berlin"),
+        Some("DE"),
+        None,
+        Some("DE123456789"),
+        None,
+        None,
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let inv = create_invoice(
+        &d,
+        c["id"].as_i64().unwrap(),
+        "2026-07-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(&["1x Advies @ 2000.00 @RE"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    finalize_invoice(&d, inv["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+    let r = bukio::vat::ob_readout(&d, "2026-Q3").unwrap();
+    assert_eq!(r["fields"]["2a"].as_i64(), Some(200000));
+    assert_eq!(r["fields"]["1a"].as_i64(), Some(0));
+}
+
+#[test]
+fn icp_readout_totals_per_eu_customer() {
+    let d = setup();
+    let mk = |name: &str, vat_id: &str, country: &str| -> i64 {
+        bukio::contacts::create_contact(
+            &d,
+            name,
+            Some("Str 1"),
+            None,
+            Some("City"),
+            Some(country),
+            None,
+            Some(vat_id),
+            None,
+            None,
+            "agent:test",
+            false,
+        )
+        .unwrap()["id"]
+            .as_i64()
+            .unwrap()
+    };
+    let de = mk("GmbH Berlin", "DE123456789", "DE");
+    let be = mk("NV Brussel", "BE0123456789", "BE");
+    for (cid, date, line) in [
+        (de, "2026-07-10", "1x Advies @ 2000.00 @RE"),
+        (de, "2026-08-01", "1x Advies @ 500.00 @RE"),
+        (be, "2026-09-05", "1x Support @ 300.00 @RE"),
+    ] {
+        let inv = create_invoice(
+            &d,
+            cid,
+            date,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &lines(&[line]),
+            "agent:test",
+            false,
+        )
+        .unwrap();
+        finalize_invoice(&d, inv["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+    }
+
+    let r = bukio::reports::icp_readout(&d, "2026-Q3").unwrap();
+    let customers = r["customers"].as_array().unwrap();
+    assert_eq!(customers.len(), 2, "{r}");
+    let de_row = customers
+        .iter()
+        .find(|c| c["name"] == json!("GmbH Berlin"))
+        .unwrap();
+    assert_eq!(de_row["amount_cents"].as_i64(), Some(250000));
+    assert_eq!(de_row["vat_id"], json!("DE123456789"));
+    assert_eq!(de_row["invoice_numbers"].as_array().unwrap().len(), 2);
+    let be_row = customers
+        .iter()
+        .find(|c| c["name"] == json!("NV Brussel"))
+        .unwrap();
+    assert_eq!(be_row["amount_cents"].as_i64(), Some(30000));
+    assert_eq!(r["total_cents"].as_i64(), Some(280000));
+}
+
+#[test]
+fn icp_readout_missing_customer_vat_id_fails_loudly() {
+    let d = setup();
+    let c = bukio::contacts::create_contact(
+        &d,
+        "GmbH Ohne Vat",
+        Some("Hauptstr 1"),
+        None,
+        Some("Berlin"),
+        Some("DE"),
+        None,
+        Some("DE123456789"),
+        None,
+        None,
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let cid = c["id"].as_i64().unwrap();
+    let inv = create_invoice(
+        &d,
+        cid,
+        "2026-07-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(&["1x Advies @ 2000.00 @RE"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    finalize_invoice(&d, inv["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+    // compliance guarantees a vat-id at finalize — simulate it being lost later
+    d.execute("UPDATE contacts SET vat_id = NULL WHERE id = ?1", [cid])
+        .unwrap();
+    assert_eq!(
+        code_of(bukio::reports::icp_readout(&d, "2026-Q3")),
+        "ICP_VAT_ID_MISSING"
+    );
+}
+
+#[test]
+fn icp_readout_no_re_lines_gives_an_empty_listing() {
+    let d = setup();
+    let r = bukio::reports::icp_readout(&d, "2026-Q3").unwrap();
+    assert_eq!(r["customers"].as_array().unwrap().len(), 0);
+    assert_eq!(r["total_cents"].as_i64(), Some(0));
+}
