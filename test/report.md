@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 17:40:56 UTC — **✅ 491 passing · 0 failing (491 tests)**
+**Latest run:** 2026-09-10 17:50:58 UTC — **✅ 483 passing · 0 failing (483 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -194,19 +194,6 @@
     - ✅ stage 10: payables + SEPA batch — two suppliers in one pain.001
     - ✅ stage 11: year-end close, jaarrekening micro, ICP readout
     - ✅ stage 12: final verification — balanced books, bank, audit, backup
-
-### direct-debit.test.js — SEPA direct debit: mandate register, pain.008.001.02 export, FRST/RCUR, CORE/B2B split
-
-8 passing · 0 failing
-
-    - ✅ mandates: add/list/remove with audit; guards
-    - ✅ direct-debit batch: FRST then RCUR, mandate snapshot on the line
-    - ✅ direct-debit batch without a mandate → MANDATE_REQUIRED
-    - ✅ payment-term isolation: transfer batch rejects direct-debit payables and vice versa
-    - ✅ buildPain008: structure, mandate data, NOTPROVIDED agents, CORE/B2B split
-    - ✅ export: DD batch → pain.008.001.02, one export per batch; transfer regression
-    - ✅ cli: mandate add/list + direct-debit batch create/export e2e
-    - ✅ mcp: mandate add/list + batch create/export (dry-run parity + execute)
 
 ### export.test.js — export xaf (Auditfile 4.0, round-trips through the importer) + audit csv/xlsx
 

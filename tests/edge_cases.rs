@@ -3567,3 +3567,863 @@ fn vat_book_dry_run_rejects_unbalanced_postings() {
     assert_eq!(v["error"]["code"], json!("UNBALANCED"), "{v}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ==== ported from test/direct-debit.test.js =================================
+
+/// JSON-RPC session over `bukio mcp` — reused by the MCP-shaped tests ahead.
+struct Mcp {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    reader: std::io::BufReader<std::process::ChildStdout>,
+    next: u64,
+}
+
+impl Mcp {
+    fn start(db_path: &str) -> Mcp {
+        use std::process::{Command, Stdio};
+        let exe = env!("CARGO_BIN_EXE_bukio");
+        let mut child = Command::new(exe)
+            .args(["mcp", "--db", db_path])
+            .env("BUKIO_ACTOR", "agent:test")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let stdin = child.stdin.take().unwrap();
+        let reader = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut m = Mcp {
+            child,
+            stdin,
+            reader,
+            next: 1,
+        };
+        m.call(
+            "initialize",
+            json!({ "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": { "name": "t", "version": "1" } }),
+        );
+        m
+    }
+
+    fn call(&mut self, method: &str, params: Value) -> Value {
+        use std::io::{BufRead, Write};
+        let id = self.next;
+        self.next += 1;
+        let req = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        writeln!(self.stdin, "{req}").unwrap();
+        self.stdin.flush().unwrap();
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let n = self.reader.read_line(&mut line).unwrap();
+            assert!(n > 0, "MCP closed before answering {method}");
+            if let Ok(msg) = serde_json::from_str::<Value>(line.trim()) {
+                if msg["id"] == json!(id) {
+                    return msg;
+                }
+            }
+        }
+    }
+
+    /// tools/call + parse the JSON payload out of the content block
+    fn tool(&mut self, name: &str, args: Value) -> (Value, bool) {
+        let r = self.call("tools/call", json!({ "name": name, "arguments": args }));
+        let is_err = r["result"]["isError"] == json!(true);
+        let txt = r["result"]["content"][0]["text"].as_str().unwrap_or("");
+        let data =
+            serde_json::from_str(txt).unwrap_or_else(|_| panic!("bad payload from {name}: {r}"));
+        (data, is_err)
+    }
+
+    fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// the JS suite's direct-debit fixture: company with an IBAN + complete address
+fn dd_db(tag: &str) -> (std::path::PathBuf, String) {
+    let (dir, f) = cli_db(
+        tag,
+        &[
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "eenmanszaak",
+            "--vat",
+            "off",
+        ],
+    );
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--address",
+        "Teststraat 1",
+        "--postal-code",
+        "1000 AA",
+        "--city",
+        "Amsterdam",
+        "--iban",
+        "NL91ABNA0417164300",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "company update failed: {out}");
+    (dir, f)
+}
+
+fn dd_contact(db: &Connection, name: &str) -> i64 {
+    bukio::contacts::create_contact(
+        db,
+        name,
+        Some("Klantstraat 1"),
+        None,
+        Some("Amsterdam"),
+        None,
+        None,
+        None,
+        None,
+        // direct debit needs the debtor's IBAN
+        Some("NL91ABNA0417164300"),
+        "agent:test",
+        false,
+    )
+    .unwrap()["id"]
+        .as_i64()
+        .unwrap()
+}
+
+fn dd_payable(db: &Connection, contact: i64, inv_ref: &str, method: &str) -> i64 {
+    bukio::payments::add_payable(
+        db,
+        &contact.to_string(),
+        inv_ref,
+        "2026-08-01",
+        Some("2026-08-31"),
+        12100,
+        method,
+        "agent:test",
+        false,
+    )
+    .unwrap()["id"]
+        .as_i64()
+        .unwrap()
+}
+
+#[test]
+fn mandates_add_list_remove_with_guards_and_audit() {
+    let (dir, f) = dd_db("dd1");
+    let d = bukio::db::open_db(&f).unwrap();
+    let c = dd_contact(&d, "Debiteur BV");
+
+    let m = bukio::payments::add_mandate(
+        &d,
+        c,
+        "NL01ZZZ123456789012",
+        Some("2026-07-01"),
+        "b2b",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(m["scheme"], json!("b2b"));
+    assert_eq!(m["contact_name"], json!("Debiteur BV"));
+
+    assert_eq!(bukio::payments::list_mandates(&d, None).unwrap().len(), 1);
+    let rows = bukio::payments::list_mandates(&d, None).unwrap();
+    assert_eq!(rows[0]["mandate_ref"], json!("NL01ZZZ123456789012"));
+    assert_eq!(
+        bukio::payments::list_mandates(&d, Some(c)).unwrap().len(),
+        1
+    );
+    assert_eq!(
+        bukio::payments::list_mandates(&d, Some(999999))
+            .unwrap()
+            .len(),
+        0
+    );
+
+    // duplicate ref for the same contact
+    assert_eq!(
+        code_of(bukio::payments::add_mandate(
+            &d,
+            c,
+            "NL01ZZZ123456789012",
+            None,
+            "core",
+            "agent:test",
+            false
+        )),
+        "MANDATE_DUPLICATE"
+    );
+    // the same ref for ANOTHER contact is fine
+    let c2 = dd_contact(&d, "Tweede BV");
+    bukio::payments::add_mandate(
+        &d,
+        c2,
+        "NL01ZZZ123456789012",
+        None,
+        "core",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(bukio::payments::list_mandates(&d, None).unwrap().len(), 2);
+
+    // guards
+    assert_eq!(
+        code_of(bukio::payments::add_mandate(
+            &d,
+            999999,
+            "R1",
+            None,
+            "core",
+            "agent:test",
+            false
+        )),
+        "CONTACT_NOT_FOUND"
+    );
+    assert_eq!(
+        code_of(bukio::payments::add_mandate(
+            &d,
+            c,
+            "",
+            None,
+            "core",
+            "agent:test",
+            false
+        )),
+        "INVALID_MANDATE_REF"
+    );
+    assert_eq!(
+        code_of(bukio::payments::add_mandate(
+            &d,
+            c,
+            &"x".repeat(36),
+            None,
+            "core",
+            "agent:test",
+            false
+        )),
+        "INVALID_MANDATE_REF"
+    );
+    assert_eq!(
+        code_of(bukio::payments::add_mandate(
+            &d,
+            c,
+            "R2",
+            None,
+            "sct",
+            "agent:test",
+            false
+        )),
+        "INVALID_SCHEME"
+    );
+    assert_eq!(
+        code_of(bukio::payments::add_mandate(
+            &d,
+            c,
+            "R3",
+            Some("2026-02-30"),
+            "core",
+            "agent:test",
+            false
+        )),
+        "INVALID_DATE"
+    );
+
+    // dry-run writes nothing
+    let plan = bukio::payments::add_mandate(&d, c, "R4", None, "core", "agent:test", true).unwrap();
+    assert_eq!(plan["dryRun"], json!(true));
+    assert_eq!(bukio::payments::list_mandates(&d, None).unwrap().len(), 2);
+
+    // remove
+    let r = bukio::payments::remove_mandate(&d, m["id"].as_i64().unwrap(), "agent:test", false)
+        .unwrap();
+    assert_eq!(r["status"], json!("deleted"));
+    assert_eq!(bukio::payments::list_mandates(&d, None).unwrap().len(), 1);
+    assert_eq!(
+        code_of(bukio::payments::remove_mandate(
+            &d,
+            999999,
+            "agent:test",
+            false
+        )),
+        "MANDATE_NOT_FOUND"
+    );
+
+    let audit: i64 = d
+        .query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE action IN ('payments.mandate.add','payments.mandate.remove')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(audit, 3, "1 add + 1 remove (dry-runs do not audit)");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn direct_debit_batch_first_then_recurrent_and_mandate_snapshot() {
+    let (dir, f) = dd_db("dd2");
+    let d = bukio::db::open_db(&f).unwrap();
+    let c = dd_contact(&d, "Debiteur BV");
+    bukio::payments::add_mandate(
+        &d,
+        c,
+        "NL01ZZZ999",
+        Some("2026-07-01"),
+        "core",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let p1 = dd_payable(&d, c, "INV-1", "direct_debit");
+
+    let batch = bukio::payments::create_payment_batch(
+        &d,
+        Some("2026-08-10"),
+        None,
+        &[],
+        &[p1],
+        "direct_debit",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(batch["batch_kind"], json!("direct_debit"));
+    let lines = batch["lines"].as_array().unwrap();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["mandate_ref"], json!("NL01ZZZ999"));
+    assert_eq!(lines[0]["mandate_seq"], json!("FRST"));
+    assert_eq!(lines[0]["scheme"], json!("core"));
+
+    // second batch for the same contact -> RCUR
+    let p2 = dd_payable(&d, c, "INV-2", "direct_debit");
+    let batch2 = bukio::payments::create_payment_batch(
+        &d,
+        Some("2026-09-10"),
+        None,
+        &[],
+        &[p2],
+        "direct_debit",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(batch2["lines"][0]["mandate_seq"], json!("RCUR"));
+
+    // a NEW mandate starts at FRST again (SEPA is per-mandate)
+    bukio::payments::add_mandate(
+        &d,
+        c,
+        "NL01ZZZ888",
+        Some("2026-10-01"),
+        "core",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let p3 = dd_payable(&d, c, "INV-3", "direct_debit");
+    let batch3 = bukio::payments::create_payment_batch(
+        &d,
+        Some("2026-11-10"),
+        None,
+        &[],
+        &[p3],
+        "direct_debit",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(batch3["lines"][0]["mandate_ref"], json!("NL01ZZZ888"));
+    assert_eq!(
+        batch3["lines"][0]["mandate_seq"],
+        json!("FRST"),
+        "a brand-new mandate starts at FRST"
+    );
+
+    // removed + re-added with the SAME ref = a new mandate: FRST, not RCUR.
+    // Counting by the ref snapshot alone used to emit RCUR here.
+    let m1 = bukio::payments::list_mandates(&d, Some(c))
+        .unwrap()
+        .into_iter()
+        .find(|m| m["mandate_ref"] == json!("NL01ZZZ999"))
+        .unwrap();
+    bukio::payments::remove_mandate(&d, m1["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+    bukio::payments::add_mandate(
+        &d,
+        c,
+        "NL01ZZZ999",
+        Some("2026-12-01"),
+        "core",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let p4 = dd_payable(&d, c, "INV-4", "direct_debit");
+    let batch4 = bukio::payments::create_payment_batch(
+        &d,
+        Some("2026-12-10"),
+        None,
+        &[],
+        &[p4],
+        "direct_debit",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(batch4["lines"][0]["mandate_ref"], json!("NL01ZZZ999"));
+    assert_eq!(
+        batch4["lines"][0]["mandate_seq"],
+        json!("FRST"),
+        "a re-created mandate with the same ref must start at FRST (SEPA per-mandate rule)"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn direct_debit_batch_without_a_mandate_is_refused() {
+    let (dir, f) = dd_db("dd3");
+    let d = bukio::db::open_db(&f).unwrap();
+    let c = dd_contact(&d, "Debiteur BV");
+    let p = dd_payable(&d, c, "F2026-10", "direct_debit");
+    let err = bukio::payments::create_payment_batch(
+        &d,
+        Some("2026-08-10"),
+        None,
+        &[],
+        &[p],
+        "direct_debit",
+        "agent:test",
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "BATCH_VALIDATION_FAILED");
+    let details = err
+        .details
+        .clone()
+        .and_then(|d| d.as_array().cloned())
+        .unwrap_or_default();
+    assert!(
+        details.iter().any(|d| d["error"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("MANDATE_REQUIRED")),
+        "{details:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn payment_term_isolation_between_transfer_and_direct_debit() {
+    let (dir, f) = dd_db("dd4");
+    let d = bukio::db::open_db(&f).unwrap();
+    let c = dd_contact(&d, "Debiteur BV");
+    bukio::payments::add_mandate(&d, c, "M1", None, "core", "agent:test", false).unwrap();
+    let dd = dd_payable(&d, c, "DD-1", "direct_debit");
+    let tr = dd_payable(&d, c, "TR-1", "transfer");
+
+    let e1 = bukio::payments::create_payment_batch(
+        &d,
+        None,
+        None,
+        &[],
+        &[dd],
+        "transfer",
+        "agent:test",
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(e1.code, "BATCH_VALIDATION_FAILED");
+    assert!(e1
+        .details
+        .clone()
+        .and_then(|d| d.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .any(|x| x["error"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("PAYABLE_DIRECT_DEBIT")));
+
+    let e2 = bukio::payments::create_payment_batch(
+        &d,
+        None,
+        None,
+        &[],
+        &[tr],
+        "direct_debit",
+        "agent:test",
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(e2.code, "BATCH_VALIDATION_FAILED");
+    assert!(e2
+        .details
+        .clone()
+        .and_then(|d| d.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .any(|x| x["error"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("PAYABLE_NOT_DIRECT_DEBIT")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn build_pain008_structure_mandate_data_agents_and_scheme_split() {
+    let xml = bukio::payments::build_pain008(
+        "BUKIO20260810123456",
+        "2026-08-10T10:00:00Z",
+        "Test Coaching",
+        "NL91ABNA0417164300",
+        "2026-08-12",
+        &[
+            json!({ "name": "Debiteur BV", "iban": "NL91ABNA0417164300", "amount_cents": 12100, "reference": "Factuur INV-1", "mandate_ref": "NL01ZZZ999", "mandate_date": "2026-07-01", "mandate_seq": "FRST", "scheme": "core" }),
+            json!({ "name": "Grootbedrijf NV", "iban": "NL91ABNA0417164300", "amount_cents": 25000, "reference": "Factuur B2B-2", "mandate_ref": "B2BMAND1", "mandate_date": "2026-06-15", "mandate_seq": "RCUR", "scheme": "b2b" }),
+        ],
+    );
+    for needle in [
+        "xmlns=\"urn:iso:std:iso:20022:tech:xsd:pain.008.001.02\"",
+        "<CstmrDrctDbtInitn>",
+        "<PmtMtd>DD</PmtMtd>",
+        "<CtrlSum>371.00</CtrlSum>",
+        "<ReqdColltnDt>2026-08-12</ReqdColltnDt>",
+        "<LclInstrm><Cd>CORE</Cd></LclInstrm>",
+        "<LclInstrm><Cd>B2B</Cd></LclInstrm>",
+        "<MndtId>NL01ZZZ999</MndtId>",
+        "<DtOfSgntr>2026-07-01</DtOfSgntr>",
+        "<DbtrAgt><FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId></DbtrAgt>",
+        "<Dbtr><Nm>Grootbedrijf NV</Nm></Dbtr>",
+    ] {
+        assert!(xml.contains(needle), "missing {needle} in:\n{xml}");
+    }
+    assert_eq!(xml.matches("<PmtInf>").count(), 2, "one PmtInf per scheme");
+    assert_eq!(xml.matches("<DrctDbtTxInf>").count(), 2);
+}
+
+#[test]
+fn export_direct_debit_batch_uses_pain008_and_transfer_still_pain001() {
+    let (dir, f) = dd_db("dd6");
+    let d = bukio::db::open_db(&f).unwrap();
+    let c = dd_contact(&d, "Debiteur BV");
+    bukio::payments::add_mandate(&d, c, "M1", None, "core", "agent:test", false).unwrap();
+    let p = dd_payable(&d, c, "F2026-10", "direct_debit");
+    let batch = bukio::payments::create_payment_batch(
+        &d,
+        Some("2026-08-10"),
+        None,
+        &[],
+        &[p],
+        "direct_debit",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let id = batch["id"].as_i64().unwrap();
+
+    let plan = bukio::payments::export_payment_batch(&d, id, "agent:test", true, None).unwrap();
+    assert_eq!(plan["dryRun"], json!(true));
+    assert_eq!(plan["schema"], json!("pain.008.001.02"));
+    assert!(plan["xml"]
+        .as_str()
+        .unwrap_or("")
+        .contains("pain.008.001.02"));
+
+    let r = bukio::payments::export_payment_batch(&d, id, "agent:test", false, None).unwrap();
+    assert_eq!(r["status"], json!("exported"));
+    assert_eq!(r["schema"], json!("pain.008.001.02"));
+    assert!(r["msg_id"].as_str().unwrap_or("").len() <= 35);
+
+    let (schema, msg_id): (Option<String>, Option<String>) = d
+        .query_row(
+            "SELECT schema, msg_id FROM payment_batches WHERE id = ?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(schema.as_deref(), Some("pain.008.001.02"));
+    assert!(msg_id.is_some());
+
+    // re-export blocked
+    assert_eq!(
+        code_of(bukio::payments::export_payment_batch(
+            &d,
+            id,
+            "agent:test",
+            false,
+            None
+        )),
+        "BATCH_ALREADY_EXPORTED"
+    );
+    // wrong schema for a DD batch
+    let c2 = dd_contact(&d, "Tweede BV");
+    bukio::payments::add_mandate(&d, c2, "M2", None, "core", "agent:test", false).unwrap();
+    let p2 = dd_payable(&d, c2, "INV-2", "direct_debit");
+    let b2 = bukio::payments::create_payment_batch(
+        &d,
+        Some("2026-08-10"),
+        None,
+        &[],
+        &[p2],
+        "direct_debit",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(
+        code_of(bukio::payments::export_payment_batch(
+            &d,
+            b2["id"].as_i64().unwrap(),
+            "agent:test",
+            false,
+            Some("001.03")
+        )),
+        "INVALID_SCHEMA"
+    );
+
+    // a transfer batch still exports pain.001
+    let tr = dd_payable(&d, c2, "TR-1", "transfer");
+    let tb = bukio::payments::create_payment_batch(
+        &d,
+        Some("2026-08-10"),
+        None,
+        &[],
+        &[tr],
+        "transfer",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(tb["batch_kind"], json!("transfer"));
+    let exp = bukio::payments::export_payment_batch(
+        &d,
+        tb["id"].as_i64().unwrap(),
+        "agent:test",
+        false,
+        None,
+    )
+    .unwrap();
+    assert_eq!(exp["schema"], json!("pain.001.001.03"));
+    assert!(exp["xml"]
+        .as_str()
+        .unwrap_or("")
+        .contains("pain.001.001.03"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cli_mandate_and_direct_debit_batch_end_to_end() {
+    let (dir, f) = dd_db("dd7");
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "contact",
+        "add",
+        "--name",
+        "Debiteur BV",
+        "--address",
+        "Klantstraat 1",
+        "--city",
+        "Amsterdam",
+        "--iban",
+        "NL91ABNA0417164300",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "payments",
+        "mandate",
+        "add",
+        "--contact",
+        "1",
+        "--ref",
+        "NL01ZZZ999",
+        "--date",
+        "2026-07-01",
+        "--type",
+        "b2b",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["scheme"], json!("b2b"), "{v}");
+
+    let (v, ok, out) = run_cli(&["--json", "payments", "mandate", "list", "--db", &f]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["mandates"].as_array().unwrap().len(), 1, "{v}");
+
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "payments",
+        "payables",
+        "add",
+        "--contact",
+        "1",
+        "--ref",
+        "INV-1",
+        "--date",
+        "2026-08-01",
+        "--due",
+        "2026-08-31",
+        "--amount",
+        "121.00",
+        "--method",
+        "direct-debit",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "payments",
+        "batch",
+        "create",
+        "--type",
+        "direct-debit",
+        "--from-invoices",
+        "--date",
+        "2026-08-10",
+        "--dry-run",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["dryRun"], json!(true), "{v}");
+    assert_eq!(v["data"]["batch_kind"], json!("direct_debit"), "{v}");
+    assert_eq!(
+        v["data"]["lines"][0]["mandate_ref"],
+        json!("NL01ZZZ999"),
+        "{v}"
+    );
+
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "payments",
+        "batch",
+        "create",
+        "--type",
+        "direct-debit",
+        "--from-invoices",
+        "--date",
+        "2026-08-10",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["lines"][0]["mandate_seq"], json!("FRST"), "{v}");
+    let batch_id = v["data"]["id"].as_i64().unwrap();
+
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "payments",
+        "batch",
+        "export",
+        "--id",
+        &batch_id.to_string(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["schema"], json!("pain.008.001.02"), "{v}");
+
+    // the DD payable is now in_batch — a transfer batch must refuse it
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "payments",
+        "batch",
+        "create",
+        "--type",
+        "transfer",
+        "--payable",
+        "1",
+        "--date",
+        "2026-08-10",
+        "--db",
+        &f,
+    ]);
+    assert!(!ok, "{out}");
+    assert_eq!(v["error"]["code"], json!("PAYABLE_NOT_ELIGIBLE"), "{v}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mcp_mandate_and_batch_tools() {
+    let (dir, f) = dd_db("dd8");
+    run_cli(&[
+        "--json",
+        "contact",
+        "add",
+        "--name",
+        "Debiteur BV",
+        "--address",
+        "Klantstraat 1",
+        "--city",
+        "Amsterdam",
+        "--iban",
+        "NL91ABNA0417164300",
+        "--db",
+        &f,
+    ]);
+    run_cli(&[
+        "--json",
+        "payments",
+        "payables",
+        "add",
+        "--contact",
+        "1",
+        "--ref",
+        "INV-1",
+        "--date",
+        "2026-08-01",
+        "--due",
+        "2026-08-31",
+        "--amount",
+        "121.00",
+        "--method",
+        "direct-debit",
+        "--db",
+        &f,
+    ]);
+
+    let mut mcp = Mcp::start(&f);
+    let (mand, is_err) = mcp.tool(
+        "payments_mandate_add",
+        json!({ "contact_id": 1, "mandate_ref": "NL01ZZZ999", "scheme": "b2b", "mode": "execute" }),
+    );
+    assert!(!is_err, "{mand}");
+    assert_eq!(mand["mode"], json!("execute"));
+    assert_eq!(mand["scheme"], json!("b2b"));
+
+    let (list, _) = mcp.tool("payments_mandate_list", json!({}));
+    assert_eq!(list["mandates"].as_array().unwrap().len(), 1, "{list}");
+
+    let (plan, _) = mcp.tool(
+        "payments_batch_create",
+        json!({ "type": "direct_debit", "batch_date": "2026-08-10", "payable_ids": [1] }),
+    );
+    assert_eq!(plan["mode"], json!("dry-run"), "{plan}");
+    assert_eq!(plan["batch_kind"], json!("direct_debit"), "{plan}");
+
+    let (exec, _) = mcp.tool("payments_batch_create", json!({ "type": "direct_debit", "batch_date": "2026-08-10", "payable_ids": [1], "mode": "execute" }));
+    assert_eq!(exec["mode"], json!("execute"), "{exec}");
+    assert_eq!(exec["batch_kind"], json!("direct_debit"), "{exec}");
+
+    let (exp, _) = mcp.tool(
+        "payments_batch_export",
+        json!({ "batch_id": exec["batch_id"], "mode": "execute" }),
+    );
+    assert_eq!(exp["schema"], json!("pain.008.001.02"), "{exp}");
+    assert!(exp["xml"]
+        .as_str()
+        .unwrap_or("")
+        .contains("pain.008.001.02"));
+    mcp.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}

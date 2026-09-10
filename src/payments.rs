@@ -146,7 +146,14 @@ pub fn add_mandate(
             entry_ids: vec![],
         },
     )?;
-    Ok(json!({"id": id, "contact_id": contact_id, "mandate_ref": ref_trimmed, "scheme": scheme}))
+    // the JS returns the stored mandate row (contact_name + mandate_date
+    // included), not a bare insert id — reuse the list query
+    Ok(list_mandates(db, Some(contact_id))?
+        .into_iter()
+        .find(|m| m["id"] == json!(id))
+        .unwrap_or_else(|| {
+            json!({"id": id, "contact_id": contact_id, "mandate_ref": ref_trimmed, "scheme": scheme})
+        }))
 }
 
 pub fn list_mandates(db: &Connection, contact_id: Option<i64>) -> Result<Vec<Value>> {
@@ -1068,6 +1075,18 @@ pub fn export_payment_batch(
         .and_then(|v| v.as_str())
         .unwrap_or("");
     let (schema, xml) = if is_dd {
+        // A direct-debit batch is always pain.008: an override asking for
+        // anything else is an INVALID_SCHEMA. The port ignored the override on
+        // this branch entirely, so `--schema 001.03` on a DD batch "succeeded"
+        // and produced pain.008 anyway — the caller's mistake went unreported.
+        if let Some(o) = schema_override {
+            if !o.contains("008") {
+                return Err(payments_error(
+                    "INVALID_SCHEMA",
+                    format!("batch {id} is a direct-debit batch — schema must be pain.008.001.02, got '{o}'"),
+                ));
+            }
+        }
         (
             "pain.008.001.02".to_string(),
             build_pain008(
