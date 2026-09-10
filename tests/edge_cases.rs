@@ -4569,7 +4569,6 @@ fn payable_rows(db: &Connection) -> Vec<Value> {
 }
 
 #[test]
-#[ignore = "PORT GAP: vat_by_rate is not returned (the UBL TaxSubtotal breakdown is not parsed)"]
 fn import_ubl_registers_a_payable_matches_by_vat_id_and_parses_vat() {
     let (dir, f) = import_db("ubl1");
     let d = bukio::db::open_db(&f).unwrap();
@@ -4652,7 +4651,6 @@ fn import_ubl_reimport_is_a_duplicate() {
 }
 
 #[test]
-#[ignore = "PORT GAP: --create-missing stores no address/city/email (the UBL PostalAddress and Contact email are not parsed)"]
 fn import_ubl_create_missing_makes_the_supplier_contact() {
     let (dir, f) = import_db("ubl3");
     let d = bukio::db::open_db(&f).unwrap();
@@ -4682,7 +4680,6 @@ fn import_ubl_create_missing_makes_the_supplier_contact() {
 }
 
 #[test]
-#[ignore = "PORT GAP: the name-fallback idempotency key does not normalise whitespace (acme bv vs acmebv)"]
 fn import_ubl_tax_scheme_id_is_not_the_vat_number() {
     let (dir, f) = import_db("ubl4");
     let d = bukio::db::open_db(&f).unwrap();
@@ -4791,7 +4788,6 @@ fn import_ubl_explicit_contact_wins_and_missing_contact_is_refused() {
 }
 
 #[test]
-#[ignore = "PORT GAP: non-XML input is not rejected as INVALID_UBL_INVOICE (the other cases in this test pass)"]
 fn import_ubl_validation_failures_write_nothing() {
     let (dir, f) = import_db("ubl6");
     let d = bukio::db::open_db(&f).unwrap();
@@ -4936,7 +4932,6 @@ fn import_ubl_due_date_defaults_to_issue_plus_30_days() {
 }
 
 #[test]
-#[ignore = "PORT GAP: the dry-run plan omits action"]
 fn import_ubl_dry_run_validates_but_writes_nothing() {
     let (dir, f) = import_db("ubl8");
     let d = bukio::db::open_db(&f).unwrap();
@@ -5077,7 +5072,6 @@ fn mcp_invoice_import_dry_run_and_execute() {
 }
 
 #[test]
-#[ignore = "PORT GAP: with several PartyTaxScheme siblings the vat-id extraction does not pick the VAT scheme"]
 fn import_ubl_multiple_party_tax_scheme_entries_still_extract_the_vat_number() {
     let (dir, f) = import_db("ubl11");
     let d = bukio::db::open_db(&f).unwrap();
@@ -5118,7 +5112,6 @@ fn import_ubl_multiple_party_tax_scheme_entries_still_extract_the_vat_number() {
 }
 
 #[test]
-#[ignore = "PORT GAP: cbc:InvoiceTypeCode (EN 16931 BT-3) is never parsed or required"]
 fn import_ubl_missing_invoice_type_code_is_rejected() {
     let (dir, f) = import_db("ubl12");
     let d = bukio::db::open_db(&f).unwrap();
@@ -5147,7 +5140,6 @@ fn import_ubl_missing_invoice_type_code_is_rejected() {
 }
 
 #[test]
-#[ignore = "PORT GAP: cbc:DocumentCurrencyCode (EN 16931 BT-5) is never parsed or required"]
 fn import_ubl_missing_document_currency_code_is_rejected() {
     let (dir, f) = import_db("ubl13");
     let d = bukio::db::open_db(&f).unwrap();
@@ -5184,7 +5176,6 @@ fn import_ubl_missing_document_currency_code_is_rejected() {
 }
 
 #[test]
-#[ignore = "PORT GAP: a malformed PayableAmount is not reported (the parser unwrap_or(0)s it)"]
 fn import_ubl_malformed_payable_amount_is_collected_with_the_other_errors() {
     let (dir, f) = import_db("ubl14");
     let d = bukio::db::open_db(&f).unwrap();

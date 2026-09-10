@@ -2168,233 +2168,378 @@ pub fn import_invoice(
     use quick_xml::events::Event;
     use quick_xml::Reader;
 
+    // ── parse (path-aware: the JS picks by path, so tag names alone are not
+    // enough — e.g. cbc:ID under <Invoice> vs any other id, or cbc:TaxAmount
+    // under TaxTotal vs under TaxSubtotal) ───────────────────────────────────
     let mut reader = Reader::from_str(xml_text);
     reader.config_mut().trim_text(true);
+
+    let mut root_name = String::new();
+    let mut invoice_ref = String::new();
+    let mut type_code = String::new();
+    let mut issue_date = String::new();
+    let mut due_date = String::new();
+    let mut currency = String::new();
+    let mut payable_raw = String::new();
+    let mut sup_name = String::new();
+    let mut sup_legal_name = String::new();
+    let mut sup_vat = String::new();
+    let mut sup_email = String::new();
+    let mut sup_street = String::new();
+    let mut sup_city = String::new();
+    let mut sup_postal = String::new();
+    let mut sup_country = String::new();
+    // per-PartyTaxScheme scratch (the VAT number lives in the scheme whose
+    // TaxScheme/cbc:ID is literally 'VAT' — several siblings are allowed)
+    let mut scheme_id = String::new();
+    let mut scheme_company_id = String::new();
+    // VAT breakdown: (percent, tax amount) per cac:TaxSubtotal
+    let mut subtotals: Vec<(String, String)> = Vec::new();
+
+    let mut stack: Vec<String> = Vec::new();
     let mut buf = Vec::new();
 
-    let mut invoice_ref = String::new();
-    let mut invoice_date = String::new();
-    let mut due_date = String::new();
-    let mut supplier_name = String::new();
-    let mut supplier_vat_id = String::new();
-    let mut total_amount = String::new();
-    let mut pay_amount = String::new();
-
-    let mut in_tag = String::new();
-    let mut depth = 0i32;
-    let mut in_supplier = false;
+    fn local(name: &[u8]) -> String {
+        let s = String::from_utf8_lossy(name).to_string();
+        match s.rsplit_once(':') {
+            Some((_, l)) => l.to_string(),
+            None => s,
+        }
+    }
+    fn top_is(stack: &[String], name: &str) -> bool {
+        stack.last().map(|t| t == name).unwrap_or(false)
+    }
+    fn has_ancestor(stack: &[String], name: &str) -> bool {
+        stack.iter().any(|t| t == name)
+    }
+    fn parent_is(stack: &[String], name: &str) -> bool {
+        stack.len() >= 2 && stack[stack.len() - 2] == name
+    }
 
     loop {
-        match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                let tag = String::from_utf8_lossy(e.name().as_ref()).to_string();
-                depth += 1;
-                match tag.as_str() {
-                    "Invoice" | "CreditNote" => {
-                        in_tag = "root".to_string();
-                    }
-                    "cbc:ID" if depth == 2 => {
-                        in_tag = "id".to_string();
-                    }
-                    "cbc:IssueDate" => {
-                        in_tag = "date".to_string();
-                    }
-                    "cbc:DueDate" => {
-                        in_tag = "due".to_string();
-                    }
-                    "cac:AccountingSupplierParty" => {
-                        in_supplier = true;
-                    }
-                    "cac:AccountingCustomerParty" => {
-                        in_supplier = false;
-                    }
-                    "cbc:Name" if in_supplier => {
-                        in_tag = "supplier".to_string();
-                    }
-                    "cbc:CompanyID" if in_supplier => {
-                        in_tag = "supplier_vat".to_string();
-                    }
-                    "cbc:TaxExclusiveAmount" | "cbc:LineExtensionAmount" => {
-                        in_tag = "total".to_string();
-                    }
-                    "cbc:PayableAmount" => {
-                        in_tag = "payable".to_string();
-                    }
-                    _ => {}
+        let ev = reader.read_event_into(&mut buf);
+        match ev {
+            Ok(Event::Start(e)) => {
+                let name = local(e.name().as_ref());
+                if stack.is_empty() {
+                    root_name = name.clone();
                 }
+                if name == "TaxSubtotal" {
+                    subtotals.push((String::new(), String::new()));
+                }
+                stack.push(name);
             }
+            // a self-closing element has no text and no End event
+            Ok(Event::Empty(_)) => {}
             Ok(Event::Text(t)) => {
-                let text = t.unescape().unwrap_or_default().to_string();
-                match in_tag.as_str() {
-                    "id" => invoice_ref = text,
-                    "date" => invoice_date = text,
-                    "due" => due_date = text,
-                    "supplier" => supplier_name = text,
-                    "supplier_vat" => supplier_vat_id = text,
-                    "total" => {
-                        if total_amount.is_empty() {
-                            total_amount = text;
+                let text = t.unescape().unwrap_or_default().trim().to_string();
+                if text.is_empty() {
+                    continue;
+                }
+                let t = text.as_str();
+                match stack.last().map(String::as_str).unwrap_or("") {
+                    "ID" if stack.len() == 2 => invoice_ref = t.to_string(), // Invoice > cbc:ID
+                    "InvoiceTypeCode" => type_code = t.to_string(),
+                    "DocumentCurrencyCode" => currency = t.to_string(),
+                    "IssueDate" => issue_date = t.to_string(),
+                    "DueDate" => due_date = t.to_string(),
+                    "PayableAmount" if parent_is(&stack, "LegalMonetaryTotal") => {
+                        payable_raw = t.to_string()
+                    }
+                    _ if has_ancestor(&stack, "AccountingSupplierParty") => {
+                        match stack.last().map(String::as_str).unwrap_or("") {
+                            "Name" if parent_is(&stack, "PartyName") => sup_name = t.to_string(),
+                            "RegistrationName" if parent_is(&stack, "PartyLegalEntity") => {
+                                sup_legal_name = t.to_string()
+                            }
+                            "CompanyID" => scheme_company_id = t.to_string(),
+                            "ID" if parent_is(&stack, "TaxScheme") => scheme_id = t.to_string(),
+                            "ElectronicMail" => sup_email = t.to_string(),
+                            "StreetName" if has_ancestor(&stack, "PostalAddress") => {
+                                sup_street = t.to_string()
+                            }
+                            "CityName" if has_ancestor(&stack, "PostalAddress") => {
+                                sup_city = t.to_string()
+                            }
+                            "PostalZone" if has_ancestor(&stack, "PostalAddress") => {
+                                sup_postal = t.to_string()
+                            }
+                            "IdentificationCode" if has_ancestor(&stack, "Country") => {
+                                sup_country = t.to_string()
+                            }
+                            _ => {}
                         }
                     }
-                    "payable" => pay_amount = text,
+                    "Percent" if has_ancestor(&stack, "TaxSubtotal") => {
+                        if let Some(s) = subtotals.last_mut() {
+                            s.0 = t.to_string();
+                        }
+                    }
+                    "TaxAmount" if parent_is(&stack, "TaxSubtotal") => {
+                        if let Some(s) = subtotals.last_mut() {
+                            s.1 = t.to_string();
+                        }
+                    }
                     _ => {}
                 }
             }
             Ok(Event::End(_)) => {
-                depth -= 1;
-                in_tag.clear();
+                match stack.last().map(String::as_str).unwrap_or("") {
+                    "PartyTaxScheme" => {
+                        // keep the first scheme whose id is literally 'VAT'
+                        if scheme_id.eq_ignore_ascii_case("VAT")
+                            && sup_vat.is_empty()
+                            && !scheme_company_id.is_empty()
+                        {
+                            sup_vat = scheme_company_id.clone();
+                        }
+                        scheme_id.clear();
+                        scheme_company_id.clear();
+                    }
+                    _ => {}
+                }
+                stack.pop();
             }
-            Ok(Event::Eof) => break,
-            Err(_) => break,
+            Ok(Event::Eof) | Err(_) => break,
             _ => {}
         }
         buf.clear();
     }
+    // ── validation (EN 16931), BEFORE resolving contacts: a malformed document
+    // must be reported as malformed whether or not a contact matches ─────────
+    if root_name != "Invoice" {
+        return Err(import_err(
+            "INVALID_UBL_INVOICE",
+            "cannot parse XML: root element must be <Invoice> in the UBL namespace \
+             (urn:oasis:names:specification:ubl:schema:xsd:Invoice-2) — this is not an EN 16931 invoice",
+        ));
+    }
+    let mut errors: Vec<Value> = Vec::new();
+    let err = |e: &str| json!({ "line": 0, "error": e });
 
-    let amount_str = if !pay_amount.is_empty() {
-        &pay_amount
+    if invoice_ref.is_empty() {
+        errors.push(err(
+            "INVALID_UBL_INVOICE: cbc:ID (invoice number) is missing",
+        ));
+    }
+    if type_code.is_empty() {
+        return Err(import_err(
+            "INVALID_UBL_INVOICE",
+            "cbc:InvoiceTypeCode is missing (EN 16931 BT-3)",
+        ));
+    }
+    if type_code != "380" {
+        return Err(import_err(
+            "UNSUPPORTED_UBL_DOCUMENT",
+            format!("InvoiceTypeCode '{type_code}' is not supported (380 = invoice; credit notes 381 are not imported yet)"),
+        ));
+    }
+    if !valid_date(&issue_date) {
+        errors.push(err(&format!(
+            "INVALID_DATE: cbc:IssueDate '{issue_date}' must be yyyy-mm-dd"
+        )));
+    }
+    if !due_date.is_empty() && !valid_date(&due_date) {
+        errors.push(err(&format!(
+            "INVALID_DATE: cbc:DueDate '{due_date}' must be yyyy-mm-dd"
+        )));
+    }
+    let supplier_name = if !sup_name.is_empty() {
+        sup_name.clone()
     } else {
-        &total_amount
+        sup_legal_name.clone()
     };
-    let amount_cents = parse_import_amount(amount_str).unwrap_or(0);
-
-    // Default due_date to issue_date + 30 days (EN 16931 BT-9)
-    if due_date.is_empty() {
-        if let Ok(d) = chrono::NaiveDate::parse_from_str(&invoice_date, "%Y-%m-%d") {
-            due_date = (d + chrono::Duration::days(30))
-                .format("%Y-%m-%d")
-                .to_string();
+    if supplier_name.is_empty() {
+        errors.push(err(
+            "INVALID_UBL_INVOICE: supplier name missing (PartyName/Name or PartyLegalEntity/RegistrationName)",
+        ));
+    }
+    // EN 16931 BT-5 is mandatory: an absent element is a malformed document, not
+    // an implicit EUR (a missing currency on a non-EUR invoice would silently
+    // create a payable in the wrong currency)
+    if currency.is_empty() {
+        errors.push(err(
+            "INVALID_UBL_INVOICE: cbc:DocumentCurrencyCode is missing (EN 16931 BT-5)",
+        ));
+    } else if currency.to_uppercase() != "EUR" {
+        errors.push(err(&format!(
+            "INVALID_UBL_INVOICE: cbc:DocumentCurrencyCode '{}' — only EUR invoices can be imported (payables are EUR-only)",
+            currency.to_uppercase()
+        )));
+    }
+    let mut payable_cents: Option<i64> = None;
+    if payable_raw.is_empty() {
+        errors.push(err("INVALID_UBL_INVOICE: cbc:PayableAmount is missing"));
+    } else {
+        match parse_import_amount(&payable_raw) {
+            Ok(c) if c > 0 => payable_cents = Some(c),
+            _ => errors.push(err(&format!(
+                "INVALID_AMOUNT: cbc:PayableAmount '{payable_raw}' must be a positive amount"
+            ))),
+        }
+    }
+    // informational only — no VAT legs are booked
+    let mut vat_by_rate = serde_json::Map::new();
+    for (pct, tax_raw) in &subtotals {
+        if tax_raw.is_empty() {
+            continue;
+        }
+        match parse_import_amount(tax_raw) {
+            Ok(c) => {
+                let cur = vat_by_rate.get(pct).and_then(|v| v.as_i64()).unwrap_or(0);
+                vat_by_rate.insert(pct.clone(), json!(cur + c));
+            }
+            Err(_) => errors.push(err(&format!(
+                "INVALID_AMOUNT: cbc:TaxAmount '{tax_raw}' is not a valid amount"
+            ))),
         }
     }
 
-    // --- contact resolution -------------------------------------------------
-    use crate::contacts::{get_contact, list_contacts};
+    if !errors.is_empty() {
+        return Err(BukioError::with_details(
+            "IMPORT_VALIDATION_FAILED",
+            "UBL invoice failed validation — nothing was imported",
+            json!(errors),
+        ));
+    }
 
-    let supplier_lower = supplier_name.trim().to_lowercase();
-    let vat_lower = if supplier_vat_id.is_empty() {
-        String::new()
+    let vat_id = if sup_vat.is_empty() {
+        None
     } else {
-        supplier_vat_id.trim().to_lowercase()
+        Some(sup_vat.clone())
+    };
+    let payable_cents = payable_cents.unwrap_or(0);
+    let vat_value = match &vat_id {
+        Some(v) => json!(v),
+        None => Value::Null,
     };
 
-    let mut resolved_contact: Option<Value> = None;
+    // ── idempotency key ─────────────────────────────────────────────────────
+    let supplier_key = match &vat_id {
+        Some(v) => v.to_lowercase(),
+        None => normalize_import_name(&supplier_name),
+    };
+    let source_ref = format!("{supplier_key}:{invoice_ref}");
+    let is_dup = db
+        .query_row(
+            "SELECT 1 FROM payables WHERE source = 'ubl' AND source_ref = ?1",
+            rusqlite::params![source_ref],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+
+    // ── contact resolution ──────────────────────────────────────────────────
+    use crate::contacts::{get_contact, list_contacts};
+    let name_lower = normalize_import_name(&supplier_name);
+    let mut resolved: Option<Value> = None;
     let mut contact_created = false;
 
     if let Some(cid) = contact_id {
-        resolved_contact = get_contact(db, cid)?;
-        if resolved_contact.is_none() {
+        resolved = get_contact(db, cid)?;
+        if resolved.is_none() {
             return Err(import_err(
                 "CONTACT_NOT_FOUND",
                 format!("contact {cid} does not exist"),
             ));
         }
     } else {
-        // match by VAT ID first
-        if !vat_lower.is_empty() {
-            for c in list_contacts(db)? {
-                if c["vat_id"].as_str().unwrap_or("").trim().to_lowercase() == vat_lower {
-                    resolved_contact = Some(c);
-                    break;
-                }
-            }
+        let all = list_contacts(db)?;
+        if let Some(v) = &vat_id {
+            let want = v.to_lowercase();
+            resolved = all
+                .iter()
+                .find(|c| {
+                    c["vat_id"]
+                        .as_str()
+                        .map(|x| x.trim().to_lowercase() == want)
+                        .unwrap_or(false)
+                })
+                .cloned();
         }
-        // fallback: match by normalized name
-        if resolved_contact.is_none() {
-            for c in list_contacts(db)? {
-                if c["name"].as_str().unwrap_or("").trim().to_lowercase() == supplier_lower {
-                    resolved_contact = Some(c);
-                    break;
-                }
-            }
+        if resolved.is_none() {
+            resolved = all
+                .iter()
+                .find(|c| normalize_import_name(c["name"].as_str().unwrap_or("")) == name_lower)
+                .cloned();
         }
-        if resolved_contact.is_none() && create_missing {
+        if resolved.is_none() && create_missing {
             contact_created = true;
             if !dry_run {
-                let r = create_contact(
+                let country = if sup_country.is_empty() {
+                    "NL".to_string()
+                } else {
+                    sup_country.to_uppercase()
+                };
+                resolved = Some(create_contact(
                     db,
                     &supplier_name,
-                    None, // address
-                    None, // postal_code
-                    None, // city
-                    None, // country
-                    None, // email
-                    if supplier_vat_id.is_empty() {
-                        None
-                    } else {
-                        Some(&supplier_vat_id)
-                    },
+                    opt(&sup_street),
+                    opt(&sup_postal),
+                    opt(&sup_city),
+                    Some(&country),
+                    opt(&sup_email),
+                    vat_id.as_deref(),
                     None, // kvk
                     None, // iban
                     actor,
                     false,
-                )?;
-                resolved_contact = Some(r);
+                )?);
             }
         }
-        if resolved_contact.is_none() && !(create_missing && dry_run) {
+        if resolved.is_none() && !(create_missing && dry_run) {
             return Err(import_err(
                 "CONTACT_NOT_FOUND",
-                format!(
-                    "no contact matches supplier '{supplier_name}' — pass --contact <id> or --create-missing to create it"
-                ),
+                format!("no contact matches supplier '{supplier_name}' — pass --contact <id> or --create-missing to create it"),
             ));
         }
     }
 
-    let contact_id_resolved = resolved_contact
-        .as_ref()
-        .and_then(|c| c["id"].as_i64())
-        .unwrap_or(0);
-    let contact_name = resolved_contact
+    let resolved_id = resolved.as_ref().and_then(|c| c["id"].as_i64());
+    let resolved_name = resolved
         .as_ref()
         .and_then(|c| c["name"].as_str())
         .unwrap_or(&supplier_name)
         .to_string();
-    let contacts_created_count: i64 = if contact_created { 1 } else { 0 };
-
-    // --- idempotency: source_ref dedup -------------------------------------
-    let supplier_key = if !vat_lower.is_empty() {
-        vat_lower.clone()
+    let final_due = if due_date.is_empty() {
+        add_days_iso(&issue_date, 30).unwrap_or_default()
     } else {
-        supplier_lower.clone()
+        due_date.clone()
     };
-    let source_ref = format!("{}:{}", supplier_key, invoice_ref);
-
-    let is_dup = db
-        .query_row(
-            "SELECT 1 FROM payables WHERE source = 'ubl' AND source_ref = ?1 AND status = 'unpaid'",
-            rusqlite::params![source_ref],
-            |_| Ok(true),
-        )
-        .unwrap_or(false);
+    let vat_by_rate = Value::Object(vat_by_rate);
 
     if dry_run {
         return Ok(json!({
             "dryRun": true,
-            "invoice_ref": invoice_ref,
+            "action": "import.invoice",
+            "file": Value::Null,
             "supplier": supplier_name,
-            "date": invoice_date,
-            "due_date": due_date,
-            "amount_cents": amount_cents,
-            "amount": crate::money::format_amount(amount_cents),
-            "vat_by_rate": {},
-            "contact": { "id": contact_id_resolved, "name": contact_name, "created": contact_created },
+            "vat_id": vat_value,
+            "invoice_ref": invoice_ref,
+            "date": issue_date,
+            "due_date": final_due,
+            "amount_cents": payable_cents,
+            "amount": crate::money::format_amount(payable_cents),
+            "vat_by_rate": vat_by_rate,
+            "contact": {
+                "id": match resolved_id { Some(i) => json!(i), None => Value::Null },
+                "name": resolved_name,
+                "created": contact_created,
+            },
             "duplicates": if is_dup { 1 } else { 0 },
-            "contacts_created": contacts_created_count,
+            "contacts_created": if contact_created { 1 } else { 0 },
             "imported": 0,
         }));
     }
 
-    // --- execute: create payable -------------------------------------------
-    let mut imported: i64 = 0;
-    let mut duplicates: i64 = 0;
-
+    let mut imported = 0;
+    let mut duplicates = 0;
     if is_dup {
         duplicates = 1;
     } else {
+        let cid = resolved_id.unwrap_or(0);
         db.execute(
             "INSERT INTO payables (contact_id, invoice_ref, date, due_date, amount_cents, payment_method, source, source_ref, created_by) VALUES (?1, ?2, ?3, ?4, ?5, 'transfer', 'ubl', ?6, ?7)",
-            rusqlite::params![contact_id_resolved, invoice_ref, invoice_date, due_date, amount_cents, source_ref, actor],
+            rusqlite::params![cid, invoice_ref, issue_date, final_due, payable_cents, source_ref, actor],
         )
         .map_err(sql_err)?;
         let pid = db.last_insert_rowid();
@@ -2407,11 +2552,13 @@ pub fn import_invoice(
                 args: Some(json!({
                     "payable_id": pid,
                     "supplier": supplier_name,
+                    "vat_id": vat_value,
                     "invoice_ref": invoice_ref,
-                    "date": invoice_date,
-                    "due_date": due_date,
-                    "amount_cents": amount_cents,
-                    "contact_id": contact_id_resolved,
+                    "date": issue_date,
+                    "due_date": final_due,
+                    "amount_cents": payable_cents,
+                    "vat_by_rate": vat_by_rate,
+                    "contact_id": cid,
                 })),
                 outcome: "ok",
                 entry_ids: vec![],
@@ -2421,17 +2568,47 @@ pub fn import_invoice(
     }
 
     Ok(json!({
-        "invoice_ref": invoice_ref,
-        "supplier": supplier_name,
-        "date": invoice_date,
-        "due_date": due_date,
-        "amount_cents": amount_cents,
-        "amount": crate::money::format_amount(amount_cents),
         "imported": imported,
         "duplicates": duplicates,
-        "contacts_created": contacts_created_count,
-        "contact": { "id": contact_id_resolved, "name": contact_name, "created": contact_created },
+        "contacts_created": if contact_created { 1 } else { 0 },
+        "supplier": supplier_name,
+        "vat_id": vat_value,
+        "invoice_ref": invoice_ref,
+        "date": issue_date,
+        "due_date": final_due,
+        "amount_cents": payable_cents,
+        "amount": crate::money::format_amount(payable_cents),
+        "vat_by_rate": vat_by_rate,
+        "contact": { "id": match resolved_id { Some(i) => json!(i), None => Value::Null }, "name": resolved_name },
+        "dryRun": false,
     }))
+}
+
+/// The JS's normalizeName: lowercased with every non-alphanumeric dropped, so
+/// 'Acme BV' and 'acmebv' are the same supplier key.
+fn normalize_import_name(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect()
+}
+
+fn opt(s: &str) -> Option<&str> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+fn add_days_iso(date: &str, days: i64) -> Option<String> {
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .ok()
+        .map(|d| {
+            (d + chrono::Duration::days(days))
+                .format("%Y-%m-%d")
+                .to_string()
+        })
 }
 
 #[cfg(test)]

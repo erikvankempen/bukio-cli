@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 17:50:58 UTC — **✅ 483 passing · 0 failing (483 tests)**
+**Latest run:** 2026-09-10 18:05:36 UTC — **✅ 469 passing · 0 failing (469 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -300,25 +300,6 @@
     - ✅ account add/deactivate/reactivate/import are audited (they mutated silently before)
     - ✅ every emitted error code in src/ is documented in AGENTS.md §7
     - ✅ MCP on a missing database errors NO_DATABASE instead of silently creating an empty company
-
-### import-invoice.test.js — inbound UBL (EN 16931/Peppol) invoice import into payables: idempotent, VAT reported not booked
-
-14 passing · 0 failing
-
-    - ✅ importUblInvoice: registers a payable, matches contact by vat-id, parses VAT
-    - ✅ importUblInvoice: idempotent re-import → duplicate skipped
-    - ✅ importUblInvoice: --create-missing creates the supplier contact with address + vat-id
-    - ✅ importUblInvoice: TaxScheme/cbc:ID is the literal scheme id, not the VAT number
-    - ✅ importUblInvoice: explicit --contact wins; no match and no flag → CONTACT_NOT_FOUND
-    - ✅ importUblInvoice: validation failures write nothing
-    - ✅ importUblInvoice: due date defaults to issue + 30 days
-    - ✅ importUblInvoice: dry-run validates like execute but writes nothing
-    - ✅ cli: import invoice end-to-end → payable in the register, dry-run plan
-    - ✅ mcp: invoice_import dry-run parity + execute
-    - ✅ importUblInvoice: multiple PartyTaxScheme entries — VAT number still extracted
-    - ✅ importUblInvoice: missing cbc:InvoiceTypeCode (EN 16931 BT-3) is rejected
-    - ✅ importUblInvoice: missing cbc:DocumentCurrencyCode (EN 16931 BT-5) is rejected
-    - ✅ importUblInvoice: a malformed PayableAmount is collected with other errors, not thrown mid-parse (round 11)
 
 ### invoice-features.test.js — 
 
