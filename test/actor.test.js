@@ -118,7 +118,7 @@ test('CLI: BUKIO_ACTOR env is recorded in the audit trail', () => {
 // --- actor identity commands (Tier 0: keygen/register/list/revoke/enforce/unlock/lock/verify) ---
 
 function keyFile(cfg, actor) {
-  return path.join(cfg, 'keys', actor + '.key');
+  return path.join(cfg, 'keys', actor.replace(':', '-') + '.key');
 }
 
 test('actor keygen: agent key writes a plain 0600 key file (BUKIO_CONFIG_DIR respected)', () => {
