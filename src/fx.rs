@@ -179,6 +179,56 @@ pub fn list_fx_rates(db: &Connection, currency: Option<&str>, limit: i64) -> Res
 }
 
 /// Fetch the ECB reference rate via HTTP (blocking). Returns (date, rate_x10000) or None.
+/// Test/ops seam mirroring the JS `setEcbFetcher`: the ECB call is the only
+/// network access in the port, and the JS suite injects a stub for it.
+/// `Ok(None)` means "no data for this currency" (the JS's non-ok/404 branch).
+pub type EcbFetcher = fn(&str) -> std::result::Result<Option<String>, String>;
+
+static ECB_FETCHER: std::sync::Mutex<Option<EcbFetcher>> = std::sync::Mutex::new(None);
+
+pub fn set_ecb_fetcher(f: EcbFetcher) {
+    *ECB_FETCHER.lock().unwrap() = Some(f);
+}
+
+pub fn clear_ecb_fetcher() {
+    *ECB_FETCHER.lock().unwrap() = None;
+}
+
+/// Parse SDMX-ML observations out of an ECB data response, oldest first.
+pub fn parse_sdmx_observations(xml: &str, _currency: &str) -> Vec<(String, f64)> {
+    let mut dim_dates: Vec<String> = Vec::new();
+    let mut obs_values: Vec<f64> = Vec::new();
+    for cap in xml.match_indices("ObsDimension") {
+        let rest = &xml[cap.0..];
+        if let Some(start) = rest.find("value=\"") {
+            let val_start = start + 7;
+            if let Some(end) = rest[val_start..].find('"') {
+                dim_dates.push(rest[val_start..val_start + end].to_string());
+            }
+        }
+    }
+    for cap in xml.match_indices("ObsValue") {
+        let rest = &xml[cap.0..];
+        if let Some(start) = rest.find("value=\"") {
+            let val_start = start + 7;
+            if let Some(end) = rest[val_start..].find('"') {
+                if let Ok(v) = rest[val_start..val_start + end].parse::<f64>() {
+                    if v > 0.0 {
+                        obs_values.push(v);
+                    }
+                }
+            }
+        }
+    }
+    let mut observations: Vec<(String, f64)> = dim_dates
+        .iter()
+        .zip(obs_values.iter())
+        .map(|(d, v)| (d.clone(), *v))
+        .collect();
+    observations.sort_by(|a, b| a.0.cmp(&b.0));
+    observations
+}
+
 pub fn fetch_ecb_rate(currency: &str, date: &str) -> Result<Option<(String, i64)>> {
     let from = {
         let d = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
@@ -191,51 +241,36 @@ pub fn fetch_ecb_rate(currency: &str, date: &str) -> Result<Option<(String, i64)
         "{}/D.{currency}.EUR.SP00.A?startPeriod={from}&endPeriod={date}",
         ECB_BASE
     );
-    let body = ureq::get(&url).call().map_err(|e| {
-        fx_error(
-            "ECB_FETCH_FAILED",
-            format!("ECB unreachable for {currency}: {e}"),
-        )
-    })?;
-
-    // simple SDMX-ML parsing: extract ObsDimension value + ObsValue value pairs
-    let xml = body.into_body().read_to_string().map_err(|e| {
-        fx_error(
-            "ECB_FETCH_FAILED",
-            format!("failed to read ECB response: {e}"),
-        )
-    })?;
-
-    let mut observations: Vec<(String, f64)> = Vec::new();
-    // simple XML scan: find <ObsDimension value="..."/> and <ObsValue value="..."/> pairs
-    let mut dim_dates: Vec<String> = Vec::new();
-    let mut obs_values: Vec<f64> = Vec::new();
-    for cap in xml.match_indices("ObsDimension") {
-        let rest = &xml[cap.0..];
-        if let Some(start) = rest.find("value=\"") {
-            let val_start = start + 7;
-            if let Some(end) = rest[val_start..].find('\"') {
-                dim_dates.push(rest[val_start..val_start + end].to_string());
+    let injected = *ECB_FETCHER.lock().unwrap();
+    let xml = match injected {
+        Some(fetch) => match fetch(&url) {
+            Ok(Some(body)) => body,
+            // no data for this currency (the JS's non-ok/404 branch)
+            Ok(None) => return Ok(None),
+            Err(e) => {
+                return Err(fx_error(
+                    "ECB_FETCH_FAILED",
+                    format!("ECB unreachable for {currency}: {e}"),
+                ))
             }
+        },
+        None => {
+            let body = ureq::get(&url).call().map_err(|e| {
+                fx_error(
+                    "ECB_FETCH_FAILED",
+                    format!("ECB unreachable for {currency}: {e}"),
+                )
+            })?;
+            body.into_body().read_to_string().map_err(|e| {
+                fx_error(
+                    "ECB_FETCH_FAILED",
+                    format!("failed to read ECB response: {e}"),
+                )
+            })?
         }
-    }
-    for cap in xml.match_indices("ObsValue") {
-        let rest = &xml[cap.0..];
-        if let Some(start) = rest.find("value=\"") {
-            let val_start = start + 7;
-            if let Some(end) = rest[val_start..].find('\"') {
-                if let Ok(v) = rest[val_start..val_start + end].parse::<f64>() {
-                    if v > 0.0 {
-                        obs_values.push(v);
-                    }
-                }
-            }
-        }
-    }
-    for (d, v) in dim_dates.iter().zip(obs_values.iter()) {
-        observations.push((d.clone(), *v));
-    }
-    observations.sort_by(|a, b| a.0.cmp(&b.0));
+    };
+
+    let observations = parse_sdmx_observations(&xml, currency);
     if observations.is_empty() {
         return Ok(None);
     }
@@ -259,6 +294,20 @@ pub fn resolve_rate(
     actor: &str,
     no_fetch: bool,
 ) -> Result<i64> {
+    resolve_rate_opt(db, currency, rate, date, actor, no_fetch, false)
+}
+
+/// `dry_run` mirrors the JS resolveRate({dryRun}) / resolveMcpFx: a plan-only
+/// call must NOT persist the fetched rate (nor write an fx.set audit row).
+pub fn resolve_rate_opt(
+    db: &Connection,
+    currency: &str,
+    rate: Option<&str>,
+    date: &str,
+    actor: &str,
+    no_fetch: bool,
+    dry_run: bool,
+) -> Result<i64> {
     if currency.is_empty() {
         return Ok(0);
     }
@@ -278,12 +327,18 @@ pub fn resolve_rate(
             format!("no ECB reference rate for {currency} on/before {date}"),
         )),
         Some((obs_date, rate_x10000)) => {
+            if dry_run {
+                return Ok(rate_x10000);
+            }
             // store for reuse (like the JS implementation)
             set_fx_rate(
                 db,
                 currency,
                 &obs_date,
-                &rate_x10000.to_string(),
+                // the ECB observation is rate x10000; set_fx_rate takes the
+                // decimal string (passing the raw integer was rejected as
+                // INVALID_RATE, so auto-fetch could never store a rate)
+                &format_rate(rate_x10000),
                 "ECB",
                 actor,
                 false,

@@ -54,8 +54,21 @@ fn months_after_fy_end(fiscal_year_end: &str, year: i32, n: i32) -> String {
     let total = mm + n;
     let y = year + (total - 1).div_euclid(12);
     let m = ((total - 1).rem_euclid(12) + 1) as u32;
-    let last_day = chrono::NaiveDate::from_ymd_opt(y, m + 1, 1)
-        .map(|d| d.format("%d").to_string().parse::<u32>().unwrap_or(28))
+    // the last day of month m: the day before the 1st of the next month
+    // (the old code read the 1st's day-of-month and always returned 01)
+    let first_of_next = if m == 12 {
+        chrono::NaiveDate::from_ymd_opt(y + 1, 1, 1)
+    } else {
+        chrono::NaiveDate::from_ymd_opt(y, m + 1, 1)
+    };
+    let last_day = first_of_next
+        .map(|d| {
+            (d - chrono::Duration::days(1))
+                .format("%d")
+                .to_string()
+                .parse::<u32>()
+                .unwrap_or(28)
+        })
         .unwrap_or(28);
     format!("{y}-{m:02}-{last_day:02}")
 }

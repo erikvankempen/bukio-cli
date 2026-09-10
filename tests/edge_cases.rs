@@ -3660,6 +3660,22 @@ impl Mcp {
         }
     }
 
+    /// Write a raw JSON-RPC line and read the next message back.
+    fn raw(&mut self, line: &str) -> Value {
+        use std::io::{BufRead, Write};
+        writeln!(self.stdin, "{line}").unwrap();
+        self.stdin.flush().unwrap();
+        let mut buf = String::new();
+        loop {
+            buf.clear();
+            let n = self.reader.read_line(&mut buf).unwrap();
+            assert!(n > 0, "MCP closed after a raw line");
+            if let Ok(msg) = serde_json::from_str::<Value>(buf.trim()) {
+                return msg;
+            }
+        }
+    }
+
     /// tools/call + parse the JSON payload out of the content block
     fn tool(&mut self, name: &str, args: Value) -> (Value, bool) {
         let r = self.call("tools/call", json!({ "name": name, "arguments": args }));
@@ -13317,4 +13333,1147 @@ fn cli_version_matches_package_json() {
         pkg["version"].as_str().unwrap(),
         "bukio --version must equal package.json"
     );
+}
+// ==== agent layer: fx, ECB, compliance, MCP (ported from test/agent-layer.test.js) ====
+
+const SDMX_USD: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<message:GenericData xmlns:message="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/message" xmlns:generic="http://www.sdmx.org/resources/sdmxml/schemas/v2_1/data/generic">
+<message:DataSet>
+<generic:Series>
+<generic:SeriesKey><generic:Value id="FREQ" value="D"/><generic:Value id="CURRENCY" value="USD"/></generic:SeriesKey>
+<generic:Obs><generic:ObsDimension value="2026-07-30"/><generic:ObsValue value="1.1476"/></generic:Obs>
+<generic:Obs><generic:ObsDimension value="2026-07-31"/><generic:ObsValue value="1.1485"/></generic:Obs>
+<generic:Obs><generic:ObsDimension value="2026-08-03"/><generic:ObsValue value="1.1515"/></generic:Obs>
+</generic:Series>
+</message:DataSet>
+</message:GenericData>"#;
+
+fn ecb_ok(_url: &str) -> std::result::Result<Option<String>, String> {
+    Ok(Some(SDMX_USD.to_string()))
+}
+fn ecb_404(_url: &str) -> std::result::Result<Option<String>, String> {
+    Ok(None)
+}
+fn ecb_boom(_url: &str) -> std::result::Result<Option<String>, String> {
+    Err("ENOTFOUND".to_string())
+}
+fn ecb_empty(_url: &str) -> std::result::Result<Option<String>, String> {
+    Ok(Some(
+        "<?xml version=\"1.0\"?><message:GenericData></message:GenericData>".to_string(),
+    ))
+}
+
+/// A file DB + config dir: init (Demo BV, bv, VAT on) through the CLI.
+fn agent_env(tag: &str) -> (std::path::PathBuf, String, String) {
+    let dir = temp_dir(tag);
+    let cfg = dir.join("cfg").to_string_lossy().to_string();
+    let db = dir.join("company.db").to_string_lossy().to_string();
+    std::fs::create_dir_all(&cfg).unwrap();
+    let (out, ok, _) = acli(
+        &[
+            "--json",
+            "init",
+            "--name",
+            "Demo BV",
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "bv",
+            "--vat",
+            "on",
+            "--tax-id",
+            "NL123456789B01",
+            "--address",
+            "Industrieweg 12",
+            "--postal-code",
+            "2712 CD",
+            "--city",
+            "Zoetermeer",
+            "--db",
+            &db,
+        ],
+        &[("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")],
+    );
+    assert!(ok, "{out}");
+    (dir, cfg, db)
+}
+
+fn mem_db() -> rusqlite::Connection {
+    bukio::db::open_db(":memory:").unwrap()
+}
+
+// --- FX rate store + conversion math ---------------------------------------
+
+#[test]
+fn fx_parse_rate_and_convert_fx_use_integer_math_rounded_half_up() {
+    assert_eq!(bukio::fx::parse_rate("1.0875").unwrap(), 10875);
+    assert_eq!(bukio::fx::parse_rate("1").unwrap(), 10000);
+    assert_eq!(bukio::fx::parse_rate("0.9").unwrap(), 9000);
+    assert_eq!(bukio::fx::parse_rate("1.087").unwrap(), 10870);
+    assert_eq!(
+        bukio::fx::parse_rate("abc").unwrap_err().code,
+        "INVALID_RATE"
+    );
+    assert_eq!(
+        bukio::fx::parse_rate("-1.0").unwrap_err().code,
+        "INVALID_RATE"
+    );
+    assert_eq!(
+        bukio::fx::parse_rate("1.08755").unwrap_err().code,
+        "INVALID_RATE",
+        "more than 4 decimals"
+    );
+    // 895.00 USD at 1.0875 -> 89500 * 10000 / 10875 = 82298.85 -> 82299
+    assert_eq!(bukio::fx::convert_fx(89500, 10875).unwrap(), 82299);
+    assert_eq!(bukio::fx::convert_fx(124630, 10875).unwrap(), 114602);
+}
+
+#[test]
+fn fx_set_rate_upserts_audits_and_get_rate_prefers_latest_on_or_before() {
+    let db = mem_db();
+    bukio::fx::set_fx_rate(
+        &db,
+        "USD",
+        "2026-07-01",
+        "1.08",
+        "manual",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    bukio::fx::set_fx_rate(
+        &db,
+        "USD",
+        "2026-07-10",
+        "1.09",
+        "manual",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    // upsert the same date
+    bukio::fx::set_fx_rate(
+        &db,
+        "USD",
+        "2026-07-01",
+        "1.081",
+        "manual",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+
+    assert_eq!(
+        bukio::fx::get_fx_rate(&db, "USD", "2026-07-01").unwrap(),
+        Some(10810)
+    );
+    assert_eq!(
+        bukio::fx::get_fx_rate(&db, "USD", "2026-07-10").unwrap(),
+        Some(10900)
+    );
+    assert_eq!(
+        bukio::fx::get_fx_rate(&db, "USD", "2026-07-05").unwrap(),
+        Some(10810),
+        "latest on/before the date"
+    );
+    assert_eq!(
+        bukio::fx::get_fx_rate(&db, "USD", "2026-06-01").unwrap(),
+        None,
+        "before the first"
+    );
+    assert_eq!(
+        bukio::fx::get_fx_rate(&db, "GBP", "2026-07-05").unwrap(),
+        None,
+        "unknown currency"
+    );
+    assert_eq!(
+        bukio::fx::list_fx_rates(&db, Some("USD"), 50)
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let n: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE action='fx.set'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 3, "every set/upsert is audited");
+
+    assert_eq!(
+        bukio::fx::set_fx_rate(&db, "usd", "2026-07-01", "1.0", "manual", "a", false)
+            .unwrap_err()
+            .code,
+        "INVALID_CURRENCY"
+    );
+    assert_eq!(
+        bukio::fx::set_fx_rate(&db, "USD", "bad", "1.0", "manual", "a", false)
+            .unwrap_err()
+            .code,
+        "INVALID_DATE"
+    );
+}
+
+#[test]
+#[ignore = "port lacks FX through the ledger: entries::PostingSpec has no fx_currency/fx_amount_cents, \
+            so a foreign-currency posting (and fx.toEurPostings) cannot be expressed yet"]
+fn fx_to_eur_postings_attaches_the_original_amounts() {}
+
+#[test]
+#[ignore = "port lacks FX through the ledger: no fx fields on entries::PostingSpec, so entry add \
+            with a currency (and the fx-preserving reversal) cannot be expressed yet"]
+fn fx_entry_add_with_currency_books_eur_and_keeps_the_original_amounts() {}
+
+#[test]
+#[ignore = "port lacks FX through the ledger: vat book cannot take fx postings, so the VAT legs \
+            cannot be computed on EUR amounts yet"]
+fn fx_vat_book_with_currency_computes_vat_on_the_eur_amounts() {}
+
+#[test]
+#[ignore = "port lacks FX through the ledger: without fx fields there is nothing to validate, so \
+            INVALID_FX_CURRENCY / INVALID_FX_AMOUNT cannot be raised yet"]
+fn fx_invalid_currency_or_amount_on_a_posting_is_rejected() {}
+
+// --- ECB reference rates ----------------------------------------------------
+
+#[test]
+fn ecb_parses_sdmx_observations_and_falls_back_to_the_last_business_day() {
+    let obs = bukio::fx::parse_sdmx_observations(SDMX_USD, "USD");
+    assert_eq!(obs.len(), 3, "{obs:?}");
+    assert_eq!(obs[0].0, "2026-07-30");
+    assert_eq!(obs[2].1, 1.1515);
+
+    bukio::fx::set_ecb_fetcher(ecb_ok);
+    let sat = bukio::fx::fetch_ecb_rate("USD", "2026-08-01").unwrap();
+    assert_eq!(
+        sat,
+        Some(("2026-07-31".to_string(), 11485)),
+        "Saturday -> Friday"
+    );
+    let mon = bukio::fx::fetch_ecb_rate("USD", "2026-08-03").unwrap();
+    assert_eq!(
+        mon,
+        Some(("2026-08-03".to_string(), 11515)),
+        "exact business day"
+    );
+    bukio::fx::clear_ecb_fetcher();
+}
+
+#[test]
+fn ecb_missing_currency_is_none_and_a_network_failure_is_ecb_fetch_failed() {
+    bukio::fx::set_ecb_fetcher(ecb_404);
+    assert_eq!(
+        bukio::fx::fetch_ecb_rate("XYZ", "2026-08-04").unwrap(),
+        None
+    );
+    bukio::fx::clear_ecb_fetcher();
+
+    bukio::fx::set_ecb_fetcher(ecb_boom);
+    let err = bukio::fx::fetch_ecb_rate("USD", "2026-08-04").unwrap_err();
+    assert_eq!(err.code, "ECB_FETCH_FAILED", "{err:?}");
+    bukio::fx::clear_ecb_fetcher();
+}
+
+#[test]
+fn fx_missing_rate_auto_fetches_from_ecb_stores_it_and_reuses_it() {
+    let db = mem_db();
+    bukio::fx::set_ecb_fetcher(ecb_ok);
+    // no stored rate -> ECB fetch -> stored as source=ECB
+    let r = bukio::fx::resolve_rate(&db, "USD", None, "2026-08-01", "agent:test", false).unwrap();
+    assert_eq!(r, 11485);
+    assert_eq!(
+        bukio::fx::get_fx_rate(&db, "USD", "2026-08-01").unwrap(),
+        Some(11485)
+    );
+    let (source, created_by): (String, String) = db
+        .query_row(
+            "SELECT source, created_by FROM fx_rates WHERE currency='USD' AND date='2026-07-31'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(source, "ECB");
+    assert_eq!(created_by, "agent:test");
+
+    // the second booking reuses the stored rate
+    let count_before: i64 = db
+        .query_row("SELECT COUNT(*) FROM fx_rates", [], |r| r.get(0))
+        .unwrap();
+    let r2 = bukio::fx::resolve_rate(&db, "USD", None, "2026-08-01", "agent:test", false).unwrap();
+    assert_eq!(r2, 11485);
+    let count_after: i64 = db
+        .query_row("SELECT COUNT(*) FROM fx_rates", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count_before, count_after, "the stored rate wins");
+
+    // an explicit rate always wins
+    let r3 = bukio::fx::resolve_rate(&db, "USD", Some("1.09"), "2026-08-01", "agent:test", false)
+        .unwrap();
+    assert_eq!(r3, 10900);
+    bukio::fx::clear_ecb_fetcher();
+}
+
+#[test]
+fn fx_no_fetch_blocks_the_ecb_fallback() {
+    let db = mem_db();
+    let err =
+        bukio::fx::resolve_rate(&db, "USD", None, "2026-08-01", "agent:test", true).unwrap_err();
+    assert_eq!(err.code, "FX_RATE_NOT_FOUND", "{err:?}");
+}
+
+#[test]
+fn fx_ecb_without_a_rate_for_the_currency_is_ecb_rate_not_available() {
+    let db = mem_db();
+    bukio::fx::set_ecb_fetcher(ecb_empty);
+    let err = bukio::fx::resolve_rate(&db, "USD", None, "2026-08-01", "a", false).unwrap_err();
+    assert_eq!(err.code, "ECB_RATE_NOT_AVAILABLE", "{err:?}");
+    bukio::fx::clear_ecb_fetcher();
+}
+
+#[test]
+fn fx_resolve_rate_dry_run_does_not_persist_the_fetched_ecb_rate() {
+    let db = mem_db();
+    bukio::fx::set_ecb_fetcher(ecb_ok);
+    let rate =
+        bukio::fx::resolve_rate_opt(&db, "USD", None, "2026-08-03", "agent:test", false, true)
+            .unwrap();
+    assert_eq!(rate, 11515);
+    assert_eq!(
+        bukio::fx::list_fx_rates(&db, None, 50).unwrap().len(),
+        0,
+        "dry-run must not INSERT"
+    );
+    let n: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'fx.set'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0, "dry-run must not audit");
+
+    // the execute path persists
+    let rate2 =
+        bukio::fx::resolve_rate(&db, "USD", None, "2026-08-03", "agent:test", false).unwrap();
+    assert_eq!(rate2, 11515);
+    assert_eq!(bukio::fx::list_fx_rates(&db, None, 50).unwrap().len(), 1);
+    bukio::fx::clear_ecb_fetcher();
+}
+
+#[test]
+#[ignore = "port lacks the MCP FX path (resolveMcpFx + a currency argument on the entry_add tool), \
+            so a plan-only MCP call cannot be checked for not storing the fetched rate"]
+fn mcp_resolve_fx_never_stores_the_fetched_rate_on_a_plan_only_call() {}
+
+// --- compliance -------------------------------------------------------------
+
+#[test]
+fn compliance_quarterly_deadlines() {
+    assert_eq!(
+        bukio::compliance::quarter_deadline("2026-Q1").unwrap(),
+        ("2026-Q1", "2026-04-30".to_string())
+    );
+    assert_eq!(
+        bukio::compliance::quarter_deadline("2026-Q3").unwrap(),
+        ("2026-Q3", "2026-10-31".to_string())
+    );
+    assert_eq!(
+        bukio::compliance::quarter_deadline("2026-Q4").unwrap(),
+        ("2026-Q4", "2027-01-31".to_string())
+    );
+    assert_eq!(
+        bukio::compliance::quarter_deadline("2026")
+            .unwrap_err()
+            .code,
+        "INVALID_PERIOD"
+    );
+}
+
+#[test]
+fn compliance_jaarrekening_deadline_is_13_months_after_the_fiscal_year_end() {
+    let (_dir, _cfg, db) = agent_env("al14");
+    let fy: String = db_company_field(&db, "fiscal_year_end");
+    assert_eq!(
+        bukio::compliance::jaarrekening_deadline(&fy, 2026),
+        "2028-01-31"
+    );
+    assert_eq!(
+        bukio::compliance::jaarrekening_deadline("06-30", 2026),
+        "2027-07-31",
+        "a June year end"
+    );
+    // tolerant parse: a full YYYY-MM-DD must not read the year as the month
+    assert_eq!(
+        bukio::compliance::jaarrekening_deadline("2026-06-30", 2026),
+        "2027-07-31",
+        "full-date fiscal_year_end"
+    );
+}
+
+fn db_company_field(db_path: &str, field: &str) -> String {
+    let d = bukio::db::open_db(db_path).unwrap();
+    let sql = format!("SELECT {field} FROM company WHERE id = 1");
+    let v: Option<String> = d.query_row(&sql, [], |r| r.get(0)).unwrap();
+    v.unwrap_or_default()
+}
+
+#[test]
+fn compliance_calendar_shows_obligations_and_statuses_flip_with_filings() {
+    let (_dir, _cfg, db_path) = agent_env("al15");
+    let db = bukio::db::open_db(&db_path).unwrap();
+    let r = bukio::compliance::compliance_status(&db, 2026).unwrap();
+    let types: Vec<&str> = r["obligations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|o| o["type"].as_str().unwrap())
+        .collect();
+    assert!(types.contains(&"OB"), "{types:?}");
+    assert!(types.contains(&"ICP"), "{types:?}");
+    assert!(types.contains(&"JAARREKENING"), "{types:?}");
+    assert!(r["obligations"].as_array().unwrap().len() >= 8, "{r}");
+
+    let ob_q3 = r["obligations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["type"] == json!("OB") && o["period"] == json!("2026-Q3"))
+        .expect("OB 2026-Q3");
+    assert_eq!(ob_q3["deadline"], json!("2026-10-31"));
+    assert_eq!(
+        ob_q3["status"],
+        json!("open"),
+        "today is before the deadline"
+    );
+
+    // filing flips the status
+    db.execute(
+        "INSERT INTO vat_returns (type, period, status, fields_json, filed_at) VALUES ('OB','2026-Q3','filed','{}','2026-10-31')",
+        [],
+    )
+    .unwrap();
+    let r2 = bukio::compliance::compliance_status(&db, 2026).unwrap();
+    let ob_q3 = r2["obligations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["type"] == json!("OB") && o["period"] == json!("2026-Q3"))
+        .unwrap();
+    assert_eq!(ob_q3["status"], json!("filed"));
+
+    bukio::compliance::mark_filed(&db, "ICP", "2026-Q3", None, "agent:test", false).unwrap();
+    bukio::compliance::mark_filed(&db, "JAARREKENING", "2026", None, "agent:test", false).unwrap();
+    let r3 = bukio::compliance::compliance_status(&db, 2026).unwrap();
+    for (t, p) in [("ICP", "2026-Q3"), ("JAARREKENING", "2026")] {
+        let o = r3["obligations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["type"] == json!(t) && o["period"] == json!(p))
+            .unwrap_or_else(|| panic!("{t} {p}"));
+        assert_eq!(o["status"], json!("filed"), "{t}");
+    }
+    // OB must be filed through vat readout --mark-filed
+    assert_eq!(
+        bukio::compliance::mark_filed(&db, "OB", "2026-Q3", None, "agent:test", false)
+            .unwrap_err()
+            .code,
+        "INVALID_TYPE"
+    );
+}
+
+#[test]
+fn compliance_closed_books_show_on_the_jaarrekening_obligation() {
+    let (_dir, _cfg, db_path) = agent_env("al16");
+    let db = bukio::db::open_db(&db_path).unwrap();
+    let e = bukio::entries::create_entry(
+        &db,
+        CreateEntry {
+            date: "2026-03-01",
+            description: "Omzet",
+            postings: vec![
+                PostingSpec {
+                    code: "1100".into(),
+                    amount_cents: 12100,
+                    cost_center_code: None,
+                    vat_code: None,
+                    vat_amount_cents: None,
+                },
+                PostingSpec {
+                    code: "8000".into(),
+                    amount_cents: -10000,
+                    cost_center_code: None,
+                    vat_code: None,
+                    vat_amount_cents: None,
+                },
+                PostingSpec {
+                    code: "2500".into(),
+                    amount_cents: -2100,
+                    cost_center_code: None,
+                    vat_code: None,
+                    vat_amount_cents: None,
+                },
+            ],
+            source: "manual",
+            source_ref: None,
+            actor: "a",
+        },
+    )
+    .unwrap();
+    bukio::entries::post_entry(&db, e.id, "a").unwrap();
+
+    let before = bukio::compliance::compliance_status(&db, 2026).unwrap();
+    let ob = before["obligations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["type"] == json!("JAARREKENING") && o["period"] == json!("2026"))
+        .unwrap();
+    assert_eq!(ob["books_closed"], json!(false), "{ob}");
+
+    bukio::year_end::year_end_close(&db, "2026", "a", false).unwrap();
+    let after = bukio::compliance::compliance_status(&db, 2026).unwrap();
+    let ob = after["obligations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|o| o["type"] == json!("JAARREKENING") && o["period"] == json!("2026"))
+        .unwrap();
+    assert_eq!(ob["books_closed"], json!(true), "{ob}");
+}
+
+// --- MCP server (real stdio child process) ----------------------------------
+
+fn mcp_init(m: &mut Mcp) {
+    m.call(
+        "initialize",
+        json!({ "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": { "name": "test", "version": "1" } }),
+    );
+}
+
+#[test]
+fn mcp_initialize_tools_list_and_read_only_calls_work_end_to_end() {
+    let (_dir, cfg, db) = agent_env("al17");
+    let (_, ok, _) = acli(
+        &[
+            "--json",
+            "entry",
+            "add",
+            "--date",
+            "2026-07-01",
+            "--desc",
+            "Omzet",
+            "--postings",
+            "1100:121.00,8000:-100.00,2500:-21.00",
+            "--post",
+            "--db",
+            &db,
+        ],
+        &[("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")],
+    );
+    assert!(ok);
+
+    let mut m = Mcp::start_as(&db, "agent:test", Some(&cfg));
+    mcp_init(&mut m);
+    let init = m.call(
+        "initialize",
+        json!({ "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": { "name": "test", "version": "1" } }),
+    );
+    assert_eq!(
+        init["result"]["serverInfo"]["name"],
+        json!("bukio-cli"),
+        "{init}"
+    );
+    assert!(
+        init["result"]["capabilities"]["tools"].is_object(),
+        "{init}"
+    );
+
+    let tools = m.call("tools/list", json!({}));
+    let names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    for want in [
+        "trial_balance",
+        "entry_add",
+        "vat_book",
+        "year_end_close",
+        "fx_set",
+        "compliance",
+    ] {
+        assert!(names.contains(&want), "{want} missing from {names:?}");
+    }
+
+    let (tb, is_err) = m.tool("trial_balance", json!({}));
+    assert!(!is_err, "{tb}");
+    assert_eq!(tb["balanced"], json!(true), "{tb}");
+
+    let (ci, is_err) = m.tool("company_info", json!({}));
+    assert!(!is_err, "{ci}");
+    assert_eq!(ci["company"]["name"], json!("Demo BV"), "{ci}");
+
+    let unknown = m.call("tools/call", json!({ "name": "nope", "arguments": {} }));
+    assert_eq!(unknown["error"]["code"], json!(-32602), "{unknown}");
+
+    // year is REQUIRED for pnl and journal — the schema must say so
+    for tool in ["pnl", "journal"] {
+        let t = tools["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == json!(tool))
+            .unwrap_or_else(|| panic!("{tool} tool exists"));
+        assert_eq!(t["inputSchema"]["required"], json!(["year"]), "{tool}");
+    }
+    m.stop();
+}
+
+#[test]
+fn mcp_null_params_answer_cleanly_instead_of_an_internal_error() {
+    let (_dir, cfg, db) = agent_env("al18");
+    let mut m = Mcp::start_as(&db, "agent:test", Some(&cfg));
+    mcp_init(&mut m);
+    let r = m.call("tools/call", Value::Null);
+    assert!(
+        !r["error"].is_null(),
+        "the call must be answered with an error object: {r}"
+    );
+    assert_eq!(
+        r["error"]["code"],
+        json!(-32602),
+        "null params must yield invalid-params, not -32603: {r}"
+    );
+
+    // a null-params read that carries the tool name still works
+    let (ci, is_err) = m.tool("company_info", Value::Null);
+    assert!(!is_err, "{ci}");
+    m.stop();
+}
+
+#[test]
+fn mcp_invoices_tool_derives_the_overdue_status() {
+    let (_dir, cfg, db) = agent_env("al19");
+    // a finalized invoice due 2026-07-01 (in the past) -> derived status overdue
+    let (contact, ok, out) = acli(
+        &[
+            "--json",
+            "contact",
+            "add",
+            "--name",
+            "Klant BV",
+            "--address",
+            "Straat 1",
+            "--city",
+            "Amsterdam",
+            "--db",
+            &db,
+        ],
+        &[("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")],
+    );
+    assert!(ok, "{out}");
+    let contact_id = contact["data"]["id"]
+        .as_i64()
+        .or_else(|| contact["data"]["contact"]["id"].as_i64())
+        .unwrap_or_else(|| panic!("no contact id in {contact}"));
+    let (inv, ok, out) = acli(
+        &[
+            "--json",
+            "invoice",
+            "create",
+            "--contact",
+            &contact_id.to_string(),
+            "--date",
+            "2026-06-01",
+            "--due-days",
+            "30",
+            "--lines",
+            "Ding @ 100.00 @21",
+            "--db",
+            &db,
+        ],
+        &[("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")],
+    );
+    assert!(ok, "{out}");
+    let inv_id = inv["data"]["id"]
+        .as_i64()
+        .or_else(|| inv["data"]["invoice"]["id"].as_i64())
+        .unwrap_or_else(|| panic!("no invoice id in {inv}"));
+    let (fin, ok, out) = acli(
+        &[
+            "--json",
+            "invoice",
+            "finalize",
+            "--id",
+            &inv_id.to_string(),
+            "--db",
+            &db,
+        ],
+        &[("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")],
+    );
+    assert!(ok, "{out}");
+    let number = fin["data"]["invoice"]["invoice_number"]
+        .as_str()
+        .or_else(|| fin["data"]["invoice_number"].as_str())
+        .unwrap_or_else(|| panic!("no invoice number in {fin}"))
+        .to_string();
+
+    let mut m = Mcp::start_as(&db, "agent:test", Some(&cfg));
+    mcp_init(&mut m);
+    let (odata, is_err) = m.tool("invoices", json!({ "status": "overdue" }));
+    assert!(!is_err, "{odata}");
+    assert_eq!(odata["invoices"].as_array().unwrap().len(), 1, "{odata}");
+    assert_eq!(
+        odata["invoices"][0]["invoice_number"],
+        json!(number),
+        "{odata}"
+    );
+
+    // the stored status is 'sent' — the same invoice shows up there too
+    let (sdata, _) = m.tool("invoices", json!({ "status": "sent" }));
+    assert_eq!(sdata["invoices"].as_array().unwrap().len(), 1, "{sdata}");
+
+    // an invalid status is still rejected
+    let (_bad, is_err) = m.tool("invoices", json!({ "status": "bogus" }));
+    assert!(is_err, "an invalid status must be refused");
+    m.stop();
+}
+
+#[test]
+fn mcp_non_object_json_rpc_messages_get_invalid_request_and_the_server_survives() {
+    let (_dir, cfg, db) = agent_env("al20");
+    let mut m = Mcp::start_as(&db, "agent:test", Some(&cfg));
+    for raw in ["null", "42", "[1,2]"] {
+        let r = m.raw(raw);
+        assert_eq!(r["error"]["code"], json!(-32600), "raw {raw}: {r}");
+    }
+    // still alive
+    mcp_init(&mut m);
+    m.stop();
+}
+
+#[test]
+fn mcp_mutations_are_plan_only_by_default_and_execute_books_with_the_actor() {
+    let (_dir, cfg, db) = agent_env("al21");
+    let mut m = Mcp::start_as(&db, "agent:test", Some(&cfg));
+    mcp_init(&mut m);
+
+    // dry-run: no write
+    let (plan, is_err) = m.tool("entry_add", json!({ "date": "2026-07-05", "description": "Plan only", "postings": ["1100:5000.00", "3000:-5000.00"] }));
+    assert!(!is_err, "{plan}");
+    assert_eq!(plan["mode"], json!("dry-run"), "{plan}");
+    assert_eq!(plan["balanced"], json!(true), "{plan}");
+
+    // execute without post: a draft
+    let (exec, is_err) = m.tool("entry_add", json!({ "date": "2026-07-05", "description": "Echte boeking", "postings": ["1100:5000.00", "3000:-5000.00"], "mode": "execute", "actor": "agent:mcp-test" }));
+    assert!(!is_err, "{exec}");
+    assert_eq!(exec["mode"], json!("execute"), "{exec}");
+    assert_eq!(exec["state"], json!("draft"), "{exec}");
+
+    // post it
+    let (posted, is_err) = m.tool(
+        "entry_post",
+        json!({ "id": exec["entry_id"], "mode": "execute", "actor": "agent:mcp-test" }),
+    );
+    assert!(!is_err, "{posted}");
+    assert_eq!(posted["state"], json!("posted"), "{posted}");
+
+    // the audit trail shows the MCP actor
+    let (audit, is_err) = m.tool("audit", json!({ "by": "agent:mcp-test" }));
+    assert!(!is_err, "{audit}");
+    assert!(audit["entries"].as_array().unwrap().len() >= 2, "{audit}");
+
+    // fx via MCP
+    let (fx, is_err) = m.tool("fx_set", json!({ "currency": "USD", "date": "2026-07-10", "rate": "1.09", "mode": "execute", "actor": "agent:mcp-test" }));
+    assert!(!is_err, "{fx}");
+    assert_eq!(fx["rate"], json!("1.0900"), "{fx}");
+
+    // an invalid call -> isError
+    let (_bad, is_err) = m.tool("entry_add", json!({ "date": "2026-07-05", "description": "x", "postings": ["1100:1.00"], "mode": "execute" }));
+    assert!(is_err, "an unbalanced entry must be refused");
+    m.stop();
+}
+
+#[test]
+fn mcp_assets_run_books_depreciation_not_recurring_entries() {
+    let (_dir, cfg, db) = agent_env("al22");
+    let (_, ok, out) = acli(
+        &[
+            "--json",
+            "assets",
+            "add",
+            "--name",
+            "Laptop",
+            "--purchase-date",
+            "2025-12-15",
+            "--purchase-price",
+            "1200.00",
+            "--depreciation-start",
+            "2026-01-01",
+            "--recognition-date",
+            "2026-01-01",
+            "--asset-account",
+            "1800",
+            "--expense-account",
+            "4600",
+            "--db",
+            &db,
+        ],
+        &[("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")],
+    );
+    assert!(ok, "{out}");
+
+    let mut m = Mcp::start_as(&db, "agent:test", Some(&cfg));
+    mcp_init(&mut m);
+    let (data, is_err) = m.tool(
+        "assets_run",
+        json!({ "period": "2026-01", "mode": "execute", "actor": "agent:mcp-test" }),
+    );
+    assert!(!is_err, "{data}");
+    assert_eq!(data["mode"], json!("execute"), "{data}");
+    assert_eq!(data["booked"].as_array().unwrap().len(), 1, "{data}");
+    m.stop();
+
+    let d = bukio::db::open_db(&db).unwrap();
+    let mut stmt = d
+        .prepare("SELECT DISTINCT source FROM journal_entries")
+        .unwrap();
+    let sources: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    assert!(
+        sources.iter().any(|s| s == "assets"),
+        "a depreciation entry must be booked: {sources:?}"
+    );
+    assert!(
+        !sources.iter().any(|s| s == "recurring"),
+        "assets_run must NOT generate recurring entries: {sources:?}"
+    );
+}
+
+#[test]
+fn mcp_contact_add_preserves_postal_code_and_vat_id() {
+    let (_dir, cfg, db) = agent_env("al23");
+    let mut m = Mcp::start_as(&db, "agent:test", Some(&cfg));
+    mcp_init(&mut m);
+    let (_r, is_err) = m.tool(
+        "contact_add",
+        json!({ "name": "Acme GmbH", "address": "Leverstrasse 1", "postal_code": "80331", "city": "München", "country": "DE", "vat_id": "DE123456789", "mode": "execute", "actor": "agent:mcp-test" }),
+    );
+    assert!(!is_err, "contact_add failed");
+    m.stop();
+
+    let d = bukio::db::open_db(&db).unwrap();
+    let (address, postal, city, country, vat): (String, String, String, String, String) = d
+        .query_row(
+            "SELECT address, postal_code, city, country, vat_id FROM contacts WHERE name = ?1",
+            ["Acme GmbH"],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .expect("contact must exist");
+    assert_eq!(address, "Leverstrasse 1");
+    assert_eq!(postal, "80331");
+    assert_eq!(city, "München");
+    assert_eq!(country, "DE");
+    assert_eq!(vat, "DE123456789");
+}
+
+#[test]
+fn mcp_readonly_env_blocks_execution() {
+    let (_dir, cfg, db) = agent_env("al24");
+    let exe = env!("CARGO_BIN_EXE_bukio");
+    let mut child = std::process::Command::new(exe)
+        .args(["mcp", "--db", &db])
+        .env("BUKIO_CONFIG_DIR", &cfg)
+        .env("BUKIO_ACTOR", "agent:test")
+        .env("BUKIO_MCP_READONLY", "1")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    use std::io::{BufRead, BufReader, Write};
+    let mut stdin = child.stdin.take().unwrap();
+    let mut reader = BufReader::new(child.stdout.take().unwrap());
+    let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": { "name": "entry_add", "arguments": { "date": "2026-07-05", "description": "x", "postings": ["1100:1.00", "3000:-1.00"], "mode": "execute" } } });
+    writeln!(stdin, "{req}").unwrap();
+    stdin.flush().unwrap();
+    let mut line = String::new();
+    reader.read_line(&mut line).unwrap();
+    let res: Value = serde_json::from_str(line.trim()).unwrap();
+    assert_eq!(res["result"]["isError"], json!(true), "{res}");
+    let data: Value =
+        serde_json::from_str(res["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(data["error"]["code"], json!("MCP_READONLY"), "{data}");
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+// --- MCP signed execution (Tier 0) ------------------------------------------
+
+/// Scratch company + config dir with agent:bartholomeus enrolled.
+fn signed_company_mcp(tag: &str) -> (std::path::PathBuf, String, String) {
+    let dir = temp_dir(tag);
+    let cfg = dir.join("cfg").to_string_lossy().to_string();
+    let db = dir.join("company.db").to_string_lossy().to_string();
+    std::fs::create_dir_all(&cfg).unwrap();
+    let base: Vec<(&str, &str)> = vec![("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")];
+    let run = |args: &[&str]| {
+        let mut full = vec!["--json"];
+        full.extend_from_slice(args);
+        full.extend(["--db", &db]);
+        let (r, ok, out) = acli(&full, &base);
+        assert!(ok, "{}: {out}", args.join(" "));
+        r
+    };
+    run(&["--actor", "human:erik", "init", "--name", "X"]);
+    run(&["--actor", "agent:bartholomeus", "actor", "keygen"]);
+    run(&["--actor", "agent:bartholomeus", "actor", "register"]);
+    (dir, cfg, db)
+}
+
+fn last_audit_row_mcp(db_path: &str) -> Value {
+    let d = bukio::db::open_db(db_path).unwrap();
+    let (sig_status, command, digest, sig, keyid): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = d
+        .query_row(
+            "SELECT sig_status, command, digest_hash, sig, sig_keyid FROM audit_log ORDER BY id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .unwrap();
+    json!({ "sig_status": sig_status, "command": command, "digest_hash": digest, "sig": sig, "sig_keyid": keyid })
+}
+
+fn mcp_entry_args() -> Value {
+    json!({ "date": "2026-08-10", "description": "MCP signed entry", "postings": ["1100:100.00", "8000:-100.00"], "mode": "execute", "post": true })
+}
+
+#[test]
+fn mcp_signed_execute_call_stores_a_verified_audit_row() {
+    let (dir, cfg, db) = signed_company_mcp("al26");
+    let mut m = Mcp::start_as(&db, "agent:bartholomeus", Some(&cfg));
+    mcp_init(&mut m);
+    let mut args = mcp_entry_args();
+    args["actor"] = json!("agent:bartholomeus");
+    let (data, is_err) = m.tool("entry_add", args);
+    assert!(!is_err, "{data}");
+    assert_eq!(data["mode"], json!("execute"), "{data}");
+    assert!(data["entry_id"].as_i64().unwrap() > 0, "{data}");
+    m.stop();
+
+    let row = last_audit_row_mcp(&db);
+    assert_eq!(row["sig_status"], json!("verified"), "{row}");
+    assert_eq!(
+        row["command"],
+        json!("mcp:entry_add"),
+        "the signed command string"
+    );
+    assert!(
+        !row["digest_hash"].is_null() && !row["sig"].is_null() && !row["sig_keyid"].is_null(),
+        "{row}"
+    );
+
+    // the CLI verifier accepts the MCP-signed row (shared digest scheme)
+    let (out, ok, _) = acli(
+        &["--json", "audit", "verify", "--db", &db],
+        &[("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(
+        out["data"]["summary"]["ok"],
+        json!(2),
+        "entry.create + entry.post: {out}"
+    );
+    assert_eq!(out["data"]["summary"]["tampered"], json!(0));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mcp_enforce_with_a_missing_key_refuses_without_mutating() {
+    let (dir, cfg, db) = signed_company_mcp("al27");
+    let (_, ok, _) = acli(
+        &[
+            "--json",
+            "--actor",
+            "human:erik",
+            "actor",
+            "enforce",
+            "--on",
+            "--db",
+            &db,
+        ],
+        &[("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")],
+    );
+    assert!(ok);
+
+    let mut m = Mcp::start_as(&db, "agent:test", Some(&cfg)); // no key material
+    mcp_init(&mut m);
+    let mut args = mcp_entry_args();
+    args["actor"] = json!("agent:test");
+    let (data, is_err) = m.tool("entry_add", args);
+    assert!(is_err, "{data}");
+    assert_eq!(data["ok"], json!(false), "{data}");
+    assert_eq!(data["error"]["code"], json!("SIGNATURE_REQUIRED"), "{data}");
+
+    let d = bukio::db::open_db(&db).unwrap();
+    let n: i64 = d
+        .query_row("SELECT COUNT(*) FROM journal_entries", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "no entry may be created");
+
+    // the dry-run default is refused identically
+    let (plan, is_err) = m.tool(
+        "entry_add",
+        json!({ "date": "2026-08-10", "description": "plan", "postings": ["1100:100.00", "8000:-100.00"], "actor": "agent:test" }),
+    );
+    assert!(is_err, "{plan}");
+    assert_eq!(plan["error"]["code"], json!("SIGNATURE_REQUIRED"), "{plan}");
+    m.stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mcp_repeated_signed_calls_verify_and_record_fresh_nonces() {
+    let (dir, cfg, db) = signed_company_mcp("al28");
+    let mut m = Mcp::start_as(&db, "agent:bartholomeus", Some(&cfg));
+    mcp_init(&mut m);
+    for i in 0..2 {
+        let mut args = mcp_entry_args();
+        args["description"] = json!(format!("MCP entry {i}"));
+        args["actor"] = json!("agent:bartholomeus");
+        let (data, is_err) = m.tool("entry_add", args);
+        assert!(!is_err, "{data}");
+    }
+    m.stop();
+
+    let d = bukio::db::open_db(&db).unwrap();
+    let mut stmt = d
+        .prepare("SELECT sig_status FROM audit_log WHERE action = 'entry.create' ORDER BY id")
+        .unwrap();
+    let statuses: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, Option<String>>(0))
+        .unwrap()
+        .map(|r| r.unwrap().unwrap_or_default())
+        .collect();
+    assert_eq!(statuses, vec!["verified", "verified"], "{statuses:?}");
+
+    // the shared nonce cache was written (the same file the CLI uses)
+    let raw = std::fs::read_to_string(std::path::Path::new(&cfg).join("nonces.json")).unwrap();
+    let nonces: Value = serde_json::from_str(&raw).unwrap();
+    let count: usize = nonces
+        .as_object()
+        .unwrap()
+        .values()
+        .map(|by_key| by_key.as_object().map(|o| o.len()).unwrap_or(0))
+        .sum();
+    assert!(count >= 2, "nonces recorded per signed call (got {count})");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mcp_malformed_actor_is_still_rejected() {
+    let (dir, cfg, db) = signed_company_mcp("al29");
+    let mut m = Mcp::start_as(&db, "agent:test", Some(&cfg));
+    mcp_init(&mut m);
+    let mut args = mcp_entry_args();
+    args["actor"] = json!("agent"); // missing ':name'
+    let (data, is_err) = m.tool("entry_add", args);
+    assert!(is_err, "{data}");
+    assert_eq!(data["error"]["code"], json!("INVALID_ACTOR"), "{data}");
+    m.stop();
+    let d = bukio::db::open_db(&db).unwrap();
+    let n: i64 = d
+        .query_row("SELECT COUNT(*) FROM journal_entries", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mcp_a_second_company_db_uses_its_own_registry_and_enforce_state() {
+    let (dir_a, cfg, db_a) = signed_company_mcp("al30a");
+    // company B: enforce OFF, agent:bartholomeus NOT enrolled
+    let dir_b = temp_dir("al30b");
+    let db_b = dir_b.join("company.db").to_string_lossy().to_string();
+    let (_, ok, _) = acli(
+        &[
+            "--json",
+            "--actor",
+            "human:erik",
+            "init",
+            "--name",
+            "Y",
+            "--db",
+            &db_b,
+        ],
+        &[("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")],
+    );
+    assert!(ok);
+
+    // A: enforce on — signed calls run and verify
+    let (_, ok, _) = acli(
+        &[
+            "--json",
+            "--actor",
+            "human:erik",
+            "actor",
+            "enforce",
+            "--on",
+            "--db",
+            &db_a,
+        ],
+        &[("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")],
+    );
+    assert!(ok);
+    let mut m_a = Mcp::start_as(&db_a, "agent:bartholomeus", Some(&cfg));
+    mcp_init(&mut m_a);
+    let mut args = mcp_entry_args();
+    args["description"] = json!("in A");
+    args["actor"] = json!("agent:bartholomeus");
+    let (_data, is_err) = m_a.tool("entry_add", args);
+    assert!(!is_err, "A must accept the signed call");
+    m_a.stop();
+    let d = bukio::db::open_db(&db_a).unwrap();
+    let status: Option<String> = d
+        .query_row(
+            "SELECT sig_status FROM audit_log WHERE action = 'entry.create' ORDER BY id DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(status.as_deref(), Some("verified"), "A verifies");
+
+    // B: the same key, enforce off, not enrolled -> unsigned rows but it runs
+    let mut m_b = Mcp::start_as(&db_b, "agent:bartholomeus", Some(&cfg));
+    mcp_init(&mut m_b);
+    let mut args = mcp_entry_args();
+    args["description"] = json!("in B");
+    args["actor"] = json!("agent:bartholomeus");
+    let (_data, is_err) = m_b.tool("entry_add", args);
+    assert!(!is_err, "B must still run (no enforcement)");
+    m_b.stop();
+    let d = bukio::db::open_db(&db_b).unwrap();
+    let status: Option<String> = d
+        .query_row(
+            "SELECT sig_status FROM audit_log WHERE action = 'entry.create' ORDER BY id DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(status.as_deref(), Some("unsigned"), "B records unsigned");
+    let _ = std::fs::remove_dir_all(&dir_a);
+    let _ = std::fs::remove_dir_all(&dir_b);
 }
