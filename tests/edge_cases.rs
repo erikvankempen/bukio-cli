@@ -7136,3 +7136,1006 @@ fn if_review_fix_reverse_charge_label_and_email_language_follow_the_document() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ==== attachments (ported from test/attachments.test.js) ====================
+
+/// A company + contact + draft invoice + draft entry, on a file DB (file-mode
+/// attachments need a real DB path).
+fn attach_env(tag: &str) -> (std::path::PathBuf, String, i64, i64) {
+    let (dir, f) = cli_db(
+        tag,
+        &[
+            "--registration-id",
+            "12345678",
+            "--legal-form",
+            "eenmanszaak",
+            "--vat",
+            "off",
+        ],
+    );
+    run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--address",
+        "Teststraat 1",
+        "--postal-code",
+        "1000 AA",
+        "--city",
+        "Amsterdam",
+        "--db",
+        &f,
+    ]);
+    let db = bukio::db::open_db(&f).unwrap();
+    let c = bukio::contacts::create_contact(
+        &db,
+        "Acme BV",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let inv = bukio::invoice::create_invoice(
+        &db,
+        c["id"].as_i64().unwrap(),
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &[json!("Ding @ 10.00")],
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let entry = bukio::entries::create_entry(
+        &db,
+        bukio::entries::CreateEntry {
+            date: "2026-08-10",
+            description: "Startkapitaal",
+            postings: vec![
+                bukio::entries::PostingSpec {
+                    code: "1100".into(),
+                    amount_cents: 10000,
+                    cost_center_code: None,
+                    vat_code: None,
+                    vat_amount_cents: None,
+                },
+                bukio::entries::PostingSpec {
+                    code: "3000".into(),
+                    amount_cents: -10000,
+                    cost_center_code: None,
+                    vat_code: None,
+                    vat_amount_cents: None,
+                },
+            ],
+            source: "manual",
+            source_ref: None,
+            actor: "agent:test",
+        },
+    )
+    .unwrap();
+    (dir, f, inv["id"].as_i64().unwrap(), entry.id)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn b64(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+fn unb64(s: &str) -> Vec<u8> {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.decode(s).unwrap()
+}
+
+#[test]
+fn attach_add_db_mode_stores_a_blob_round_trips_and_infers_mime() {
+    let (dir, f, inv_id, _) = attach_env("att1");
+    let doc = b"%PDF-1.4 fake invoice bytes".to_vec();
+    let src = dir.join("F2026-123.pdf");
+    std::fs::write(&src, &doc).unwrap();
+
+    let db = bukio::db::open_db(&f).unwrap();
+    let a = bukio::attachments::add_attachment(
+        &db,
+        "invoice",
+        inv_id,
+        src.to_str().unwrap(),
+        Some("originel"),
+        "db",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert!(a["id"].as_i64().unwrap() > 0, "{a}");
+    assert_eq!(a["mode"], json!("db"));
+    assert_eq!(a["mime"], json!("application/pdf"));
+    assert_eq!(a["sha256"], json!(sha256_hex(&doc)));
+    assert_eq!(a["size"], json!(doc.len()));
+
+    // the row holds the BLOB and no path
+    let (mode, data, path): (String, Option<Vec<u8>>, Option<String>) = db
+        .query_row(
+            "SELECT mode, data, path FROM attachments WHERE id = ?1",
+            [a["id"].as_i64().unwrap()],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(mode, "db");
+    assert_eq!(data.unwrap(), doc);
+    assert_eq!(path, None);
+
+    // get_attachment returns the bytes
+    let got = bukio::attachments::get_attachment(&db, a["id"].as_i64().unwrap()).unwrap();
+    assert_eq!(unb64(got["data"].as_str().unwrap()), doc);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_add_works_for_entries_too() {
+    let (dir, f, _, entry_id) = attach_env("att2");
+    let src = dir.join("factuur.xml");
+    std::fs::write(&src, b"some xml invoice").unwrap();
+    let db = bukio::db::open_db(&f).unwrap();
+    let a = bukio::attachments::add_attachment(
+        &db,
+        "entry",
+        entry_id,
+        src.to_str().unwrap(),
+        None,
+        "db",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(a["kind"], json!("entry"));
+    assert_eq!(a["ref_id"], json!(entry_id));
+    assert_eq!(a["mime"], json!("application/xml"));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_add_validation_errors() {
+    let (dir, f, inv_id, _) = attach_env("att3");
+    let src = dir.join("x.pdf");
+    std::fs::write(&src, b"data").unwrap();
+    let p = src.to_str().unwrap().to_string();
+    let db = bukio::db::open_db(&f).unwrap();
+    let err = |r: bukio::money::Result<Value>| r.unwrap_err().code;
+
+    assert_eq!(
+        err(bukio::attachments::add_attachment(
+            &db,
+            "bogus",
+            inv_id,
+            &p,
+            None,
+            "db",
+            "agent:test",
+            false
+        )),
+        "INVALID_KIND"
+    );
+    assert_eq!(
+        err(bukio::attachments::add_attachment(
+            &db,
+            "invoice",
+            0,
+            &p,
+            None,
+            "db",
+            "agent:test",
+            false
+        )),
+        "REF_REQUIRED"
+    );
+    assert_eq!(
+        err(bukio::attachments::add_attachment(
+            &db,
+            "invoice",
+            999999,
+            &p,
+            None,
+            "db",
+            "agent:test",
+            false
+        )),
+        "NOT_FOUND"
+    );
+    let missing = dir.join("nope.pdf");
+    assert_eq!(
+        err(bukio::attachments::add_attachment(
+            &db,
+            "invoice",
+            inv_id,
+            missing.to_str().unwrap(),
+            None,
+            "db",
+            "agent:test",
+            false
+        )),
+        "ATTACHMENT_FILE_NOT_FOUND"
+    );
+    assert_eq!(
+        err(bukio::attachments::add_attachment(
+            &db,
+            "invoice",
+            inv_id,
+            &p,
+            None,
+            "bogus",
+            "agent:test",
+            false
+        )),
+        "INVALID_STORE"
+    );
+
+    bukio::attachments::add_attachment(&db, "invoice", inv_id, &p, None, "db", "agent:test", false)
+        .unwrap();
+    assert_eq!(
+        err(bukio::attachments::add_attachment(
+            &db,
+            "invoice",
+            inv_id,
+            &p,
+            None,
+            "db",
+            "agent:test",
+            false
+        )),
+        "ATTACHMENT_DUPLICATE"
+    );
+
+    let big = dir.join("big.pdf");
+    std::fs::write(
+        &big,
+        vec![0u8; bukio::attachments::MAX_ATTACHMENT_BYTES + 1],
+    )
+    .unwrap();
+    assert_eq!(
+        err(bukio::attachments::add_attachment(
+            &db,
+            "invoice",
+            inv_id,
+            big.to_str().unwrap(),
+            None,
+            "db",
+            "agent:test",
+            false
+        )),
+        "ATTACHMENT_TOO_LARGE"
+    );
+
+    // an empty file is a friendly error, not a raw CHECK-constraint failure
+    let empty = dir.join("empty.pdf");
+    std::fs::write(&empty, b"").unwrap();
+    assert_eq!(
+        err(bukio::attachments::add_attachment(
+            &db,
+            "invoice",
+            inv_id,
+            empty.to_str().unwrap(),
+            None,
+            "db",
+            "agent:test",
+            false
+        )),
+        "ATTACHMENT_EMPTY"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_list_is_metadata_only_without_the_blob() {
+    let (dir, f, inv_id, _) = attach_env("att4");
+    let doc = b"hello".to_vec();
+    let src = dir.join("a.pdf");
+    std::fs::write(&src, &doc).unwrap();
+    let db = bukio::db::open_db(&f).unwrap();
+    bukio::attachments::add_attachment(
+        &db,
+        "invoice",
+        inv_id,
+        src.to_str().unwrap(),
+        Some("n1"),
+        "db",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    // the same bytes again is a duplicate, so exactly one row remains
+    let dup = bukio::attachments::add_attachment(
+        &db,
+        "invoice",
+        inv_id,
+        src.to_str().unwrap(),
+        Some("n2"),
+        "db",
+        "agent:test",
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(dup.code, "ATTACHMENT_DUPLICATE");
+
+    let rows = bukio::attachments::list_attachments(&db, "invoice", inv_id).unwrap();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["file_name"], json!("a.pdf"));
+    assert_eq!(rows[0]["mode"], json!("db"));
+    assert_eq!(rows[0]["sha256"], json!(sha256_hex(&doc)));
+    assert!(
+        rows[0].get("data").is_none(),
+        "list must not carry the BLOB: {:?}",
+        rows[0]
+    );
+    assert_eq!(
+        bukio::attachments::list_attachments(&db, "invoice", 999999)
+            .unwrap()
+            .len(),
+        0
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_remove_deletes_and_audits_and_unknown_ids_error() {
+    let (dir, f, inv_id, _) = attach_env("att5");
+    let src = dir.join("a.pdf");
+    std::fs::write(&src, b"hello").unwrap();
+    let db = bukio::db::open_db(&f).unwrap();
+    let a = bukio::attachments::add_attachment(
+        &db,
+        "invoice",
+        inv_id,
+        src.to_str().unwrap(),
+        None,
+        "db",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let id = a["id"].as_i64().unwrap();
+
+    let r = bukio::attachments::remove_attachment(&db, id, "agent:test", false).unwrap();
+    assert_eq!(r["id"], json!(id));
+    let n: i64 = db
+        .query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0);
+
+    let (actor, args): (String, String) = db
+        .query_row(
+            "SELECT actor, args_json FROM audit_log WHERE action = 'attachments.remove'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(actor, "agent:test");
+    let args: Value = serde_json::from_str(&args).unwrap();
+    assert_eq!(args["attachment_id"], json!(id));
+
+    assert_eq!(
+        bukio::attachments::remove_attachment(&db, id, "agent:test", false)
+            .unwrap_err()
+            .code,
+        "ATTACHMENT_NOT_FOUND"
+    );
+    assert_eq!(
+        bukio::attachments::get_attachment(&db, id)
+            .unwrap_err()
+            .code,
+        "ATTACHMENT_NOT_FOUND"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_add_dry_run_writes_nothing_and_audits_nothing() {
+    let (dir, f, inv_id, _) = attach_env("att6");
+    let src = dir.join("a.pdf");
+    std::fs::write(&src, b"hello").unwrap();
+    let db = bukio::db::open_db(&f).unwrap();
+
+    let plan = bukio::attachments::add_attachment(
+        &db,
+        "invoice",
+        inv_id,
+        src.to_str().unwrap(),
+        None,
+        "db",
+        "agent:test",
+        true,
+    )
+    .unwrap();
+    assert_eq!(plan["dryRun"], json!(true), "{plan}");
+    assert_eq!(plan["action"], json!("attachments.add"));
+    assert_eq!(plan["sha256"], json!(sha256_hex(b"hello")));
+    let n: i64 = db
+        .query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0);
+    let audited: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'attachments.add'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(audited, 0);
+
+    // a dry-run remove plans without deleting
+    let a = bukio::attachments::add_attachment(
+        &db,
+        "invoice",
+        inv_id,
+        src.to_str().unwrap(),
+        None,
+        "db",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let r =
+        bukio::attachments::remove_attachment(&db, a["id"].as_i64().unwrap(), "agent:test", true)
+            .unwrap();
+    assert_eq!(r["dryRun"], json!(true));
+    let n: i64 = db
+        .query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 1);
+    let audited: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'attachments.remove'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(audited, 0);
+
+    // a dry-run remove of a nonexistent id still validates
+    assert_eq!(
+        bukio::attachments::remove_attachment(&db, 999999, "agent:test", true)
+            .unwrap_err()
+            .code,
+        "ATTACHMENT_NOT_FOUND"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_file_mode_copies_to_sha256_and_remove_deletes_the_copy() {
+    let (dir, f, inv_id, _) = attach_env("att7");
+    let doc = b"%PDF-1.4 file-mode doc".to_vec();
+    let src = dir.join("F2026-124.pdf");
+    std::fs::write(&src, &doc).unwrap();
+    let db = bukio::db::open_db(&f).unwrap();
+
+    let a = bukio::attachments::add_attachment(
+        &db,
+        "invoice",
+        inv_id,
+        src.to_str().unwrap(),
+        None,
+        "file",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(a["mode"], json!("file"));
+    let path = a["path"].as_str().unwrap().to_string();
+    assert!(
+        path.ends_with(&sha256_hex(&doc)),
+        "the copy is stored under its sha256: {path}"
+    );
+    assert!(
+        std::path::Path::new(&path).exists(),
+        "copy must exist on disk"
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), doc);
+
+    // the DB row carries the path, no BLOB
+    let (data, row_path): (Option<Vec<u8>>, Option<String>) = db
+        .query_row(
+            "SELECT data, path FROM attachments WHERE id = ?1",
+            [a["id"].as_i64().unwrap()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(data, None);
+    assert_eq!(row_path.as_deref(), Some(path.as_str()));
+
+    // show round-trips
+    let got = bukio::attachments::get_attachment(&db, a["id"].as_i64().unwrap()).unwrap();
+    assert_eq!(unb64(got["data"].as_str().unwrap()), doc);
+
+    // remove deletes the copy
+    bukio::attachments::remove_attachment(&db, a["id"].as_i64().unwrap(), "agent:test", false)
+        .unwrap();
+    assert!(
+        !std::path::Path::new(&path).exists(),
+        "the file-mode copy must be deleted with the row"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_get_file_mode_with_a_missing_copy_is_attachment_file_missing() {
+    let (dir, f, inv_id, _) = attach_env("att8");
+    let src = dir.join("a.pdf");
+    std::fs::write(&src, b"hello").unwrap();
+    let db = bukio::db::open_db(&f).unwrap();
+    let a = bukio::attachments::add_attachment(
+        &db,
+        "invoice",
+        inv_id,
+        src.to_str().unwrap(),
+        None,
+        "file",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let copy_dir = std::path::Path::new(a["path"].as_str().unwrap())
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    std::fs::remove_dir_all(&copy_dir).unwrap();
+
+    let err = bukio::attachments::get_attachment(&db, a["id"].as_i64().unwrap()).unwrap_err();
+    assert_eq!(err.code, "ATTACHMENT_FILE_MISSING", "{err:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_cli_round_trip_with_audit() {
+    let (dir, f, inv_id, _) = attach_env("att9");
+    let doc = b"%PDF-1.4 cli doc".to_vec();
+    let src = dir.join("F2026-125.pdf");
+    std::fs::write(&src, &doc).unwrap();
+
+    let (added, ok, out) = run_cli(&[
+        "--json",
+        "attach",
+        "add",
+        "--invoice",
+        &inv_id.to_string(),
+        "--file",
+        src.to_str().unwrap(),
+        "--note",
+        "cli test",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    let id = added["data"]["id"].as_i64().unwrap();
+    assert_eq!(added["data"]["mode"], json!("db"), "{added}");
+    assert_eq!(added["data"]["file_name"], json!("F2026-125.pdf"));
+
+    let (listed, _, out) = run_cli(&[
+        "--json",
+        "attach",
+        "list",
+        "--invoice",
+        &inv_id.to_string(),
+        "--db",
+        &f,
+    ]);
+    assert_eq!(
+        listed["data"]["attachments"].as_array().unwrap().len(),
+        1,
+        "{out}"
+    );
+    assert_eq!(listed["data"]["attachments"][0]["id"], json!(id));
+
+    let out_dir = dir.join("out");
+    let out_file = out_dir.join("extracted.pdf");
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "attach",
+        "show",
+        "--id",
+        &id.to_string(),
+        "--out",
+        out_file.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(std::fs::read(&out_file).unwrap(), doc);
+
+    // --out that exists without --force → FILE_EXISTS
+    let (blocked, ok, _) = run_cli(&[
+        "--json",
+        "attach",
+        "show",
+        "--id",
+        &id.to_string(),
+        "--out",
+        out_file.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(!ok);
+    assert_eq!(blocked["error"]["code"], json!("FILE_EXISTS"), "{blocked}");
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "attach",
+        "show",
+        "--id",
+        &id.to_string(),
+        "--out",
+        out_file.to_str().unwrap(),
+        "--force",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+
+    let db = bukio::db::open_db(&f).unwrap();
+    let (n, actor, command): (i64, String, String) = db
+        .query_row(
+            "SELECT COUNT(*), MAX(actor), MAX(command) FROM audit_log WHERE action = 'attachments.add'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+    assert_eq!(actor, "agent:test");
+    assert_eq!(command, "attach add");
+
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "attach",
+        "remove",
+        "--id",
+        &id.to_string(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    let (listed, _, _) = run_cli(&[
+        "--json",
+        "attach",
+        "list",
+        "--invoice",
+        &inv_id.to_string(),
+        "--db",
+        &f,
+    ]);
+    assert_eq!(listed["data"]["attachments"].as_array().unwrap().len(), 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_cli_rejects_both_refs_and_an_unknown_store() {
+    let (dir, f, inv_id, entry_id) = attach_env("att10");
+    let src = dir.join("a.pdf");
+    std::fs::write(&src, b"x").unwrap();
+    let p = src.to_str().unwrap().to_string();
+
+    let (both, ok, _) = run_cli(&[
+        "--json",
+        "attach",
+        "add",
+        "--invoice",
+        &inv_id.to_string(),
+        "--entry",
+        &entry_id.to_string(),
+        "--file",
+        &p,
+        "--db",
+        &f,
+    ]);
+    assert!(!ok);
+    assert_eq!(both["error"]["code"], json!("REF_REQUIRED"), "{both}");
+
+    let (none, ok, _) = run_cli(&["--json", "attach", "add", "--file", &p, "--db", &f]);
+    assert!(!ok);
+    assert_eq!(none["error"]["code"], json!("REF_REQUIRED"), "{none}");
+
+    let (bad, ok, _) = run_cli(&[
+        "--json",
+        "attach",
+        "add",
+        "--invoice",
+        &inv_id.to_string(),
+        "--file",
+        &p,
+        "--store",
+        "bogus",
+        "--db",
+        &f,
+    ]);
+    assert!(!ok);
+    assert_eq!(bad["error"]["code"], json!("INVALID_STORE"), "{bad}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_cli_dry_run_writes_nothing() {
+    let (dir, f, inv_id, _) = attach_env("att11");
+    let src = dir.join("a.pdf");
+    std::fs::write(&src, b"x").unwrap();
+    let (r, ok, out) = run_cli(&[
+        "--json",
+        "attach",
+        "add",
+        "--invoice",
+        &inv_id.to_string(),
+        "--file",
+        src.to_str().unwrap(),
+        "--dry-run",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(r["data"]["dryRun"], json!(true), "{r}");
+    let db = bukio::db::open_db(&f).unwrap();
+    let n: i64 = db
+        .query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_cli_file_mode_end_to_end() {
+    let (dir, f, inv_id, _) = attach_env("att12");
+    let doc = b"%PDF-1.4 cli file mode".to_vec();
+    let src = dir.join("F2026-126.pdf");
+    std::fs::write(&src, &doc).unwrap();
+    let (r, ok, out) = run_cli(&[
+        "--json",
+        "attach",
+        "add",
+        "--invoice",
+        &inv_id.to_string(),
+        "--file",
+        src.to_str().unwrap(),
+        "--store",
+        "file",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(r["data"]["mode"], json!("file"), "{r}");
+    let id = r["data"]["id"].as_i64().unwrap();
+    let out_file = dir.join("extracted2.pdf");
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "attach",
+        "show",
+        "--id",
+        &id.to_string(),
+        "--out",
+        out_file.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(std::fs::read(&out_file).unwrap(), doc);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_migration_created_the_table_with_its_columns() {
+    let (dir, f, _, _) = attach_env("att13");
+    let db = bukio::db::open_db(&f).unwrap();
+    let mut stmt = db.prepare("PRAGMA table_info('attachments')").unwrap();
+    let cols: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))
+        .unwrap()
+        .map(|r| r.unwrap())
+        .collect();
+    for c in [
+        "kind",
+        "ref_id",
+        "file_name",
+        "mime",
+        "size",
+        "sha256",
+        "mode",
+        "data",
+        "path",
+        "note",
+        "created_by",
+    ] {
+        assert!(
+            cols.iter().any(|x| x == c),
+            "missing column {c} in {cols:?}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_dir_convention_is_the_db_name_with_an_attachments_suffix() {
+    let dir = temp_dir("att14");
+    let file = dir.join("demo.db");
+    let f = file.to_str().unwrap().to_string();
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "init",
+        "--name",
+        "Test Coaching",
+        "--registration-id",
+        "12345678",
+        "--legal-form",
+        "eenmanszaak",
+        "--vat",
+        "off",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--address",
+        "Teststraat 1",
+        "--postal-code",
+        "1000 AA",
+        "--city",
+        "Amsterdam",
+        "--db",
+        &f,
+    ]);
+    let db = bukio::db::open_db(&f).unwrap();
+    let c = bukio::contacts::create_contact(
+        &db,
+        "Acme BV",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let inv = bukio::invoice::create_invoice(
+        &db,
+        c["id"].as_i64().unwrap(),
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &[json!("Ding @ 10.00")],
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let src = dir.join("a.pdf");
+    std::fs::write(&src, b"x").unwrap();
+    let a = bukio::attachments::add_attachment(
+        &db,
+        "invoice",
+        inv["id"].as_i64().unwrap(),
+        src.to_str().unwrap(),
+        None,
+        "file",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let parent = std::path::Path::new(a["path"].as_str().unwrap())
+        .parent()
+        .unwrap();
+    assert_eq!(
+        parent,
+        dir.join("demo-attachments"),
+        "demo.db → demo-attachments/"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn attach_file_mode_dir_is_created_next_to_a_nested_db() {
+    let dir = temp_dir("att15");
+    let nested = dir.join("nested");
+    std::fs::create_dir_all(&nested).unwrap();
+    let file = nested.join("sub.db");
+    let f = file.to_str().unwrap().to_string();
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "init",
+        "--name",
+        "Test Coaching",
+        "--registration-id",
+        "12345678",
+        "--legal-form",
+        "eenmanszaak",
+        "--vat",
+        "off",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--address",
+        "Teststraat 1",
+        "--postal-code",
+        "1000 AA",
+        "--city",
+        "Amsterdam",
+        "--db",
+        &f,
+    ]);
+    let db = bukio::db::open_db(&f).unwrap();
+    let c = bukio::contacts::create_contact(
+        &db,
+        "Acme BV",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let inv = bukio::invoice::create_invoice(
+        &db,
+        c["id"].as_i64().unwrap(),
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &[json!("Ding @ 10.00")],
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let src = dir.join("a.pdf");
+    std::fs::write(&src, b"x").unwrap();
+    let a = bukio::attachments::add_attachment(
+        &db,
+        "invoice",
+        inv["id"].as_i64().unwrap(),
+        src.to_str().unwrap(),
+        None,
+        "file",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let path = a["path"].as_str().unwrap();
+    assert_eq!(
+        std::path::Path::new(path).parent().unwrap(),
+        nested.join("sub-attachments")
+    );
+    assert!(std::path::Path::new(path).exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}

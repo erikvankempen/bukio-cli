@@ -6,6 +6,7 @@
 
 use crate::audit::{record, RecordArgs};
 use crate::money::{BukioError, Result};
+use base64::Engine as _;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -180,9 +181,12 @@ pub fn add_attachment(
             entry_ids: vec![],
         },
     )?;
-    Ok(
-        json!({"id": id, "kind": kind, "ref_id": ref_id, "file_name": file_name, "mime": mime, "size": size, "sha256": sha256, "mode": store, "note": note, "created_by": actor}),
-    )
+    Ok(json!({
+        "id": id, "kind": kind, "ref_id": ref_id, "file_name": file_name,
+        "mime": mime, "size": size, "sha256": sha256, "mode": store,
+        // the JS returns path: null for db mode, the copy for file mode
+        "path": path_opt, "note": note, "created_by": actor,
+    }))
 }
 
 /// Metadata only — never selects data column.
@@ -218,6 +222,49 @@ fn attachments_dir(db: &Connection) -> std::path::PathBuf {
 
 /// Write the attachment's bytes to `out`. `db` mode reads the blob; `file`
 /// mode copies the stored path. Refuses to overwrite unless `force`.
+/// The attachment's bytes, whichever store mode it uses. A file-mode row whose
+/// copy is gone is ATTACHMENT_FILE_MISSING (the JS raises the same code from
+/// both get and show).
+fn read_attachment_bytes(db: &Connection, id: i64) -> Result<Vec<u8>> {
+    let row = db.query_row(
+        "SELECT mode, data, path FROM attachments WHERE id = ?1",
+        [id],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<Vec<u8>>>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        },
+    );
+    let (mode, data, path) = match row {
+        Ok(v) => v,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(attachment_error(
+                "ATTACHMENT_NOT_FOUND",
+                format!("attachment {id} does not exist"),
+            ));
+        }
+        Err(e) => return Err(sql_err(e)),
+    };
+    match mode.as_str() {
+        "db" => data.ok_or_else(|| attachment_error("NO_DATA", "attachment has no stored blob")),
+        "file" => {
+            let p = path.ok_or_else(|| attachment_error("NO_PATH", "attachment has no path"))?;
+            std::fs::read(&p).map_err(|_| {
+                attachment_error(
+                    "ATTACHMENT_FILE_MISSING",
+                    format!("the stored copy {p} is missing on disk"),
+                )
+            })
+        }
+        other => Err(attachment_error(
+            "INVALID_STORE",
+            format!("unknown store mode '{other}'"),
+        )),
+    }
+}
+
 pub fn extract_attachment(db: &Connection, id: i64, out: &str, force: bool) -> Result<Value> {
     let row = db.query_row(
         "SELECT mode, data, path, file_name FROM attachments WHERE id = ?1",
@@ -241,20 +288,7 @@ pub fn extract_attachment(db: &Connection, id: i64, out: &str, force: bool) -> R
         }
         Err(e) => return Err(sql_err(e)),
     };
-    let bytes = match mode.as_str() {
-        "db" => data.ok_or_else(|| attachment_error("NO_DATA", "attachment has no stored blob"))?,
-        "file" => {
-            let p = path.ok_or_else(|| attachment_error("NO_PATH", "attachment has no path"))?;
-            std::fs::read(&p)
-                .map_err(|e| attachment_error("IO_ERROR", format!("cannot read {p}: {e}")))?
-        }
-        other => {
-            return Err(attachment_error(
-                "INVALID_STORE",
-                format!("unknown store mode '{other}'"),
-            ));
-        }
-    };
+    let bytes = read_attachment_bytes(db, id)?;
     if std::path::Path::new(out).exists() && !force {
         return Err(attachment_error(
             "FILE_EXISTS",
@@ -274,6 +308,17 @@ pub fn extract_attachment(db: &Connection, id: i64, out: &str, force: bool) -> R
 }
 
 pub fn get_attachment(db: &Connection, id: i64) -> Result<Value> {
+    let mut v = get_attachment_metadata(db, id)?;
+    // JS parity: getAttachment returns the bytes alongside the metadata (base64
+    // over JSON). A single attachment is at most MAX_ATTACHMENT_BYTES.
+    let bytes = read_attachment_bytes(db, id)?;
+    v["data"] = json!(base64::engine::general_purpose::STANDARD.encode(&bytes));
+    Ok(v)
+}
+
+/// Metadata only — what `attach list` returns, and what the CLI prints (a list
+/// must never carry the BLOB).
+pub fn get_attachment_metadata(db: &Connection, id: i64) -> Result<Value> {
     let row = db.query_row(
         "SELECT id, kind, ref_id, file_name, mime, size, sha256, mode, path, note, created_by, created_at FROM attachments WHERE id = ?1",
         [id], |r| {
@@ -325,6 +370,12 @@ pub fn remove_attachment(db: &Connection, id: i64, actor: &str, dry_run: bool) -
     }
     db.execute("DELETE FROM attachments WHERE id = ?1", [id])
         .map_err(sql_err)?;
+    // a file-mode copy goes with the row, or every removal orphans bytes on disk
+    if row.4 == "file" {
+        if let Some(p) = &row.5 {
+            let _ = std::fs::remove_file(p); // best effort: the row is already gone
+        }
+    }
     record(
         db,
         RecordArgs {

@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 19:45:45 UTC — **✅ 416 passing · 0 failing (416 tests)**
+**Latest run:** 2026-09-10 20:01:13 UTC — **✅ 401 passing · 0 failing (401 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -77,26 +77,6 @@
     - ✅ MCP: repeated signed calls verify (fresh nonces, no replay refusal)
     - ✅ MCP: malformed actor still rejected (INVALID_ACTOR)
     - ✅ MCP: a second company DB uses its own registry/enforce state
-
-### attachments.test.js — in-DB/file document attachments: add/list/show/remove, 25 MB cap, dedupe, metadata-only lists, audit
-
-15 passing · 0 failing
-
-    - ✅ attach add (db mode): stores BLOB, round-trips byte-identical, infers mime
-    - ✅ attach add: works for entries too
-    - ✅ attach add: validation errors
-    - ✅ attach list: metadata only, no data column payload
-    - ✅ attach remove: deletes row + audits; unknown id errors
-    - ✅ attach add: dry-run writes nothing and audits nothing
-    - ✅ attach add: file mode copies to <db>-attachments/<sha256> and remove deletes it
-    - ✅ attach get: file-mode with missing file on disk → ATTACHMENT_FILE_MISSING
-    - ✅ cli: attach add/list/show --out/remove round-trip with audit
-    - ✅ cli: attach add rejects both refs, and unknown store
-    - ✅ cli: attach dry-run writes nothing
-    - ✅ cli: attach file mode end-to-end
-    - ✅ migration 013 applies on fresh init (attachments table exists)
-    - ✅ attachmentsDir convention: demo.db → demo-attachments/
-    - ✅ file-mode attachments dir is created under the DB dir (regression)
 
 ### authz-cli.test.js — Tier 0.5 authorizations end-to-end: actor authz/roles/can/who-can CLI, the AUTHZ_DENIED gate (dry-run parity, deny-by-default, authz implies enforce), MCP tool gate (no mutation on refusal, read-only unaffected), owner-mediated revoke, full SoD lifecycle
 
