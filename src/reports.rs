@@ -1865,7 +1865,7 @@ pub fn icp_readout(db: &Connection, period: &str) -> Result<Value> {
                     let re_net: i64 = groups
                         .iter()
                         .find(|g| g["code"].as_str() == Some("RE"))
-                        .and_then(|g| g["discounted_net"].as_i64())
+                        .and_then(|g| g["discountedNet"].as_i64())
                         .unwrap_or(0);
                     if re_net == 0 {
                         continue;
@@ -1963,6 +1963,8 @@ mod tests {
                 code: c.to_string(),
                 amount_cents: *a,
                 cost_center_code: None,
+                vat_code: None,
+                vat_amount_cents: None,
             })
             .collect();
         let e = create_entry(

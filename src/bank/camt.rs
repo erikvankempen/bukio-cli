@@ -115,7 +115,7 @@ mod tests {
         </TxDtls></NtryDtls>
       </Ntry>
       <Ntry>
-        <Amt Ccy="EUR">-50.00</Amt>
+        <Amt Ccy="EUR">50.00</Amt>
         <CdtDbtInd>DBIT</CdtDbtInd>
         <BookgDt><Dt>2026-01-16</Dt></BookgDt>
         <NtryDtls><TxDtls>

@@ -63,6 +63,8 @@ pub fn parse_posting_specs(raw: &[String]) -> Result<Vec<PostingSpec>> {
                 code: code.to_string(),
                 amount_cents: parse_amount(amount)?,
                 cost_center_code: cc.map(String::from),
+                vat_code: None,
+                vat_amount_cents: None,
             });
         }
     }
@@ -89,6 +91,11 @@ pub struct PostingSpec {
     pub code: String,
     pub amount_cents: i64,
     pub cost_center_code: Option<String>,
+    /// Optional VAT tag (JS: `vatCode` on the posting spec) — the code must
+    /// exist in vat_codes; null/inert when the VAT module is off.
+    pub vat_code: Option<String>,
+    /// VAT amount in cents carried alongside the base (JS: `vatAmountCents`).
+    pub vat_amount_cents: Option<i64>,
 }
 
 /// Entry as returned by get_entry — the JSON shape matches serializeEntry.
@@ -221,7 +228,7 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
     }
 
     // resolve postings: accounts exist + active; cost centers exist + active
-    let mut resolved: Vec<(i64, i64, Option<i64>)> = Vec::new(); // (account_id, amount, cc_id)
+    let mut resolved: Vec<(i64, i64, Option<i64>, Option<i64>, Option<i64>)> = Vec::new(); // (account_id, amount, cc_id, vat_code_id, vat_amount_cents)
     for p in &input.postings {
         if p.amount_cents == 0 {
             return Err(BukioError::new(
@@ -271,10 +278,32 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
                 Some(cc.0)
             }
         };
-        resolved.push((account.0, p.amount_cents, cc_id));
+        // VAT tag (optional): the code must exist, the amount is inert when
+        // the VAT module is off — same contract as JS resolvePostings
+        let vat_code_id = match &p.vat_code {
+            None => None,
+            Some(code) => Some(
+                db.query_row("SELECT id FROM vat_codes WHERE code = ?1", [code.as_str()], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .map_err(|_| {
+                    BukioError::new(
+                        "VAT_CODE_NOT_FOUND",
+                        format!("vat code '{code}' does not exist"),
+                    )
+                })?,
+            ),
+        };
+        resolved.push((
+            account.0,
+            p.amount_cents,
+            cc_id,
+            vat_code_id,
+            p.vat_amount_cents,
+        ));
     }
 
-    let sum: i64 = resolved.iter().map(|(_, a, _)| a).sum();
+    let sum: i64 = resolved.iter().map(|(_, a, ..)| a).sum();
     if sum != 0 {
         return Err(BukioError::new(
             "UNBALANCED",
@@ -297,11 +326,11 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
         )
         .map_err(sql_err)?;
         let id = tx.last_insert_rowid();
-        for (account_id, amount, cc_id) in &resolved {
+        for (account_id, amount, cc_id, vat_code_id, vat_amount_cents) in &resolved {
             tx.execute(
                 "INSERT INTO postings (entry_id, account_id, amount_cents, vat_code_id, vat_amount_cents, fx_currency, fx_amount_cents, cost_center_id)
-                 VALUES (?1, ?2, ?3, NULL, NULL, NULL, NULL, ?4)",
-                rusqlite::params![id, account_id, amount, cc_id],
+                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6)",
+                rusqlite::params![id, account_id, amount, vat_code_id, vat_amount_cents, cc_id],
             )
             .map_err(sql_err)?;
         }
@@ -615,6 +644,8 @@ mod tests {
                 code: c.to_string(),
                 amount_cents: *a,
                 cost_center_code: None,
+                vat_code: None,
+                vat_amount_cents: None,
             })
             .collect()
     }

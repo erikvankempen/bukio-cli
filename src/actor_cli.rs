@@ -26,7 +26,7 @@ fn config_dir() -> PathBuf {
 }
 
 fn key_file_path(actor: &str) -> PathBuf {
-    config_dir().join("keys").join(format!("{actor}.key"))
+    config_dir().join("keys").join(format!("{}.key", actor.replace(':', "-")))
 }
 
 pub fn session_file_path(actor: &str) -> PathBuf {

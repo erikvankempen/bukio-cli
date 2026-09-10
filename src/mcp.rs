@@ -319,6 +319,8 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                             code,
                             amount_cents,
                             cost_center_code: None,
+                            vat_code: None,
+                            vat_amount_cents: None,
                         });
                     }
                 }

@@ -278,6 +278,8 @@ pub fn expand_vat_postings(
                         code: vat_account,
                         amount_cents: vat_amount,
                         cost_center_code: None,
+                        vat_code: None,
+                        vat_amount_cents: None,
                     });
                 }
             }
@@ -297,6 +299,8 @@ pub fn expand_vat_postings(
             code: e.code.clone(),
             amount_cents: e.amount_cents,
             cost_center_code: e.vat_code.clone().and(None),
+            vat_code: None,
+            vat_amount_cents: None,
         })
         .collect();
     // carry vat info separately — resolved inside create_entry via vat_code? No:
@@ -692,16 +696,22 @@ pub fn vat_file(
             code: output_code.clone(),
             amount_cents: -bal_output,
             cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
         },
         PostingSpec {
             code: input_code.clone(),
             amount_cents: -bal_input,
             cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
         },
         PostingSpec {
             code: account.clone(),
             amount_cents: bal_output + bal_input,
             cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
         },
     ];
     postings.retain(|p| p.amount_cents != 0);
@@ -920,11 +930,15 @@ pub fn vat_settle(
             code: account.clone(),
             amount_cents: if owe { liability } else { -liability },
             cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
         },
         PostingSpec {
             code: bank_account_code.to_string(),
             amount_cents: tx_amount_cents,
             cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
         },
     ];
     if difference != 0 {
@@ -932,6 +946,8 @@ pub fn vat_settle(
             code: difference_account.clone(),
             amount_cents: difference,
             cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
         });
     }
     let description = desc.map(String::from).unwrap_or_else(|| {

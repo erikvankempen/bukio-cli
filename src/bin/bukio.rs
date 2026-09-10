@@ -179,6 +179,11 @@ fn main() {
     let result = dispatch(&argv, &db_path, &actor, dry_run);
     match result {
         Ok(data) => {
+            // `server token` prints the raw token for operator capture (JS parity)
+            if !json_mode && argv.first().map(|s| s.as_str()) == Some("server") && argv.get(1).map(|s| s.as_str()) == Some("token") {
+                println!("{}", data["token"].as_str().unwrap_or(""));
+                return;
+            }
             if json_mode {
                 ok(data);
             } else if let Some(p) = data.get("path").and_then(|v| v.as_str()) {
@@ -380,7 +385,7 @@ fn try_match_cmd(
         ["payments", "batch", "list"] => cmd_batch_list(argv, db_path),
         ["payments", "batch", "show"] => cmd_batch_show(argv, db_path),
         ["payments", "batch", "delete"] => cmd_batch_delete(argv, db_path, actor, dry_run),
-        ["payments", "batch", "export"] => cmd_batch_export(argv, db_path, dry_run),
+        ["payments", "batch", "export"] => cmd_batch_export(argv, db_path, actor, dry_run),
 
         // ── item ──────────────────────────────────────────────────────
         ["item", "add"] => cmd_item_add(argv, db_path, actor, dry_run),
@@ -469,6 +474,14 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
         } else {
             positional.push(a);
             i += 1;
+        }
+    }
+
+    // Remote client mode: --server <url> signs the command and POSTs it
+    if let Some(server) = arg(argv, "--server").or_else(|| std::env::var("BUKIO_SERVER").ok()) {
+        if !server.is_empty() {
+            remote_client_mode(&server, &positional, argv, actor);
+            return Ok(json!({"ok": true})); // unreachable — remote fn exits
         }
     }
 
@@ -2353,7 +2366,8 @@ fn cmd_invoice_pay(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
 fn cmd_year_end_status(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
     let year = arg(argv, "--year").ok_or_else(|| missing_arg("--year"))?;
-    bukio::year_end::year_end_status(&db, &year)
+    // JS CLI wraps: { status: yearEndStatus(...) }
+    Ok(json!({ "status": bukio::year_end::year_end_status(&db, &year)? }))
 }
 
 fn cmd_year_end_close(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
@@ -2922,44 +2936,23 @@ fn cmd_batch_delete(argv: &[String], db_path: &str, actor: &str, dry_run: bool) 
     bukio::payments::delete_payment_batch(&db, id, actor, dry_run)
 }
 
-fn cmd_batch_export(argv: &[String], db_path: &str, dry_run: bool) -> Result<Value> {
+fn cmd_batch_export(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     let db = open_existing(db_path)?;
     let id: i64 = parse_i64(argv, "--id").ok_or_else(|| missing_arg("--id"))?;
-    let batch = bukio::payments::get_payment_batch(&db, id)?;
-    // Auto-detect schema: direct-debit → pain.008.001.02, transfer → pain.001.001.03
-    let batch_kind = batch.get("batch_kind").and_then(|v| v.as_str()).unwrap_or("transfer");
-    let default_schema = if batch_kind == "direct_debit" { "pain.008.001.02" } else { "pain.001.001.03" };
-    let schema = arg(argv, "--schema").unwrap_or_else(|| default_schema.into());
-    let out = arg(argv, "--out");
-    // Build pain.001 XML
-    let lines = batch["lines"].as_array().cloned().unwrap_or_default();
-    let xml = bukio::payments::build_pain001(
-        &batch["id"].to_string(),
-        &bukio::dates::today_iso(),
-        &batch
-            .get("debit_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or(""),
-        &batch
-            .get("debit_iban")
-            .and_then(|v| v.as_str())
-            .unwrap_or(""),
-        &batch
-            .get("date")
-            .and_then(|v| v.as_str())
-            .unwrap_or(&bukio::dates::today_iso()),
-        &lines,
-        &schema,
-    );
-    if let Some(path) = &out {
-        std::fs::write(path, &xml)
+    // One code path owns the SEPA build + status/audit transition (JS parity:
+    // the CLI calls exportPaymentBatch) — a second hand-rolled builder here
+    // silently skipped the status update and the msg_id/file_hash bookkeeping.
+    let mut result = bukio::payments::export_payment_batch(&db, id, actor, dry_run)?;
+    if let Some(path) = arg(argv, "--out") {
+        let xml = result["xml"].as_str().unwrap_or("");
+        std::fs::write(&path, xml)
             .map_err(|e| BukioError::new("IO_ERROR", format!("cannot write {path}: {e}")))?;
+        // main() prints "wrote <path>" when data.path is present
+        if let Value::Object(m) = &mut result {
+            m.insert("path".to_string(), json!(path));
+        }
     }
-    if dry_run {
-        Ok(json!({ "batch": batch, "schema": schema, "xml_length": xml.len(), "dryRun": true }))
-    } else {
-        Ok(json!({ "batch": batch, "schema": schema, "xml_length": xml.len() }))
-    }
+    Ok(result)
 }
 
 // ── item ───────────────────────────────────────────────────────────────────
@@ -3389,10 +3382,263 @@ fn cmd_server_start(argv: &[String], db_path: &str) -> Result<Value> {
 
 fn cmd_server_token(argv: &[String], actor: &str) -> Result<Value> {
     require_actor(actor)?;
-    let ttl: u64 = parse_i64(argv, "--ttl-hours").unwrap_or(24) as u64;
+    let ttl_raw = arg(argv, "--ttl-hours").unwrap_or_else(|| "24".into());
+    let ttl: u64 = ttl_raw
+        .parse()
+        .map_err(|_| BukioError::new("INVALID_TTL", format!("--ttl-hours must be a positive number of hours, got '{ttl_raw}'")))?;
+    if ttl == 0 {
+        return Err(BukioError::new(
+            "INVALID_TTL",
+            "--ttl-hours must be a positive number of hours",
+        ));
+    }
     let target_actor = positional_after(argv, "token").ok_or_else(|| missing_arg("actor"))?;
     let token = bukio::server::mint_enrol_token(&target_actor, ttl)?;
     Ok(json!({ "token": token, "actor": target_actor, "ttl_hours": ttl }))
+}
+
+// ── remote client (--server) ──────────────────────────────────────
+const REMOTE_LOCAL_ONLY_CMDS: &[&str] = &[
+    "server start",
+    "server token",
+    "mcp",
+    "init",
+    "update",
+    "actor keygen",
+    "actor unlock",
+    "actor lock",
+];
+
+fn remote_key_file(actor: &str) -> std::path::PathBuf {
+    let cfg = std::env::var("BUKIO_CONFIG_DIR")
+        
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into())).join(".bukio")
+        });
+    cfg.join("keys")
+        .join(format!("{}.key", actor.replace(':', "-")))
+}
+
+/// Output a JSON document and exit with the right code (used by the remote
+/// client to replay server answers verbatim).
+fn remote_exit_json(body: &serde_json::Value, code: i32) -> ! {
+    println!("{}", serde_json::to_string_pretty(body).unwrap_or_default());
+    std::process::exit(code);
+}
+
+fn remote_client_mode(
+    server: &str,
+    positional: &[&str],
+    argv: &[String],
+    actor: &str,
+) {
+    let json_mode = has_flag(argv, "--json");
+    let cmd = positional.join(" ");
+    // LOCAL_ONLY matches the command PATH (JS: commandPathOf), not the full
+    // positional line — `server token agent:x` is still `server token`.
+    let is_local_only = REMOTE_LOCAL_ONLY_CMDS
+        .iter()
+        .any(|c| cmd == *c || cmd.starts_with(&format!("{c} ")));
+    if is_local_only {
+        let e = json!({
+            "ok": false,
+            "error": {"code": "LOCAL_ONLY",
+                      "message": format!("'{cmd}' cannot run with --server — it is a local/operator command")}
+        });
+        remote_exit_json(&e, 1);
+    }
+    let base = server.trim_end_matches('/');
+    if actor.is_empty() {
+        let e = json!({"ok": false, "error": {"code": "ACTOR_REQUIRED",
+            "message": "a named actor is required (--actor <role>:<name> or BUKIO_ACTOR)"}});
+        remote_exit_json(&e, 1);
+    }
+
+    // `actor register --server` → /register (key never leaves the client)
+    if cmd == "actor register" {
+        let token = match arg(argv, "--token") {
+            Some(t) if !t.is_empty() => t,
+            _ => {
+                let e = json!({"ok": false, "error": {"code": "TOKEN_REQUIRED",
+                    "message": "remote registration needs --token <t> — mint one with 'bukio server token <actor>' on the server machine"}});
+                remote_exit_json(&e, 1);
+            }
+        };
+        let key_file = remote_key_file(actor);
+        if !key_file.exists() {
+            let e = json!({"ok": false, "error": {"code": "KEY_NOT_FOUND",
+                "message": format!("no key file for {actor} at {} — run 'bukio actor keygen' first", key_file.display())}});
+            remote_exit_json(&e, 1);
+        }
+        let pem = std::fs::read_to_string(&key_file).unwrap_or_default();
+        let public_pem = match bukio::sign::public_key_from_private(&pem, None) {
+            Ok(p) => p,
+            Err(_) => {
+                let e = json!({"ok": false, "error": {"code": "PASSPHRASE_INVALID",
+                    "message": format!("could not read the key for {actor} — wrong passphrase or corrupt key file")}});
+                remote_exit_json(&e, 1);
+            }
+        };
+        let keyid = bukio::sign::keyid_of(&public_pem).unwrap_or_default();
+        let dry_run = has_flag(argv, "--dry-run");
+        if dry_run {
+            let d = json!({"actor": actor, "keyid": keyid, "server": base, "dryRun": true});
+            if json_mode {
+                println!("{}", serde_json::to_string_pretty(&json!({"ok": true, "data": d})).unwrap());
+            } else {
+                println!("plan: register {actor} (keyid {keyid}) at {base}");
+                println!("(dry run — nothing sent)");
+            }
+            std::process::exit(0);
+        }
+        let payload = json!({"actor": actor, "keyid": keyid, "publicKey": public_pem, "token": token});
+        let body = match remote_post(&format!("{base}/register"), &payload) {
+            Ok(b) => b,
+            Err((code, message)) => {
+                let e = json!({"ok": false, "error": {"code": code, "message": message}});
+                remote_exit_json(&e, 1);
+            }
+        };
+        let mut data = body.get("data").cloned().unwrap_or(Value::Null);
+        if data.is_null() {
+            // the server refused: {ok:false,error}
+            remote_exit_json(&body, 1);
+        }
+        if let Value::Object(m) = &mut data {
+            m.insert("server".to_string(), Value::String(base.to_string()));
+        }
+        if json_mode {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({"ok": true, "data": data})).unwrap()
+            );
+        } else {
+            println!("enrolled {actor} (keyid {keyid}) at {base}");
+        }
+        std::process::exit(0);
+    }
+
+    // Envelope: sanitize argv (transport flags out), keep semantics
+    let mut env_argv: Vec<String> = Vec::new();
+    {
+        let transport = ["--server", "--db", "--sign-key"];
+        let mut i = 0;
+        while i < argv.len() {
+            let tok = &argv[i];
+            let flag = tok.split('=').next().unwrap_or("");
+            if transport.contains(&flag) {
+                if !tok.contains('=') && i + 1 < argv.len() && !argv[i + 1].starts_with('-') {
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                continue;
+            }
+            env_argv.push(tok.clone());
+            i += 1;
+        }
+    }
+    if !env_argv.iter().any(|a| a == "--actor") && !actor.is_empty() {
+        env_argv.push("--actor".to_string());
+        env_argv.push(actor.to_string());
+    }
+    let ts = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let nonce = uuid4();
+    let args = json!({"argv": env_argv});
+    let digest = bukio::canonical::build_digest(actor, &cmd, &args, &ts, &nonce);
+    let mut envelope = json!({
+        "v": 1, "actor": actor, "cmd": cmd, "args": args, "ts": ts, "nonce": nonce,
+        "digest": digest, "sig": Value::Null, "keyid": Value::Null,
+    });
+    let key_file = remote_key_file(actor);
+    if key_file.exists() {
+        if let Ok(pem) = std::fs::read_to_string(&key_file) {
+            if let (Ok(public_pem), Ok(sig)) = (
+                bukio::sign::public_key_from_private(&pem, None),
+                bukio::sign::sign(digest.as_bytes(), &pem),
+            ) {
+                if let Ok(keyid) = bukio::sign::keyid_of(&public_pem) {
+                    envelope["sig"] = json!(sig);
+                    envelope["keyid"] = json!(keyid);
+                }
+            }
+        }
+    }
+    let body = match remote_post(&format!("{base}/rpc"), &envelope) {
+        Ok(b) => b,
+        Err((code, message)) => {
+            let e = json!({"ok": false, "error": {"code": code, "message": message}});
+            remote_exit_json(&e, 1);
+        }
+    };
+    // server reply: {ok, stdout, stderr, exitCode} or {ok:false,error}
+    if body.get("error").is_some() {
+        remote_exit_json(&body, 1);
+    }
+    let stdout = body["stdout"].as_str().unwrap_or("");
+    let code = body["exitCode"].as_i64().unwrap_or(1);
+    print!("{stdout}");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    if code != 0 {
+        let stderr = body["stderr"].as_str().unwrap_or("");
+        eprint!("{stderr}");
+        std::process::exit(1);
+    }
+    std::process::exit(0);
+}
+
+/// POST JSON over plain HTTP/1.1 (tiny stdlib client — ureq 3.x drops error
+/// bodies, which we need for gate refusals). Returns the parsed JSON reply.
+fn remote_post(url: &str, payload: &Value) -> std::result::Result<Value, (String, String)> {
+    use std::io::{Read, Write};
+    let rest = url.strip_prefix("http://").unwrap_or(url);
+    let (hostport, path) = match rest.split_once('/') {
+        Some((h, p)) => (h, format!("/{p}")),
+        None => (rest, "/".to_string()),
+    };
+    let (host, port) = match hostport.rsplit_once(':') {
+        Some((h, p)) => (h.to_string(), p.parse().unwrap_or(80)),
+        None => (hostport.to_string(), 80),
+    };
+    let body = serde_json::to_string(payload).unwrap_or_default();
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: {hostport}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let mut stream = std::net::TcpStream::connect((host.as_str(), port)).map_err(|e| {
+        (
+            "REMOTE_UNREACHABLE".into(),
+            format!("cannot reach {url}: {e}"),
+        )
+    })?;
+    stream.write_all(request.as_bytes()).ok();
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).ok();
+    let text = String::from_utf8_lossy(&raw).to_string();
+    let json_part = text
+        .split_once("\r\n\r\n")
+        .map(|(_, b)| b)
+        .unwrap_or(&text);
+    serde_json::from_str(json_part).map_err(|_| {
+        (
+            "REMOTE_ERROR".into(),
+            format!("non-JSON reply from {url}: {}", &text[..text.len().min(200)]),
+        )
+    })
+}
+
+fn uuid4() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+    )
 }
 
 // ── report aging ───────────────────────────────────────────────────

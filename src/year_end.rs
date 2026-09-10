@@ -197,6 +197,8 @@ pub fn year_end_close(db: &Connection, year: &str, actor: &str, dry_run: bool) -
                 code,
                 amount_cents: -net,
                 cost_center_code: None,
+                vat_code: None,
+                vat_amount_cents: None,
             })
         })
         .collect();
@@ -205,6 +207,8 @@ pub fn year_end_close(db: &Connection, year: &str, actor: &str, dry_run: bool) -
             code: result_account.to_string(),
             amount_cents: -result_cents,
             cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
         });
     }
 
@@ -215,11 +219,15 @@ pub fn year_end_close(db: &Connection, year: &str, actor: &str, dry_run: bool) -
                 code: result_account.to_string(),
                 amount_cents: result_cents,
                 cost_center_code: None,
+                vat_code: None,
+                vat_amount_cents: None,
             },
             PostingSpec {
                 code: equity_account.to_string(),
                 amount_cents: -result_cents,
                 cost_center_code: None,
+                vat_code: None,
+                vat_amount_cents: None,
             },
         ]
     } else {
@@ -343,11 +351,15 @@ mod tests {
                         code: "1100".into(),
                         amount_cents: 12100,
                         cost_center_code: None,
+                        vat_code: None,
+                        vat_amount_cents: None,
                     },
                     PostingSpec {
                         code: "8000".into(),
                         amount_cents: -12100,
                         cost_center_code: None,
+                        vat_code: None,
+                        vat_amount_cents: None,
                     },
                 ],
                 source: "manual",
@@ -367,11 +379,15 @@ mod tests {
                         code: "4300".into(),
                         amount_cents: -5000,
                         cost_center_code: None,
+                        vat_code: None,
+                        vat_amount_cents: None,
                     },
                     PostingSpec {
                         code: "1100".into(),
                         amount_cents: 5000,
                         cost_center_code: None,
+                        vat_code: None,
+                        vat_amount_cents: None,
                     },
                 ],
                 source: "manual",

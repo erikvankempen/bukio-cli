@@ -7,6 +7,7 @@
 use crate::actor::{can_act_enrolled, get_authz, get_enforce, get_roles};
 use crate::db::open_db;
 use crate::money::{BukioError, Result};
+use crate::sign_gate;
 use crate::sign;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -18,24 +19,30 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const TOKENS_FILE: &str = "enrol_tokens.json";
+const TOKENS_FILE: &str = "server-tokens.json";
 const MAX_BODY_BYTES: usize = 1024 * 1024;
-const BIN_PATH: &str = "bukio";
 
-// Commands that must only run locally (defense in depth).
-const REMOTE_LOCAL_ONLY: &[&str] = &[
-    "server start",
-    "server token",
-    "backup create",
-    "backup restore",
-    "actor keygen",
-    "actor unlock",
-    "actor lock",
-    "actor register",
-];
+// ponytail: exact match like JS REMOTE_LOCAL_ONLY.has(cmd)
+fn is_local_only(cmd: &str) -> bool {
+    matches!(
+        cmd,
+        "server start"
+            | "server token"
+            | "mcp"
+            | "init"
+            | "update"
+            | "actor keygen"
+            | "actor unlock"
+            | "actor lock"
+    )
+}
 
 fn config_dir() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())).join(".bukio")
+    std::env::var("BUKIO_CONFIG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".to_string())).join(".bukio")
+        })
 }
 
 fn tokens_path() -> PathBuf {
@@ -47,8 +54,11 @@ fn tokens_path() -> PathBuf {
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 struct TokenEntry {
     actor: String,
+    #[serde(rename = "createdAt")]
     created_at: String,
+    #[serde(rename = "expiresAt")]
     expires_at: String,
+    #[serde(rename = "usedAt")]
     used_at: Option<String>,
 }
 
@@ -71,17 +81,13 @@ fn write_tokens(tokens: &HashMap<String, TokenEntry>) {
 
 /// Mint a one-time enrolment token for an actor.
 pub fn mint_enrol_token(actor: &str, ttl_hours: u64) -> Result<String> {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let token: String = (0..32)
-        .map(|_| {
-            let b: u8 = rng.gen();
-            // base64url
-            const CHARS: &[u8] =
-                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-            CHARS[(b as usize) % 64] as char
-        })
-        .collect();
+    use rand::RngCore;
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let token = {
+        use base64::Engine as _;
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&bytes)
+    };
     let hash = hex::encode(Sha256::digest(token.as_bytes()));
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -151,11 +157,12 @@ fn verify_envelope(db: &rusqlite::Connection, envelope: &Value) -> Result<Value>
     let cmd = envelope["cmd"].as_str().unwrap_or("");
     let sig = envelope["sig"].as_str();
     let keyid = envelope["keyid"].as_str();
-    let ts = envelope["ts"].as_str();
-    let nonce = envelope["nonce"].as_str();
+    let ts = envelope["ts"].as_str().unwrap_or("");
+    let nonce = envelope["nonce"].as_str().unwrap_or("");
+    let digest = envelope["digest"].as_str().unwrap_or("");
 
-    // LOCAL_ONLY blacklist
-    if REMOTE_LOCAL_ONLY.iter().any(|c| cmd.starts_with(c)) {
+    // LOCAL_ONLY blacklist (defense in depth)
+    if is_local_only(cmd) {
         return Err(BukioError::new(
             "LOCAL_ONLY",
             format!("'{cmd}' cannot run remotely — it is a local/operator command"),
@@ -177,20 +184,68 @@ fn verify_envelope(db: &rusqlite::Connection, envelope: &Value) -> Result<Value>
         return Ok(json!({"ok": true, "sigStatus": "unsigned"}));
     }
 
-    // Verify signature (simplified — full Tier 0 gate in production)
-    let key_row = crate::actor::get_actor_key(db, actor);
-    if let Some(row) = key_row {
-        if row.revoked_at.is_some() {
-            return Err(BukioError::new(
+    let sig = sig.unwrap();
+    let keyid = keyid.unwrap();
+
+    // Recompute the digest over the TRANSMITTED args — a digest that does
+    // not match what was actually sent means the signed payload differs
+    // from the executed argv (tamper refusal, JS parity)
+    let recomputed =
+        crate::canonical::build_digest(actor, cmd, &envelope["args"], ts, nonce);
+    if digest.is_empty() || recomputed != digest {
+        return Err(BukioError::new(
+            "SIGNATURE_INVALID",
+            "signature does not cover the transmitted args — the envelope was tampered with",
+        ));
+    }
+
+    // Full Tier 0 gate: nonce replay, timestamp window, registry check, sig verify
+    let gate = sign_gate::verify_signature_bundle(
+        db,
+        actor,
+        digest,
+        sig,
+        keyid,
+        ts,
+        nonce,
+        enforce,
+    );
+
+    if !gate.ok {
+        let code = gate.code.unwrap_or("SIGNATURE_FAILED");
+        let messages = [
+            (
+                "ACTOR_KEY_UNKNOWN",
+                format!("actor {actor} has no enrolled key"),
+            ),
+            (
                 "ACTOR_KEY_REVOKED",
                 format!("the key for {actor} is revoked"),
-            ));
-        }
-    } else {
-        return Err(BukioError::new(
-            "ACTOR_KEY_UNKNOWN",
-            format!("actor {actor} has no enrolled key"),
-        ));
+            ),
+            (
+                "SIGNATURE_STALE",
+                "signature timestamp is outside the ±5 minute window".into(),
+            ),
+            (
+                "NONCE_REUSED",
+                "signature nonce was already used — a replayed command is refused".into(),
+            ),
+            (
+                "SIGNATURE_INVALID",
+                format!("signature does not verify against the enrolled key for {actor}"),
+            ),
+        ];
+        let message = messages
+            .iter()
+            .find(|(c, _)| *c == code)
+            .map(|(_, m)| m.clone())
+            .unwrap_or_else(|| format!("signature verification failed for {actor}"));
+        return Err(BukioError::new(code, message));
+    }
+
+    // Authz gate (Tier 0.5)
+    if get_authz(db) {
+        crate::authz::check_authz(db, actor, cmd, false, false)?;
     }
 
     Ok(json!({"ok": true, "sigStatus": "verified"}))
@@ -198,13 +253,53 @@ fn verify_envelope(db: &rusqlite::Connection, envelope: &Value) -> Result<Value>
 
 // --- Child process dispatch ------------------------------------------------
 
+/// Remove transport flags (+ their values) from argv.
+fn sanitize_argv(argv: &[String]) -> Vec<String> {
+    let transport_flags = ["--server", "--db", "--sign-key"];
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < argv.len() {
+        let tok = &argv[i];
+        if tok == "--" {
+            out.push(tok.clone());
+            // everything after -- is kept
+            for t in &argv[i + 1..] {
+                out.push(t.clone());
+            }
+            break;
+        }
+        let flag = if let Some(eq) = tok.strip_prefix("--") {
+            eq.split_once('=').map(|(k, _)| format!("--{k}")).unwrap_or_else(|| tok.clone())
+        } else {
+            tok.clone()
+        };
+        if transport_flags.contains(&flag.as_str()) {
+            // skip the flag and its value (if not --flag=value form and next token isn't a flag)
+            if !tok.contains('=') && i + 1 < argv.len() && !argv[i + 1].starts_with('-') {
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        out.push(tok.clone());
+        i += 1;
+    }
+    out
+}
+
 fn run_child(db_path: &str, argv: &[String], env_extra: Option<&str>) -> Result<Value> {
-    let mut cmd = Command::new(std::env::current_exe().unwrap_or_else(|_| PathBuf::from(BIN_PATH)));
+    let safe_argv = sanitize_argv(argv);
+    let mut cmd = Command::new(std::env::current_exe().unwrap_or_else(|_| PathBuf::from("bukio")));
     cmd.arg("--db").arg(db_path);
-    for arg in argv {
+    for arg in &safe_argv {
         cmd.arg(arg);
     }
     cmd.env("BUKIO_REMOTE_EXEC", "1");
+    // Pass BUKIO_CONFIG_DIR to child so keys/nonces resolve
+    if let Ok(cfg) = std::env::var("BUKIO_CONFIG_DIR") {
+        cmd.env("BUKIO_CONFIG_DIR", cfg);
+    }
     if let Some(env) = env_extra {
         cmd.env("BUKIO_REMOTE_SIG", env);
     }
@@ -253,7 +348,57 @@ fn send_json_response(writer: &mut dyn Write, status: &str, payload: &Value) {
 
 fn handle_request(db_path: &str, method: &str, path: &str, body: Value) -> (String, Value) {
     match (method, path) {
-        ("GET", "/health") => ("200 OK".into(), json!({"ok": true, "version": "0.17.0"})),
+        ("GET", "/health") => (
+            "200 OK".into(),
+            json!({"ok": true, "data": {"status": "ok"}}),
+        ),
+
+        ("POST", "/register") => {
+            let db = match open_db(db_path) {
+                Ok(db) => db,
+                Err(e) => {
+                    return (
+                        "500 Internal Server Error".into(),
+                        json!({"ok": false, "error": {"code": "ERROR", "message": e.to_string()}}),
+                    )
+                }
+            };
+            let actor = body["actor"].as_str().unwrap_or("");
+            let keyid = body["keyid"].as_str().unwrap_or("");
+            let public_key = body["publicKey"].as_str().unwrap_or("");
+            let token = body["token"].as_str().unwrap_or("");
+            match consume_enrol_token(token, actor) {
+                Ok(()) => {
+                    match crate::actor::enrol_actor(&db, actor, keyid, public_key) {
+                        Ok(row) => {
+                            let _ = crate::audit::record(
+                                &db,
+                                crate::audit::RecordArgs {
+                                    actor,
+                                    action: "actor.register",
+                                    command: Some("actor register"),
+                                    args: Some(json!({"actor": actor, "keyid": keyid, "remote": true})),
+                                    outcome: "ok",
+                                    entry_ids: vec![],
+                                },
+                            );
+                            (
+                                "200 OK".into(),
+                                json!({"ok": true, "data": {"actor": row["actor"], "keyid": row["keyid"], "enrolled_at": row["enrolled_at"], "remote": true}}),
+                            )
+                        }
+                        Err(e) => (
+                            "401 Unauthorized".into(),
+                            json!({"ok": false, "error": {"code": e.code, "message": e.message}}),
+                        ),
+                    }
+                }
+                Err(e) => (
+                    "401 Unauthorized".into(),
+                    json!({"ok": false, "error": {"code": e.code, "message": e.message}}),
+                ),
+            }
+        }
 
         ("POST", "/rpc") => {
             let db = match open_db(db_path) {
@@ -292,7 +437,7 @@ fn handle_request(db_path: &str, method: &str, path: &str, body: Value) -> (Stri
                 }
                 Err(e) => (
                     "401 Unauthorized".into(),
-                    json!({"ok": false, "error": {"code": "ERROR", "message": e.to_string()}}),
+                    json!({"ok": false, "error": {"code": e.code, "message": e.message}}),
                 ),
             }
         }
@@ -309,7 +454,15 @@ pub fn cmd_server_start(db_path: &str, port: u16, host: &str) -> Result<()> {
     let addr = format!("{host}:{port}");
     let listener = TcpListener::bind(&addr)
         .map_err(|e| BukioError::new("SERVER_START", format!("cannot bind {addr}: {e}")))?;
-    eprintln!("bukio server listening on {addr}");
+    // Print the ACTUAL bound address (port 0 → ephemeral port), like JS srv.address()
+    let shown = listener
+        .local_addr()
+        .map(|a| format!("{}:{}", a.ip(), a.port()))
+        .unwrap_or_else(|_| addr.clone());
+    // Print to stdout (not stderr) — test reads stdout
+    println!("listening on {shown}");
+    println!("serving company DB: {db_path}");
+    std::io::stdout().flush().ok();
     for stream in listener.incoming() {
         let stream = match stream {
             Ok(s) => s,
@@ -340,8 +493,11 @@ pub fn cmd_server_start(db_path: &str, port: u16, host: &str) -> Result<()> {
                 if reader.read_line(&mut header).is_err() || header.trim().is_empty() {
                     break;
                 }
-                if let Some(val) = header.strip_prefix("Content-Length:") {
-                    content_length = val.trim().parse().unwrap_or(0);
+                // HTTP header names are case-insensitive; Node's fetch sends lowercase.
+                if let Some((name, val)) = header.split_once(':') {
+                    if name.trim().eq_ignore_ascii_case("content-length") {
+                        content_length = val.trim().parse().unwrap_or(0);
+                    }
                 }
             }
 
@@ -392,7 +548,7 @@ mod tests {
     fn mint_and_consume_token() {
         let token = mint_enrol_token("agent:bartholomeus", 24).unwrap();
         assert!(!token.is_empty());
-        // consume would require DB — just test mint
+        assert!(token.len() >= 40);
     }
 
     #[test]

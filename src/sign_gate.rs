@@ -90,7 +90,7 @@ fn nonces_path() -> PathBuf {
 }
 
 fn key_file_path(actor: &str) -> PathBuf {
-    config_dir().join("keys").join(format!("{actor}.key"))
+    config_dir().join("keys").join(format!("{}.key", actor.replace(':', "-")))
 }
 
 // --- Exempt commands ---
@@ -436,6 +436,30 @@ pub fn sign_command(
     sign_key: Option<&str>,
     enforce_override: Option<bool>,
 ) -> Result<Option<SignResult>> {
+    // Remote-exec: the SERVER already verified the envelope (nonce, window,
+    // key registry, signature). The child only replays the verified bundle
+    // so its audit rows carry the REAL signature.
+    if std::env::var("BUKIO_REMOTE_EXEC").as_deref() == Ok("1") {
+        let bundle: Value = std::env::var("BUKIO_REMOTE_SIG")
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or(Value::Null);
+        let sig = bundle["sig"].as_str().unwrap_or("").to_string();
+        return Ok(Some(SignResult {
+            digest_hash: bundle["digest"].as_str().unwrap_or("").to_string(),
+            sig_keyid: bundle["keyid"].as_str().unwrap_or("").to_string(),
+            sig_nonce: bundle["nonce"].as_str().unwrap_or("").to_string(),
+            sig_ts: bundle["ts"].as_str().unwrap_or("").to_string(),
+            sig,
+            sig_status: if bundle["sig"].is_string() {
+                "verified".to_string()
+            } else {
+                "unsigned".to_string()
+            },
+            signed_args: bundle["args"].clone(),
+            signed_command: bundle["cmd"].as_str().unwrap_or(cmd).to_string(),
+        }));
+    }
     if is_signing_exempt(cmd) {
         return Ok(None);
     }

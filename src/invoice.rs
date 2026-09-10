@@ -632,40 +632,14 @@ pub fn list_invoices(
     let rows = stmt
         .query_map(param_refs.as_slice(), |r| serialize_invoice_row(r))
         .map_err(sql_err)?;
-    let mut invoices: Vec<Value> = rows.filter_map(|r| r.ok()).collect();
-    // Enrich each invoice
-    for inv in invoices.iter_mut() {
+    // Enrich each invoice through the ONE serializer (JS maps getInvoice over
+    // the rows) — a hand-rolled enrichment drifts: it dropped outstanding_cents
+    // and the formatted amount strings.
+    let mut invoices: Vec<Value> = Vec::new();
+    for inv in rows.filter_map(|r| r.ok()) {
         let iid = inv["id"].as_i64().unwrap_or(0);
-        let lines = get_invoice_lines(db, iid)?;
-        let payments = get_invoice_payments(db, iid)?;
-        let contact = inv["contact_id"]
-            .as_i64()
-            .and_then(|cid| get_contact(db, cid).ok().flatten());
-        let t = compute_invoice_totals(
-            &lines,
-            inv["discount_type"].as_str(),
-            inv["discount_value"].as_i64(),
-        );
-        inv["lines"] = json!(lines);
-        inv["payments"] = json!(payments);
-        inv["contact"] = contact.unwrap_or(Value::Null);
-        inv["net_cents"] = t["net_cents"].clone();
-        inv["vat_cents"] = t["vat_cents"].clone();
-        inv["gross_cents"] = t["gross_cents"].clone();
-        inv["discount_cents"] = t["discount_cents"].clone();
-        inv["vat_breakdown"] = t["breakdown"].clone();
-        let paid: i64 = payments
-            .iter()
-            .map(|p| p["amount_cents"].as_i64().unwrap_or(0))
-            .sum();
-        inv["paid_cents"] = json!(paid);
-        if inv["status"].as_str() == Some("sent") {
-            if let Some(due) = inv["due_date"].as_str() {
-                let today = crate::dates::today_iso();
-                if due < today.as_str() {
-                    inv["status"] = json!("overdue");
-                }
-            }
+        if let Some(full) = get_invoice(db, iid)? {
+            invoices.push(full);
         }
     }
     // Filter overdue in-Rust (can't filter derived status in SQL)
@@ -1093,6 +1067,10 @@ pub fn finalize_invoice(db: &Connection, id: i64, actor: &str, dry_run: bool) ->
                                 .get("costCenterCode")
                                 .and_then(|v| v.as_str())
                                 .map(String::from),
+                            // carry the VAT tag through — the OB readout derives
+                            // 1a/1b/1c/2a from tagged income postings
+                            vat_code: p.get("vatCode").and_then(|v| v.as_str()).map(String::from),
+                            vat_amount_cents: p.get("vatAmountCents").and_then(|v| v.as_i64()),
                         })
                         .collect(),
                     source: "invoice",

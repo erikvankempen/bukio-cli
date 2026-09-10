@@ -264,6 +264,8 @@ pub fn import_opening_balances(
             code: c.clone(),
             amount_cents: *a,
             cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
         })
         .collect();
     let entry = create_entry(
@@ -446,11 +448,15 @@ pub fn import_journal_csv(
                 code: rek.to_string(),
                 amount_cents: bed,
                 cost_center_code: None,
+                vat_code: None,
+                vat_amount_cents: None,
             });
             postings.push(PostingSpec {
                 code: teg.to_string(),
                 amount_cents: -bed,
                 cost_center_code: None,
+                vat_code: None,
+                vat_amount_cents: None,
             });
         }
         let entry = create_entry(
