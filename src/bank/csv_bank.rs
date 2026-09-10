@@ -58,7 +58,9 @@ fn normalize_header(h: &str) -> String {
 
 /// Find the column index for a canonical key (exact, then contains).
 fn find_column(header: &[String], key: &str) -> Option<usize> {
-    header.iter().position(|h| h == key)
+    header
+        .iter()
+        .position(|h| h == key)
         .or_else(|| header.iter().position(|h| h.contains(key)))
 }
 
@@ -92,8 +94,7 @@ pub fn parse_bank_csv(content: &str, _default_iban: &str) -> Result<Vec<BankTx>,
     let description_idx = find_column(&header, "mededelingen")
         .or_else(|| find_column(&header, "omschrijving"))
         .or_else(|| find_column(&header, "description"));
-    let af_bij_idx = find_column(&header, "afbij")
-        .or_else(|| find_column(&header, "af/bij"));
+    let af_bij_idx = find_column(&header, "afbij").or_else(|| find_column(&header, "af/bij"));
     let iban_idx = find_column(&header, "rekening")
         .or_else(|| find_column(&header, "iban"))
         .or_else(|| find_column(&header, "tegenrekeningnummer"));

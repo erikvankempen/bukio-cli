@@ -42,7 +42,11 @@ fn parse_ntry(block: &str) -> Option<BankTx> {
     let bank_ref = extract_tag(block, "AcctSvcrRef");
     // DBIT = money out (negative), CRDT = money in (positive)
     let direction = extract_tag(block, "CdtDbtInd").unwrap_or_default();
-    let signed_cents = if direction == "DBIT" { -amount_cents } else { amount_cents };
+    let signed_cents = if direction == "DBIT" {
+        -amount_cents
+    } else {
+        amount_cents
+    };
 
     Some(BankTx {
         date,

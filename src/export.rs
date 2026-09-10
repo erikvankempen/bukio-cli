@@ -254,19 +254,20 @@ fn build_faia_b(
             format!("year '{year}' must be YYYY"),
         ));
     }
-    let company = db.query_row("SELECT * FROM company WHERE id = 1", [], |r| {
-        Ok(json!({
-            "name": r.get::<_, Option<String>>(1)?,
-            "registration_id": r.get::<_, Option<String>>(2)?,
-            "tax_id": r.get::<_, Option<String>>(4)?,
-            "address": r.get::<_, Option<String>>(11)?,
-            "city": r.get::<_, Option<String>>(13)?,
-            "postal_code": r.get::<_, Option<String>>(12)?,
-            "country": r.get::<_, Option<String>>(16)?,
-            "base_currency": r.get::<_, Option<String>>(17)?,
-        }))
-    })
-    .map_err(|_| export_error("NO_COMPANY", "no company initialised"))?;
+    let company = db
+        .query_row("SELECT * FROM company WHERE id = 1", [], |r| {
+            Ok(json!({
+                "name": r.get::<_, Option<String>>(1)?,
+                "registration_id": r.get::<_, Option<String>>(2)?,
+                "tax_id": r.get::<_, Option<String>>(4)?,
+                "address": r.get::<_, Option<String>>(11)?,
+                "city": r.get::<_, Option<String>>(13)?,
+                "postal_code": r.get::<_, Option<String>>(12)?,
+                "country": r.get::<_, Option<String>>(16)?,
+                "base_currency": r.get::<_, Option<String>>(17)?,
+            }))
+        })
+        .map_err(|_| export_error("NO_COMPANY", "no company initialised"))?;
 
     let sel_from = format!("{year}-01-01");
     let sel_to = format!("{year}-12-31");

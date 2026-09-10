@@ -128,12 +128,12 @@ fn dispatch(db: &Connection, actor: &str, msg: &Value) -> Result<String> {
             // Validate actor up front (INVALID_ACTOR, same as CLI)
             if !crate::actor::is_valid_actor(&eff_actor) {
                 let err = crate::actor::actor_error(Some(&eff_actor)).unwrap_or_else(|| {
-                    BukioError::new(
-                        "INVALID_ACTOR",
-                        format!("invalid actor '{eff_actor}'"),
-                    )
+                    BukioError::new("INVALID_ACTOR", format!("invalid actor '{eff_actor}'"))
                 });
-                return Ok(rpc_response(id.clone(), rpc_error_content(&err.code, &err.message)));
+                return Ok(rpc_response(
+                    id.clone(),
+                    rpc_error_content(&err.code, &err.message),
+                ));
             }
             // Mutating tools are signed by their actor (gate + audit attribution);
             // BUKIO_MCP_READONLY refuses every mutating tool before signing.
@@ -154,22 +154,27 @@ fn dispatch(db: &Connection, actor: &str, msg: &Value) -> Result<String> {
                 match crate::sign_gate::sign_tool_call(db, &eff_actor, tool_name, args) {
                     Ok(sr) => {
                         if let Some(s) = sr {
-                            crate::audit::set_pending_signature(Some(crate::audit::PendingSignature {
-                                digest_hash: Some(s.digest_hash.clone()),
-                                sig_keyid: Some(s.sig_keyid.clone()),
-                                sig_nonce: Some(s.sig_nonce.clone()),
-                                sig_ts: Some(s.sig_ts.clone()),
-                                sig: Some(s.sig.clone()),
-                                sig_status: s.sig_status.clone(),
-                                signed_args: Some(s.signed_args.clone()),
-                                signed_command: Some(s.signed_command.clone()),
-                            }));
+                            crate::audit::set_pending_signature(Some(
+                                crate::audit::PendingSignature {
+                                    digest_hash: Some(s.digest_hash.clone()),
+                                    sig_keyid: Some(s.sig_keyid.clone()),
+                                    sig_nonce: Some(s.sig_nonce.clone()),
+                                    sig_ts: Some(s.sig_ts.clone()),
+                                    sig: Some(s.sig.clone()),
+                                    sig_status: s.sig_status.clone(),
+                                    signed_args: Some(s.signed_args.clone()),
+                                    signed_command: Some(s.signed_command.clone()),
+                                },
+                            ));
                         } else {
                             crate::audit::set_pending_signature(None);
                         }
                     }
                     Err(e) => {
-                        return Ok(rpc_response(id.clone(), rpc_error_content(&e.code, &e.message)));
+                        return Ok(rpc_response(
+                            id.clone(),
+                            rpc_error_content(&e.code, &e.message),
+                        ));
                     }
                 }
             }
@@ -195,7 +200,10 @@ fn dispatch(db: &Connection, actor: &str, msg: &Value) -> Result<String> {
                         // Return JSON-RPC error for unknown tools (matches JS parity)
                         Ok(rpc_error(id.clone(), -32602, &e.message))
                     } else {
-                        Ok(rpc_response(id.clone(), rpc_error_content(&e.code, &e.message)))
+                        Ok(rpc_response(
+                            id.clone(),
+                            rpc_error_content(&e.code, &e.message),
+                        ))
                     }
                 }
             }
@@ -211,12 +219,7 @@ fn dispatch(db: &Connection, actor: &str, msg: &Value) -> Result<String> {
 /// The MCP authz gate: the effective actor must carry the tool's capability.
 /// Returns the refusal (AUTHZ_DENIED) or None. Mutating tools only — readers
 /// stay ungated (JS parity). Unmapped tools fail closed.
-fn mcp_authz_refusal(
-    db: &Connection,
-    actor: &str,
-    tool: &str,
-    args: &Value,
-) -> Option<BukioError> {
+fn mcp_authz_refusal(db: &Connection, actor: &str, tool: &str, args: &Value) -> Option<BukioError> {
     let post = args.get("post").and_then(|v| v.as_bool()).unwrap_or(false);
     crate::authz::check_authz(db, actor, &format!("mcp:{tool}"), false, post).err()
 }
@@ -391,9 +394,13 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             )?;
             if post {
                 let posted = post_entry(db, entry.id, actor)?;
-                Ok(json!({"ok": true, "mode": "execute", "state": "posted", "entry_id": posted.id, "entry": posted}))
+                Ok(
+                    json!({"ok": true, "mode": "execute", "state": "posted", "entry_id": posted.id, "entry": posted}),
+                )
             } else {
-                Ok(json!({"ok": true, "mode": "execute", "state": "draft", "entry_id": entry.id, "entry": entry}))
+                Ok(
+                    json!({"ok": true, "mode": "execute", "state": "draft", "entry_id": entry.id, "entry": entry}),
+                )
             }
         }
         "entry_post" => {
@@ -470,9 +477,13 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             )?;
             if post {
                 let posted = post_entry(db, entry.id, actor)?;
-                Ok(json!({"ok": true, "mode": "execute", "state": "posted", "entry_id": posted.id, "entry": posted}))
+                Ok(
+                    json!({"ok": true, "mode": "execute", "state": "posted", "entry_id": posted.id, "entry": posted}),
+                )
             } else {
-                Ok(json!({"ok": true, "mode": "execute", "state": "draft", "entry_id": entry.id, "entry": entry}))
+                Ok(
+                    json!({"ok": true, "mode": "execute", "state": "draft", "entry_id": entry.id, "entry": entry}),
+                )
             }
         }
         "asset_add" => {
@@ -519,15 +530,17 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             Ok(json!({"ok": true, "action": "assets.add", "asset": action}))
         }
         "assets_run" => {
-            let period = arg_str(args, "period").unwrap_or_else(|| {
-                chrono::Utc::now().format("%Y-%m").to_string()
-            });
+            let period = arg_str(args, "period")
+                .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m").to_string());
             let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
             let dry_run = mode != "execute";
             let r = crate::assets::run_due(db, &period, actor, dry_run)?;
             let mut data = r;
             if let Some(o) = data.as_object_mut() {
-                o.insert("mode".to_string(), json!(if dry_run { "dry-run" } else { "execute" }));
+                o.insert(
+                    "mode".to_string(),
+                    json!(if dry_run { "dry-run" } else { "execute" }),
+                );
             }
             Ok(data)
         }
@@ -601,7 +614,10 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 if !["draft", "sent", "paid", "overdue", "void"].contains(&s.as_str()) {
                     return Err(BukioError::new(
                         "INVALID_STATUS",
-                        format!("status must be one of draft|sent|paid|overdue|void, got '{}'", s),
+                        format!(
+                            "status must be one of draft|sent|paid|overdue|void, got '{}'",
+                            s
+                        ),
                     ));
                 }
             }
@@ -694,7 +710,11 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 .unwrap_or_default();
             let batch_date = arg_str(args, "batch_date");
             let kind_raw = arg_str(args, "type").unwrap_or_else(|| "transfer".into());
-            let kind = if kind_raw == "direct_debit" { "direct_debit".to_string() } else { "transfer".to_string() };
+            let kind = if kind_raw == "direct_debit" {
+                "direct_debit".to_string()
+            } else {
+                "transfer".to_string()
+            };
             let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
             let dry_run = mode != "execute";
             let r = crate::payments::create_payment_batch(
@@ -744,8 +764,8 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             Ok(r)
         }
         "report_sales" => {
-            let year = arg_str(args, "year")
-                .unwrap_or_else(|| crate::dates::today_iso()[..4].to_string());
+            let year =
+                arg_str(args, "year").unwrap_or_else(|| crate::dates::today_iso()[..4].to_string());
             if year.len() != 4 || !year.chars().all(|c| c.is_ascii_digit()) {
                 return Err(BukioError::new(
                     "INVALID_YEAR",
@@ -757,11 +777,14 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             Ok(r)
         }
         "invoice_email" => {
-            let id = arg_i64(args, "id")
-                .ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
+            let id =
+                arg_i64(args, "id").ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
             let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
             let dry_run = mode != "execute";
-            let attach_pdf = args.get("attach_pdf").and_then(|v| v.as_bool()).unwrap_or(true);
+            let attach_pdf = args
+                .get("attach_pdf")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
             let r = crate::smtp::email_invoice(
                 db,
                 id,
@@ -905,16 +928,22 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             }))
         }
         "item_list" => {
-            let active_only = !args.get("include_inactive").and_then(|v| v.as_bool()).unwrap_or(false);
+            let active_only = !args
+                .get("include_inactive")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let rows = crate::items::list_items(db, active_only)?;
             Ok(json!({"items": rows}))
         }
         "item_update" => {
-            let id = arg_i64(args, "id")
-                .ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
+            let id =
+                arg_i64(args, "id").ok_or_else(|| BukioError::new("MISSING_ARG", "id required"))?;
             let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
             let dry_run = mode != "execute";
-            let deactivate = args.get("deactivate").and_then(|v| v.as_bool()).unwrap_or(false);
+            let deactivate = args
+                .get("deactivate")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let price = match args.get("unit_price") {
                 Some(v) if v.is_string() => {
                     let ps = v.as_str().unwrap_or("");

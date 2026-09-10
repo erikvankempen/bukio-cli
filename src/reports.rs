@@ -1694,7 +1694,10 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
                 // leftover 'Autres' carries net_cents (JS parity): income adds
                 // amount_cents, expense subtracts — so MIXED leftovers
                 // (expense + income) reconcile with the balans result
-                if let Some(autres) = grouped.iter_mut().find(|l| l["label"].as_str() == Some("Autres")) {
+                if let Some(autres) = grouped
+                    .iter_mut()
+                    .find(|l| l["label"].as_str() == Some("Autres"))
+                {
                     let mut known: Vec<String> = lines_pnl
                         .iter()
                         .flat_map(|l| {
@@ -1779,10 +1782,7 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
         } else {
             "resultaat_cents"
         };
-        pnl_out.insert(
-            result_key.to_string(),
-            json!(resultaat_cents),
-        );
+        pnl_out.insert(result_key.to_string(), json!(resultaat_cents));
         pnl_out.insert(
             "resultaat".to_string(),
             json!(crate::money::format_amount(resultaat_cents)),

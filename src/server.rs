@@ -7,8 +7,8 @@
 use crate::actor::{can_act_enrolled, get_authz, get_enforce, get_roles};
 use crate::db::open_db;
 use crate::money::{BukioError, Result};
-use crate::sign_gate;
 use crate::sign;
+use crate::sign_gate;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -190,8 +190,7 @@ fn verify_envelope(db: &rusqlite::Connection, envelope: &Value) -> Result<Value>
     // Recompute the digest over the TRANSMITTED args — a digest that does
     // not match what was actually sent means the signed payload differs
     // from the executed argv (tamper refusal, JS parity)
-    let recomputed =
-        crate::canonical::build_digest(actor, cmd, &envelope["args"], ts, nonce);
+    let recomputed = crate::canonical::build_digest(actor, cmd, &envelope["args"], ts, nonce);
     if digest.is_empty() || recomputed != digest {
         return Err(BukioError::new(
             "SIGNATURE_INVALID",
@@ -200,16 +199,8 @@ fn verify_envelope(db: &rusqlite::Connection, envelope: &Value) -> Result<Value>
     }
 
     // Full Tier 0 gate: nonce replay, timestamp window, registry check, sig verify
-    let gate = sign_gate::verify_signature_bundle(
-        db,
-        actor,
-        digest,
-        sig,
-        keyid,
-        ts,
-        nonce,
-        enforce,
-    );
+    let gate =
+        sign_gate::verify_signature_bundle(db, actor, digest, sig, keyid, ts, nonce, enforce);
 
     if !gate.ok {
         let code = gate.code.unwrap_or("SIGNATURE_FAILED");
@@ -269,7 +260,9 @@ fn sanitize_argv(argv: &[String]) -> Vec<String> {
             break;
         }
         let flag = if let Some(eq) = tok.strip_prefix("--") {
-            eq.split_once('=').map(|(k, _)| format!("--{k}")).unwrap_or_else(|| tok.clone())
+            eq.split_once('=')
+                .map(|(k, _)| format!("--{k}"))
+                .unwrap_or_else(|| tok.clone())
         } else {
             tok.clone()
         };
@@ -368,31 +361,29 @@ fn handle_request(db_path: &str, method: &str, path: &str, body: Value) -> (Stri
             let public_key = body["publicKey"].as_str().unwrap_or("");
             let token = body["token"].as_str().unwrap_or("");
             match consume_enrol_token(token, actor) {
-                Ok(()) => {
-                    match crate::actor::enrol_actor(&db, actor, keyid, public_key) {
-                        Ok(row) => {
-                            let _ = crate::audit::record(
-                                &db,
-                                crate::audit::RecordArgs {
-                                    actor,
-                                    action: "actor.register",
-                                    command: Some("actor register"),
-                                    args: Some(json!({"actor": actor, "keyid": keyid, "remote": true})),
-                                    outcome: "ok",
-                                    entry_ids: vec![],
-                                },
-                            );
-                            (
-                                "200 OK".into(),
-                                json!({"ok": true, "data": {"actor": row["actor"], "keyid": row["keyid"], "enrolled_at": row["enrolled_at"], "remote": true}}),
-                            )
-                        }
-                        Err(e) => (
-                            "401 Unauthorized".into(),
-                            json!({"ok": false, "error": {"code": e.code, "message": e.message}}),
-                        ),
+                Ok(()) => match crate::actor::enrol_actor(&db, actor, keyid, public_key) {
+                    Ok(row) => {
+                        let _ = crate::audit::record(
+                            &db,
+                            crate::audit::RecordArgs {
+                                actor,
+                                action: "actor.register",
+                                command: Some("actor register"),
+                                args: Some(json!({"actor": actor, "keyid": keyid, "remote": true})),
+                                outcome: "ok",
+                                entry_ids: vec![],
+                            },
+                        );
+                        (
+                            "200 OK".into(),
+                            json!({"ok": true, "data": {"actor": row["actor"], "keyid": row["keyid"], "enrolled_at": row["enrolled_at"], "remote": true}}),
+                        )
                     }
-                }
+                    Err(e) => (
+                        "401 Unauthorized".into(),
+                        json!({"ok": false, "error": {"code": e.code, "message": e.message}}),
+                    ),
+                },
                 Err(e) => (
                     "401 Unauthorized".into(),
                     json!({"ok": false, "error": {"code": e.code, "message": e.message}}),

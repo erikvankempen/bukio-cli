@@ -113,10 +113,7 @@ pub fn update_company(
         let (store_bytes, store_mime): (Option<Vec<u8>>, Option<String>) = if clear {
             (None, None)
         } else {
-            (
-                logo_bytes.clone(),
-                logo_mime.map(|m| m.to_string()),
-            )
+            (logo_bytes.clone(), logo_mime.map(|m| m.to_string()))
         };
         db.execute(
             "UPDATE company SET logo = ?1, logo_mime = ?2 WHERE id = 1",
@@ -164,7 +161,10 @@ pub fn read_logo_file(file: &str) -> Result<(Vec<u8>, String)> {
     if bytes.len() > MAX_BYTES {
         return Err(BukioError::new(
             "LOGO_TOO_LARGE",
-            format!("logo file is {} bytes — the maximum is {MAX_BYTES}", bytes.len()),
+            format!(
+                "logo file is {} bytes — the maximum is {MAX_BYTES}",
+                bytes.len()
+            ),
         ));
     }
     let mime = if bytes.len() >= 8
@@ -182,9 +182,7 @@ pub fn read_logo_file(file: &str) -> Result<(Vec<u8>, String)> {
             .trim_start_matches('\u{feff}')
             .trim_start()
             .to_string();
-        if head.starts_with("<svg")
-            || (head.starts_with("<?xml") && head.contains("<svg"))
-        {
+        if head.starts_with("<svg") || (head.starts_with("<?xml") && head.contains("<svg")) {
             "image/svg+xml"
         } else {
             return Err(BukioError::new(
@@ -207,8 +205,12 @@ pub fn read_logo_file(file: &str) -> Result<(Vec<u8>, String)> {
 fn logo_dimensions(mime: &str, bytes: &[u8]) -> Option<(i64, i64)> {
     if mime == "image/png" && bytes.len() >= 24 {
         return Some((
-            i64::from(u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]])),
-            i64::from(u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]])),
+            i64::from(u32::from_be_bytes([
+                bytes[16], bytes[17], bytes[18], bytes[19],
+            ])),
+            i64::from(u32::from_be_bytes([
+                bytes[20], bytes[21], bytes[22], bytes[23],
+            ])),
         ));
     }
     if mime == "image/jpeg" {
@@ -232,10 +234,9 @@ fn logo_dimensions(mime: &str, bytes: &[u8]) -> Option<(i64, i64)> {
     if mime == "image/svg+xml" {
         let head = String::from_utf8_lossy(&bytes[..bytes.len().min(4096)]).to_string();
         // viewBox="x y w h"
-        let re = regex::Regex::new(
-            r#"viewBox=["']\s*[\d.-]+\s+[\d.-]+\s+([\d.]+)\s+([\d.]+)\s*["']"#,
-        )
-        .unwrap();
+        let re =
+            regex::Regex::new(r#"viewBox=["']\s*[\d.-]+\s+[\d.-]+\s+([\d.]+)\s+([\d.]+)\s*["']"#)
+                .unwrap();
         if let Some(c) = re.captures(&head) {
             let w = c[1].parse::<f64>().ok()?.ceil() as i64;
             let h = c[2].parse::<f64>().ok()?.ceil() as i64;
@@ -244,7 +245,10 @@ fn logo_dimensions(mime: &str, bytes: &[u8]) -> Option<(i64, i64)> {
         let wre = regex::Regex::new(r#"width=["']\s*([\d.]+)"#).unwrap();
         let hre = regex::Regex::new(r#"height=["']\s*([\d.]+)"#).unwrap();
         if let (Some(w), Some(h)) = (wre.captures(&head), hre.captures(&head)) {
-            return Some((w[1].parse::<f64>().ok()?.ceil() as i64, h[1].parse::<f64>().ok()?.ceil() as i64));
+            return Some((
+                w[1].parse::<f64>().ok()?.ceil() as i64,
+                h[1].parse::<f64>().ok()?.ceil() as i64,
+            ));
         }
         return None; // no parsable dims — accept, renders at natural size
     }

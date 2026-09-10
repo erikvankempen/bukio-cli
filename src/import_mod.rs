@@ -1059,7 +1059,9 @@ pub fn import_invoice(
     // Default due_date to issue_date + 30 days (EN 16931 BT-9)
     if due_date.is_empty() {
         if let Ok(d) = chrono::NaiveDate::parse_from_str(&invoice_date, "%Y-%m-%d") {
-            due_date = (d + chrono::Duration::days(30)).format("%Y-%m-%d").to_string();
+            due_date = (d + chrono::Duration::days(30))
+                .format("%Y-%m-%d")
+                .to_string();
         }
     }
 
@@ -1109,11 +1111,11 @@ pub fn import_invoice(
                 let r = create_contact(
                     db,
                     &supplier_name,
-                    None,    // address
-                    None,    // postal_code
-                    None,    // city
-                    None,    // country
-                    None,    // email
+                    None, // address
+                    None, // postal_code
+                    None, // city
+                    None, // country
+                    None, // email
                     if supplier_vat_id.is_empty() {
                         None
                     } else {

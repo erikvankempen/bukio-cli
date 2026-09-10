@@ -746,18 +746,24 @@ pub fn auto_match(db: &Connection, window_days: i64, actor: &str, dry_run: bool)
                            WHERE i.invoice_type = 'sales' AND i.status IN ('sent','overdue')
                            ORDER BY i.due_date IS NULL, i.due_date, i.id";
             if let Ok(mut inv_stmt) = db.prepare(inv_sql) {
-                let inv_rows: Vec<Value> = inv_stmt.query_map([], |r| {
-                    Ok(json!({
-                        "id": r.get::<_, i64>(0)?,
-                        "invoice_number": r.get::<_, Option<String>>(1)?,
-                        "contact_id": r.get::<_, Option<i64>>(2)?,
-                        "contact_name": r.get::<_, Option<String>>(3)?,
-                    }))
-                }).map_err(sql_err)?.filter_map(|r| r.ok()).collect();
+                let inv_rows: Vec<Value> = inv_stmt
+                    .query_map([], |r| {
+                        Ok(json!({
+                            "id": r.get::<_, i64>(0)?,
+                            "invoice_number": r.get::<_, Option<String>>(1)?,
+                            "contact_id": r.get::<_, Option<i64>>(2)?,
+                            "contact_name": r.get::<_, Option<String>>(3)?,
+                        }))
+                    })
+                    .map_err(sql_err)?
+                    .filter_map(|r| r.ok())
+                    .collect();
                 let mut best_inv: Option<(i64, String, String, i64, i64)> = None; // (id, number, contact, outstanding, delta)
                 for ir in &inv_rows {
                     let iid = ir["id"].as_i64().unwrap();
-                    if used_invoice_ids.contains(&iid) { continue; }
+                    if used_invoice_ids.contains(&iid) {
+                        continue;
+                    }
                     // outstanding comes from the DISCOUNTED totals engine — a
                     // raw line-sum query ignores v0.13 discounts and never matches
                     let full = match crate::invoice::get_invoice(db, iid) {
@@ -766,9 +772,14 @@ pub fn auto_match(db: &Connection, window_days: i64, actor: &str, dry_run: bool)
                     };
                     let outstanding = full["gross_cents"].as_i64().unwrap_or(0)
                         - full["paid_cents"].as_i64().unwrap_or(0);
-                    if outstanding <= 0 { continue; }
+                    if outstanding <= 0 {
+                        continue;
+                    }
                     let delta = (outstanding - amount).abs();
-                    let tolerance = std::cmp::max(outstanding * FX_MATCH_TOLERANCE_BP / 10000, FX_MATCH_FLOOR_CENTS);
+                    let tolerance = std::cmp::max(
+                        outstanding * FX_MATCH_TOLERANCE_BP / 10000,
+                        FX_MATCH_FLOOR_CENTS,
+                    );
                     if delta <= tolerance && best_inv.as_ref().map_or(true, |b| delta < b.4) {
                         best_inv = Some((
                             iid,
@@ -821,18 +832,29 @@ pub fn auto_match(db: &Connection, window_days: i64, actor: &str, dry_run: bool)
                          VALUES (?1, ?2, ?3, 'bank', ?4, ?5)",
                         rusqlite::params![invoice_id, tx_date_str, outstanding, tx_id, actor],
                     ).map_err(sql_err)?;
-                    tx_ref.execute(
-                        "UPDATE invoices SET status = 'paid' WHERE id = ?1",
-                        [invoice_id],
-                    ).map_err(sql_err)?;
+                    tx_ref
+                        .execute(
+                            "UPDATE invoices SET status = 'paid' WHERE id = ?1",
+                            [invoice_id],
+                        )
+                        .map_err(sql_err)?;
                     // Get bank account code
-                    let bank_account_id = m.get("bank_account_id").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let account_code: String = tx_ref.query_row(
-                        "SELECT account_code FROM bank_accounts WHERE id = ?1",
-                        [bank_account_id],
-                        |r| r.get(0),
-                    ).unwrap_or_else(|_| "1100".into());
-                    let inv_num: String = m.get("invoice_number").and_then(|v| v.as_str()).map(String::from).unwrap_or_default();
+                    let bank_account_id = m
+                        .get("bank_account_id")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                    let account_code: String = tx_ref
+                        .query_row(
+                            "SELECT account_code FROM bank_accounts WHERE id = ?1",
+                            [bank_account_id],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or_else(|_| "1100".into());
+                    let inv_num: String = m
+                        .get("invoice_number")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                        .unwrap_or_default();
                     let mut desc = format!("Payment {inv_num}");
                     if let Some(cn) = m.get("contact_name").and_then(|v| v.as_str()) {
                         if !cn.is_empty() {
@@ -843,30 +865,34 @@ pub fn auto_match(db: &Connection, window_days: i64, actor: &str, dry_run: bool)
                     let debtors_code: String = {
                         let profile = crate::accounts::resolve_profile(&tx_ref).ok();
                         profile
-                            .and_then(|p| p["reporting"]["debtorsAccount"].as_str().map(String::from))
+                            .and_then(|p| {
+                                p["reporting"]["debtorsAccount"].as_str().map(String::from)
+                            })
                             .unwrap_or_else(|| "1200".into())
                     };
-                    let bank_acct_id: i64 = tx_ref.query_row(
-                        "SELECT id FROM accounts WHERE code = ?1",
-                        [&account_code],
-                        |r| r.get(0),
-                    ).unwrap_or(0);
-                    let debtors_acct_id: i64 = tx_ref.query_row(
-                        "SELECT id FROM accounts WHERE code = ?1",
-                        [&debtors_code],
-                        |r| r.get(0),
-                    ).unwrap_or(0);
-                    let mut legs: Vec<(i64, i64)> = vec![
-                        (bank_acct_id, amount),
-                        (debtors_acct_id, -outstanding),
-                    ];
+                    let bank_acct_id: i64 = tx_ref
+                        .query_row(
+                            "SELECT id FROM accounts WHERE code = ?1",
+                            [&account_code],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
+                    let debtors_acct_id: i64 = tx_ref
+                        .query_row(
+                            "SELECT id FROM accounts WHERE code = ?1",
+                            [&debtors_code],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
+                    let mut legs: Vec<(i64, i64)> =
+                        vec![(bank_acct_id, amount), (debtors_acct_id, -outstanding)];
                     if fx_cents != 0 {
                         let fx_code = ensure_fx_difference_account(&tx_ref, actor)?;
-                        let fx_acct_id: i64 = tx_ref.query_row(
-                            "SELECT id FROM accounts WHERE code = ?1",
-                            [&fx_code],
-                            |r| r.get(0),
-                        ).unwrap_or(0);
+                        let fx_acct_id: i64 = tx_ref
+                            .query_row("SELECT id FROM accounts WHERE code = ?1", [&fx_code], |r| {
+                                r.get(0)
+                            })
+                            .unwrap_or(0);
                         legs.push((fx_acct_id, -fx_cents));
                         desc.push_str(&format!(" (fx difference {})", format_amount(fx_cents)));
                     }
@@ -884,11 +910,17 @@ pub fn auto_match(db: &Connection, window_days: i64, actor: &str, dry_run: bool)
                         ).map_err(sql_err)?;
                     }
                     // Now post it
-                    tx_ref.execute(
-                        "UPDATE journal_entries SET state = 'posted' WHERE id = ?1",
-                        [entry_id],
-                    ).map_err(sql_err)?;
-                    let recon_method = if actor.starts_with("agent") { "agent" } else { "manual" };
+                    tx_ref
+                        .execute(
+                            "UPDATE journal_entries SET state = 'posted' WHERE id = ?1",
+                            [entry_id],
+                        )
+                        .map_err(sql_err)?;
+                    let recon_method = if actor.starts_with("agent") {
+                        "agent"
+                    } else {
+                        "manual"
+                    };
                     tx_ref.execute(
                         "INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
                          VALUES (?1, 'invoice', ?2, ?3, 1.0, ?4)",

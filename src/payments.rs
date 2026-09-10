@@ -686,7 +686,10 @@ pub fn build_pain008(
             .as_str()
             .map(|r| r.chars().take(35).collect::<String>())
             .unwrap_or_else(|| format!("BUKIO{}", i + 1));
-        let amt = format!("{:.2}", l["amount_cents"].as_i64().unwrap_or(0) as f64 / 100.0);
+        let amt = format!(
+            "{:.2}",
+            l["amount_cents"].as_i64().unwrap_or(0) as f64 / 100.0
+        );
         let mandate_ref = l["mandate_ref"].as_str().unwrap_or("");
         let mandate_date = l["mandate_date"].as_str().unwrap_or("");
         let rmt = l["reference"]
@@ -752,12 +755,7 @@ pub fn build_pain008(
 
 /// Export a draft batch as SEPA XML: pain.001 for transfer, pain.008.001.02
 /// for direct-debit. Marks the batch exported (mirrors JS exportPaymentBatch).
-pub fn export_payment_batch(
-    db: &Connection,
-    id: i64,
-    actor: &str,
-    dry_run: bool,
-) -> Result<Value> {
+pub fn export_payment_batch(db: &Connection, id: i64, actor: &str, dry_run: bool) -> Result<Value> {
     let batch = serialize_batch(db, id)?;
     if batch.get("status").and_then(|v| v.as_str()) != Some("draft") {
         return Err(payments_error(
@@ -775,23 +773,52 @@ pub fn export_payment_batch(
             .chars()
             .take(14)
             .collect::<String>(),
-        id.to_string().chars().rev().take(16).collect::<String>().chars().rev().collect::<String>()
+        id.to_string()
+            .chars()
+            .rev()
+            .take(16)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect::<String>()
     );
-    let created_iso = chrono::Utc::now()
-        .format("%Y-%m-%dT%H:%M:%SZ")
-        .to_string();
-    let debit_name = batch.get("debit_name").and_then(|v| v.as_str()).unwrap_or("");
-    let debit_iban = batch.get("debit_iban").and_then(|v| v.as_str()).unwrap_or("");
-    let batch_date = batch.get("batch_date").and_then(|v| v.as_str()).unwrap_or("");
+    let created_iso = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let debit_name = batch
+        .get("debit_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let debit_iban = batch
+        .get("debit_iban")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let batch_date = batch
+        .get("batch_date")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let (schema, xml) = if is_dd {
         (
             "pain.008.001.02".to_string(),
-            build_pain008(&msg_id, &created_iso, debit_name, debit_iban, batch_date, &lines),
+            build_pain008(
+                &msg_id,
+                &created_iso,
+                debit_name,
+                debit_iban,
+                batch_date,
+                &lines,
+            ),
         )
     } else {
         (
             "pain.001.001.03".to_string(),
-            build_pain001(&msg_id, &created_iso, debit_name, debit_iban, batch_date, &lines, "001.03"),
+            build_pain001(
+                &msg_id,
+                &created_iso,
+                debit_name,
+                debit_iban,
+                batch_date,
+                &lines,
+                "001.03",
+            ),
         )
     };
     let file_hash = format!("{:x}", {
@@ -819,7 +846,9 @@ pub fn export_payment_batch(
             actor,
             action: "payments.batch.export",
             command: Some("payments batch export"),
-            args: Some(json!({"batch_id": id, "kind": batch.get("batch_kind"), "msg_id": msg_id, "lines": lines.len(), "total_cents": batch.get("total_cents"), "file_hash": &file_hash[..12.min(file_hash.len())], "schema": schema})),
+            args: Some(
+                json!({"batch_id": id, "kind": batch.get("batch_kind"), "msg_id": msg_id, "lines": lines.len(), "total_cents": batch.get("total_cents"), "file_hash": &file_hash[..12.min(file_hash.len())], "schema": schema}),
+            ),
             outcome: "ok",
             entry_ids: vec![],
         },

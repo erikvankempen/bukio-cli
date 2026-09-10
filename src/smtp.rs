@@ -182,7 +182,11 @@ pub fn email_invoice(
 ) -> Result<Value> {
     let inv = crate::invoice::get_invoice(db, id)?
         .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} does not exist")))?;
-    if inv.get("invoice_number").and_then(|v| v.as_str()).is_none_or(|s| s.is_empty()) {
+    if inv
+        .get("invoice_number")
+        .and_then(|v| v.as_str())
+        .is_none_or(|s| s.is_empty())
+    {
         return Err(BukioError::new(
             "NOT_FINALIZED",
             "finalize the invoice before emailing it",

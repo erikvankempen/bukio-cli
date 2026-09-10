@@ -54,7 +54,11 @@ fn backup_passphrase(passphrase: Option<&str>) -> Result<String> {
     let pass = passphrase
         .filter(|p| !p.is_empty())
         .map(String::from)
-        .or_else(|| std::env::var("BUKIO_BACKUP_PASSPHRASE").ok().filter(|p| !p.is_empty()));
+        .or_else(|| {
+            std::env::var("BUKIO_BACKUP_PASSPHRASE")
+                .ok()
+                .filter(|p| !p.is_empty())
+        });
     match pass {
         Some(p) => Ok(p),
         None => Err(BukioError::new(
@@ -103,8 +107,9 @@ fn encrypt_bytes(plain: &[u8], dest: &Path, pass: &str) -> Result<u64> {
     out.extend_from_slice(&salt);
     out.extend_from_slice(&iv);
     out.extend_from_slice(&in_out);
-    fs::write(dest, &out)
-        .map_err(|e| BukioError::new("IO_ERROR", format!("cannot write {}: {e}", dest.display())))?;
+    fs::write(dest, &out).map_err(|e| {
+        BukioError::new("IO_ERROR", format!("cannot write {}: {e}", dest.display()))
+    })?;
     Ok(out.len() as u64)
 }
 
@@ -281,7 +286,9 @@ pub fn cmd_backup(
             actor,
             action: "backup",
             command: Some("backup"),
-            args: Some(json!({"to": dest.display().to_string(), "bytes": final_bytes, "encrypted": encrypt})),
+            args: Some(
+                json!({"to": dest.display().to_string(), "bytes": final_bytes, "encrypted": encrypt}),
+            ),
             outcome: "ok",
             entry_ids: vec![],
         },

@@ -90,7 +90,9 @@ fn nonces_path() -> PathBuf {
 }
 
 fn key_file_path(actor: &str) -> PathBuf {
-    config_dir().join("keys").join(format!("{}.key", actor.replace(':', "-")))
+    config_dir()
+        .join("keys")
+        .join(format!("{}.key", actor.replace(':', "-")))
 }
 
 // --- Exempt commands ---
@@ -99,7 +101,13 @@ fn key_file_path(actor: &str) -> PathBuf {
 pub fn is_signing_exempt(cmd: &str) -> bool {
     matches!(
         cmd,
-        "actor keygen" | "actor unlock" | "actor lock" | "actor verify" | "mcp" | "server start" | "server token"
+        "actor keygen"
+            | "actor unlock"
+            | "actor lock"
+            | "actor verify"
+            | "mcp"
+            | "server start"
+            | "server token"
     )
 }
 
@@ -498,7 +506,13 @@ pub fn sign_command(
             if let Some(ref db) = db {
                 if crate::actor::get_authz(db) {
                     // Authz is on — let authz gate deny, not signing gate
-                    check_authz(db, actor, cmd, argv.iter().any(|a| a == "--target" || a == "--for"), false)?;
+                    check_authz(
+                        db,
+                        actor,
+                        cmd,
+                        argv.iter().any(|a| a == "--target" || a == "--for"),
+                        false,
+                    )?;
                     // If we get here, authz passed (shouldn't happen for missing key)
                     return Ok(None);
                 }
@@ -592,7 +606,8 @@ pub fn sign_tool_call(
         .map_err(|e| BukioError::new("SIGN_ERROR", e))?;
 
     // Verify the bundle against the registry
-    let verify = verify_signature_bundle(db, actor, &digest, &sig, &key.keyid, &ts, &nonce, enforce);
+    let verify =
+        verify_signature_bundle(db, actor, &digest, &sig, &key.keyid, &ts, &nonce, enforce);
 
     if !verify.ok {
         let code = verify.code.unwrap_or("SIGNATURE_FAILED");

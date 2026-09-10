@@ -283,9 +283,11 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
         let vat_code_id = match &p.vat_code {
             None => None,
             Some(code) => Some(
-                db.query_row("SELECT id FROM vat_codes WHERE code = ?1", [code.as_str()], |r| {
-                    r.get::<_, i64>(0)
-                })
+                db.query_row(
+                    "SELECT id FROM vat_codes WHERE code = ?1",
+                    [code.as_str()],
+                    |r| r.get::<_, i64>(0),
+                )
                 .map_err(|_| {
                     BukioError::new(
                         "VAT_CODE_NOT_FOUND",

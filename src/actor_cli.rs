@@ -26,7 +26,9 @@ fn config_dir() -> PathBuf {
 }
 
 fn key_file_path(actor: &str) -> PathBuf {
-    config_dir().join("keys").join(format!("{}.key", actor.replace(':', "-")))
+    config_dir()
+        .join("keys")
+        .join(format!("{}.key", actor.replace(':', "-")))
 }
 
 pub fn session_file_path(actor: &str) -> PathBuf {
@@ -344,7 +346,10 @@ pub fn cmd_grant(db_path: &str, actor: &str, role: &str, granted_by: &str) -> Re
     if !crate::authz::ROLES.contains(&role) {
         return Err(BukioError::new(
             "INVALID_ROLE",
-            format!("'{role}' is not a role — use one of {}", crate::authz::ROLES.join("|")),
+            format!(
+                "'{role}' is not a role — use one of {}",
+                crate::authz::ROLES.join("|")
+            ),
         ));
     }
     if !is_valid_actor(actor) {
@@ -382,7 +387,10 @@ pub fn cmd_revoke_role(db_path: &str, actor: &str, role: &str, revoked_by: &str)
     if !crate::authz::ROLES.contains(&role) {
         return Err(BukioError::new(
             "INVALID_ROLE",
-            format!("'{role}' is not a role — use one of {}", crate::authz::ROLES.join("|")),
+            format!(
+                "'{role}' is not a role — use one of {}",
+                crate::authz::ROLES.join("|")
+            ),
         ));
     }
     if !is_valid_actor(actor) {
