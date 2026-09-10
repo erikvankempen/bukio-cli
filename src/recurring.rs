@@ -717,11 +717,7 @@ fn run_template_once(db: &Connection, tpl: &Value, actor: &str) -> Result<Value>
                     Ok(reversal) => {
                         generated.push(json!({
                             "kind": "reversal",
-                            "entry": {
-                                "id": reversal.id,
-                                "date": reversal.date,
-                                "state": reversal.state,
-                            },
+                            "entry": serde_json::to_value(&reversal).unwrap_or(Value::Null),
                         }));
                     }
                     Err(e) if e.code == "ALREADY_REVERSED" || e.code == "NOT_POSTED" => {}
@@ -745,9 +741,10 @@ fn run_template_once(db: &Connection, tpl: &Value, actor: &str) -> Result<Value>
         )?;
         let posted = post_entry(db, entry.id, "recurring")?;
         last_entry_id = Some(posted.id);
+        // the JS pushes the whole posted entry ({ kind:'entry', entry: posted })
         generated.push(json!({
             "kind": "entry",
-            "entry": { "id": posted.id, "date": posted.date, "state": posted.state },
+            "entry": serde_json::to_value(&posted).unwrap_or(Value::Null),
         }));
     }
 

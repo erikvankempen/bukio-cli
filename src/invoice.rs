@@ -157,7 +157,10 @@ pub fn parse_line_spec(spec: &str) -> Result<Value> {
     }
 
     Ok(json!({
-        "qtyMilli": qty_milli, "qty": qty_milli as f64 / 1000.0,
+        "qtyMilli": qty_milli,
+        // the JS's qty is a plain JS number: JSON.stringify(1) is "1", not
+        // "1.0" — serde prints the f64 form, which broke byte parity of --json
+        "qty": if qty_milli % 1000 == 0 { json!(qty_milli / 1000) } else { json!(qty_milli as f64 / 1000.0) },
         "description": description, "priceCents": price_cents,
         "vatCode": vat_code, "discountType": discount_type, "discountValue": discount_value,
     }))
@@ -1360,8 +1363,11 @@ pub fn credit_invoice(
             .as_str()
             .or_else(|| original["invoice_number"].as_str()),
         None,
-        None, // no discount on credit
-        None,
+        // the invoice-level discount is re-applied on the credit, like the JS
+        // (original.discount_type/discount_value) — dropping it credited the
+        // UNDISCOUNTED amount and over-credited the customer
+        original["discount_type"].as_str(),
+        original["discount_value"].as_i64(),
         &credit_lines_raw,
         actor,
         false,

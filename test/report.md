@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 16:25:52 UTC — **✅ 579 passing · 0 failing (579 tests)**
+**Latest run:** 2026-09-10 16:40:36 UTC — **✅ 542 passing · 0 failing (542 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -218,48 +218,6 @@
     - ✅ export: DD batch → pain.008.001.02, one export per batch; transfer regression
     - ✅ cli: mandate add/list + direct-debit batch create/export e2e
     - ✅ mcp: mandate add/list + batch create/export (dry-run parity + execute)
-
-### edge-cases.test.js — rounding, boundaries, idempotency, lifecycle violations, dry-run hygiene
-
-37 passing · 0 failing
-
-    - ✅ ledger: unbalanced, zero-amount, too-few postings rejected
-    - ✅ ledger: same account on both sides is legal
-    - ✅ ledger: reversal guards — draft and double-reversal rejected
-    - ✅ ledger: posted entries are immutable — direct UPDATE blocked by trigger
-    - ✅ ledger: drafts excluded from balans and P&L
-    - ✅ invoice: quantity and price guards
-    - ✅ invoice: line parser — Dutch comma price, @ inside description
-    - ✅ invoice: line parser — price-only integer price, lowercase vat codes, negative qty (regression)
-    - ✅ invoice: per-line rounding edge — 3x 0.01 @21 has 1 cent VAT (line-total rounding)
-    - ✅ invoice: 0% and exempt (V) lines book without VAT
-    - ✅ invoice: credit note of a paid invoice; credit of a credit rejected
-    - ✅ invoice: lifecycle — pay draft rejected, overpayment rejected, overdue derived
-    - ✅ invoice: UBL escaping and verlegd category
-    - ✅ invoice: due date crosses the year boundary
-    - ✅ recurring: day 28 keeps the 28th every month (no drift)
-    - ✅ recurring: quarterly and yearly frequencies
-    - ✅ recurring: end_date stops the schedule
-    - ✅ recurring: templateId run only runs that template even when due later
-    - ✅ recurring: depreciation with residual value — final run absorbs the remainder
-    - ✅ bank: import is idempotent — same statement twice = 0 duplicates on re-import
-    - ✅ bank: Rabo CSV with Af/Bij and Dutch decimals parses correctly
-    - ✅ bank: auto-match prefers an exact entry over an invoice for the same amount
-    - ✅ bank: partial payment does not auto-match the invoice
-    - ✅ vat: mixed rates in one entry, monthly period readout
-    - ✅ vat: private use (P) -> 1d/5a at the standard rate (21%)
-    - ✅ vat: private use (P) VAT is ALWAYS owed (credit 2500) regardless of the posting sign
-    - ✅ vat: R income (verlegd binnenland sale) reports the base in 1c, no VAT due
-    - ✅ year-end: loss year closes with negative result into equity
-    - ✅ year-end: fiscal year end 06-30 drives the jaarrekening as-of date
-    - ✅ jaarrekening: custom account lands in Overig, totals still balance
-    - ✅ jaarrekening: micro with no activity — zero balans, balanced
-    - ✅ year-end: closing two different years works independently
-    - ✅ icp: credit note reduces the customer total; period boundary respected
-    - ✅ icp: RE base uses the DISCOUNTED amount (agrees with the OB 2a base)
-    - ✅ fx: setFxRate with a raw float rate parses as 1.0875, not 1.0875 x10000
-    - ✅ all mutating paths leave no trace in dry-run
-    - ✅ ensureDb(mustExist:false) returns null and never creates the database file
 
 ### export.test.js — export xaf (Auditfile 4.0, round-trips through the importer) + audit csv/xlsx
 
