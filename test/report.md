@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 15:53:57 UTC — **✅ 611 passing · 0 failing (611 tests)**
+**Latest run:** 2026-09-10 16:03:11 UTC — **✅ 602 passing · 0 failing (602 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -650,20 +650,6 @@
     - ✅ sales by item: catalog items group by item_id, ad-hoc lines by description
     - ✅ cli: report aging + sales + contact statement e2e with csv export
     - ✅ mcp: report_aging and report_sales expose the same shapes
-
-### reports.test.js — balance sheet, P&L, journal
-
-9 passing · 0 failing
-
-    - ✅ balans: assets = liabilities + equity + result
-    - ✅ balans: before any income/expense, result is zero
-    - ✅ balans: empty books balance at zero
-    - ✅ balans: drafts excluded, reversal nets out
-    - ✅ pnl: revenue, costs and result
-    - ✅ pnl: empty period gives zero result and no sections
-    - ✅ pnl: legacy chart without RGS codes still splits revenue/costs by type
-    - ✅ pnl: catch-all section for accounts with unknown taxonomy_code
-    - ✅ journal: one row per posting, ordered by date
 
 ### review-round3.test.js — 
 

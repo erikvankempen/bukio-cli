@@ -2359,3 +2359,281 @@ mod tests {
         assert_eq!(centers[0]["cost_center_code"].as_str(), Some("ADM"));
     }
 }
+
+// ==== ported from test/reports.test.js ======================================
+#[cfg(test)]
+mod reports_tests {
+    use super::*;
+    use crate::entries::{create_entry, post_entry, reverse_entry, CreateEntry, PostingSpec};
+    use rusqlite::Connection;
+    use serde_json::{json, Value};
+
+    fn idb() -> Connection {
+        let d = crate::db::open_db(":memory:").unwrap();
+        crate::accounts::seed_default_chart(&d).unwrap();
+        d
+    }
+
+    fn specs(pairs: &[(&str, i64)]) -> Vec<PostingSpec> {
+        pairs
+            .iter()
+            .map(|(code, amount_cents)| PostingSpec {
+                code: (*code).to_string(),
+                amount_cents: *amount_cents,
+                cost_center_code: None,
+                vat_code: None,
+                vat_amount_cents: None,
+            })
+            .collect()
+    }
+
+    fn post(db: &Connection, date: &str, description: &str, postings: Vec<PostingSpec>) -> i64 {
+        let e = create_entry(
+            db,
+            CreateEntry {
+                date,
+                description,
+                postings,
+                source: "manual",
+                source_ref: None,
+                actor: "agent:test",
+            },
+        )
+        .unwrap();
+        post_entry(db, e.id, "agent:test").unwrap();
+        e.id
+    }
+
+    fn seed_scenario(db: &Connection) {
+        post(
+            db,
+            "2026-01-05",
+            "Startkapitaal",
+            specs(&[("1100", 1000000), ("3000", -1000000)]),
+        );
+        post(
+            db,
+            "2026-02-10",
+            "Omzet",
+            specs(&[("1100", 121000), ("8000", -121000)]),
+        );
+        post(
+            db,
+            "2026-03-01",
+            "Kantoorartikelen",
+            specs(&[("4300", 25000), ("1100", -25000)]),
+        );
+    }
+
+    /// find a section by taxonomy_code in a {sections: [...]} object
+    fn section(container: &Value, val: &str) -> Value {
+        container["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["taxonomy_code"] == val)
+            .cloned()
+            .unwrap_or_else(|| panic!("no section {val}: {container:?}"))
+    }
+
+    #[test]
+    fn balans_assets_equal_liabilities_plus_equity_plus_result() {
+        let d = idb();
+        seed_scenario(&d);
+        let b = balans(&d, "2026-03-31").unwrap();
+        assert_eq!(b["balanced"], json!(true));
+        assert_eq!(b["assets"]["total_cents"].as_i64(), Some(1096000));
+        assert_eq!(
+            b["liabilities_and_equity"]["total_cents"].as_i64(),
+            Some(1096000)
+        );
+        assert_eq!(
+            b["liabilities_and_equity"]["result_cents"].as_i64(),
+            Some(96000)
+        );
+        let blim = section(&b["assets"], "BLIM.10");
+        assert_eq!(blim["label"].as_str(), Some("Liquide middelen"));
+        assert_eq!(blim["total_cents"].as_i64(), Some(1096000));
+        let ev = section(&b["liabilities_and_equity"], "BEIV.05");
+        assert_eq!(ev["total_cents"].as_i64(), Some(1000000));
+    }
+
+    #[test]
+    fn balans_result_is_zero_before_any_income_or_expense() {
+        let d = idb();
+        post(
+            &d,
+            "2026-01-05",
+            "Startkapitaal",
+            specs(&[("1100", 1000000), ("3000", -1000000)]),
+        );
+        let b = balans(&d, "2026-01-31").unwrap();
+        assert_eq!(b["balanced"], json!(true));
+        assert_eq!(b["assets"]["total_cents"].as_i64(), Some(1000000));
+        assert_eq!(
+            b["liabilities_and_equity"]["result_cents"].as_i64(),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn balans_empty_books_balance_at_zero() {
+        let d = idb();
+        let b = balans(&d, "2026-01-31").unwrap();
+        assert_eq!(b["balanced"], json!(true));
+        assert_eq!(b["assets"]["total_cents"].as_i64(), Some(0));
+        assert_eq!(b["liabilities_and_equity"]["total_cents"].as_i64(), Some(0));
+    }
+
+    #[test]
+    fn balans_excludes_drafts_and_nets_out_reversals() {
+        let d = idb();
+        // never posted — must not appear
+        create_entry(
+            &d,
+            CreateEntry {
+                date: "2026-02-01",
+                description: "draft",
+                postings: specs(&[("1100", 999), ("3000", -999)]),
+                source: "manual",
+                source_ref: None,
+                actor: "agent:test",
+            },
+        )
+        .unwrap();
+        let posted = post(
+            &d,
+            "2026-02-02",
+            "Omzet",
+            specs(&[("1100", 50000), ("8000", -50000)]),
+        );
+        reverse_entry(&d, posted, "agent:test", Some("credit note")).unwrap();
+
+        let b = balans(&d, "2026-12-31").unwrap();
+        assert_eq!(b["balanced"], json!(true));
+        assert_eq!(b["assets"]["total_cents"].as_i64(), Some(0));
+        assert_eq!(
+            b["liabilities_and_equity"]["result_cents"].as_i64(),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn pnl_revenue_costs_and_result() {
+        let d = idb();
+        seed_scenario(&d);
+        let p = pnl(&d, "2026-01-01", "2026-12-31").unwrap();
+        assert_eq!(p["revenue_cents"].as_i64(), Some(121000));
+        assert_eq!(p["costs_cents"].as_i64(), Some(25000));
+        assert_eq!(p["result_cents"].as_i64(), Some(96000));
+        assert_eq!(section(&p, "WOMZ.80")["total_cents"].as_i64(), Some(121000));
+        assert_eq!(section(&p, "WBED.42")["total_cents"].as_i64(), Some(25000));
+    }
+
+    #[test]
+    fn pnl_empty_period_gives_zero_result_and_no_sections() {
+        let d = idb();
+        let p = pnl(&d, "2025-01-01", "2025-12-31").unwrap();
+        assert_eq!(p["result_cents"].as_i64(), Some(0));
+        assert_eq!(p["sections"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn pnl_legacy_chart_without_rgs_codes_splits_by_account_type() {
+        let d = idb();
+        for (code, name, type_, nb) in [
+            ("8200", "Omzet diensten", "income", "credit"),
+            ("6531", "Kosten IT", "expense", "debit"),
+            ("6710", "Afschrijvingskosten", "expense", "debit"),
+            ("9100", "Rentebaten", "expense", "debit"), // contra-expense
+        ] {
+            crate::accounts::create_account(
+                &d,
+                &crate::accounts::NewAccount {
+                    code,
+                    name,
+                    type_,
+                    normal_balance: nb,
+                    taxonomy_code: None,
+                },
+            )
+            .unwrap();
+        }
+        post(
+            &d,
+            "2026-03-01",
+            "Factuur",
+            specs(&[("1100", 29420), ("8200", -29420)]),
+        );
+        post(
+            &d,
+            "2026-03-02",
+            "Hosting",
+            specs(&[("6531", 24036), ("1100", -24036)]),
+        );
+        post(
+            &d,
+            "2026-03-03",
+            "Afschrijving",
+            specs(&[("6710", 29976), ("1100", -29976)]),
+        );
+        post(
+            &d,
+            "2026-03-04",
+            "Rente",
+            specs(&[("1100", 11716), ("9100", -11716)]),
+        );
+
+        let p = pnl(&d, "2026-01-01", "2026-12-31").unwrap();
+        assert_eq!(p["revenue_cents"].as_i64(), Some(29420));
+        assert_eq!(p["costs_cents"].as_i64(), Some(24036 + 29976 - 11716));
+        assert_eq!(
+            p["result_cents"].as_i64(),
+            Some(29420 - (24036 + 29976 - 11716))
+        );
+    }
+
+    #[test]
+    fn pnl_catch_all_section_for_unknown_taxonomy() {
+        let d = idb();
+        crate::accounts::create_account(
+            &d,
+            &crate::accounts::NewAccount {
+                code: "5000",
+                name: "Testkosten",
+                type_: "expense",
+                normal_balance: "debit",
+                taxonomy_code: None,
+            },
+        )
+        .unwrap();
+        post(
+            &d,
+            "2026-05-01",
+            "Testkosten",
+            specs(&[("5000", 1000), ("1100", -1000)]),
+        );
+        let p = pnl(&d, "2026-01-01", "2026-12-31").unwrap();
+        let overig = p["sections"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["label"] == "Overig")
+            .cloned()
+            .unwrap_or_else(|| panic!("no Overig section: {p:?}"));
+        assert_eq!(overig["total_cents"].as_i64(), Some(1000));
+        assert_eq!(p["costs_cents"].as_i64(), Some(1000));
+    }
+
+    #[test]
+    fn journal_one_row_per_posting_ordered_by_date() {
+        let d = idb();
+        seed_scenario(&d);
+        let rows = journal(&d, "2026-01-01", "2026-12-31", None).unwrap();
+        assert_eq!(rows.len(), 6);
+        assert_eq!(rows[0]["entry_id"].as_i64(), Some(1));
+        assert_eq!(rows[0]["account_code"].as_str(), Some("1100"));
+        assert_eq!(rows[0]["amount_cents"].as_i64(), Some(1000000));
+        assert_eq!(rows[0]["state"].as_str(), Some("posted"));
+    }
+}
