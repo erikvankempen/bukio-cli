@@ -1982,6 +1982,7 @@ fn cmd_vat_file(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
         arg(argv, "--desc").as_deref(),
         actor,
         dry_run,
+        &bukio::i18n::resolve_locale(arg(argv, "--locale").as_deref()),
     )
 }
 
@@ -2032,6 +2033,7 @@ fn cmd_vat_settle(argv: &[String], db_path: &str, actor: &str, dry_run: bool) ->
         arg(argv, "--desc").as_deref(),
         actor,
         dry_run,
+        &bukio::i18n::resolve_locale(arg(argv, "--locale").as_deref()),
     )?;
     if !dry_run {
         if let Some(entry_id) = result["entry_id"].as_i64() {

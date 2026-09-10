@@ -657,6 +657,7 @@ pub fn vat_file(
     desc: Option<&str>,
     actor: &str,
     dry_run: bool,
+    locale: &str,
 ) -> Result<Value> {
     require_vat(db)?;
     let profile = resolve_profile(db)?;
@@ -717,11 +718,23 @@ pub fn vat_file(
     postings.retain(|p| p.amount_cents != 0);
     let owe = net > 0;
     let liability = net.abs();
+    // the JS builds this from the locale tables (vat.file.description), with the
+    // direction itself translated first — the port hardcoded different English
     let description = desc.map(String::from).unwrap_or_else(|| {
-        let direction = if owe { "payable" } else { "receivable" };
-        format!(
-            "VAT filing{period_part} — reclassify to {account} ({direction})",
-            period_part = period.map(|p| format!(" {p}")).unwrap_or_default()
+        let direction = if owe {
+            crate::i18n::t("dir.payable", &[], locale)
+        } else {
+            crate::i18n::t("dir.receivable", &[], locale)
+        };
+        let period_part = period.map(|p| format!(" {p}")).unwrap_or_default();
+        crate::i18n::t(
+            "vat.file.description",
+            &[
+                ("period", &period_part),
+                ("account", &account),
+                ("direction", &direction),
+            ],
+            locale,
         )
     });
 
@@ -878,6 +891,7 @@ pub fn vat_settle(
     desc: Option<&str>,
     actor: &str,
     dry_run: bool,
+    locale: &str,
 ) -> Result<Value> {
     require_vat(db)?;
     let tax = &resolve_profile(db)?["tax"];
@@ -951,11 +965,15 @@ pub fn vat_settle(
         });
     }
     let description = desc.map(String::from).unwrap_or_else(|| {
-        format!(
-            "VAT settlement{period_part} — {} (difference {diff})",
-            settlement_account_name(db),
-            period_part = period.map(|p| format!(" {p}")).unwrap_or_default(),
-            diff = format_amount(difference)
+        let period_part = period.map(|p| format!(" {p}")).unwrap_or_default();
+        crate::i18n::t(
+            "vat.settle.description",
+            &[
+                ("period", &period_part),
+                ("account", &settlement_account_name(db)),
+                ("amount", &format_amount(difference)),
+            ],
+            locale,
         )
     });
     let date = tx_date.map(String::from).unwrap_or_else(today_iso);
@@ -1522,7 +1540,7 @@ mod tests {
         let db = settle_company();
         book_quarter(&db);
         assert_eq!(vat_net_position(&db), 1050); // 2100 output - 1050 input
-        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false, "en").unwrap();
         assert_eq!(r["owe"], true);
         assert_eq!(r["liability_cents"], 1050);
         assert_eq!(account_bal(&db, "2500"), 0); // clearing account emptied
@@ -1556,7 +1574,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(vat_net_position(&db), -2100);
-        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false, "en").unwrap();
         assert_eq!(r["owe"], false);
         assert_eq!(r["liability_cents"], 2100);
         assert_eq!(account_bal(&db, "1500"), 0);
@@ -1567,7 +1585,7 @@ mod tests {
     fn file_nothing_to_file_when_the_position_is_zero() {
         let db = settle_company();
         assert_eq!(
-            vat_file(&db, None, None, None, "agent:test", false)
+            vat_file(&db, None, None, None, "agent:test", false, "en")
                 .unwrap_err()
                 .code,
             "VAT_NOTHING_TO_FILE"
@@ -1578,7 +1596,7 @@ mod tests {
     fn file_dry_run_writes_nothing_and_does_not_create_the_account() {
         let db = settle_company();
         book_quarter(&db);
-        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", true).unwrap();
+        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", true, "en").unwrap();
         assert_eq!(r["dryRun"], true);
         assert_eq!(r["liability_cents"], 1050);
         assert_eq!(account_bal(&db, "2500"), -2100); // untouched
@@ -1605,7 +1623,7 @@ mod tests {
     fn settle_rounding_in_your_favour_books_a_gain_to_4700() {
         let db = settle_company();
         book_quarter(&db);
-        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false, "en").unwrap();
         let (amt, date, code, state) = import_payment(&db, "10.00", "DBIT");
         assert_eq!(state, "unmatched");
         let r = vat_settle(
@@ -1619,6 +1637,7 @@ mod tests {
             None,
             "agent:test",
             false,
+            "en",
         )
         .unwrap();
         assert_eq!(r["difference_cents"], -50); // paid 50c less -> gain
@@ -1644,7 +1663,7 @@ mod tests {
             true,
         )
         .unwrap();
-        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false, "en").unwrap();
         let (amt, date, code, _) = import_payment(&db, "22.00", "CRDT");
         let r = vat_settle(
             &db,
@@ -1657,6 +1676,7 @@ mod tests {
             None,
             "agent:test",
             false,
+            "en",
         )
         .unwrap();
         assert_eq!(r["difference_cents"], -100); // received 1.00 more -> gain
@@ -1669,7 +1689,7 @@ mod tests {
     fn settle_paying_more_than_booked_books_a_loss() {
         let db = settle_company();
         book_quarter(&db);
-        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false, "en").unwrap();
         let (amt, date, code, _) = import_payment(&db, "11.00", "DBIT");
         let r = vat_settle(
             &db,
@@ -1682,6 +1702,7 @@ mod tests {
             None,
             "agent:test",
             false,
+            "en",
         )
         .unwrap();
         assert_eq!(r["difference_cents"], 50); // loss (debit)
@@ -1692,7 +1713,7 @@ mod tests {
     fn settle_difference_beyond_five_euro_is_rejected() {
         let db = settle_company();
         book_quarter(&db);
-        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false, "en").unwrap();
         let (amt, date, code, _) = import_payment(&db, "20.00", "DBIT");
         assert_eq!(
             vat_settle(
@@ -1705,7 +1726,8 @@ mod tests {
                 None,
                 None,
                 "agent:test",
-                false
+                false,
+                "en",
             )
             .unwrap_err()
             .code,
@@ -1729,7 +1751,8 @@ mod tests {
                 None,
                 None,
                 "agent:test",
-                false
+                false,
+                "en",
             )
             .unwrap_err()
             .code,
@@ -1741,7 +1764,7 @@ mod tests {
     fn settle_direction_guard_blocks_incoming_against_a_payable() {
         let db = settle_company();
         book_quarter(&db);
-        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false, "en").unwrap();
         let (amt, date, code, _) = import_payment(&db, "10.50", "CRDT");
         assert_eq!(
             vat_settle(
@@ -1754,7 +1777,8 @@ mod tests {
                 None,
                 None,
                 "agent:test",
-                false
+                false,
+                "en",
             )
             .unwrap_err()
             .code,
@@ -1766,7 +1790,7 @@ mod tests {
     fn settle_rejects_an_invalid_difference_account() {
         let db = settle_company();
         book_quarter(&db);
-        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false, "en").unwrap();
         let (amt, date, code, _) = import_payment(&db, "10.50", "DBIT");
         assert_eq!(
             vat_settle(
@@ -1779,7 +1803,8 @@ mod tests {
                 None,
                 None,
                 "agent:test",
-                false
+                false,
+                "en",
             )
             .unwrap_err()
             .code,
@@ -1791,7 +1816,7 @@ mod tests {
     fn settle_dry_run_books_nothing_and_leaves_the_tx_unmatched() {
         let db = settle_company();
         book_quarter(&db);
-        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false, "en").unwrap();
         let (amt, date, code, _) = import_payment(&db, "10.00", "DBIT");
         let r = vat_settle(
             &db,
@@ -1804,6 +1829,7 @@ mod tests {
             None,
             "agent:test",
             true,
+            "en",
         )
         .unwrap();
         assert_eq!(r["dryRun"], true);
@@ -1835,7 +1861,7 @@ mod tests {
         )
         .unwrap();
         book_quarter(&db);
-        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false, "en").unwrap();
         let (amt, date, code, _) = import_payment(&db, "10.00", "DBIT");
         let r = vat_settle(
             &db,
@@ -1848,6 +1874,7 @@ mod tests {
             None,
             "agent:test",
             false,
+            "en",
         )
         .unwrap();
         assert_eq!(r["difference_account"], "4850");
@@ -1872,7 +1899,7 @@ mod tests {
         let db = settle_company();
         add_account(&db, "2510", "Te betalen omzetbelasting 2025");
         book_quarter(&db);
-        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false, "en").unwrap();
         assert_eq!(r["account"], "2511"); // next best numeric code
         assert_eq!(account_bal(&db, "2510"), 0); // the foreign 2510 is untouched
         assert_eq!(account_bal(&db, "2511"), -1050);
@@ -1900,6 +1927,7 @@ mod tests {
             None,
             "agent:test",
             false,
+            "en",
         )
         .unwrap();
         assert_eq!(s["account"], "2511");
@@ -1918,6 +1946,7 @@ mod tests {
             None,
             "agent:test",
             false,
+            "en",
         )
         .unwrap();
         assert_eq!(r["account"], "2515");
@@ -1935,6 +1964,7 @@ mod tests {
             None,
             "agent:test",
             false,
+            "en",
         )
         .unwrap();
         assert_eq!(s["account"], "2515");
@@ -1946,7 +1976,7 @@ mod tests {
         let db = settle_company();
         add_account(&db, "2510", "Oude schuld");
         book_quarter(&db);
-        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", true).unwrap();
+        let r = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", true, "en").unwrap();
         assert_eq!(r["dryRun"], true);
         assert_eq!(r["account"], "2511"); // the plan shows where it WOULD land
         let created: i64 = db
@@ -1965,7 +1995,7 @@ mod tests {
         let db = settle_company();
         add_account(&db, "2510", "Oude schuld");
         book_quarter(&db);
-        let first = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false).unwrap();
+        let first = vat_file(&db, None, Some("2026-Q3"), None, "agent:test", false, "en").unwrap();
         assert_eq!(first["account"], "2511");
         // a second quarter must find the SAME 2511 again
         book_vat_entry(
@@ -1979,7 +2009,7 @@ mod tests {
             true,
         )
         .unwrap();
-        let second = vat_file(&db, None, Some("2026-Q4"), None, "agent:test", false).unwrap();
+        let second = vat_file(&db, None, Some("2026-Q4"), None, "agent:test", false, "en").unwrap();
         assert_eq!(second["account"], "2511"); // reuse, not 2512
         assert_eq!(account_bal(&db, "2511"), -3150); // -1050 (Q3) + -2100 (Q4)
     }
@@ -2053,7 +2083,7 @@ mod tests {
         )
         .unwrap();
         // nothing outstanding on 2510 yet -> file moves 2500 position
-        let filed = vat_file(&db, None, Some("2026-Q2"), None, "human:erik", false).unwrap();
+        let filed = vat_file(&db, None, Some("2026-Q2"), None, "human:erik", false, "en").unwrap();
         assert_eq!(filed["owe"], true);
         assert_eq!(filed["liability_cents"], 2100);
         // settle the rounded whole-euro payment (21.00 exact -> difference 0)
@@ -2068,6 +2098,7 @@ mod tests {
             None,
             "human:erik",
             false,
+            "en",
         )
         .unwrap();
         assert_eq!(settled["difference_cents"], 0);
@@ -2083,7 +2114,8 @@ mod tests {
                 None,
                 None,
                 "human:erik",
-                false
+                false,
+                "en",
             )
             .unwrap_err()
             .code,

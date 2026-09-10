@@ -2573,3 +2573,298 @@ mod tests {
         assert!(result.contains("NL123"));
     }
 }
+
+// ==== ported from test/i18n.test.js =========================================
+#[cfg(test)]
+mod i18n_ported_tests {
+    use super::*;
+    use crate::entries::PostingSpec;
+    use rusqlite::Connection;
+
+    /// the 26 full locale tables (en pivot + nl/de/fr/da/fi/nb/sv/it/es/pt +
+    /// bg/hr/sl/et/lv/lt/mt/cy/cs/sk/el/pl/hu/ro/sq). nl-be/fr-lu are regional
+    /// override subsets by design, not full tables.
+    const FULL: &[&str] = &[
+        "en", "nl", "de", "fr", "da", "fi", "nb", "sv", "it", "es", "pt", "bg", "hr", "sl", "et",
+        "lv", "lt", "mt", "cy", "cs", "sk", "el", "pl", "hu", "ro", "sq",
+    ];
+
+    fn t_nokey(key: &str, locale: &str) -> String {
+        t(key, &[], locale)
+    }
+
+    #[test]
+    fn fallbacks() {
+        assert_eq!(t_nokey("dir.payable", "xx"), "payable"); // unknown locale -> en
+        assert_eq!(t_nokey("no.such.key", "nl"), "no.such.key"); // unknown key -> key
+        assert_eq!(t_nokey("dir.payable", "nl"), "te betalen");
+        assert_eq!(t_nokey("dir.payable", "en"), "payable"); // default en
+    }
+
+    #[test]
+    fn interpolation() {
+        assert_eq!(
+            t(
+                "vat.file.description",
+                &[
+                    ("period", " 2026-Q3"),
+                    ("account", "2510"),
+                    ("direction", "payable")
+                ],
+                "en"
+            ),
+            "VAT return 2026-Q3 — transfer to 2510 (payable)"
+        );
+        assert_eq!(
+            t(
+                "vat.file.description",
+                &[
+                    ("period", " 2026-Q3"),
+                    ("account", "2510"),
+                    ("direction", "te betalen")
+                ],
+                "nl"
+            ),
+            "OB-aangifte 2026-Q3 verlegging naar 2510 (te betalen)"
+        );
+        assert_eq!(
+            t("email.reminderSubject", &[("number", "2026-001")], "nl"),
+            "Betalingsherinnering factuur 2026-001"
+        );
+    }
+
+    #[test]
+    fn resolve_locale_flag_beats_env_which_beats_en() {
+        // the UI stays English unless opted in — a company locale does NOT flip it
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("BUKIO_LOCALE").ok();
+        std::env::remove_var("BUKIO_LOCALE");
+        assert_eq!(resolve_locale(Some("fr")), "fr"); // --locale flag wins
+        assert_eq!(resolve_locale(None), "en"); // nothing set
+
+        std::env::set_var("BUKIO_LOCALE", "de");
+        assert_eq!(resolve_locale(None), "de"); // env opts in
+        assert_eq!(resolve_locale(Some("fr")), "fr"); // flag beats env
+        match prev {
+            Some(v) => std::env::set_var("BUKIO_LOCALE", v),
+            None => std::env::remove_var("BUKIO_LOCALE"),
+        }
+    }
+
+    #[test]
+    fn resolve_locale_ignores_the_company_row() {
+        // regression guard: the company's locale must not flip the UI language
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var("BUKIO_LOCALE").ok();
+        std::env::remove_var("BUKIO_LOCALE");
+        let d = crate::db::open_db(":memory:").unwrap();
+        d.execute(
+            "INSERT INTO company (id, name, locale) VALUES (1, 'Demo BV', 'nl')",
+            [],
+        )
+        .unwrap();
+        assert_eq!(resolve_locale(None), "en");
+        let _ = d;
+        match prev {
+            Some(v) => std::env::set_var("BUKIO_LOCALE", v),
+            None => std::env::remove_var("BUKIO_LOCALE"),
+        }
+    }
+
+    #[test]
+    fn legacy_shims_keep_the_old_api_and_values() {
+        assert_eq!(label("invoice", "nl"), "FACTUUR");
+        assert_eq!(label("invoice", "en"), "INVOICE");
+        assert_eq!(label("billedTo", "nl"), "Factuur aan");
+        assert_eq!(unit_label("h", "nl"), "uur");
+        assert_eq!(unit_label("day", "en"), "day");
+        // LABELS.nl.invoice is the same value as the table's pdf.invoice
+        assert_eq!(get_table("nl").unwrap()["pdf.invoice"], "FACTUUR");
+        assert_eq!(get_table("en").unwrap()["pdf.invoice"], "INVOICE");
+    }
+
+    #[test]
+    fn all_26_full_locale_tables_carry_the_identical_key_set() {
+        let en = get_table("en").unwrap();
+        let base: std::collections::BTreeSet<String> = en.keys().cloned().collect();
+        for loc in FULL {
+            let t = get_table(loc).unwrap_or_else(|| panic!("no table for {loc}"));
+            let keys: std::collections::BTreeSet<String> = t.keys().cloned().collect();
+            assert_eq!(keys, base, "key set mismatch in table '{loc}'");
+        }
+        for ov in ["nl-be", "fr-lu"] {
+            let t = get_table(ov).unwrap_or_else(|| panic!("no table for {ov}"));
+            for k in t.keys() {
+                assert!(base.contains(k), "override '{ov}' has extra key {k}");
+            }
+        }
+        assert!(
+            base.len() >= 88,
+            "expected >= 88 keys in en, got {}",
+            base.len()
+        );
+        for k in ["report.totalAssets", "company.name", "invlist.dueDate"] {
+            assert!(base.contains(k), "missing {k}");
+        }
+    }
+
+    #[test]
+    fn company_and_balance_sheet_labels_localize() {
+        assert_eq!(t_nokey("company.name", "nl"), "naam");
+        assert_eq!(t_nokey("company.language", "nl"), "taal");
+        assert_eq!(t_nokey("company.regId", "de"), "Reg.-Nr.");
+        assert_eq!(t_nokey("report.totalAssets", "en"), "total assets:");
+        assert_eq!(t_nokey("report.totalAssets", "nl"), "totaal activa:");
+        assert_eq!(t_nokey("report.assets", "de"), "AKTIVA");
+        assert_eq!(t_nokey("report.liabilities", "fr"), "PASSIF");
+    }
+
+    #[test]
+    fn reminder_labels_localize() {
+        assert_eq!(t_nokey("invlist.dueDate", "nl"), "vervaldatum");
+        assert_eq!(t_nokey("invlist.outstanding", "nl"), "openstaand");
+        assert_eq!(t_nokey("invlist.dueDate", "de"), "Fälligkeitsdatum");
+    }
+
+    #[test]
+    fn locale_normalization_and_regional_overrides() {
+        assert_eq!(t_nokey("dir.payable", "de-DE"), "zu zahlen");
+        assert_eq!(t_nokey("dir.payable", "DE-DE"), "zu zahlen"); // case-insensitive
+        assert_eq!(t_nokey("dir.payable", "en-GB"), "payable");
+        assert_eq!(t_nokey("dir.payable", "en-US"), "payable");
+        assert_eq!(t_nokey("pdf.kvk", "nl-BE"), "KBO"); // regional override first
+        assert_eq!(t_nokey("dir.payable", "nl-BE"), "te betalen"); // then base language
+        assert_eq!(t_nokey("pdf.kvk", "fr-LU"), "RCS");
+        assert_eq!(t_nokey("pdf.kvk", "fr"), "SIREN");
+    }
+
+    #[test]
+    fn per_locale_spot_checks() {
+        assert_eq!(t_nokey("pdf.invoice", "de"), "RECHNUNG");
+        assert_eq!(t_nokey("status.overdue", "de"), "überfällig");
+        assert_eq!(t_nokey("report.revenue", "de"), "Erlöse");
+        assert_eq!(t_nokey("pdf.invoice", "fr"), "FACTURE");
+        assert_eq!(t_nokey("dir.receivable", "fr"), "à recevoir");
+        assert_eq!(
+            t("email.reminderSubject", &[("number", "2026-001")], "fr"),
+            "Rappel de paiement — facture 2026-001"
+        );
+        assert_eq!(t_nokey("pdf.invoice", "da"), "FAKTURA");
+        assert_eq!(t_nokey("status.paid", "da"), "betalt");
+        assert_eq!(
+            t(
+                "vat.file.description",
+                &[
+                    ("period", " 2026-Q3"),
+                    ("account", "2510"),
+                    ("direction", "skyldig"),
+                ],
+                "da"
+            ),
+            "Momsangivelse 2026-Q3 — overførsel til 2510 (skyldig)"
+        );
+        assert_eq!(t_nokey("pdf.invoice", "fi"), "LASKU");
+        assert_eq!(t_nokey("status.draft", "fi"), "luonnos");
+        assert_eq!(t_nokey("dir.debit", "fi"), "debet");
+        assert_eq!(t_nokey("pdf.invoice", "nb"), "FAKTURA");
+        assert_eq!(t_nokey("status.overdue", "nb"), "forfalt");
+        assert_eq!(
+            t(
+                "vat.settle.description",
+                &[
+                    ("period", " 2026-Q3"),
+                    ("account", "2510"),
+                    ("amount", "0.01")
+                ],
+                "nb"
+            ),
+            "Betaling av mva-melding 2026-Q3 — 2510 (avrundingsdifferanse 0.01)"
+        );
+        assert_eq!(t_nokey("pdf.invoice", "sv"), "FAKTURA");
+        assert_eq!(t_nokey("status.paid", "sv"), "betald");
+        assert_eq!(t_nokey("report.netResult", "sv"), "nettoresultat");
+    }
+
+    // ---- vat file description localization ---------------------------------
+
+    fn vdb() -> Connection {
+        let d = crate::db::open_db(":memory:").unwrap();
+        crate::accounts::seed_default_chart(&d).unwrap();
+        d.execute(
+            "INSERT INTO company (id, name, registration_id, legal_form, tax_id, iban, address, postal_code, city, vat_module)
+             VALUES (1,'Demo BV','12345678','bv','NL123456789B01','NL91ABNA0417164300','Industrieweg 12','2712 CD','Zoetermeer',1)",
+            [],
+        )
+        .unwrap();
+        crate::vat::enable_vat_module(&d, "agent:test").unwrap();
+        d
+    }
+
+    fn book_sale(db: &Connection) {
+        crate::vat::book_vat_entry(
+            db,
+            "2026-07-01",
+            "Verkoop",
+            &crate::vat::parse_vat_posting_specs(&["1100:121.00,8000:-100.00@21".to_string()])
+                .unwrap(),
+            "manual",
+            None,
+            "agent:test",
+            true,
+        )
+        .unwrap();
+    }
+
+    fn entry_desc(db: &Connection, id: i64) -> String {
+        db.query_row(
+            "SELECT description FROM journal_entries WHERE id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn vat_file_description_is_english_by_default() {
+        let d = vdb();
+        book_sale(&d);
+        let r = crate::vat::vat_file(&d, None, Some("2026-Q3"), None, "agent:test", false, "en")
+            .unwrap();
+        assert_eq!(
+            entry_desc(&d, r["entry_id"].as_i64().unwrap()),
+            "VAT return 2026-Q3 — transfer to 2510 (payable)"
+        );
+    }
+
+    #[test]
+    fn vat_file_description_is_dutch_when_localized() {
+        let d = vdb();
+        book_sale(&d);
+        let r = crate::vat::vat_file(&d, None, Some("2026-Q3"), None, "agent:test", false, "nl")
+            .unwrap();
+        assert_eq!(
+            entry_desc(&d, r["entry_id"].as_i64().unwrap()),
+            "OB-aangifte 2026-Q3 verlegging naar 2510 (te betalen)"
+        );
+    }
+
+    #[test]
+    fn vat_file_desc_override_beats_localization() {
+        let d = vdb();
+        book_sale(&d);
+        let r = crate::vat::vat_file(
+            &d,
+            None,
+            Some("2026-Q3"),
+            Some("custom"),
+            "agent:test",
+            false,
+            "nl",
+        )
+        .unwrap();
+        assert_eq!(entry_desc(&d, r["entry_id"].as_i64().unwrap()), "custom");
+    }
+
+    /// env-var tests must not race each other
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+}
