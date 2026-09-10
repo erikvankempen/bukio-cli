@@ -743,9 +743,13 @@ fn debtors_aging(db: &Connection, as_of: &str) -> Result<Value> {
                 continue;
             }
 
-            // FIFO offset items (items are oldest-first due to ORDER BY date)
+            // FIFO offset items: the items array IS oldest-first (ORDER BY date,
+            // id), so iterating it in order nets the OLDEST debt first. The
+            // .rev() here did the opposite — a credit note zeroed the NEWEST
+            // invoice and left the oldest outstanding, which is the row a user
+            // chases for payment.
             let mut remaining = cr_gross;
-            for item in contact.items.iter_mut().rev() {
+            for item in contact.items.iter_mut() {
                 if remaining <= 0 {
                     break;
                 }

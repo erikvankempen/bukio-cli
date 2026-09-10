@@ -454,7 +454,7 @@ fn invoice_credit_note_of_a_paid_invoice_and_credit_of_credit_rejected() {
     .unwrap();
     let id = inv["id"].as_i64().unwrap();
     finalize_invoice(&d, id, "agent:test", false).unwrap();
-    mark_paid(&d, id, "2026-07-20", 12100, "bank", "agent:test", false).unwrap();
+    mark_paid(&d, id, "2026-07-20", 12100, "transfer", "agent:test", false).unwrap();
     let credit = credit_invoice(&d, id, None, None, "agent:test", false).unwrap();
     let cid = credit["id"].as_i64().unwrap();
     finalize_invoice(&d, cid, "agent:test", false).unwrap();
@@ -2054,4 +2054,783 @@ fn icp_readout_no_re_lines_gives_an_empty_listing() {
     let r = bukio::reports::icp_readout(&d, "2026-Q3").unwrap();
     assert_eq!(r["customers"].as_array().unwrap().len(), 0);
     assert_eq!(r["total_cents"].as_i64(), Some(0));
+}
+
+// ==== ported from test/reports-v014.test.js =================================
+// aging / contact statement / sales, plus a CLI + MCP e2e (part B below).
+
+fn vat_off() -> Connection {
+    setup_with_vat(false)
+}
+
+fn make_finalized(
+    db: &Connection,
+    contact_id: i64,
+    date: &str,
+    due_days: Option<i64>,
+    lines_raw: &[&str],
+) -> Value {
+    let inv = create_invoice(
+        db,
+        contact_id,
+        date,
+        due_days,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(lines_raw),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let id = inv["id"].as_i64().unwrap();
+    finalize_invoice(db, id, "agent:test", false).unwrap();
+    get_invoice(db, id).unwrap().unwrap()
+}
+
+fn contact_id(db: &Connection, name: &str) -> i64 {
+    bukio::contacts::create_contact(
+        db,
+        name,
+        Some("Klantstraat 1"),
+        Some("1000 AA"),
+        Some("Amsterdam"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        "agent:test",
+        false,
+    )
+    .unwrap()["id"]
+        .as_i64()
+        .unwrap()
+}
+
+#[test]
+fn aging_debtors_buckets_totals_paid_excluded_sorted() {
+    let d = vat_off();
+    let acme = contact_id(&d, "Acme BV");
+    let beta = contact_id(&d, "Beta BV");
+
+    // due 2026-06-01 -> 68 days past the as-of -> d90 (61-90)
+    make_finalized(&d, acme, "2026-05-01", Some(31), &["Ding @ 100.00"]);
+    // due 2026-07-20 -> 19 days past -> d30
+    make_finalized(&d, acme, "2026-06-20", Some(30), &["Ding @ 100.00"]);
+    // fully paid — must NOT appear
+    let paid = make_finalized(&d, acme, "2026-07-01", Some(30), &["Ding @ 100.00"]);
+    mark_paid(
+        &d,
+        paid["id"].as_i64().unwrap(),
+        "2026-07-10",
+        paid["gross_cents"].as_i64().unwrap(),
+        "bank",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    // due after the as-of -> current
+    make_finalized(&d, beta, "2026-08-01", Some(30), &["Ding @ 100.00"]);
+
+    let r = bukio::reports::aging(&d, "2026-08-08", "debtors").unwrap();
+    assert_eq!(r["kind"], json!("debtors"));
+    let contacts = r["debtors"]["contacts"].as_array().unwrap();
+    assert_eq!(contacts.len(), 2, "{r}");
+    let ac = contacts
+        .iter()
+        .find(|c| c["contact_id"] == json!(acme))
+        .unwrap();
+    assert_eq!(ac["buckets"]["d90"].as_i64(), Some(10000));
+    assert_eq!(ac["buckets"]["d30"].as_i64(), Some(10000));
+    assert_eq!(ac["buckets"]["current"].as_i64(), Some(0));
+    assert_eq!(ac["buckets"]["d60"].as_i64(), Some(0));
+    assert_eq!(ac["total_cents"].as_i64(), Some(20000));
+    assert_eq!(ac["items"].as_array().unwrap().len(), 2);
+    assert!(ac["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|i| i["outstanding_cents"].as_i64() == Some(10000)));
+    let be = contacts
+        .iter()
+        .find(|c| c["contact_id"] == json!(beta))
+        .unwrap();
+    assert_eq!(be["buckets"]["current"].as_i64(), Some(10000));
+    assert_eq!(r["debtors"]["totals"]["total_cents"].as_i64(), Some(30000));
+    assert_eq!(r["debtors"]["totals"]["d90"].as_i64(), Some(10000));
+    assert_eq!(r["debtors"]["totals"]["d30"].as_i64(), Some(10000));
+    assert_eq!(r["debtors"]["totals"]["current"].as_i64(), Some(10000));
+}
+
+#[test]
+fn aging_debtors_excludes_invoices_after_as_of_and_nets_credits_fifo() {
+    let d = vat_off();
+    let acme = contact_id(&d, "Acme BV");
+    make_finalized(&d, acme, "2026-05-01", Some(31), &["Ding @ 1000.00"]);
+    // an invoice dated AFTER the as-of did not exist at as-of
+    make_finalized(&d, acme, "2026-09-01", Some(30), &["Later @ 500.00"]);
+    // a credit note dated after as-of must not net against the as-of position
+    let cred = credit_invoice(
+        &d,
+        1,
+        Some("2026-09-02"),
+        Some("later"),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    finalize_invoice(&d, cred["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+
+    let mut r = bukio::reports::aging(&d, "2026-08-08", "debtors").unwrap();
+    let mut ac = r["debtors"]["contacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["contact_id"] == json!(acme))
+        .unwrap()
+        .clone();
+    assert_eq!(
+        ac["total_cents"].as_i64(),
+        Some(100000),
+        "only the pre-as-of invoice"
+    );
+    assert_eq!(ac["buckets"]["d90"].as_i64(), Some(100000));
+
+    // at a later as-of the 1000 credit nets the OLDEST invoice (FIFO)
+    r = bukio::reports::aging(&d, "2026-09-30", "debtors").unwrap();
+    ac = r["debtors"]["contacts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["contact_id"] == json!(acme))
+        .unwrap()
+        .clone();
+    assert_eq!(ac["total_cents"].as_i64(), Some(50000));
+    let items = ac["items"].as_array().unwrap();
+    let first = items
+        .iter()
+        .find(|i| i["ref"] == json!("2026-0001"))
+        .unwrap();
+    assert_eq!(
+        first["outstanding_cents"].as_i64(),
+        Some(0),
+        "credit offsets the oldest"
+    );
+    let later = items
+        .iter()
+        .find(|i| i["ref"] == json!("2026-0002"))
+        .unwrap();
+    assert_eq!(later["outstanding_cents"].as_i64(), Some(50000));
+}
+
+#[test]
+fn aging_debtors_finalized_credits_reduce_drafts_do_not() {
+    let d = vat_off();
+    let acme = contact_id(&d, "Acme BV");
+    make_finalized(&d, acme, "2026-05-01", Some(31), &["Ding @ 1000.00"]);
+    let cred = credit_invoice(
+        &d,
+        1,
+        Some("2026-07-01"),
+        Some("retour"),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+
+    // a DRAFT credit note must not reduce anything yet
+    let mut r = bukio::reports::aging(&d, "2026-08-08", "debtors").unwrap();
+    let find = |r: &Value| -> Value {
+        r["debtors"]["contacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["contact_id"] == json!(acme))
+            .unwrap()
+            .clone()
+    };
+    let mut ac = find(&r);
+    assert_eq!(ac["buckets"]["d90"].as_i64(), Some(100000));
+    assert_eq!(ac["total_cents"].as_i64(), Some(100000));
+
+    finalize_invoice(&d, cred["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+    r = bukio::reports::aging(&d, "2026-08-08", "debtors").unwrap();
+    ac = find(&r);
+    assert_eq!(ac["buckets"]["d90"].as_i64(), Some(0));
+    assert_eq!(ac["total_cents"].as_i64(), Some(0));
+    assert_eq!(r["debtors"]["totals"]["total_cents"].as_i64(), Some(0));
+}
+
+#[test]
+fn aging_creditors_buckets_and_in_batch_separately() {
+    let d = vat_off();
+    let sup = contact_id(&d, "Lever BV");
+    for (r, date, due, amt) in [
+        ("F-1", "2026-05-01", Some("2026-06-01"), 5000i64),
+        ("F-2", "2026-08-01", Some("2026-08-20"), 2500),
+    ] {
+        bukio::payments::add_payable(
+            &d,
+            &sup.to_string(),
+            r,
+            date,
+            due,
+            amt,
+            "transfer",
+            "agent:test",
+            false,
+        )
+        .unwrap();
+    }
+    // move one payable into a batch (simulating batch create)
+    d.execute(
+        "UPDATE payables SET status = 'in_batch' WHERE invoice_ref = 'F-1'",
+        [],
+    )
+    .unwrap();
+
+    let r = bukio::reports::aging(&d, "2026-08-08", "creditors").unwrap();
+    let cs = r["creditors"]["contacts"].as_array().unwrap();
+    assert_eq!(cs.len(), 1, "{r}");
+    let s = &cs[0];
+    assert_eq!(s["in_batch_cents"].as_i64(), Some(5000));
+    assert_eq!(s["buckets"]["current"].as_i64(), Some(2500));
+    assert_eq!(s["total_cents"].as_i64(), Some(7500));
+    assert_eq!(r["creditors"]["totals"]["total_cents"].as_i64(), Some(7500));
+    let f1 = s["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["ref"] == json!("F-1"))
+        .unwrap();
+    assert_eq!(f1["status"], json!("in_batch"));
+}
+
+#[test]
+fn aging_creditors_excludes_payables_after_as_of() {
+    let d = vat_off();
+    let sup = contact_id(&d, "Lever BV");
+    bukio::payments::add_payable(
+        &d,
+        &sup.to_string(),
+        "F-1",
+        "2026-05-01",
+        None,
+        5000,
+        "transfer",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    bukio::payments::add_payable(
+        &d,
+        &sup.to_string(),
+        "F-2",
+        "2026-09-15",
+        None,
+        2500,
+        "transfer",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+
+    let r = bukio::reports::aging(&d, "2026-08-08", "creditors").unwrap();
+    let cs = r["creditors"]["contacts"].as_array().unwrap();
+    assert_eq!(cs.len(), 1, "{r}");
+    assert_eq!(cs[0]["total_cents"].as_i64(), Some(5000));
+    assert_eq!(cs[0]["items"].as_array().unwrap().len(), 1);
+    assert_eq!(cs[0]["items"][0]["ref"], json!("F-1"));
+    assert_eq!(r["creditors"]["totals"]["total_cents"].as_i64(), Some(5000));
+
+    let later = bukio::reports::aging(&d, "2026-09-30", "creditors").unwrap();
+    assert_eq!(
+        later["creditors"]["contacts"][0]["total_cents"].as_i64(),
+        Some(7500)
+    );
+}
+
+#[test]
+fn aging_validation_rejects_bad_as_of_and_kind() {
+    let d = vat_off();
+    assert_eq!(
+        code_of(bukio::reports::aging(&d, "garbage", "debtors")),
+        "INVALID_DATE"
+    );
+    assert_eq!(
+        code_of(bukio::reports::aging(&d, "2026-02-30", "debtors")),
+        "INVALID_DATE"
+    );
+    assert_eq!(
+        code_of(bukio::reports::aging(&d, "2026-08-08", "bogus")),
+        "INVALID_KIND"
+    );
+}
+
+#[test]
+fn contact_statement_running_balance_and_supplier_side() {
+    let d = vat_off();
+    let acme = contact_id(&d, "Acme BV");
+    let sup = contact_id(&d, "Lever BV");
+    let inv = make_finalized(&d, acme, "2026-07-01", Some(30), &["Ding @ 100.00"]);
+    let gross = inv["gross_cents"].as_i64().unwrap();
+    mark_paid(
+        &d,
+        inv["id"].as_i64().unwrap(),
+        "2026-07-20",
+        4000,
+        "bank",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+
+    let r = bukio::contacts::contact_statement(&d, acme, Some("2026-08-08")).unwrap();
+    assert_eq!(r["contact"]["name"], json!("Acme BV"));
+    let rows = r["rows"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "invoice + payment: {r}");
+    assert_eq!(rows[0]["kind"], json!("invoice"));
+    assert_eq!(rows[0]["debit_cents"].as_i64(), Some(gross));
+    assert_eq!(rows[1]["kind"], json!("payment"));
+    assert_eq!(rows[1]["credit_cents"].as_i64(), Some(4000));
+    assert_eq!(r["balance_cents"].as_i64(), Some(gross - 4000));
+    assert_eq!(rows[rows.len() - 1]["balance_cents"], r["balance_cents"]);
+    assert_eq!(
+        code_of(bukio::contacts::contact_statement(&d, 999999, None)),
+        "CONTACT_NOT_FOUND"
+    );
+    assert_eq!(
+        code_of(bukio::contacts::contact_statement(&d, acme, Some("abc"))),
+        "INVALID_DATE"
+    );
+
+    // supplier: a payable makes the balance negative (we owe them)
+    bukio::payments::add_payable(
+        &d,
+        &sup.to_string(),
+        "F-9",
+        "2026-07-05",
+        None,
+        12345,
+        "transfer",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let s = bukio::contacts::contact_statement(&d, sup, Some("2026-08-08")).unwrap();
+    assert_eq!(s["rows"][0]["kind"], json!("payable"));
+    assert_eq!(s["balance_cents"].as_i64(), Some(-12345));
+}
+
+#[test]
+fn contact_statement_credit_notes_reduce_the_balance() {
+    let d = vat_off();
+    let acme = contact_id(&d, "Acme BV");
+    let inv = make_finalized(&d, acme, "2026-07-01", None, &["Ding @ 100.00"]);
+    let st = bukio::contacts::contact_statement(&d, acme, Some("2026-08-08")).unwrap();
+    assert_eq!(st["balance_cents"].as_i64(), Some(10000));
+
+    let credit = credit_invoice(
+        &d,
+        inv["id"].as_i64().unwrap(),
+        Some("2026-07-15"),
+        None,
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    finalize_invoice(&d, credit["id"].as_i64().unwrap(), "agent:test", false).unwrap();
+
+    let st = bukio::contacts::contact_statement(&d, acme, Some("2026-08-08")).unwrap();
+    let credit_row = st["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["kind"] == json!("credit"))
+        .cloned()
+        .unwrap_or_else(|| panic!("credit note must appear on the opgave: {st}"));
+    assert_eq!(credit_row["credit_cents"].as_i64(), Some(10000));
+    assert_eq!(st["balance_cents"].as_i64(), Some(0));
+}
+
+#[test]
+fn contact_statement_excludes_payments_after_as_of() {
+    let d = vat_off();
+    let acme = contact_id(&d, "Acme BV");
+    let inv = make_finalized(&d, acme, "2026-07-01", None, &["Ding @ 100.00"]);
+    let id = inv["id"].as_i64().unwrap();
+    mark_paid(&d, id, "2026-07-20", 2000, "transfer", "agent:test", false).unwrap();
+    mark_paid(&d, id, "2026-08-20", 3000, "transfer", "agent:test", false).unwrap();
+
+    let r = bukio::contacts::contact_statement(&d, acme, Some("2026-08-08")).unwrap();
+    let payments: Vec<&Value> = r["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|x| x["kind"] == json!("payment"))
+        .collect();
+    assert_eq!(payments.len(), 1, "only the pre-as-of payment shows: {r}");
+    assert_eq!(payments[0]["credit_cents"].as_i64(), Some(2000));
+    assert_eq!(r["balance_cents"].as_i64(), Some(10000 - 2000));
+
+    let full = bukio::contacts::contact_statement(&d, acme, Some("2026-09-30")).unwrap();
+    assert_eq!(
+        full["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|x| x["kind"] == json!("payment"))
+            .count(),
+        2
+    );
+    assert_eq!(full["balance_cents"].as_i64(), Some(10000 - 2000 - 3000));
+}
+
+#[test]
+fn sales_by_contact_net_vat_gross_and_credits_excluded() {
+    let d = vat_off();
+    let acme = contact_id(&d, "Acme BV");
+    let beta = contact_id(&d, "Beta BV");
+    make_finalized(&d, acme, "2026-01-10", None, &["Ding @ 100.00"]);
+    make_finalized(&d, acme, "2026-03-15", Some(30), &["Ding @ 50.00"]);
+    // a draft must not count
+    let draft = create_invoice(
+        &d,
+        acme,
+        "2026-02-01",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(&["Ding @ 999.00"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(draft["status"], json!("draft"));
+    // outside the year
+    make_finalized(&d, beta, "2025-12-31", Some(30), &["Ding @ 100.00"]);
+
+    let r = bukio::reports::sales(&d, "2026", "contact").unwrap();
+    let groups = r["groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 1, "{r}");
+    assert_eq!(groups[0]["contact_id"], json!(acme));
+    assert_eq!(groups[0]["invoice_count"].as_i64(), Some(2));
+    assert_eq!(groups[0]["net_cents"].as_i64(), Some(15000));
+    assert_eq!(groups[0]["gross_cents"].as_i64(), Some(15000));
+    assert_eq!(r["totals"]["net_cents"].as_i64(), Some(15000));
+
+    assert_eq!(
+        code_of(bukio::reports::sales(&d, "abc", "contact")),
+        "INVALID_YEAR"
+    );
+    assert_eq!(
+        code_of(bukio::reports::sales(&d, "2026", "bogus")),
+        "INVALID_KIND"
+    );
+}
+
+#[test]
+fn sales_by_item_groups_catalog_items_and_ad_hoc_lines() {
+    let d = vat_off();
+    let acme = contact_id(&d, "Acme BV");
+    let beta = contact_id(&d, "Beta BV");
+    bukio::items::create_item(
+        &d,
+        "Coaching uur",
+        None,
+        "h",
+        8000,
+        None,
+        None,
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    make_finalized(
+        &d,
+        acme,
+        "2026-02-01",
+        None,
+        &["1x Coaching uur @ 80.00", "Materiaal @ 20.00"],
+    );
+    make_finalized(&d, beta, "2026-02-02", None, &["1x Coaching uur @ 80.00"]);
+
+    let r = bukio::reports::sales(&d, "2026", "item").unwrap();
+    let groups = r["groups"].as_array().unwrap();
+    let find = |n: &str| groups.iter().find(|g| g["name"] == json!(n)).cloned();
+    let coaching = find("Coaching uur").unwrap_or_else(|| panic!("no Coaching uur group: {r}"));
+    assert_eq!(coaching["line_count"].as_i64(), Some(2));
+    assert_eq!(coaching["net_cents"].as_i64(), Some(16000));
+    let materiaal = find("Materiaal").unwrap_or_else(|| panic!("no Materiaal group: {r}"));
+    assert_eq!(materiaal["net_cents"].as_i64(), Some(2000));
+    assert_eq!(r["totals"]["line_count"].as_i64(), Some(3));
+    assert_eq!(r["totals"]["net_cents"].as_i64(), Some(18000));
+}
+
+// ---- CLI + MCP e2e (needs a real file database the binary can open) --------
+
+fn temp_dir(tag: &str) -> std::path::PathBuf {
+    let p = std::env::temp_dir().join(format!(
+        "bukio-rep14-{}-{}-{}",
+        tag,
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_dir_all(&p);
+    std::fs::create_dir_all(&p).unwrap();
+    p
+}
+
+fn run_cli(args: &[&str]) -> (Value, bool, String) {
+    let exe = env!("CARGO_BIN_EXE_bukio");
+    let out = std::process::Command::new(exe)
+        .env("BUKIO_ACTOR", "agent:test")
+        .args(args)
+        .output()
+        .unwrap();
+    (
+        serde_json::from_slice(&out.stdout).unwrap_or(Value::Null),
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).to_string(),
+    )
+}
+
+#[test]
+fn cli_aging_sales_statement_e2e_with_csv_export() {
+    let dir = temp_dir("cli");
+    let file = dir.join("test.db");
+    let f = file.to_str().unwrap().to_string();
+
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "init",
+        "--name",
+        "Test Coaching",
+        "--registration-id",
+        "12345678",
+        "--legal-form",
+        "eenmanszaak",
+        "--vat",
+        "off",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "init failed: {out}");
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--address",
+        "Teststraat 1",
+        "--postal-code",
+        "1000 AA",
+        "--city",
+        "Amsterdam",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "company update failed: {out}");
+
+    // seed through the engine on the same file (like the JS suite does)
+    let d = bukio::db::open_db(&f).unwrap();
+    let acme = contact_id(&d, "Acme BV");
+    make_finalized(&d, acme, "2026-07-01", Some(30), &["Ding @ 100.00"]);
+    drop(d);
+
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "report",
+        "aging",
+        "--as-of",
+        "2026-08-08",
+        "--kind",
+        "debtors",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(
+        v["data"]["debtors"]["totals"]["total_cents"].as_i64(),
+        Some(10000),
+        "{v}"
+    );
+
+    let (v, ok, out) = run_cli(&["--json", "report", "sales", "--year", "2026", "--db", &f]);
+    assert!(ok, "{out}");
+    assert_eq!(
+        v["data"]["totals"]["invoice_count"].as_i64(),
+        Some(1),
+        "{v}"
+    );
+
+    let (v, ok, out) = run_cli(&[
+        "--json",
+        "contact",
+        "statement",
+        "--id",
+        &acme.to_string(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    assert_eq!(v["data"]["rows"].as_array().unwrap().len(), 1, "{v}");
+    assert_eq!(v["data"]["balance_cents"].as_i64(), Some(10000));
+
+    // csv export: --out writes the file (the command still prints a human line)
+    let csv = dir.join("aging.csv");
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "report",
+        "aging",
+        "--format",
+        "csv",
+        "--out",
+        csv.to_str().unwrap(),
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "{out}");
+    let content = std::fs::read_to_string(&csv).unwrap();
+    assert!(content.contains("debtors"), "{content}");
+    assert!(
+        !content.contains("=HYPERLINK"),
+        "formula-injection guard tripped: {content}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn mcp_report_aging_and_report_sales_share_the_shapes() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::{Command, Stdio};
+
+    let dir = temp_dir("mcp");
+    let file = dir.join("test.db");
+    let f = file.to_str().unwrap().to_string();
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "init",
+        "--name",
+        "Test Coaching",
+        "--registration-id",
+        "12345678",
+        "--legal-form",
+        "eenmanszaak",
+        "--vat",
+        "off",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "init failed: {out}");
+    let (_, ok, out) = run_cli(&[
+        "--json",
+        "company",
+        "update",
+        "--address",
+        "Teststraat 1",
+        "--postal-code",
+        "1000 AA",
+        "--city",
+        "Amsterdam",
+        "--db",
+        &f,
+    ]);
+    assert!(ok, "company update failed: {out}");
+    let d = bukio::db::open_db(&f).unwrap();
+    let acme = contact_id(&d, "Acme BV");
+    make_finalized(&d, acme, "2026-07-01", Some(30), &["Ding @ 100.00"]);
+    drop(d);
+
+    let exe = env!("CARGO_BIN_EXE_bukio");
+    let mut child = Command::new(exe)
+        .args(["mcp", "--db", &f])
+        .env("BUKIO_ACTOR", "agent:test")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut reader = BufReader::new(child.stdout.take().unwrap());
+
+    let mut call = |stdin: &mut dyn Write,
+                    reader: &mut BufReader<_>,
+                    id: u64,
+                    method: &str,
+                    params: Value|
+     -> Value {
+        let req = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
+        writeln!(stdin, "{req}").unwrap();
+        stdin.flush().unwrap();
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let n = reader.read_line(&mut line).unwrap();
+            assert!(n > 0, "MCP closed before answering {method}");
+            let Ok(msg) = serde_json::from_str::<Value>(line.trim()) else {
+                continue;
+            };
+            if msg["id"] == json!(id) {
+                return msg;
+            }
+        }
+    };
+
+    call(
+        &mut stdin,
+        &mut reader,
+        1,
+        "initialize",
+        json!({ "protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": { "name": "t", "version": "1" } }),
+    );
+
+    let r = call(
+        &mut stdin,
+        &mut reader,
+        2,
+        "tools/call",
+        json!({ "name": "report_aging", "arguments": { "as_of": "2026-08-08", "kind": "debtors" } }),
+    );
+    let txt = r["result"]["content"][0]["text"].as_str().unwrap_or("");
+    let data: Value =
+        serde_json::from_str(txt).unwrap_or_else(|_| panic!("bad tools/call payload: {r}"));
+    assert_eq!(
+        data["debtors"]["totals"]["total_cents"].as_i64(),
+        Some(10000),
+        "{r}"
+    );
+
+    let r = call(
+        &mut stdin,
+        &mut reader,
+        3,
+        "tools/call",
+        json!({ "name": "report_sales", "arguments": { "year": "2026" } }),
+    );
+    let txt = r["result"]["content"][0]["text"].as_str().unwrap_or("");
+    let data: Value =
+        serde_json::from_str(txt).unwrap_or_else(|_| panic!("bad tools/call payload: {r}"));
+    assert_eq!(data["totals"]["invoice_count"].as_i64(), Some(1), "{r}");
+
+    let r = call(
+        &mut stdin,
+        &mut reader,
+        4,
+        "tools/call",
+        json!({ "name": "report_sales", "arguments": { "year": "abc" } }),
+    );
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&dir);
 }

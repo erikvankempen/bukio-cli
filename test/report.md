@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 16:52:11 UTC — **✅ 521 passing · 0 failing (521 tests)**
+**Latest run:** 2026-09-10 17:03:01 UTC — **✅ 508 passing · 0 failing (508 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
@@ -573,24 +573,6 @@
     - ✅ unreachable server: clean REMOTE_UNREACHABLE error
     - ✅ server token rejects a bad --ttl-hours value
     - ✅ envelope can carry the --db of the CLIENT but the server DB is authoritative
-
-### reports-v014.test.js — aging buckets, contact statements, sales analytics (by contact/item)
-
-13 passing · 0 failing
-
-    - ✅ aging debtors: buckets, totals, paid excluded, contacts sorted by total
-    - ✅ aging debtors: invoices issued AFTER the as-of date are excluded, item totals netted by credits
-    - ✅ aging debtors: finalized credit notes reduce the outstanding, drafts do not
-    - ✅ aging creditors: buckets + in_batch shown separately
-    - ✅ aging creditors: payables dated AFTER the as-of date are excluded
-    - ✅ aging validation: bad as-of and kind rejected
-    - ✅ contact statement: running balance ends at outstanding; supplier side negative
-    - ✅ contact statement: credit notes reduce the balance (regression)
-    - ✅ contact statement: payments after the as-of date are excluded (as-of leak regression)
-    - ✅ sales by contact: net/vat/gross from the totals engine; credit notes excluded
-    - ✅ sales by item: catalog items group by item_id, ad-hoc lines by description
-    - ✅ cli: report aging + sales + contact statement e2e with csv export
-    - ✅ mcp: report_aging and report_sales expose the same shapes
 
 ### review-round3.test.js — 
 
