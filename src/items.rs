@@ -95,11 +95,18 @@ fn validate_item(
         ));
     }
     if let Some(vc) = vat_code {
-        if !vc
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-' || b == b'_')
-            || vc.is_empty()
-        {
+        // a dotted RATE is legal (FR 5.5 / 2.1) but only one dot, with digits on
+        // both sides — '5..5' used to pass because any dot was allowed
+        let ok = if !vc.is_empty() && vc.chars().all(|c| c.is_ascii_digit() || c == '.') {
+            let parts: Vec<&str> = vc.split('.').collect();
+            parts.len() <= 2 && parts.iter().all(|x| !x.is_empty())
+        } else {
+            !vc.is_empty()
+                && vc
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        };
+        if !ok {
             return Err(item_error(
                 "INVALID_VAT_CODE",
                 format!("vat code '{vc}' is malformed"),

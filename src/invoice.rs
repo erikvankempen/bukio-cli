@@ -271,18 +271,31 @@ pub fn parse_item_spec(spec: &str) -> Result<Value> {
             } else {
                 &last[1..]
             };
-            let val = parse_dutch_amount(num_str).ok_or_else(|| {
-                invoice_error(
-                    "INVALID_LINE",
-                    format!("item spec '{spec}': invalid discount"),
-                )
-            })?;
+            // a percentage is a plain number (10% -> 1000 bp), NOT an amount:
+            // running it through parse_dutch_amount gave 10.00 EUR = 1000 cents
+            // and the old *100 then made 100000, a 100% discount
+            let val = if is_pct {
+                let pct: f64 = num_str.parse().map_err(|_| {
+                    invoice_error(
+                        "INVALID_LINE",
+                        format!("item spec '{spec}': invalid discount"),
+                    )
+                })?;
+                (pct * 100.0).round() as i64
+            } else {
+                parse_dutch_amount(num_str).ok_or_else(|| {
+                    invoice_error(
+                        "INVALID_LINE",
+                        format!("item spec '{spec}': invalid discount"),
+                    )
+                })?
+            };
             discount_type = Some(if is_pct {
                 "pct".to_string()
             } else {
                 "amount".to_string()
             });
-            discount_value = Some(if is_pct { val * 100 } else { val });
+            discount_value = Some(val);
             consumed += 1;
         }
         let remaining = overrides.len() - consumed;
@@ -302,10 +315,12 @@ pub fn parse_item_spec(spec: &str) -> Result<Value> {
         }
     }
 
+    // the JS parseItemSpec returns camelCase — the invoice engine's
+    // to_snake_line converts it back where it consumes the spec
     Ok(json!({
-        "item_id": item_id, "qty_milli": qty_milli,
-        "price_cents": price_cents, "vat_code": vat_code,
-        "discount_type": discount_type, "discount_value": discount_value,
+        "itemId": item_id, "qtyMilli": qty_milli,
+        "priceCents": price_cents, "vatCode": vat_code,
+        "discountType": discount_type, "discountValue": discount_value,
     }))
 }
 
@@ -371,7 +386,11 @@ pub fn format_qty(qty: i64) -> String {
     if qty % 1000 == 0 {
         format!("{}", qty / 1000)
     } else {
+        // the JS toFixed(3) then strips trailing zeros: 1500 -> "1.5", not "1.500"
         format!("{:.3}", qty as f64 / 1000.0)
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
     }
 }
 
@@ -1026,10 +1045,21 @@ pub fn create_invoice(
     notes: Option<&str>,
     discount_type: Option<&str>,
     discount_value: Option<i64>,
+    language: Option<&str>,
     lines_raw: &[Value],
     actor: &str,
     dry_run: bool,
 ) -> Result<Value> {
+    // every i18n table is a valid document language; anything else is rejected
+    // (the stored column may be NULL — get_invoice then reports the 'nl' default)
+    if let Some(l) = language {
+        if crate::i18n::get_table(l).is_none() {
+            return Err(invoice_error(
+                "INVALID_LANGUAGE",
+                format!("'{l}' is not a supported document language"),
+            ));
+        }
+    }
     let contact = get_contact(db, contact_id)?.ok_or_else(|| {
         invoice_error(
             "CONTACT_NOT_FOUND",
@@ -1051,6 +1081,18 @@ pub fn create_invoice(
         return Err(invoice_error("NO_LINES", "an invoice needs lines"));
     }
 
+    // the JS takes either --lines or --items, never both
+    let has_item_spec = lines_raw
+        .iter()
+        .any(|v| v.get("item_id").or_else(|| v.get("itemId")).is_some());
+    let has_line_spec = lines_raw.iter().any(|v| v.is_string());
+    if has_item_spec && has_line_spec {
+        return Err(invoice_error(
+            "CONFLICTING_LINES",
+            "pass either lines or items, not both",
+        ));
+    }
+
     let vat_on = is_vat_enabled(db);
     let vat_codes: std::collections::HashMap<String, Value> = list_vat_codes(db)?
         .into_iter()
@@ -1070,6 +1112,52 @@ pub fn create_invoice(
         };
         // both the JS camelCase shape and our snake_case must resolve
         let p = to_snake_line(p);
+        // an item spec (--items) resolves against the catalog: snapshot the
+        // description/price/VAT/unit/gl, applying any per-invoice override
+        let p = if p.get("item_id").map(|v| !v.is_null()).unwrap_or(false) {
+            let item_id = p["item_id"].as_i64().unwrap_or(0);
+            let item = crate::items::get_item(db, item_id)?.ok_or_else(|| {
+                invoice_error("ITEM_NOT_FOUND", format!("item {item_id} does not exist"))
+            })?;
+            let item_active = item["active"]
+                .as_i64()
+                .map(|v| v == 1)
+                .or_else(|| item["active"].as_bool())
+                .unwrap_or(false);
+            if !item_active {
+                return Err(invoice_error(
+                    "ITEM_INACTIVE",
+                    format!("item {item_id} is deactivated"),
+                ));
+            }
+            let price = p["price_cents"]
+                .as_i64()
+                .unwrap_or_else(|| item["unit_price_cents"].as_i64().unwrap_or(0));
+            if price <= 0 {
+                return Err(invoice_error(
+                    "INVALID_ITEM_OVERRIDE",
+                    "item price override must be positive".to_string(),
+                ));
+            }
+            let description = item["description"]
+                .as_str()
+                .filter(|d| !d.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| item["name"].as_str().unwrap_or("").to_string());
+            json!({
+                "description": description,
+                "qty_milli": p["qty_milli"],
+                "price_cents": price,
+                "vat_code": if p["vat_code"].is_null() { item["vat_code"].clone() } else { p["vat_code"].clone() },
+                "discount_type": p["discount_type"],
+                "discount_value": p["discount_value"],
+                "unit": item["unit"],
+                "item_id": item_id,
+                "gl_account": item["gl_account"],
+            })
+        } else {
+            p
+        };
         let desc = p["description"].as_str().unwrap_or("");
         let price = p["price_cents"].as_i64().unwrap_or(0);
         if desc.is_empty() || price <= 0 {
@@ -1086,6 +1174,30 @@ pub fn create_invoice(
             ));
         }
 
+        // the JS's assertLineDiscount: a null/null pair is fine, a percentage
+        // must be in (0, 100] and a fixed discount must be positive — the port
+        // accepted both a >100% discount and one that swallowed the whole line
+        let (d_type, d_val) = (p["discount_type"].as_str(), p["discount_value"].as_i64());
+        match (d_type, d_val) {
+            (None, None) => {}
+            (Some("pct"), Some(v)) if v > 0 && v <= 10000 => {}
+            (Some("amount"), Some(v)) if v > 0 => {}
+            _ => {
+                return Err(invoice_error(
+                    "INVALID_LINE_DISCOUNT",
+                    format!(
+                        "line {i}: discount must be a percentage in (0, 100] or a positive amount"
+                    ),
+                ))
+            }
+        }
+        let line_amount = ((qty as f64 * price as f64) / 1000.0).round() as i64;
+        if d_type == Some("amount") && d_val.unwrap_or(0) >= line_amount {
+            return Err(invoice_error(
+                "INVALID_LINE_DISCOUNT",
+                format!("line {i}: fixed discount must be less than the line amount"),
+            ));
+        }
         let vat_code = p["vat_code"].as_str().map(String::from);
         if let Some(ref vc) = vat_code {
             if !vat_on {
@@ -1154,8 +1266,9 @@ pub fn create_invoice(
 
     // Insert invoice
     db.execute(
-        "INSERT INTO invoices (contact_id, date, due_date, description, reference, notes, discount_type, discount_value, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-        rusqlite::params![contact_id, date, due_date, description, reference, notes, discount_type, discount_value, actor],
+        "INSERT INTO invoices (contact_id, date, due_date, description, reference, notes, discount_type, discount_value, language, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        // the column is NOT NULL; the JS default is 'nl' (get_invoice keeps the same fallback for old rows)
+        rusqlite::params![contact_id, date, due_date, description, reference, notes, discount_type, discount_value, language.unwrap_or("nl"), actor],
     ).map_err(sql_err)?;
     let invoice_id = db.last_insert_rowid();
 
@@ -1368,6 +1481,8 @@ pub fn credit_invoice(
         // UNDISCOUNTED amount and over-credited the customer
         original["discount_type"].as_str(),
         original["discount_value"].as_i64(),
+        // the credit note inherits the source document language
+        original["language"].as_str().or(Some("nl")),
         &credit_lines_raw,
         actor,
         false,
@@ -1615,10 +1730,10 @@ mod tests {
     #[test]
     fn parse_item_spec_basic() {
         let r = parse_item_spec("1:2@140.00@21").unwrap();
-        assert_eq!(r["item_id"], 1);
-        assert_eq!(r["qty_milli"], 2000);
-        assert_eq!(r["price_cents"], 14000);
-        assert_eq!(r["vat_code"], "21");
+        assert_eq!(r["itemId"], 1);
+        assert_eq!(r["qtyMilli"], 2000);
+        assert_eq!(r["priceCents"], 14000);
+        assert_eq!(r["vatCode"], "21");
     }
 
     #[test]
@@ -1692,6 +1807,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             lines,
             "agent:test",
             false,
@@ -1741,6 +1857,7 @@ mod tests {
             &db,
             1,
             "2026-07-10",
+            None,
             None,
             None,
             None,
@@ -1899,6 +2016,7 @@ mod tests {
             &db,
             1,
             "2026-07-10",
+            None,
             None,
             None,
             None,

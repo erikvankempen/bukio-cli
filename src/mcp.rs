@@ -931,7 +931,15 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                         // resolve the item spec against the catalog (JS parity:
                         // snapshot price/VAT/unit/GL now, reject missing/inactive)
                         let p = crate::invoice::parse_item_spec(s)?;
-                        let item_id = p["item_id"].as_i64().unwrap_or(0);
+                        // parse_item_spec returns the JS camelCase shape
+                        let pv = |snake: &str, camel: &str| -> Value {
+                            if p[snake].is_null() {
+                                p[camel].clone()
+                            } else {
+                                p[snake].clone()
+                            }
+                        };
+                        let item_id = pv("item_id", "itemId").as_i64().unwrap_or(0);
                         let item = crate::items::get_item(db, item_id)?.ok_or_else(|| {
                             BukioError::new(
                                 "ITEM_NOT_FOUND",
@@ -944,21 +952,21 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                                 format!("item {item_id} is deactivated"),
                             ));
                         }
-                        let price = p["price_cents"]
+                        let price = pv("price_cents", "priceCents")
                             .as_i64()
                             .or_else(|| item["unit_price_cents"].as_i64())
                             .unwrap_or(0);
-                        let vat_code = p["vat_code"]
+                        let vat_code = pv("vat_code", "vatCode")
                             .as_str()
                             .map(String::from)
                             .or_else(|| item["vat_code"].as_str().map(String::from));
                         lines_raw.push(json!({
                             "description": item["name"].as_str().unwrap_or(""),
-                            "qty_milli": p["qty_milli"].as_i64().unwrap_or(1000),
+                            "qty_milli": pv("qty_milli", "qtyMilli").as_i64().unwrap_or(1000),
                             "price_cents": price,
                             "vat_code": vat_code,
-                            "discount_type": p["discount_type"],
-                            "discount_value": p["discount_value"],
+                            "discount_type": pv("discount_type", "discountType"),
+                            "discount_value": pv("discount_value", "discountValue"),
                             "unit": item["unit"].as_str(),
                             "item_id": item_id,
                             "gl_account": item["gl_account"].as_str(),
@@ -977,6 +985,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 None,
                 discount_type.as_deref(),
                 discount_value,
+                arg_str(args, "language").as_deref(),
                 &lines_raw,
                 actor,
                 dry_run,

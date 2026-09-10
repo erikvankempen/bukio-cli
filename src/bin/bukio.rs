@@ -2567,6 +2567,7 @@ fn cmd_invoice_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         notes.as_deref(),
         discount_type.as_deref(),
         discount_value,
+        arg(argv, "--language").as_deref(),
         &lines_raw,
         actor,
         dry_run,

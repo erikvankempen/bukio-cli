@@ -268,15 +268,33 @@ pub fn create_template(
             .collect();
         let mut vat_aware = false;
         if !items.is_empty() {
+            // objects (already-parsed specs from a stored template) pass through;
+            // only string specs are split. Stringifying everything made a stored
+            // object arrive at parse_item_spec as its own JSON text.
             let specs: Vec<Value> =
                 split_item_specs(&items.iter().cloned().map(Value::String).collect::<Vec<_>>());
             for p in specs {
-                let id = p["item_id"].as_i64().ok_or_else(|| {
-                    recurring_error(
-                        "INVALID_ITEM_SPEC",
-                        format!("item spec {:?} has no item id", p),
-                    )
-                })?;
+                // a spec may arrive as the JSON text of an already-parsed object
+                // (the CLI stores --items entries that way) — decode those instead
+                // of handing the JSON text to the line-spec parser
+                let p = if let Some(t) = p.as_str() {
+                    if t.trim_start().starts_with('{') {
+                        serde_json::from_str::<Value>(t).unwrap_or(Value::String(t.to_string()))
+                    } else {
+                        p.clone()
+                    }
+                } else {
+                    p.clone()
+                };
+                let id = p["item_id"]
+                    .as_i64()
+                    .or_else(|| p["itemId"].as_i64())
+                    .ok_or_else(|| {
+                        recurring_error(
+                            "INVALID_ITEM_SPEC",
+                            format!("item spec {:?} has no item id", p),
+                        )
+                    })?;
                 let item = get_item(db, id)?.ok_or_else(|| {
                     recurring_error("ITEM_NOT_FOUND", format!("item {id} does not exist"))
                 })?;
@@ -635,19 +653,28 @@ fn run_template_once(db: &Connection, tpl: &Value, actor: &str) -> Result<Value>
             let mut resolved = Vec::new();
             let item_specs: Vec<Value> = split_item_specs(items);
             for p in item_specs {
-                let item_id = p["item_id"].as_i64().ok_or_else(|| {
+                // parse_item_spec returns the JS camelCase shape; stored
+                // templates may still carry the older snake_case keys
+                let pv = |snake: &str, camel: &str| -> Value {
+                    if p[snake].is_null() {
+                        p[camel].clone()
+                    } else {
+                        p[snake].clone()
+                    }
+                };
+                let item_id = pv("item_id", "itemId").as_i64().ok_or_else(|| {
                     recurring_error("INVALID_ITEM_SPEC", "item spec has no item id")
                 })?;
                 let item = get_item(db, item_id)?.ok_or_else(|| {
                     recurring_error("ITEM_NOT_FOUND", format!("item {item_id} does not exist"))
                 })?;
                 // build a line object create_invoice understands
-                let qty = p["qty_milli"].as_i64().unwrap_or(1000);
-                let price = p["price_cents"]
+                let qty = pv("qty_milli", "qtyMilli").as_i64().unwrap_or(1000);
+                let price = pv("price_cents", "priceCents")
                     .as_i64()
                     .or_else(|| item["unit_price_cents"].as_i64())
                     .unwrap_or(0);
-                let vat = p["vat_code"]
+                let vat = pv("vat_code", "vatCode")
                     .as_str()
                     .map(String::from)
                     .or_else(|| item["vat_code"].as_str().map(String::from));
@@ -656,8 +683,8 @@ fn run_template_once(db: &Connection, tpl: &Value, actor: &str) -> Result<Value>
                     "qty_milli": qty,
                     "price_cents": price,
                     "vat_code": vat,
-                    "discount_type": p["discount_type"],
-                    "discount_value": p["discount_value"],
+                    "discount_type": pv("discount_type", "discountType"),
+                    "discount_value": pv("discount_value", "discountValue"),
                     "item_id": item_id,
                     "unit": item["unit"],
                     "gl_account": item["gl_account"],
@@ -681,6 +708,8 @@ fn run_template_once(db: &Connection, tpl: &Value, actor: &str) -> Result<Value>
             None,
             None,
             None,
+            None,
+            // ponytail: templates carry no language yet — add when one does
             None,
             &lines_raw,
             "recurring",
@@ -2135,6 +2164,7 @@ mod recurring_invoice_tests {
             None,
             None,
             None,
+            None,
             &[json!("1x Premium @ 99.00 @21")],
             "agent:test",
             false,
@@ -2186,6 +2216,7 @@ mod recurring_invoice_tests {
             None,
             None,
             Some("REF-1"),
+            None,
             None,
             None,
             None,
@@ -2253,6 +2284,7 @@ mod recurring_invoice_tests {
             None,
             None,
             None,
+            None,
             &[json!("1x A @ 10.00 @21")],
             "agent:test",
             false,
@@ -2291,6 +2323,7 @@ mod recurring_invoice_tests {
             None,
             None,
             None,
+            None,
             &[json!("1x A @ 10.00 @21")],
             "agent:test",
             false,
@@ -2324,6 +2357,7 @@ mod recurring_invoice_tests {
             None,
             None,
             Some("PO-2026-007"),
+            None,
             None,
             None,
             None,
