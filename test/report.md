@@ -1,6 +1,6 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 17:03:01 UTC — **✅ 508 passing · 0 failing (508 tests)**
+**Latest run:** 2026-09-10 17:26:14 UTC — **✅ 508 passing · 0 failing (508 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests

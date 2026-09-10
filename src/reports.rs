@@ -1508,7 +1508,9 @@ fn with_amount_cents(rows: &[Value]) -> Vec<Value> {
     rows.iter()
         .cloned()
         .map(|mut g| {
-            if let Some(accs) = g["accounts"].as_array_mut() {
+            // both levels expose amount_cents: the group rollup and each
+            // section's account rows (the renderer and the JS read the latter)
+            let mut normalize = |accs: &mut Vec<Value>| {
                 for a in accs.iter_mut() {
                     let amt = a["balance_cents"]
                         .as_i64()
@@ -1516,6 +1518,37 @@ fn with_amount_cents(rows: &[Value]) -> Vec<Value> {
                         .unwrap_or(0);
                     a["amount_cents"] = json!(amt);
                 }
+            };
+            if let Some(accs) = g["accounts"].as_array_mut() {
+                normalize(accs);
+            }
+            if let Some(secs) = g["sections"].as_array_mut() {
+                for sec in secs.iter_mut() {
+                    if let Some(accs) = sec["accounts"].as_array_mut() {
+                        normalize(accs);
+                    }
+                }
+            }
+            // The statutory balans nests its account rows under `sections` (the
+            // shape the renderer and the JS both read). Some builders emit the
+            // accounts directly on the group, which left the printed asset side
+            // EMPTY — wrap those into a single section.
+            let has_sections = g["sections"]
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false);
+            let loose = g["accounts"].as_array().cloned().unwrap_or_default();
+            if !has_sections && !loose.is_empty() {
+                let total: i64 = loose
+                    .iter()
+                    .map(|a| a["amount_cents"].as_i64().unwrap_or(0))
+                    .sum();
+                g["sections"] = json!([{
+                    "taxonomy_code": g["taxonomy_code"],
+                    "label": g["label"],
+                    "accounts": loose,
+                    "total_cents": total,
+                }]);
             }
             g
         })

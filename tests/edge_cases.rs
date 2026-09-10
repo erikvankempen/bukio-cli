@@ -2834,3 +2834,131 @@ fn mcp_report_aging_and_report_sales_share_the_shapes() {
     let _ = child.wait();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ==== jaarrekening HTML/PDF renderer (the 3 tests year-end could not port) ==
+
+#[test]
+fn jaarrekening_html_renders_account_detail_without_nan() {
+    let d = setup();
+    entry(
+        &d,
+        "2026-03-01",
+        "Omzet",
+        specs(&[("1100", 12100), ("8000", -10000), ("2500", -2100)]),
+    );
+    entry(
+        &d,
+        "2026-03-05",
+        "Laptop",
+        specs(&[("1800", 537000), ("1100", -537000)]),
+    );
+    let r = bukio::reports::jaarrekening(&d, "2026", Some("klein")).unwrap();
+    let html = bukio::report_pdf::jaarrekening_html(&r);
+    assert!(
+        !html.contains("NaN"),
+        "the HTML template must not contain NaN"
+    );
+    assert!(html.contains("5370.00"), "account detail amount rendered");
+    assert!(html.contains("Jaarrekening 2026"), "title");
+    assert!(html.contains("Totaal activa"), "balans total");
+}
+
+#[test]
+fn jaarrekening_pdf_renders_bytes() {
+    let d = setup();
+    entry(
+        &d,
+        "2026-03-01",
+        "Omzet",
+        specs(&[("1100", 12100), ("8000", -10000), ("2500", -2100)]),
+    );
+    let r = bukio::reports::jaarrekening(&d, "2026", Some("klein")).unwrap();
+    let dir = temp_dir("pdf");
+    let out = dir.join("test-jaarrekening.pdf");
+    // the port writes the PDF natively — no browser, so this cannot be skipped
+    let res = bukio::report_pdf::jaarrekening_to_pdf(&r, Some(out.to_str().unwrap()))
+        .expect("native PDF render");
+    // The port writes the PDF natively (no Chromium), so it is a valid ~3KB
+    // document rather than the JS's chromium-inflated 48KB. Check the structure
+    // instead of the size: header, EOF, and every xref offset pointing at its
+    // own "N 0 obj" — the thing that breaks when the writer's offsets drift.
+    assert!(res["bytes"].as_u64().unwrap_or(0) > 1000, "{res}");
+    let bytes = std::fs::read(&out).unwrap();
+    assert!(bytes.starts_with(b"%PDF-1.4"), "must be a PDF");
+    assert!(bytes.ends_with(b"%%EOF\n"), "must be terminated");
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    assert!(text.contains("Jaarrekening 2026"), "title in the document");
+    // WinAnsi single-byte encoding: "Materiële" must carry 0xEB, not the two
+    // UTF-8 bytes — otherwise the PDF shows "MateriÃ«le"
+    assert!(
+        !text.contains('\u{c3}') && !text.contains('\u{c2}'),
+        "content stream must be single-byte (WinAnsi) encoded — a UTF-8 push showed 'MateriÃ«le'"
+    );
+    assert!(
+        text.contains("Totaal activa"),
+        "balans total in the document"
+    );
+    // xref offsets are BYTE offsets — parse them from the raw bytes (the lossy
+    // string conversion above shifts positions for non-ASCII content)
+    let marker = b"startxref";
+    let at = bytes
+        .windows(marker.len())
+        .rposition(|w| w == marker)
+        .unwrap();
+    let tail = String::from_utf8_lossy(&bytes[at + marker.len()..]).to_string();
+    let start: usize = tail.trim().lines().next().unwrap().trim().parse().unwrap();
+    assert!(
+        bytes[start..].starts_with(b"xref"),
+        "startxref must point at the table"
+    );
+    let table = String::from_utf8_lossy(&bytes[start..]).to_string();
+    let mut it = table.lines();
+    assert_eq!(it.next().map(str::trim), Some("xref"));
+    let header = it.next().unwrap_or("");
+    let count: usize = header.split_whitespace().nth(1).unwrap().parse().unwrap();
+    for n in 0..count {
+        let chunk = it.next().expect("xref table shorter than its count");
+        let off: usize = chunk
+            .split_whitespace()
+            .next()
+            .unwrap_or("0")
+            .parse()
+            .unwrap_or(0);
+        if off == 0 {
+            continue; // object 0 is the free head
+        }
+        let want = format!("{n} 0 obj");
+        assert!(
+            bytes[off..].starts_with(want.as_bytes()),
+            "xref entry {n} points at {:?}",
+            String::from_utf8_lossy(&bytes[off..(off + 12).min(bytes.len())])
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jaarrekening_html_escapes_quotes_in_the_company_name() {
+    let d = setup();
+    entry(
+        &d,
+        "2026-03-01",
+        "Omzet",
+        specs(&[("1100", 12100), ("8000", -10000), ("2500", -2100)]),
+    );
+    d.execute(
+        "UPDATE company SET name = ?1 WHERE id = 1",
+        ["Test \"Bedrijf\" BV"],
+    )
+    .unwrap();
+    let r = bukio::reports::jaarrekening(&d, "2026", Some("klein")).unwrap();
+    let html = bukio::report_pdf::jaarrekening_html(&r);
+    assert!(
+        html.contains("Test &quot;Bedrijf&quot; BV"),
+        "company name must be escaped"
+    );
+    assert!(
+        !html.contains("Test \"Bedrijf\" BV"),
+        "raw quotes must not reach the HTML"
+    );
+}

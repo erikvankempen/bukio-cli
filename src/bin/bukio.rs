@@ -4241,6 +4241,20 @@ fn cmd_financial_statements_report(argv: &[String], db_path: &str) -> Result<Val
 
     let model = arg(argv, "--model");
     let report = bukio::reports::jaarrekening(&db, &year, model.as_deref())?;
+
+    if format == "html" {
+        return Ok(json!({ "html": bukio::report_pdf::jaarrekening_html(&report) }));
+    }
+    if format == "pdf" {
+        // the JS default out path: financial-statements-<year>-<model>.pdf
+        let default_out = format!(
+            "financial-statements-{year}-{}.pdf",
+            report["model"].as_str().unwrap_or("klein")
+        );
+        let out = arg(argv, "--out").unwrap_or(default_out);
+        let result = bukio::report_pdf::jaarrekening_to_pdf(&report, Some(&out))?;
+        return Ok(json!({ "path": result["path"], "bytes": result["bytes"] }));
+    }
     Ok(json!({ "financial_statements": report }))
 }
 

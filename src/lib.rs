@@ -33,6 +33,7 @@ pub mod month_end;
 pub mod payments;
 pub mod peppol;
 pub mod recurring;
+pub mod report_pdf;
 pub mod reports;
 pub mod server;
 pub mod sign;
