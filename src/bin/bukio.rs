@@ -3532,7 +3532,7 @@ fn cmd_update(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     if !git_dir_ok {
         return Err(BukioError::new(
             "UPDATE_NOT_A_CLONE",
-            format!("'{repo}' is not a git clone — `bukio update` works on a cloned installation; an npm -g install must be updated with `npm update -g bukio-cli`"),
+            format!("'{repo}' is not a git clone — `bukio update` works on a cloned installation"),
         ));
     }
     let url = git(&["remote", "get-url", "origin"])?;
@@ -3577,14 +3577,19 @@ fn cmd_update(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
         .map(|l| l.chars().skip(3).collect())
         .collect();
     let untracked_count = status.split('\n').filter(|l| l.starts_with("??")).count();
-    let package_json_changed = !git(&[
-        "diff",
-        "--name-only",
-        &format!("{current_sha}..{target_sha}"),
-        "--",
-        "package.json",
-    ])?
-    .is_empty();
+    // The key keeps its old name for clients of the JS-era payload, but on a
+    // Rust install the manifest that matters is Cargo.toml.
+    let manifest_changed = |path: &str| -> Result<bool> {
+        Ok(!git(&[
+            "diff",
+            "--name-only",
+            &format!("{current_sha}..{target_sha}"),
+            "--",
+            path,
+        ])?
+        .is_empty())
+    };
+    let package_json_changed = manifest_changed("package.json")? || manifest_changed("Cargo.toml")?;
     let up_to_date = current_sha == target_sha;
     let warning = if !modified_files.is_empty() || !local_commits.is_empty() {
         Some(format!(
@@ -3595,10 +3600,7 @@ fn cmd_update(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     } else {
         None
     };
-    let current_version = std::fs::read_to_string(format!("{repo}/package.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .and_then(|v| v.get("version").and_then(|x| x.as_str()).map(String::from));
+    let current_version = installed_version(&repo);
 
     if dry_run {
         return Ok(json!({
@@ -3637,10 +3639,19 @@ fn cmd_update(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     let mut deps_installed = false;
     let mut deps_error: Option<String> = None;
     if package_json_changed {
-        let dep = std::process::Command::new("npm")
-            .args(["install"])
-            .current_dir(&repo)
-            .output();
+        // A Rust install rebuilds; the JS-era layout installed npm deps. The
+        // result keys stay the same so clients of the old payload keep working.
+        let dep = if std::path::Path::new(&format!("{repo}/Cargo.toml")).exists() {
+            std::process::Command::new("cargo")
+                .args(["build", "--release"])
+                .current_dir(&repo)
+                .output()
+        } else {
+            std::process::Command::new("npm")
+                .args(["install"])
+                .current_dir(&repo)
+                .output()
+        };
         match dep {
             Ok(o) if o.status.success() => deps_installed = true,
             Ok(o) => deps_error = Some(String::from_utf8_lossy(&o.stderr).trim().to_string()),
@@ -3662,10 +3673,7 @@ fn cmd_update(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
             },
         );
     }
-    let version_after = std::fs::read_to_string(format!("{repo}/package.json"))
-        .ok()
-        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
-        .and_then(|v| v.get("version").and_then(|x| x.as_str()).map(String::from));
+    let version_after = installed_version(&repo);
     Ok(json!({
         "action": "update", "updated": true,
         "from_sha": from_sha, "to_sha": to_sha,
@@ -3673,6 +3681,25 @@ fn cmd_update(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
         "deps_installed": deps_installed, "deps_error": deps_error,
         "repo_path": repo, "branch": "main",
     }))
+}
+
+/// The installed version: Cargo.toml on a Rust install, package.json on the
+/// JS-era layout. Both call sites used to read package.json only — the file this
+/// branch no longer ships — so `current_version` was coming back null.
+fn installed_version(repo: &str) -> Option<String> {
+    if let Ok(cargo) = std::fs::read_to_string(format!("{repo}/Cargo.toml")) {
+        for line in cargo.lines() {
+            if let Some(rest) = line.trim().strip_prefix("version") {
+                if let Some(v) = rest.trim_start().strip_prefix('=') {
+                    return Some(v.trim().trim_matches('"').to_string());
+                }
+            }
+        }
+    }
+    std::fs::read_to_string(format!("{repo}/package.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .and_then(|v| v.get("version").and_then(|x| x.as_str()).map(String::from))
 }
 
 // ── attach ─────────────────────────────────────────────────────────────────
