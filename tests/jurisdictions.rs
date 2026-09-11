@@ -1530,7 +1530,7 @@ fn jur_lu_compliance_calendar() {
         ],
     );
     let r = cli(&db, &["compliance", "status", "--year", "2026"]);
-    let obs = r["data"]["obligations"]
+    let obs = r["data"]["compliance"]["obligations"]
         .as_array()
         .cloned()
         .unwrap_or_else(|| {

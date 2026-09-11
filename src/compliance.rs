@@ -196,6 +196,21 @@ pub fn mark_filed(
 }
 
 /// Compute deadline for a filing type using the profile's deadline rules.
+/// The year and month `n` months after the fiscal year end month — the JS
+/// deadline rules all open with `const total = mm + n` and reduce it the same
+/// way (Date.UTC-style wraparound). Day-of-month is the caller's business.
+fn fy_month_offset(fiscal_year_end: &str, year: i32, n: i32) -> (i32, u32) {
+    let parts: Vec<&str> = fiscal_year_end.split('-').collect();
+    let mm: i32 = parts
+        .get(parts.len().saturating_sub(2))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(12);
+    let total = mm + n;
+    let y = year + (total - 1).div_euclid(12);
+    let m = ((total - 1).rem_euclid(12) + 1) as u32;
+    (y, m)
+}
+
 fn compute_deadline(
     fiscal_year_end: &str,
     deadline_rule: &str,
@@ -289,12 +304,9 @@ fn compute_deadline(
         }
         "es-390" => Ok(format!("{}-01-30", year + 1)),
         "es-200" => {
-            let mm2 = 7u32;
-            let yy2 = year + (mm2 as i32 - 1).div_euclid(12);
-            Ok(format!(
-                "{yy2}-{:02}-25",
-                ((mm2 as i32 - 1).rem_euclid(12) + 1) as u32
-            ))
+            // 25 days into the month following the 6-month point after FYE
+            let (y, m) = fy_month_offset(fiscal_year_end, year, 7);
+            Ok(format!("{y}-{m:02}-25"))
         }
         "es-7-months" => Ok(months_after_fy_end(fiscal_year_end, year, 7)),
         "pt-dp-quarterly" => quarter_deadline_on_offset(period, 2, 20),
@@ -344,6 +356,11 @@ fn compute_deadline(
         "xk-annual-accounts" | "xk-cit" => Ok(format!("{}-03-31", year + 1)),
         // US
         "us-941" => Ok(quarter_deadline(period)?.1),
+        "us-1120" => {
+            // 15th of the 4th month after the fiscal year end (calendar -> 15 Apr)
+            let (y, m) = fy_month_offset(fiscal_year_end, year, 4);
+            Ok(format!("{y}-{m:02}-15"))
+        }
         _ => Err(compliance_error(
             "DEADLINE_RULE_NOT_FOUND",
             format!("rule '{deadline_rule}' is not implemented"),
@@ -376,6 +393,22 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
         let ftype = ft["type"].as_str().unwrap_or("");
         let rule_name = ft["deadlineRule"].as_str().unwrap_or("");
         let shape = ft["periodShape"].as_str().unwrap_or("");
+
+        // The JS resolves the rule before iterating periods and throws
+        // DEADLINE_RULE_NOT_FOUND for an unknown one. Probing once here keeps
+        // that loud: the per-period `if let Ok(..)` used to swallow the error,
+        // which is how us-1120 vanished from the US calendar entirely.
+        let probe = match shape {
+            "YYYY-Qn" => format!("{year}-Q1"),
+            "YYYY-MM" => format!("{year}-01"),
+            "YYYY-Pn" => format!("{year}-P1"),
+            _ => year.to_string(),
+        };
+        match compute_deadline(&fy_end, rule_name, year, &probe) {
+            Ok(_) => {}
+            Err(e) if e.code == "DEADLINE_RULE_NOT_FOUND" => return Err(e),
+            Err(_) => {} // a shape-specific period error is handled per period
+        }
 
         match shape {
             "YYYY-Qn" => {
@@ -486,6 +519,25 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
                     };
                     let closed = is_year_closed(db, &year_str(year))?;
                     obligations.push(json!({ "type": ftype, "period": period_str, "deadline": deadline, "status": status, "books_closed": closed }));
+
+                    // The previous year's accounts, while still unfiled and due
+                    // before this year's: the missing obligation a `--year 2026`
+                    // view would otherwise hide (its deadline falls in 2026).
+                    let prev_str = (year - 1).to_string();
+                    if let Ok(prev_deadline) =
+                        compute_deadline(&fy_end, rule_name, year - 1, &prev_str)
+                    {
+                        if !is_filed(db, ftype, &prev_str)? && prev_deadline < deadline {
+                            let prev_closed = is_year_closed(db, &year_str(year - 1))?;
+                            obligations.push(json!({
+                                "type": ftype,
+                                "period": prev_str,
+                                "deadline": prev_deadline,
+                                "status": if prev_deadline < today { "overdue" } else { "open" },
+                                "books_closed": prev_closed
+                            }));
+                        }
+                    }
                 }
             }
             _ => {}
@@ -503,11 +555,12 @@ pub fn compliance_status(db: &Connection, year: i32) -> Result<Value> {
     let open_count = obligations.iter().filter(|o| o["status"] == "open").count();
 
     Ok(json!({
-        "year": year,
+        "year": year.to_string(),
         "company": company_name,
         "as_of": today,
         "obligations": obligations,
         "summary": { "filed": filed_count, "overdue": overdue_count, "open": open_count },
+        "note": "Deadlines follow the country profile's filingTypes (NL quarterly, BE monthly 20th, DE quarterly UStVA, NO bi-monthly, ...). Never auto-files.",
     }))
 }
 

@@ -12,7 +12,7 @@
  * Usage: node scripts/parity.mjs [--rust-bin path] [--filter entry]
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -170,6 +170,30 @@ const CASES = [
   },
 ];
 
+// Every market profile, through the same command surface. The per-market
+// calendars and returns are data plus rules, so a hand-written expectation per
+// market would drift; comparing the two engines step by step cannot.
+const PROFILES = JSON.parse(readFileSync(path.join(root, 'src', 'profiles.json'), 'utf8'));
+for (const [cc, p] of Object.entries(PROFILES)) {
+  const form = p.meta?.legalForms?.[0];
+  if (!form || !(p.reporting?.defaultChart || []).length) continue;
+  const vat = p.tax?.system === 'vat' ? ['--vat', 'on'] : [];
+  CASES.push({
+    name: `market-${cc}`,
+    codesOnly: true,
+    setup: [['init', '--name', 'Parity Co', '--country', cc, '--legal-form', form, ...vat]],
+    steps: [
+      ['company', 'show'],
+      ['account', 'list', '--type', 'asset'],
+      ['compliance', 'status', '--year', '2026'],
+      ['compliance', 'status', '--year', '2025'],
+      ['vat', 'readout', '--period', '2026-Q1'],
+      ['financial-statements', 'report', '--year', '2026'],
+      ['bank', 'add', '--name', 'Main', '--iban', 'NL91ABNA0417164300'],
+    ],
+  });
+}
+
 function runJs(db, argv) {
   const r = spawnSync(process.execPath, ['bin/bukio.js', ...argv, ...ACTOR, '--db', db, '--json'], {
     cwd: root, encoding: 'utf8',
@@ -223,6 +247,14 @@ try {
       total += 1;
       const jsOut = normalise(parse(runJs(dbJs, step)));
       const rsOut = normalise(parse(runRust(dbRs, step)));
+      // codesOnly cases: an error's code is the contract, its wording is a
+      // placeholder that differs per engine (B-milestone returns, format
+      // registries). Compare the code, not the prose.
+      if (c.codesOnly) {
+        for (const o of [jsOut, rsOut]) {
+          if (o && o.ok === false && o.error) delete o.error.message;
+        }
+      }
       const jsS = JSON.stringify(jsOut);
       const rsS = JSON.stringify(rsOut);
       // A step where BOTH engines fail with NO_DATABASE proves nothing: the

@@ -224,7 +224,7 @@ fn mkt_compliance_calendar_only_carries_the_markets_own_filing_types() {
         let r = cli(&db, &args);
         assert_eq!(r["ok"], json!(true), "{cc} init failed: {r}");
         let cal = cli(&db, &["compliance", "status", "--year", "2026"]);
-        let obs = cal["data"]["obligations"]
+        let obs = cal["data"]["compliance"]["obligations"]
             .as_array()
             .cloned()
             .unwrap_or_else(|| {

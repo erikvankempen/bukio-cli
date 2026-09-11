@@ -516,6 +516,9 @@ fn dim(y: i32, m: u32) -> u32 {
 
 /// OB-aangifte readout for a period (mirrors buildObReadoutNl).
 pub fn ob_readout(db: &Connection, period: &str) -> Result<Value> {
+    // The JS checks the module before the country/format dispatch: a company
+    // with VAT off must hear VAT_MODULE_OFF, not "no layout for your country".
+    require_vat(db)?;
     require_vat(db)?;
     let profile = resolve_profile(db)?;
     if profile["tax"]["returnLayout"].as_str() != Some("ob-1a-5d") {

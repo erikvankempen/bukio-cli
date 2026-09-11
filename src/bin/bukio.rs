@@ -343,7 +343,7 @@ fn try_match_cmd(
         ["mcp"] => cmd_mcp(db_path, actor),
 
         // ── compliance ────────────────────────────────────────────────
-        ["compliance", "status"] => cmd_compliance_status(db_path),
+        ["compliance", "status"] => cmd_compliance_status(argv, db_path),
         ["compliance", "mark"] => cmd_compliance_mark(argv, db_path, actor, dry_run),
 
         // ── import ────────────────────────────────────────────────────
@@ -1646,7 +1646,7 @@ fn cmd_bank_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
         Ok(json!({ "plan": result }))
     } else {
         Ok(
-            json!({ "bank_account": { "id": result["id"], "iban": result["iban"], "name": result["name"], "account_code": result["account_code"] } }),
+            json!({ "bank_account": { "iban": result["iban"], "name": result["name"], "account_code": result["account_code"], "id": result["id"] } }),
         )
     }
 }
@@ -2775,10 +2775,23 @@ fn cmd_mcp(db_path: &str, actor: &str) -> Result<Value> {
 
 // ── compliance ─────────────────────────────────────────────────────────────
 
-fn cmd_compliance_status(db_path: &str) -> Result<Value> {
+fn cmd_compliance_status(argv: &[String], db_path: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
-    let year: i32 = bukio::dates::today_iso()[0..4].parse().unwrap_or(2026);
-    bukio::compliance::compliance_status(&db, year)
+    // --year was accepted and silently ignored: every call reported the current
+    // year, so asking for 2025 returned 2026's calendar (the JS CLI reads it)
+    let year: i32 = match arg(argv, "--year") {
+        None => bukio::dates::today_iso()[0..4].parse().unwrap_or(2026),
+        Some(raw) => raw.parse().map_err(|_| {
+            BukioError::new(
+                "INVALID_YEAR",
+                format!("--year must be a year, got '{raw}'"),
+            )
+        })?,
+    };
+    // the JS CLI wraps the engine value under `compliance`
+    Ok(json!({
+        "compliance": bukio::compliance::compliance_status(&db, year)?
+    }))
 }
 
 fn cmd_compliance_mark(

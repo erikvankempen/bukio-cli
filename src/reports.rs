@@ -1571,6 +1571,16 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
     let default_model = models.last().cloned().unwrap_or_default();
     let model = model.unwrap_or(&default_model);
 
+    if models.is_empty() {
+        // A market with no statutory-accounts builder: the JS reports the
+        // missing builder, never an empty model list as INVALID_MODEL.
+        return Err(BukioError::new(
+            "FORMAT_NOT_SUPPORTED",
+            format!(
+                "financial statements format '{format}' has no builder (registered: auto, lu-lsc)"
+            ),
+        ));
+    }
     if !models.contains(&model.to_string()) {
         return Err(BukioError::new(
             "INVALID_MODEL",
@@ -1842,11 +1852,6 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
         } else {
             "resultaat_cents"
         };
-        pnl_out.insert(result_key.to_string(), json!(resultaat_cents));
-        pnl_out.insert(
-            "resultaat".to_string(),
-            json!(crate::money::format_amount(resultaat_cents)),
-        );
         if format != "lu-lsc" {
             // the statutory klein W&V also reports the aggregates the JS derives
             // from the same lines: omzet / overige opbrengsten / inkoop (counted
@@ -1875,6 +1880,13 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
             pnl_out.insert("bruto_marge_cents".into(), json!(omzet - inkoop));
             pnl_out.insert("kosten_cents".into(), json!(kosten));
         }
+        // The JS builds the pnl object aggregates-first, result-last; key order
+        // is part of the byte-parity contract the CLI comparison checks.
+        pnl_out.insert(result_key.to_string(), json!(resultaat_cents));
+        pnl_out.insert(
+            "resultaat".to_string(),
+            json!(crate::money::format_amount(resultaat_cents)),
+        );
         report["pnl"] = Value::Object(pnl_out);
     }
 
