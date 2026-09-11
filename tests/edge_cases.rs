@@ -17175,6 +17175,98 @@ fn hard_every_emitted_error_code_is_documented() {
         "error codes emitted by src/ but missing from AGENTS.md: {missing:?}"
     );
 }
+// --- dead public API guard ---------------------------------------------------
+
+/// Rust never reports an unused `pub` item, so a port can leave whole public
+/// functions behind and the build stays silent (six did, including a duplicate
+/// `invoice reminders` and a superseded `cmd_verify_signature`). `cargo` sees
+/// dead *private* items only; this is the missing half.
+///
+/// Heuristic: a `pub` item whose name occurs exactly once in the crate — its own
+/// declaration — is unreferenced. It cannot over-report: a name appearing in a
+/// string, a doc comment or another module counts as a hit, so the failure mode
+/// is a missed item, never a false alarm on live code. Anything reachable only
+/// through a macro or generated code goes in ALLOWED with a reason.
+#[test]
+fn hard_no_unreferenced_public_items() {
+    /// No exceptions today. Add one with a comment explaining why it is live
+    /// despite nothing naming it.
+    const ALLOWED: &[&str] = &[];
+
+    const KINDS: &[&str] = &["fn ", "struct ", "enum ", "trait ", "const ", "static ", "type "];
+
+    fn walk(dir: std::path::PathBuf, out: &mut Vec<(std::path::PathBuf, String)>) {
+        let mut stack = vec![dir];
+        while let Some(d) = stack.pop() {
+            for entry in std::fs::read_dir(&d).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().map(|e| e == "rs").unwrap_or(false) {
+                    out.push((path.clone(), std::fs::read_to_string(&path).unwrap()));
+                }
+            }
+        }
+    }
+
+    fn count_words(text: &str, counts: &mut std::collections::HashMap<String, usize>) {
+        for word in text.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')) {
+            if !word.is_empty() {
+                *counts.entry(word.to_string()).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let base = concat!(env!("CARGO_MANIFEST_DIR"));
+    let mut sources: Vec<(std::path::PathBuf, String)> = Vec::new();
+    walk(std::path::PathBuf::from(format!("{base}/src")), &mut sources);
+
+    // Count every identifier in src/ AND tests/: a public item used only by an
+    // integration test is live.
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut test_sources: Vec<(std::path::PathBuf, String)> = Vec::new();
+    walk(std::path::PathBuf::from(format!("{base}/tests")), &mut test_sources);
+    for (_, src) in sources.iter().chain(test_sources.iter()) {
+        count_words(src, &mut counts);
+    }
+
+    let mut offenders: Vec<String> = Vec::new();
+    for (path, src) in &sources {
+        for (idx, line) in src.lines().enumerate() {
+            let trimmed = line.trim_start();
+            let Some(rest) = trimmed.strip_prefix("pub ") else {
+                continue;
+            };
+            let rest = rest.strip_prefix("async ").unwrap_or(rest);
+            let Some(kind) = KINDS.iter().find(|k| rest.starts_with(**k)) else {
+                continue;
+            };
+            let name: String = rest[kind.len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            if name.is_empty() || ALLOWED.contains(&name.as_str()) {
+                continue;
+            }
+            if counts.get(&name).copied().unwrap_or(0) <= 1 {
+                offenders.push(format!(
+                    "{}:{}  pub {} {}",
+                    path.file_name().unwrap().to_string_lossy(),
+                    idx + 1,
+                    kind.trim(),
+                    name
+                ));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "public items that nothing references (delete them, or add to ALLOWED with a reason):\n{}",
+        offenders.join("\n")
+    );
+}
+
 // ==== hardening, part 2 (lib-level) ========================================
 
 /// A file DB whose company is complete enough to finalize invoices.

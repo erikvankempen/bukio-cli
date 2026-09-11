@@ -480,11 +480,6 @@ pub fn cmd_verify_actor(db_path: &str, actor: &str) -> Result<Value> {
     }))
 }
 
-/// Verify: check signature (low-level).
-pub fn cmd_verify_signature(data: &str, signature: &str, public_pem: &str) -> Result<Value> {
-    let ok = sign::verify(data.as_bytes(), signature, public_pem);
-    Ok(json!({"ok": true, "valid": ok}))
-}
 
 #[cfg(test)]
 mod tests {

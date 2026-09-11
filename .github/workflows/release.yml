@@ -22,6 +22,11 @@ jobs:
   test:
     name: test suite
     runs-on: ubuntu-22.04
+    env:
+      # Warnings are errors here: the port accumulated 24 without anyone
+      # noticing, and `cargo` caps lints for dependencies, so this only denies
+      # warnings in this crate.
+      RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -39,6 +44,8 @@ jobs:
     needs: test
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ${{ matrix.os }}
+    env:
+      RUSTFLAGS: -D warnings
     strategy:
       fail-fast: false
       matrix:

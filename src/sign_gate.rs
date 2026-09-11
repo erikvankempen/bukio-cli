@@ -29,20 +29,8 @@ thread_local! {
     static PENDING_SIGN: RefCell<Option<SignResult>> = RefCell::new(None);
 }
 
-/// Store the sign result for the current command.
-pub fn set_pending_sign(result: Option<SignResult>) {
-    PENDING_SIGN.with(|c| *c.borrow_mut() = result);
-}
 
-/// Take the pending sign result (consumed once).
-pub fn take_pending_sign() -> Option<SignResult> {
-    PENDING_SIGN.with(|c| c.borrow_mut().take())
-}
 
-/// Get a reference to the pending sign result for building audit args.
-pub fn pending_sign_ref() -> Option<SignResult> {
-    PENDING_SIGN.with(|c| c.borrow().clone())
-}
 
 const SIGNATURE_WINDOW_MS: i64 = 5 * 60_000; // ±5 minutes
 const NONCE_RETENTION_MS: i64 = 24 * 3600_000; // nonces remembered 24h

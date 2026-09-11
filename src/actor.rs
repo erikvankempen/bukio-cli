@@ -50,14 +50,6 @@ pub fn actor_error(actor: Option<&str>) -> Option<BukioError> {
 
 // --- registry (mirrors actor-registry.js) -----------------------------------
 
-pub const VALID_ROLES: [&str; 6] = [
-    "owner",
-    "bookkeeper",
-    "payments",
-    "tax",
-    "assets",
-    "readonly",
-];
 
 pub fn now_iso() -> String {
     let now = std::time::SystemTime::now()
