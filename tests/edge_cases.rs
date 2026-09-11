@@ -7141,7 +7141,11 @@ fn if_company_logo_set_extract_round_trip_and_remove() {
     ]);
     assert!(ok, "{out}");
     assert_eq!(v["data"]["company"]["logo_mime"], json!("image/png"), "{v}");
-    assert_eq!(v["data"]["company"]["logo_bytes"], json!(33));
+    assert_eq!(
+        v["data"]["company"]["logo_bytes"],
+        json!(bytes.len()),
+        "the CLI must report the size it actually stored"
+    );
 
     let extract = dir.join("out.png");
     let (v, ok, out) = run_cli(&[
