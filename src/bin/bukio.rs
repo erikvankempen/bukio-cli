@@ -138,20 +138,16 @@ fn parse_limit(argv: &[String], default: i64) -> Result<i64> {
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
 
-    // --help / --version (before global flag parsing)
-    let has_subcmd = argv.iter().any(|a| !a.starts_with('-'));
-    if (has_flag(&argv, "--help") || has_flag(&argv, "-h")) && !has_subcmd {
-        println!("bukio — agent-first bookkeeping for SMEs across thirty-one jurisdictions");
-        println!("Usage: bukio [global flags] <command> [subcommand] [options]");
-        println!();
-        println!("Global flags:");
-        println!("  --db <path>           database file (default: ~/.bukio/bukio.db)");
-        println!("  --json                machine-readable JSON output");
-        println!("  --actor <who>         acting entity '<role>:<name>' (required)");
-        println!("  --locale <code>       output language (default: en)");
-        println!("  --sign-key <path>     explicit private-key file to sign with");
-        println!("  --server <url>        remote bukio server URL");
-        println!("  --dry-run             show the plan without writing");
+    // --help: the captured JS help for the deepest known command path, so
+    // `bukio bank --help` and `bukio payments payables add --help` work like
+    // commander's output instead of UNKNOWN_COMMAND
+    if has_flag(&argv, "--help") || has_flag(&argv, "-h") {
+        print!("{}", bukio::help::resolve(&argv));
+        std::process::exit(0);
+    }
+    // `bukio help <path>` — the JS exposes this as a command
+    if argv.first().map(|a| a.as_str()) == Some("help") {
+        print!("{}", bukio::help::resolve(&argv[1..]));
         std::process::exit(0);
     }
     if has_flag(&argv, "--version") || has_flag(&argv, "-V") {
@@ -526,9 +522,16 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
             return result;
         }
     }
+    // A group typed on its own (`bukio bank`) is not an error in commander: it
+    // prints the group's help and exits 1. Do the same from the captured text.
+    let path = positional.join(" ");
+    if bukio::help::has_children(&path) {
+        eprint!("{}", bukio::help::text_for(&path).unwrap_or(""));
+        std::process::exit(1);
+    }
     Err(BukioError::new(
         "UNKNOWN_COMMAND",
-        format!("unknown command: {}", positional.join(" ")),
+        format!("unknown command: {path}"),
     ))
 }
 

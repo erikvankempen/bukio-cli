@@ -23,6 +23,7 @@ pub mod db;
 pub mod entries;
 pub mod export;
 pub mod fx;
+pub mod help;
 pub mod i18n;
 pub mod import_mod;
 pub mod invoice;
