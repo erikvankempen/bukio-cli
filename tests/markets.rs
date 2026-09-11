@@ -185,10 +185,17 @@ fn mkt_strict_dispatch_never_falls_back_to_dutch_output() {
             );
             continue;
         }
-        // no layout registered: fail loudly, and never render NL fields
+        // Fail loudly, and never render NL fields. A company whose VAT module is
+        // off hears VAT_MODULE_OFF first (the JS order); the rest must report
+        // that their country has no return layout.
+        let expected = if p["tax"]["system"].as_str() == Some("vat") {
+            "FORMAT_NOT_SUPPORTED"
+        } else {
+            "VAT_MODULE_OFF"
+        };
         assert_eq!(
             code(&out),
-            "FORMAT_NOT_SUPPORTED",
+            expected,
             "{cc} must not fall back to a Dutch VAT return: {out}"
         );
     }

@@ -24,7 +24,7 @@ pub fn is_vat_enabled(db: &Connection) -> bool {
     .unwrap_or(false)
 }
 
-fn require_vat(db: &Connection) -> Result<()> {
+pub fn require_vat(db: &Connection) -> Result<()> {
     if !is_vat_enabled(db) {
         return Err(BukioError::new(
             "VAT_MODULE_OFF",

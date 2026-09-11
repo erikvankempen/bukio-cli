@@ -1979,6 +1979,9 @@ fn cmd_vat_book(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
 
 fn cmd_vat_readout(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
     let db = open_existing(db_path)?;
+    // module first, then the format dispatch — the same order as the JS, so a
+    // company with VAT off hears VAT_MODULE_OFF rather than a format complaint
+    bukio::vat::require_vat(&db)?;
     let profile = bukio::accounts::resolve_profile(&db)?;
     if profile["tax"]["returnLayout"].as_str().is_none() {
         return Err(BukioError::new(

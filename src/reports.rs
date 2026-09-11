@@ -1882,9 +1882,16 @@ pub fn jaarrekening(db: &Connection, year: &str, model: Option<&str>) -> Result<
         }
         // The JS builds the pnl object aggregates-first, result-last; key order
         // is part of the byte-parity contract the CLI comparison checks.
+        // the LU model is French throughout: src/report/jaarrekening.js emits
+        // resultat_cents + resultat there, resultaat_cents + resultaat for NL
+        let result_label = if format == "lu-lsc" {
+            "resultat"
+        } else {
+            "resultaat"
+        };
         pnl_out.insert(result_key.to_string(), json!(resultaat_cents));
         pnl_out.insert(
-            "resultaat".to_string(),
+            result_label.to_string(),
             json!(crate::money::format_amount(resultaat_cents)),
         );
         report["pnl"] = Value::Object(pnl_out);
