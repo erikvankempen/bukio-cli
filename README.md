@@ -9,7 +9,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![Website](https://img.shields.io/badge/website-agentic.bukio.nl-2b6cb0)](https://agentic.bukio.nl)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.17.0-blue)](https://github.com/erikvankempen/bukio-cli/releases)
-[![Tests](https://img.shields.io/badge/tests-927%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-928%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -1080,7 +1080,7 @@ bukio-cli/
 │   ├── mcp.rs            # MCP server (stdio JSON-RPC 2.0)
 │   └── ...               # posting engine, reports, actors, VAT, i18n, jurisdictions
 ├── migrations/            # 26 numbered SQL migrations
-├── tests/                 # 6 integration suites (edge_cases, jurisdictions, markets, ...)
+├── tests/                 # 7 integration suites (edge_cases, jurisdictions, markets, company_simulation, ...)
 ├── test/report.md         # test report, generated
 ├── scripts/
 │   └── testreport.sh      # runs cargo test and writes test/report.md (+ the badge)
@@ -1378,26 +1378,26 @@ Stated plainly, so nothing is hidden:
 - **It was free:** the ≈ €3,150 is an imputed opportunity cost, not money paid.
   My out-of-pocket spend remains **$41.90** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
-  conventional code review of a 62 KLOC codebase would take; treat them as
+  conventional code review of a 63 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
 
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **62,055 non-blank, non-comment lines of Rust**
-across 49 files (40,151 in `src/`, 21,904 in `tests/`), i.e. **62.05 KLOC**
+model (Boehm, 1981): **62,945 non-blank, non-comment lines of Rust**
+across 50 files (40,231 in `src/`, 22,714 in `tests/`), i.e. **62.95 KLOC**
 (measured with `scc` v3.7.0, the same tool the earlier JavaScript figure used).
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 183.1 PM | 18.1 months | ~10 developers | ≈ €1,648K |
-| Semi-detached | 305.5 PM | 18.5 months | ~17 developers | ≈ €2,750K |
-| Embedded | 510.1 PM | 18.4 months | ~28 developers | ≈ €4,591K |
+| Organic | 185.8 PM | 18.2 months | ~10 developers | ≈ €1,672K |
+| Semi-detached | 310.4 PM | 18.6 months | ~17 developers | ≈ €2,794K |
+| Embedded | 518.9 PM | 18.5 months | ~28 developers | ≈ €4,670K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 183–510
-person-months (≈ €1.65M–€4.59M)**; the AI-assisted build consumed **$41.90 in
+**Comparison:** a conventional team building this would estimate **≈ 186–519
+person-months (≈ €1.67M–€4.67M)**; the AI-assisted build consumed **$41.90 in
 API costs plus ≈ €3,150 of my review-and-direction time (contributed, unpaid
 — see above)** over 66 working sessions in under six weeks — still a tiny fraction of
 the conventional estimate.
