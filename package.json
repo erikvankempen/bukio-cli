@@ -10,7 +10,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node scripts/testreport.mjs"
+    "test": "node --test test/*.test.js"
   },
   "keywords": [
     "bookkeeping",

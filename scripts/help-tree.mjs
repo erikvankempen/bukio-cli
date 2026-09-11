@@ -69,6 +69,13 @@ export function captureHelp() {
     out[p] = text;
     for (const c of childrenOf(text)) queue.push(`${p} ${c}`);
   }
+  // This port renders PDFs itself (src/pdf.rs, no browser involved), so the JS
+  // help's "headless Chromium" would be a lie in the binary's own --help.
+  // Adapt it here, in the generator the drift guard also calls, so both sides
+  // see the same text.
+  for (const [k, v] of Object.entries(out)) {
+    if (typeof v === 'string') out[k] = v.replaceAll('headless Chromium', 'native renderer');
+  }
   return out;
 }
 

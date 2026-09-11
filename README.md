@@ -8,9 +8,8 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
 [![Website](https://img.shields.io/badge/website-agentic.bukio.nl-2b6cb0)](https://agentic.bukio.nl)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/github/package-json/v/erikvankempen/bukio-cli?label=version&color=2b6cb0)](https://github.com/erikvankempen/bukio-cli/releases)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](package.json)
-[![Tests](https://img.shields.io/badge/tests-946%20passing-brightgreen)](test/report.md)
+[![Version](https://img.shields.io/badge/version-0.17.0-blue)](https://github.com/erikvankempen/bukio-cli/releases)
+[![Tests](https://img.shields.io/badge/tests-927%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -34,7 +33,7 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 - **SEPA payment batches** — a payables register (purchase invoices, `transfer` vs `direct_debit`/incasso), batch creation from unpaid invoices or CSV, and **pain.001 export** (`001.03`/`001.09`) for upload in any SEPA bank portal. **Direct debit** adds a direct-debit mandate register (`payments mandate add`, core/b2b) and **pain.008.001.02 export** (one `PmtInf` per scheme, FRST/RCUR auto-assigned). One export per batch (unique `MsgId` — re-uploading would double-pay); the ledger is untouched until the bank statement import books the payments.
 - **One company per database** — a second company is a second SQLite file (`--db` or `BUKIO_DB`).
 - **Local-first** — no cloud, no lock-in. Your 7-year administration stays yours.
-- **Sixteen jurisdictions** — `bukio init --country <cc>` seeds the country's chart convention (RGS, PCN 2020, PCG, SKR 03, BAS 2023, NS 4102, EKR, PGC, SNC, …), VAT codes/rates, identifiers and compliance calendar (NL, LU, GB, FR, US, BE, DE, DK, FI, NO, SE, AT, IE, IT, ES, PT — see [Supported jurisdictions](#supported-jurisdictions)). Format dispatch is strict: unbuilt markets fail loudly (`FORMAT_NOT_SUPPORTED`), never silently fall back.
+- **Thirty-one jurisdictions** — `bukio init --country <cc>` seeds the country's chart convention (RGS, PCN 2020, PCG, SKR 03, BAS 2023, NS 4102, EKR, PGC, SNC, …), VAT codes/rates, identifiers and compliance calendar — all 27 EU member states plus GB, NO, XK and US (see [Supported jurisdictions](#supported-jurisdictions)). Format dispatch is strict: a market without a builder fails loudly (`FORMAT_NOT_SUPPORTED`), never silently falls back.
 - **Localization (i18n)** — optional and opt-in: `--locale <code>` / `BUKIO_LOCALE` switches human-facing output to Dutch, Belgian Dutch, German, French, Luxembourg French, Danish, Finnish, Norwegian or Swedish; **English is the default** whenever localization is off (see [Localization](#localization-i18n)). JSON, error codes and statutory documents never localize.
 - **Cost centers** — an optional analytical dimension for management reporting. Define cost centers (`bukio cost-center add`), tag expense/revenue postings at booking time (`4700:-100.00@SALES`), and run `report cost-center` to see revenue, costs and result per center for any period (year, quarter, month, or date range). Cost centers are purely analytical — they never block a posting and are invisible to statutory reporting.
 
@@ -46,7 +45,7 @@ installs from source and stops before touching any financial data:
 ```
 Install bukio-cli from github.com/erikvankempen/bukio-cli.
 
-Verify Node.js 20+ and a Linux or macOS environment, then clone the repository, run npm install and npm link, and confirm with bukio --version.
+Clone the repository, run `cargo build --release`, and confirm with `target/release/bukio --version`. Alternatively, `cargo install --path .` puts `bukio` on PATH.
 
 Read the repository README.md and AGENTS.md files, configure `bukio mcp` as a local stdio MCP server, and explain the setup you made. Do not create a company or book real transactions yet. When we start, use named actors, preview every mutation with --dry-run, and ask for confirmation before writing.
 ```
@@ -62,42 +61,60 @@ Read the repository README.md and AGENTS.md files, configure `bukio mcp` as a lo
 1. [Features](#features)
 2. [Quick start](#quick-start)
 3. [Screenshot](#screenshot)
-4. [Requirements & Install](#requirements--install)
-5. [Core Concepts](#core-concepts)
-6. [Command Reference](#command-reference)
-7. [Global Flags](#global-flags)
-8. [Localization (i18n)](#localization-i18n)
-9. [Money Format](#money-format)
-10. [Integrity & Safety Model](#integrity--safety-model)
-11. [The Database](#the-database)
-12. [Using Agents](#using-agents)
-13. [Scheduling recurring actions (cron)](#scheduling-recurring-actions-cron)
-14. [Project Layout](#project-layout)
-15. [Development & Testing](#development--testing)
-16. [Error Codes](#error-codes)
-17. [Common Tasks](#common-tasks)
-18. [EU AI Act Transparency](#eu-ai-act-transparency)
-19. [AI Development Cost & Token Usage](#ai-development-cost--token-usage)
-20. [Troubleshooting](#troubleshooting)
-21. [Supported jurisdictions](#supported-jurisdictions)
-22. [Roadmap](#roadmap)
+4. [Status](#status)
+5. [Requirements & Install](#requirements--install)
+6. [Core Concepts](#core-concepts)
+7. [Command Reference](#command-reference)
+8. [Global Flags](#global-flags)
+9. [Localization (i18n)](#localization-i18n)
+10. [Money Format](#money-format)
+11. [Integrity & Safety Model](#integrity--safety-model)
+12. [The Database](#the-database)
+13. [Using Agents](#using-agents)
+14. [Scheduling recurring actions (cron)](#scheduling-recurring-actions-cron)
+15. [Project Layout](#project-layout)
+16. [Development & Testing](#development--testing)
+17. [Error Codes](#error-codes)
+18. [Common Tasks](#common-tasks)
+19. [EU AI Act Transparency](#eu-ai-act-transparency)
+20. [AI Development Cost & Token Usage](#ai-development-cost--token-usage)
+21. [Troubleshooting](#troubleshooting)
+22. [Supported jurisdictions](#supported-jurisdictions)
+23. [Roadmap](#roadmap)
+
+---
+
+## Status
+
+**Rust binary is feature-complete against the original JavaScript reference.** All 28 command groups, 134 dispatch arms, 42 MCP tools, and 31 jurisdiction profiles are implemented and verified. The `bukio` binary is a single self-contained executable (~16 MB) with no runtime dependencies beyond SQLite (bundled via rusqlite).
+
+The JavaScript tree (`src/**/*.js`, `bin/bukio.js`, `test/*.test.js`) currently remains in the repository as the **parity oracle** (`node scripts/parity.mjs`, 324/324 steps passing) and will be removed at the Rust-only cut-over.
 
 ---
 
 ## Requirements & Install
 
-- Node.js **>= 20**
-- Linux/macOS (developed on a Linux VPS)
+- **Rust toolchain** (stable; 2021 edition or later)
+- Linux or macOS (developed on a Linux VPS)
+
+### Build from source
 
 ```bash
 git clone https://github.com/erikvankempen/bukio-cli.git
 cd bukio-cli
-npm install          # deps: better-sqlite3, commander
-npm link             # exposes `bukio` on PATH (or: npm install -g .)
-bukio --version
+cargo build --release          # → target/release/bukio (~16 MB single binary)
+target/release/bukio --version
 ```
 
-Uninstall: `npm unlink -g bukio-cli` (or `npm uninstall -g bukio-cli`).
+### Install to PATH
+
+```bash
+cargo install --path .         # puts `bukio` on ~/.cargo/bin (on PATH)
+```
+
+Or simply copy `target/release/bukio` to any directory on your PATH (e.g. `/usr/local/bin/bukio`).
+
+**No runtime dependencies.** SQLite is bundled (via rusqlite), PDFs are rendered natively (src/pdf.rs), TLS is in-process. There is no Node.js, no browser, and no external process required.
 
 ---
 
@@ -265,7 +282,7 @@ Initialise a company database: creates the file, the company row, and seeds the 
 | `--legal-form <form>` | profile default | Legal forms follow the profile (NL: `eenmanszaak` \| `vof` \| `bv` \| `nv` \| `stichting` \| `vereniging`; DE: `gmbh` \| `ug` \| `ag` \| ...; US: `llc` \| `c-corp` \| `s-corp` \| ...) |
 | `--tax-id <id>` | — | Tax/VAT identification number |
 | `--iban <iban>` | — | Bank account (IBAN) |
-| `--vat <on\|off>` | `off` | Enable the VAT module (Phase 2) |
+| `--vat <on\|off>` | `off` | Enable the VAT module |
 | `--kor` | off | Small business scheme — implies `--vat off` |
 | `--fiscal-year-end <mm-dd>` | `12-31` | Fiscal year end |
 | `--dry-run` | off | Show the plan without writing anything |
@@ -317,7 +334,7 @@ bukio entry add --date 2026-08-04 --desc "Startkapitaal" \
 bukio entry add --desc "Startkapitaal" \
   --postings "1100:10000.00" --postings "3000:-10000.00"
 
-# three postings (VAT-like split is a Phase 2 concern; 3-leg entries work today)
+# three postings (VAT-like split; 3-leg entries work today)
 bukio entry add --desc "3-leg example" \
   --postings "1100:121.00,8000:-100.00,2100:-21.00" --dry-run
 ```
@@ -521,7 +538,7 @@ bukio vat book --date 2026-06-05 --desc "Kantoorartikelen" \
 bukio vat readout --period 2026-Q2
 ```
 
-**OB field mapping (the NL statutory return shape):** 1a/1b/1c omzet (21%/9%/0%/vrijgesteld), 1d privégebruik, 3a/3b/3c inkopen, 4a/4b verlegde btw (binnenland/EU, netted via 5b), 5a verschuldigde btw, 5b voorbelasting, 5d te betalen/te ontvangen. Fields 2a/2b (exports) and 5c are not tracked in Phase 2 (shown as 0).
+**OB field mapping (the NL statutory return shape):** 1a/1b/1c omzet (21%/9%/0%/vrijgesteld), 1d privégebruik, 3a/3b/3c inkopen, 4a/4b verlegde btw (binnenland/EU, netted via 5b), 5a verschuldigde btw, 5b voorbelasting, 5d te betalen/te ontvangen. Fields 2a/2b (exports) and 5c are not tracked (shown as 0).
 
 ### `bukio recurring` / `bukio depreciation`
 
@@ -577,7 +594,7 @@ Outgoing invoicing (FR3) — compliant with the 12 verplichte factuurvereisten, 
 | `invoice create ... [--discount-pct 5 \| --discount-amount 50.00] [--language nl\|en]` | **Total discount** (before VAT; allocated across VAT-rate groups to the cent so the VAT-return readout reconciles) and invoice language — follows the company profile (Dutch for NL/BE companies, English otherwise), `nl|en` explicit override — PDF labels and unit names |
 | `invoice finalize --id N [--dry-run]` | **Assign the sequential number (YYYY-NNNN) and book the entry** (Debiteuren / Omzet / Te betalen btw) |
 | `invoice list [--status] [--type]` / `show --id` | Inspect invoices |
-| `invoice pdf --id N [--out PATH]` | Render a compliant PDF via headless Chromium — includes the **company logo** (set via `company update --logo`), a **VAT breakdown per rate** (`Btw 21% over …`), a Eenheid/Unit column and localized labels |
+| `invoice pdf --id N [--out PATH]` | Render a compliant PDF via the native Rust renderer — includes the **company logo** (set via `company update --logo`), a **VAT breakdown per rate** (`Btw 21% over …`), a Eenheid/Unit column and localized labels |
 | `invoice ubl --id N [--out PATH]` | Export **UBL 2.1 / Peppol BIS 3.0 (EN 16931)** XML |
 | `invoice credit --id N [--reason]` | Create a credit note (draft) from a finalized invoice (inherits language + discounts) |
 | `invoice pay --id N --date [--amount]` | Record a payment (tracking; the posting comes from the bank flow) |
@@ -603,7 +620,7 @@ bukio bank match auto                        # tx -> invoice 2026-0001 (paid)
 
 ### `bukio year-end` / `bukio icp`
 
-Annual close and statutory reporting (Phase 4).
+Annual close and statutory reporting.
 
 | Command | Purpose |
 |---------|---------|
@@ -621,11 +638,11 @@ bukio financial-statements report --year 2026 --model klein --format pdf   # fin
 bukio icp readout --period 2026-Q3             # EU customers + amounts
 ```
 
-**OB readout fields (Phase 4 — the NL statutory VAT-return shape):** 1a/1b/1c omzet (21%/9%/0%-vrijgesteld), 1d privégebruik (21% auto-computed on `@P`), **2a verlegde EU leveringen (RE)**, 3a inkopen binnenland (incl. verlegd `@R`), **3b inkopen EU (RE)**, 3c buiten EU, 4a/4b verlegde btw, 5a verschuldigd, 5b voorbelasting, 5d te betalen/te ontvangen. 2b and 5c are not tracked.
+**OB readout fields (the NL statutory VAT-return shape):** 1a/1b/1c omzet (21%/9%/0%-vrijgesteld), 1d privégebruik (21% auto-computed on `@P`), **2a verlegde EU leveringen (RE)**, 3a inkopen binnenland (incl. verlegd `@R`), **3b inkopen EU (RE)**, 3c buiten EU, 4a/4b verlegde btw, 5a verschuldigd, 5b voorbelasting, 5d te betalen/te ontvangen. 2b and 5c are not tracked.
 
 ### `bukio mcp` / `bukio fx` / `bukio compliance`
 
-The agent layer (Phase 5).
+The agent layer.
 
 | Command | Purpose |
 |---------|---------|
@@ -708,7 +725,7 @@ SSH's security **and** per-device attribution.
 
 ### `bukio import` / `bukio month-end` / `bukio invoice reminders`
 
-Imports & period automation (Phase 6).
+Imports & period automation.
 
 **Every importer validates the ENTIRE file before writing anything** — all
 errors are collected and reported with line numbers (`IMPORT_VALIDATION_FAILED`
@@ -789,7 +806,7 @@ via the harmonized baseline + their localised PDFs).
 |---------|---------|
 | `backup [--out <path>] [--encrypt] [--passphrase] [--keep N] [--dry-run]` | Consistent SQLite backup (default `~/.bukio/backups/bukio-<ts>.db`). **`--encrypt` (v0.14)** wraps it in AES-256-GCM (scrypt-derived key) — file extension `.enc`, passphrase from `--passphrase` or `BUKIO_BACKUP_PASSPHRASE` env (never in the repo). **`--keep N`** prunes the oldest backups in the default folder (rejects `--out` — rotation only applies to the default location) |
 | `restore --from <file> [--to <path>] [--force] [--passphrase]` | Restore from a backup file (validated first); **encrypted backups are auto-detected** by the `BUKIOENC1` magic header and decrypted with `--passphrase` / `BUKIO_BACKUP_PASSPHRASE` |
-| `update [--yes] [--repo <path>] [--trust-remote] [--dry-run]` | **Self-update** from the GitHub main branch: fetch `origin/main` and reset the working tree to it (audit row when a company DB exists; works without one). ⚠️ The reset **overwrites local customizations** — `--dry-run` first (incoming commits + modified files + local commits that would be lost), and the real run refuses without `--yes`. `--trust-remote` for forks/mirrors, `--repo` for a different install, npm installs update with `npm update -g bukio-cli` |
+| `update [--yes] [--repo <path>] [--trust-remote] [--dry-run]` | **Self-update** from the GitHub main branch: fetch `origin/main` and reset the working tree to it (audit row when a company DB exists; works without one). ⚠️ The reset **overwrites local customizations** — `--dry-run` first (incoming commits + modified files + local commits that would be lost), and the real run refuses without `--yes`. `--trust-remote` for forks/mirrors, `--repo` for a different install. Rebuild with `cargo build --release` after updating the source. |
 | `attach add --invoice N \| --entry N --file F [--store db\|file] [--note] [--dry-run]` | **Source documents (v0.14)**: store the original PDF/scans against an invoice or entry. Default `--store db` = BLOB in the SQLite file (travels with backups; 25 MB/file cap; sha256 dedupe). `--store file` = content-addressed copy in `<db>-attachments/` |
 | `attach list --invoice N \| --entry N` / `show --id [--out F]` / `remove --id` | Metadata-only listing (never reads the BLOB); `show` extracts the bytes (`--force` to overwrite); `remove` deletes the BLOB/copy. Add/remove are audited |
 
@@ -943,13 +960,13 @@ Human-facing output is **English by default**. Localization is optional and opt-
 sqlite3 ~/.bukio/bukio.db ".backup ~/backups/bukio-$(date +%F).db"
 ```
 
-A built-in `bukio backup`/`restore` lands in Phase 1.
+A built-in `bukio backup`/`restore` command is available — see [Command Reference](#bukio-backup--bukio-restore--bukio-attach).
 
 ---
 
 ## The Database
 
-- Engine: SQLite (via better-sqlite3), WAL mode, foreign keys on.
+- Engine: SQLite (bundled via rusqlite), WAL mode, foreign keys on.
 - Location: `~/.bukio/bukio.db` by default; override with `--db` or `BUKIO_DB`.
 - Migrations: numbered `.sql` files in `migrations/`, applied in order, tracked via `PRAGMA user_version`.
 
@@ -1053,14 +1070,21 @@ machine can propose and a human (or a verifying agent) disposes.
 
 ```
 bukio-cli/
-├── bin/bukio.js           # CLI entry point
 ├── src/
-│   ├── cli/               # commander commands (init, entry, report, audit, util)
+│   ├── main.rs            # CLI entry point + dispatch
+│   ├── lib.rs             # library root (all modules)
+│   ├── cli/               # command groups (init, entry, report, audit, ...)
 │   ├── core/              # db, accounts, chart, entries (posting engine), money
 │   ├── audit/             # append-only audit log
-│   └── report/            # trial balance
-├── migrations/            # numbered SQL migrations (001_initial.sql)
-├── test/                  # node:test suites (unit + CLI end-to-end)
+│   ├── report/            # trial balance, balance sheet, P&L, journal
+│   ├── pdf.rs             # native PDF renderer (invoices + jaarrekening)
+│   ├── ubl.rs             # Peppol BIS 3.0 UBL generation
+│   ├── mcp.rs             # MCP server (stdio JSON-RPC 2.0)
+│   └── ...                # (43 Rust source files total)
+├── migrations/            # numbered SQL migrations
+├── tests/                 # integration tests (edge_cases, jurisdictions, markets, ...)
+├── scripts/
+│   └── testreport.sh      # runs cargo test and writes test/report.md
 ├── AGENTS.md              # agent manual — read before driving the tool
 └── README.md
 ```
@@ -1069,11 +1093,25 @@ bukio-cli/
 
 ## Development & Testing
 
+### Build
+
 ```bash
-npm test          # node --test — discovers test/*.test.js
+cargo build --release       # → target/release/bukio
 ```
 
-The suite covers: money parsing, posting engine invariants, reversal semantics, DB triggers (balance, immutability, append-only audit), trial balance math, and end-to-end CLI flows against temporary databases.
+### Test
+
+```bash
+cargo test --release        # runs all test modules (lib + integration)
+```
+
+The test suite covers: money parsing, posting engine invariants, reversal semantics, DB triggers (balance, immutability, append-only audit), trial balance math, end-to-end CLI flows against temporary databases, jurisdiction profiles (all 31 markets), edge cases, remote server protocol, SMTP integration, and update CLI validation.
+
+### Test report
+
+```bash
+scripts/testreport.sh       # runs cargo test --release, writes test/report.md
+```
 
 The version history is recorded in [CHANGELOG.md](CHANGELOG.md); the agent manual for driving the tool lives in [AGENTS.md](AGENTS.md).
 
@@ -1112,8 +1150,8 @@ The version history is recorded in [CHANGELOG.md](CHANGELOG.md); the agent manua
 | `ENTRY_NOT_FOUND` | The `--entry-id` purchase-booking link does not exist |
 | `ACCOUNT_NOT_FOUND` | Account code does not exist |
 | `ACCOUNT_INACTIVE` | Account exists but is inactive |
-| `ACCOUNT_EXISTS` | Account code already exists (account creation, Phase 1) |
-| `INVALID_CODE` / `INVALID_NAME` / `INVALID_TYPE` / `INVALID_NORMAL_BALANCE` / `INVALID_COMBINATION` | Account validation (Phase 1 surface) |
+| `ACCOUNT_EXISTS` | Account code already exists (account creation) |
+| `INVALID_CODE` / `INVALID_NAME` / `INVALID_TYPE` / `INVALID_NORMAL_BALANCE` / `INVALID_COMBINATION` | Account validation |
 | `NOT_FOUND` | Entry id does not exist |
 | `ALREADY_POSTED` | Entry is already posted |
 | `NOT_POSTED` | Entry must be posted first (reversal) |
@@ -1143,7 +1181,7 @@ The version history is recorded in [CHANGELOG.md](CHANGELOG.md); the agent manua
 | `INVALID_LINE` / `NO_LINES` / `CONTACT_NOT_FOUND` | Invoice line/contact validation |
 | `ALREADY_FINALIZED` / `NOT_FINALIZED` | Invoice lifecycle violations |
 | `OVERPAYMENT` / `NOT_PAYABLE` / `CREDIT_NOT_PAYABLE` | Payment validation |
-| `PDF_UNAVAILABLE` | Playwright/Chromium could not render the invoice PDF |
+| `PDF_UNAVAILABLE` | The native PDF renderer could not write the invoice PDF (empty output, filesystem error) |
 | `PEPPOL_NOT_CONFIGURED` / `PEPPOL_SEND_FAILED` | Peppol provider missing (env `BUKIO_PEPPOL_ENDPOINT`) or rejected the document |
 | `INVALID_KIND` / `INVALID_REVERSE` | Recurring template kind errors (reverse-previous is entry-only) |
 | `INCOMPLETE_YEAR` / `ALREADY_CLOSED` / `EMPTY_YEAR` / `INVALID_YEAR` | Year-end close guards |
@@ -1258,7 +1296,7 @@ principle for AI-generated content:
 | Aspect | Disclosure |
 |---|---|
 | Development method | All source, tests and documentation were generated with an AI coding assistant (Hermes Agent, running `deepseek-v4-flash`), then reviewed, verified and accepted by the repository owner. |
-| Human oversight | Every commit is reviewed by the owner before it lands; the automated test suite (495 tests, `npm test`) must pass; money paths additionally require a balanced trial balance. Nothing is accepted blind. |
+| Human oversight | Every commit is reviewed by the owner before it lands; the automated test suite (`cargo test --release`) must pass; money paths additionally require a balanced trial balance. Nothing is accepted blind. |
 | Synthetic content | Code, tests and docs are AI-generated output; this README section and the commit history serve as the disclosure that the content is machine-generated. |
 | Model provider obligations | The underlying general-purpose AI model is provided by DeepSeek; its obligations under the AI Act (e.g. Article 53 documentation, copyright policy, training-data summary) sit with the provider, not with this repository. |
 | No prohibited practices | The project involves none of the Article 5 prohibited practices (no social scoring, no biometric identification, no manipulation). |
@@ -1415,30 +1453,28 @@ Thirteen jurisdiction profiles (NL plus the twelve-market expansion; see AGENTS.
 
 ## Roadmap
 
-| Phase | Scope | Status |
-|-------|-------|--------|
-| 0 | Foundation: ledger, posting engine, audit, trial balance, `--json`/`--dry-run` | ✅ done |
-| 1 | Accounts CRUD + CSV import, RGS-mapped chart, balans + W&V, CSV/XLSX export, backup/restore | ✅ done |
-| 2 | Bank import (CAMT.053/CSV), matching; optional VAT module (codes, OB readout, KOR) | ✅ done |
-| 3 | Invoicing: factuurvereisten, PDF (Playwright), UBL/Peppol BIS 3.0, credit notes, payment matching, recurring entries **+ recurring invoices + Peppol send** | Compliant invoice PDF + UBL per invoice; due entries generated & posted on time | ✅ done (v0.6.0) |
-| 4 | Jaarrekening micro/klein models, closing entries, KVK package, ICP readout | Jaarrekening package for a micro BV — **✅ done (v0.7.0, 178 tests green)** | planned |
-| 5 | Agent layer: MCP server, permissions/approval gates, NL query, AI categorization suggestions, compliance calendar, FX translation | Agent closes a month end-to-end with zero unsupervised mutations — **✅ done (v0.8.0, 199 tests green)**; actor identity (signed commands, `audit verify`) + per-actor authorizations **✅ done (v0.15.0)** | planned |
-| 6 | Migration & automation: `import opening-balances`, `import journal` (SnelStart/Exact CSV), `import xaf` (XML Auditfile 4.0), `month-end` close check, `invoice reminders` | Switch from an old package in one morning; the agent runs the close check monthly — **✅ done (v0.9.0, 229 tests green)** | planned |
-| 7 | Fixed assets: depreciation schemes (lineair/degressief), asset register with mid-life adoption, monthly runs, disposal, activastaat | Recognise mid-life assets and book only the remaining depreciation — **✅ done (v0.10.0, 271 tests green)** | planned |
-| 8 | SEPA payment batches: payables register (transfer vs direct-debit), pain.001 export for bank-portal upload | Prepare vendor payments in bukio, upload the file in the bank, close the loop via the CAMT import — **✅ done (v0.11.0, 295 tests green)** | planned |
-| 9 | External handover: `export xaf` (Auditfile Financieel 4.0) + audit log as csv/xlsx | The year as a file your boekhouder/tax advisor/auditor imports directly — **✅ done (v0.12.0, 342 tests green)** | planned |
-| 10 | Optional: Ponto live feeds, Peppol send/receive, OCR, SQLCipher | optional |
-| 11 | Items catalog + discounts + invoice languages: `item` CRUD, `invoice create --items/--discount-*/--language`, fractional quantities, per-line + total discounts with per-rate VAT allocation, VAT breakdown per rate on PDF/UBL, company logo on the PDF | Invoice from a reusable catalog with discounts, in Dutch or English, with the company logo — **✅ done (v0.13.0, 433 tests green)** | planned |
-| 12 | Inbound e-invoicing + delivery + cash management: attachments in-DB (`attach`), encrypted/rotated backups, aging/statement/sales reports, `import invoice` (EN 16931/Peppol UBL → payables), `invoice email` (SMTP), SEPA direct debit (`mandate` + pain.008) | The 2027 e-invoice mandate both ways: receive UBL invoices, email the PDF, collect by incasso — **✅ done (v0.14.1, 603 tests green)** | planned |
-| 13 | Actor security layers: **Tier 0** signed actor commands (per-company key registry, enforcement, `audit verify`) + **Tier 0.5 per-actor authorizations** — capability families + roles (`actor authz`, `actor roles`, `actor can`, `actor who-can`), deny-by-default segregation-of-duties gate in the sign gate (CLI + MCP), owner-mediated key revoke | Every command signed and attributable; agents act only within their role — the actor who books is not the one who files or pays — **✅ done (dev branch, 746 tests green)** | done |
-| 14 | Multi-jurisdiction profiles: sixteen (NL + the fifteen-market expansion LU/GB/FR/US/BE/DE/DK/FI/NO/SE/AT/IE/IT/ES/PT) — country chart conventions, VAT codes + rates, identifiers + Peppol schemes, compliance calendars; strict format dispatch (unbuilt formats fail loudly, no silent fallbacks) | One research-verified profile per market (docs-research/*.md); PLANNED empty (CH parked) — **✅ done (dev branch, 932 tests green)** | done |
-| 15 | Localization (i18n): optional `--locale` / `BUKIO_LOCALE` mechanism with English default + locale tables covering all twenty-four markets' languages (en, nl, nl-be, de, fr, fr-lu, da, fi, nb, sv — AT resolves to de, IE to en); curated wiring of PDF labels, emails, CLI renders, VAT descriptions | English default, opt-in per market — **✅ done (dev branch, 932 tests green)** | done |
-| 16 | Phase C: AT Austria (EKR chart, USt 20/10/13, Kleinunternehmer ≤ €55K, UID/FN, UVA, Peppol) + IE Ireland (UK-style chart, VAT 23/13.5/9/4.8/0, CRO + IE VAT, VAT3 bi-monthly, Peppol) — profiles, research briefs, contract tests | Thirteen markets live; research briefs at docs-research/{at,ie}-profile.md — **✅ done (dev branch, 932 tests green)** | done |
-| 17 | Phase D: IT Italy (convention chart, IVA 22/10/5/4, Partita IVA, liquidazione IVA quarterly 16th + Dichiarazione 30 Apr, FatturaPA/SdI domestic e-invoicing as B-milestone) + ES Spain (PGC chart, IVA 21/10/4, NIF, Modelo 303/390, Verifactu B-milestone) + PT Portugal (SNC chart, IVA 23/13/6, NIPC, Declaração Periódica, ATCUD B-milestone) — profiles, research briefs, contract tests | Sixteen markets live; research briefs at docs-research/{it,es,pt}-profile.md — **✅ done (dev branch, 932 tests green)** | done |
-| 18 | Phase E: BG Bulgaria + HR Croatia + SI Slovenia + EE Estonia + LV Latvia + LT Lithuania + MT Malta + CY Cyprus — eight more EUR-market profiles (EAS codes verified against the official OpenPEPPOL codelist; monthly/quarterly VAT deadlines; annual accounts + CIT per market) | Thirty markets live; research briefs at docs-research/{bg,hr,si,ee,lv,lt,mt,cy}-profile.md — **✅ done (dev branch, 932 tests green)** | done |
-| 19 | Phase F: CZ Czechia + SK Slovakia + GR Greece + PL Poland + HU Hungary + RO Romania — the final six EU members (CZK/PLN/HUF/RON base currencies; GR uses the EL prefix; RO non-Peppol/e-Factura) | Thirty markets live — 27/27 EU + GB/NO/US; research briefs at docs-research/{cz,sk,gr,pl,hu,ro}-profile.md — **✅ done (dev branch, 944 tests green)** | done |
+The Rust binary implements every capability from the original JavaScript release through Phase 19. The following table shows the current status:
 
-Design principles persist across phases: **agent-native from day one**, **VAT optional**, **no automated tax filing**, **single company per database**, **local-first**.
+| Area | Capability | Status |
+|------|-----------|--------|
+| Foundation | Ledger, posting engine, audit log, trial balance, `--json`/`--dry-run` | ✅ Implemented |
+| Accounts & Reports | Chart CRUD, CSV import, RGS mapping, balance sheet, P&L, journal, CSV/XLSX export, backup/restore | ✅ Implemented |
+| Bank & VAT | CAMT.053/CSV import, matching, optional VAT module (codes, OB readout, KOR) | ✅ Implemented |
+| Invoicing | 12 factuurvereisten, native PDF, UBL/Peppol BIS 3.0, credit notes, payment matching, recurring invoices + Peppol send | ✅ Implemented |
+| Jaarrekening | Micro/klein models, closing entries, KVK deposit package, ICP readout | ✅ Implemented |
+| Agent Layer | MCP server (42 tools), actor identity (Ed25519 signing, `audit verify`), per-actor authorizations (SoD), compliance calendar, FX rates | ✅ Implemented |
+| Migration & Automation | `import opening-balances` / `journal` / `xaf`, `month-end` close check, `invoice reminders` | ✅ Implemented |
+| Fixed Assets | Depreciation schemes (lineair/degressief), mid-life adoption, asset register, disposal, activastaat | ✅ Implemented |
+| SEPA Payments | Payables register, batch creation, pain.001/008 export, direct-debit mandates | ✅ Implemented |
+| External Handover | `export xaf` (Auditfile Financieel 4.0), audit log CSV/XLSX | ✅ Implemented |
+| Items & Discounts | Items catalog, fractional quantities, per-line + total discounts, per-rate VAT allocation, company logo, invoice languages (i18n) | ✅ Implemented |
+| Inbound E-invoicing | Attachments in-DB, encrypted backups, aging/statement/sales reports, `import invoice` (EN 16931 UBL), `invoice email` (SMTP), SEPA direct debit | ✅ Implemented |
+| Actor Security | Signed commands, per-company enforcement, `audit verify`, per-actor authorizations (capability families + roles), owner-mediated key revoke | ✅ Implemented |
+| Multi-jurisdiction | 31 profiles: all 27 EU member states + GB/NO/XK/US — chart conventions, VAT codes/rates, Peppol schemes, compliance calendars, strict format dispatch | ✅ Implemented |
+| Localization | English default, opt-in `--locale` / `BUKIO_LOCALE` with locale tables for 11 languages | ✅ Implemented |
+| Optional / future | Ponto live feeds, Peppol receive, OCR, automated email sending for reminders | Not yet implemented |
+
+**Design principles:** agent-native from day one · VAT optional · no automated tax filing · single company per database · local-first.
 
 ---
 

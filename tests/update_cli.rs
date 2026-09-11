@@ -84,7 +84,16 @@ fn fixture(v2_files: &[(&str, &str)]) -> (PathBuf, PathBuf) {
 /// run the built binary; returns (data-or-error document, exit ok)
 fn bukio(args: &[&str]) -> (Value, bool) {
     let exe = env!("CARGO_BIN_EXE_bukio");
-    let out = Command::new(exe).args(args).output().unwrap();
+    let out = Command::new(exe)
+        .args(args)
+        // A plain temp fixture must never resolve to an enclosing repository:
+        // git walks up out of the fixture directory, so a TMPDIR that sits
+        // inside a checkout (CI's RUNNER_TEMP, a report run under the project)
+        // would make the "not a clone" directories below look like clones of
+        // this very repo — and a_non_clone_directory_is_refused would fail.
+        .env("GIT_CEILING_DIRECTORIES", std::env::temp_dir())
+        .output()
+        .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
     (
         serde_json::from_str(&stdout).unwrap_or_else(|_| json!({ "raw": stdout.to_string() })),
