@@ -92,6 +92,17 @@ fn bukio(args: &[&str]) -> (Value, bool) {
         // would make the "not a clone" directories below look like clones of
         // this very repo — and a_non_clone_directory_is_refused would fail.
         .env("GIT_CEILING_DIRECTORIES", std::env::temp_dir())
+        // Every child must be pointed away from the live installation: `update`
+        // records an audit row "when a company DB exists", so without these two
+        // the suite wrote those rows into the real ~/.bukio/bukio.db.
+        .env(
+            "BUKIO_DB",
+            std::env::temp_dir().join("bukio-update-cli-no-company.db"),
+        )
+        .env(
+            "BUKIO_CONFIG_DIR",
+            std::env::temp_dir().join("bukio-update-cli-config"),
+        )
         .output()
         .unwrap();
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -400,4 +411,48 @@ fn records_an_audit_row_when_a_company_db_exists() {
     assert_eq!(actor, "human:erik");
     let parsed: Value = serde_json::from_str(&args_json).unwrap();
     assert_eq!(parsed["commits"].as_i64(), r["commits_applied"].as_i64());
+}
+
+/// The companion rule: only a real run touches the books. `cmd_update` returns
+/// the plan before the audit row when --dry-run is set, and this pins that
+/// ordering so a later refactor cannot quietly move the write above it.
+#[test]
+fn a_dry_run_records_no_audit_row() {
+    let (_dir, work1) = fixture(&[]);
+    let dbdir = tmpdir("db");
+    let db = dbdir.join("c.db");
+    let _ = bukio(&[
+        "init",
+        "--name",
+        "Demo BV",
+        "--db",
+        db.to_str().unwrap(),
+        "--json",
+        "--actor",
+        "human:erik",
+    ]);
+    let args: Vec<&str> = vec![
+        "update",
+        "--repo",
+        work1.to_str().unwrap(),
+        "--dry-run",
+        "--trust-remote",
+        "--json",
+        "--db",
+        db.to_str().unwrap(),
+    ];
+    let mut a = args.clone();
+    a.extend_from_slice(ACTOR);
+    let r = data(&a);
+    assert_eq!(r["dryRun"], true);
+
+    let conn = rusqlite::Connection::open(&db).unwrap();
+    let n: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'update'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0, "a dry run must not write an update audit row");
 }
