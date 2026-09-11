@@ -196,13 +196,15 @@ pub fn prune_backups(keep: usize, dry_run: bool) -> Result<Vec<String>> {
     if !dir.exists() {
         return Ok(vec![]);
     }
-    let re = regex::Regex::new(r"^bukio-.*\.db(\.enc)?$").unwrap();
+    // bukio-*.db / bukio-*.db.enc, without a regex engine
     let mut entries: Vec<(PathBuf, std::time::SystemTime, String)> = fs::read_dir(&dir)
         .map_err(|e| BukioError::new("IO_ERROR", format!("cannot read {}: {e}", dir.display())))?
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
-            if !re.is_match(&name) {
+            if !(name.starts_with("bukio-")
+                && (name.ends_with(".db") || name.ends_with(".db.enc")))
+            {
                 return None;
             }
             let mtime = e.metadata().ok()?.modified().ok()?;
