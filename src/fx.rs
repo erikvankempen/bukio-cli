@@ -153,6 +153,12 @@ pub fn get_fx_rate(db: &Connection, currency: &str, date: &str) -> Result<Option
 
 /// List stored rates, newest first.
 pub fn list_fx_rates(db: &Connection, currency: Option<&str>, limit: i64) -> Result<Vec<Value>> {
+    if limit < 0 {
+        return Err(BukioError::new(
+            "INVALID_LIMIT",
+            format!("limit must be a non-negative integer, got '{limit}'"),
+        ));
+    }
     let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match currency {
         Some(c) => (
             "SELECT currency, date, rate_x10000, source, created_by FROM fx_rates WHERE currency = ?1 ORDER BY date DESC LIMIT ?2".into(),

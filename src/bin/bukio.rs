@@ -1153,14 +1153,39 @@ fn cmd_cc_toggle(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
 
 // ── report ─────────────────────────────────────────────────────────────────
 
+/// One CSV cell: neuter spreadsheet formula injection, then quote per RFC 4180.
+/// A value starting with = @ + — or - (but not a plain number, so a negative
+/// amount stays an amount) is prefixed with a single quote, as the JS toCsv does.
+fn csv_cell(v: &str) -> String {
+    let numeric = !v.is_empty() && v.parse::<f64>().is_ok();
+    let guarded = match v.chars().next() {
+        Some(c) if "=@".contains(c) || ("+-".contains(c) && !numeric) => format!("'{v}"),
+        _ => v.to_string(),
+    };
+    if guarded.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", guarded.replace('"', "\"\""))
+    } else {
+        guarded
+    }
+}
+
+fn csv_row(cells: &[String]) -> String {
+    cells
+        .iter()
+        .map(|c| csv_cell(c))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 /// CSV file writer.
 fn write_csv(path: &str, columns: &[&str], rows: &[Vec<String>]) -> Result<()> {
     let mut w = std::fs::File::create(path)
         .map_err(|e| BukioError::new("IO_ERROR", format!("cannot write {path}: {e}")))?;
     use std::io::Write;
-    writeln!(w, "{}", columns.join(",")).ok();
+    let cols: Vec<String> = columns.iter().map(|c| c.to_string()).collect();
+    writeln!(w, "{}", csv_row(&cols)).ok();
     for row in rows {
-        writeln!(w, "{}", row.join(",")).ok();
+        writeln!(w, "{}", csv_row(row)).ok();
     }
     Ok(())
 }
@@ -1179,10 +1204,11 @@ fn emit_csv(
         }
         // CSV to stdout
         let rows = flat_fn(data);
-        print!("{}", columns.join(","));
+        let cols: Vec<String> = columns.iter().map(|c| c.to_string()).collect();
+        print!("{}", csv_row(&cols));
         println!();
         for row in &rows {
-            println!("{}", row.join(","));
+            println!("{}", csv_row(row));
         }
         return Ok(true);
     }

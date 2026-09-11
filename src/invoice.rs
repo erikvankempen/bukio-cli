@@ -1070,6 +1070,8 @@ pub fn create_invoice(
     actor: &str,
     dry_run: bool,
 ) -> Result<Value> {
+    // the JS validates the date at create; a 2026-02-30 used to be stored
+    crate::dates::validate_date(date)?;
     // every i18n table is a valid document language; anything else is rejected
     // (the stored column may be NULL — get_invoice then reports the 'nl' default)
     if let Some(l) = language {

@@ -322,6 +322,12 @@ pub fn list_transactions(
     iban: Option<&str>,
     limit: i64,
 ) -> Result<Vec<Value>> {
+    if limit < 0 {
+        return Err(BukioError::new(
+            "INVALID_LIMIT",
+            format!("limit must be a non-negative integer, got '{limit}'"),
+        ));
+    }
     let mut where_clauses = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
     if let Some(s) = state {
@@ -783,8 +789,10 @@ pub fn auto_match(db: &Connection, window_days: i64, actor: &str, dry_run: bool)
                         continue;
                     }
                     let delta = (outstanding - amount).abs();
+                    // round like the posting tolerance does; plain integer
+                    // division shaved a cent off and missed boundary payments
                     let tolerance = std::cmp::max(
-                        outstanding * FX_MATCH_TOLERANCE_BP / 10000,
+                        ((outstanding * FX_MATCH_TOLERANCE_BP) as f64 / 10000.0).round() as i64,
                         FX_MATCH_FLOOR_CENTS,
                     );
                     if delta <= tolerance && best_inv.as_ref().map_or(true, |b| delta < b.4) {
