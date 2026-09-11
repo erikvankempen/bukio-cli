@@ -9,7 +9,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![Website](https://img.shields.io/badge/website-agentic.bukio.nl-2b6cb0)](https://agentic.bukio.nl)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.17.0-blue)](https://github.com/erikvankempen/bukio-cli/releases)
-[![Tests](https://img.shields.io/badge/tests-928%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-930%20passing-red)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -303,7 +303,7 @@ Company record — the supplier gegevens on your invoices (12-vereisten 1–3 mu
 |---------|---------|
 | `company show` | Current company record (name, registration id, tax id, iban, address) |
 | `company update --name --registration-id --tax-id --iban --address --postal-code --city [--dry-run]` | Update supplier data (audited; IBAN mod-97 validated) |
-| `company update --logo FILE` / `--remove-logo` / `company logo --out FILE` | Store/extract the invoice logo (PNG/JPEG/SVG ≤ 1 MB, ≤ 2048×2048 px, stored as a BLOB in the DB — travels with backups) |
+| `company update --logo FILE` / `--remove-logo` / `company logo --out FILE` | Store/extract the invoice logo (PNG/JPEG/SVG ≤ 1 MB, ≤ 2048×2048 px, stored as a BLOB in the DB — travels with backups). PNG and JPEG logos are embedded in the invoice PDF by the native renderer; an SVG logo renders in the invoice email only, since a PDF cannot carry vector SVG without a vector engine. |
 
 ```bash
 bukio company update --address "Industrieweg 12" --postal-code "2712 CD" --city "Zoetermeer" --tax-id NL123456789B01

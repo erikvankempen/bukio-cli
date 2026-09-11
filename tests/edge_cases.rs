@@ -6213,14 +6213,62 @@ fn if_credit_note_inherits_language_and_discounts() {
 
 // ==== invoice-features, second half (UBL / PDF / logo / recurring / MCP / bank)
 
+fn png_chunk(out: &mut Vec<u8>, kind: &[u8; 4], body: &[u8]) {
+    out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+    out.extend_from_slice(kind);
+    out.extend_from_slice(body);
+    // CRC zeroed on purpose: neither the logo validator nor the PDF writer
+    // verifies it, and a real table would only be test noise
+    out.extend_from_slice(&0u32.to_be_bytes());
+}
+
+fn zlib_bytes(data: &[u8]) -> Vec<u8> {
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
+    e.write_all(data).unwrap();
+    e.finish().unwrap()
+}
+
+/// A complete, decodable PNG: 8-bit colour type 2 (RGB) unless asked otherwise
+/// (0 grey, 6 RGBA), filter type None on every row.
+fn png_with(width: u32, height: u32, colour_type: u8) -> Vec<u8> {
+    let ch: u32 = match colour_type {
+        0 => 1,
+        2 => 3,
+        6 => 4,
+        other => panic!("unsupported colour type {other}"),
+    };
+    let mut raw = Vec::new();
+    for y in 0..height {
+        raw.push(0);
+        for x in 0..width {
+            // two known pixels make the alpha-compositing assertion possible
+            if colour_type == 6 && y == 0 && x == 0 {
+                raw.extend_from_slice(&[255, 0, 0, 0]); // transparent red
+            } else if colour_type == 6 && y == 0 && x == 1 {
+                raw.extend_from_slice(&[0, 0, 255, 255]); // opaque blue
+            } else {
+                for c in 0..ch {
+                    raw.push(((x * 2 + c * 40) % 256) as u8);
+                }
+            }
+        }
+    }
+    let mut out = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    let mut ihdr = Vec::new();
+    ihdr.extend_from_slice(&width.to_be_bytes());
+    ihdr.extend_from_slice(&height.to_be_bytes());
+    ihdr.extend_from_slice(&[8, colour_type, 0, 0, 0]);
+    png_chunk(&mut out, b"IHDR", &ihdr);
+    png_chunk(&mut out, b"IDAT", &zlib_bytes(&raw));
+    png_chunk(&mut out, b"IEND", &[]);
+    out
+}
+
 fn png_bytes(width: u32, height: u32) -> Vec<u8> {
-    let mut b = vec![0u8; 33];
-    b[0..8].copy_from_slice(&[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    b[8..12].copy_from_slice(&13u32.to_be_bytes());
-    b[12..16].copy_from_slice(b"IHDR");
-    b[16..20].copy_from_slice(&width.to_be_bytes());
-    b[20..24].copy_from_slice(&height.to_be_bytes());
-    b
+    png_with(width, height, 2)
 }
 
 fn jpeg_bytes(width: u16, height: u16) -> Vec<u8> {
@@ -6234,6 +6282,7 @@ fn jpeg_bytes(width: u16, height: u16) -> Vec<u8> {
     b[24] = 8;
     b[25..27].copy_from_slice(&height.to_be_bytes());
     b[27..29].copy_from_slice(&width.to_be_bytes());
+    b[29] = 3; // three components: the decoder refuses CMYK
     b
 }
 
@@ -6643,6 +6692,148 @@ fn if_pdf_native_renderer_produces_a_valid_pdf() {
     assert!(bytes.starts_with(b"%PDF-"));
     assert!(dir.exists());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The native renderer must embed a stored logo as a real image XObject. The
+/// old test of this feature only checked the HTML data URI, which is why the
+/// PDF could ship without ever drawing a logo.
+#[test]
+fn if_pdf_embeds_the_company_logo_as_an_image_xobject() {
+    let d = setup();
+    let c = if_contact(&d, Some("NL999999999B01"));
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(&["1x Ding @ 10.00"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+
+    // no logo: no image object at all, exactly as before
+    let plain = String::from_utf8_lossy(&bukio::pdf::invoice_pdf(&d, &inv)).to_string();
+    assert!(
+        !plain.contains("/XObject"),
+        "unexpected image without a logo"
+    );
+
+    // PNG: embedded verbatim, so FlateDecode reads PNG predictors directly
+    let png = png_bytes(120, 60);
+    d.execute(
+        "UPDATE company SET logo = ?1, logo_mime = ?2 WHERE id = 1",
+        rusqlite::params![png, "image/png"],
+    )
+    .unwrap();
+    let pdf = String::from_utf8_lossy(&bukio::pdf::invoice_pdf(&d, &inv)).to_string();
+    assert!(pdf.starts_with("%PDF-"), "not a PDF");
+    assert!(pdf.contains("/Subtype /Image"), "no image object:\n{pdf}");
+    assert!(pdf.contains("/Width 120 /Height 60"), "wrong size");
+    assert!(pdf.contains("/Filter /FlateDecode"), "PNG must stay zlib");
+    assert!(
+        pdf.contains("/DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns 120 >>"),
+        "missing PNG predictor parameters"
+    );
+    assert!(
+        pdf.contains("/XObject <<"),
+        "page does not reference the image"
+    );
+    assert!(pdf.contains(" /Im0 Do"), "the image is never drawn");
+
+    // JPEG: passed through as DCTDecode, no predictor
+    d.execute(
+        "UPDATE company SET logo = ?1, logo_mime = ?2 WHERE id = 1",
+        rusqlite::params![jpeg_bytes(120, 60), "image/jpeg"],
+    )
+    .unwrap();
+    let pdf = String::from_utf8_lossy(&bukio::pdf::invoice_pdf(&d, &inv)).to_string();
+    assert!(
+        pdf.contains("/Filter /DCTDecode"),
+        "JPEG must stay DCTDecode"
+    );
+    assert!(
+        !pdf.contains("/DecodeParms"),
+        "DCTDecode takes no predictor"
+    );
+
+    // SVG cannot be drawn natively: no logo, and no broken half-image either
+    d.execute(
+        "UPDATE company SET logo = ?1, logo_mime = ?2 WHERE id = 1",
+        rusqlite::params![
+            b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>".to_vec(),
+            "image/svg+xml"
+        ],
+    )
+    .unwrap();
+    let pdf = String::from_utf8_lossy(&bukio::pdf::invoice_pdf(&d, &inv)).to_string();
+    assert!(!pdf.contains("/XObject"), "SVG must not produce an image");
+}
+
+/// A logo with transparency must be composited onto white. Dropping the alpha
+/// channel instead would print a transparent black background as a black box.
+#[test]
+fn if_pdf_composites_a_transparent_logo_onto_white() {
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+
+    let d = setup();
+    let c = if_contact(&d, Some("NL999999999B01"));
+    let inv = bukio::invoice::create_invoice(
+        &d,
+        c,
+        "2026-08-10",
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(&["1x Ding @ 10.00"]),
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    // 2x1 RGBA: transparent red, opaque blue
+    d.execute(
+        "UPDATE company SET logo = ?1, logo_mime = ?2 WHERE id = 1",
+        rusqlite::params![png_with(2, 1, 6), "image/png"],
+    )
+    .unwrap();
+    let pdf = bukio::pdf::invoice_pdf(&d, &inv);
+    assert!(
+        String::from_utf8_lossy(&pdf).contains("/ColorSpace /DeviceRGB"),
+        "alpha must flatten to RGB"
+    );
+
+    // Byte offsets, not string offsets: the image stream is binary, so a lossy
+    // conversion shifts every index.
+    let find = |hay: &[u8], needle: &[u8]| -> Option<usize> {
+        hay.windows(needle.len()).position(|w| w == needle)
+    };
+    let after = find(&pdf, b"/Subtype /Image").expect("no image object");
+    let start = after + find(&pdf[after..], b"stream\n").expect("no stream") + 7;
+    let end = start + find(&pdf[start..], b"endstream").expect("no endstream");
+    let mut raw = Vec::new();
+    ZlibDecoder::new(&pdf[start..end])
+        .read_to_end(&mut raw)
+        .expect("image stream is not zlib");
+    // filter byte None, then (255,255,255) for the transparent pixel and
+    // (0,0,255) for the opaque one
+    assert_eq!(
+        raw,
+        vec![0, 255, 255, 255, 0, 0, 255],
+        "alpha was not composited"
+    );
 }
 
 #[test]

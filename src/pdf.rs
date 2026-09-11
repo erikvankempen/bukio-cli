@@ -27,6 +27,7 @@ struct Pdf {
     pages: Vec<Vec<u8>>,
     cur: Vec<u8>,
     y: f64,
+    images: Vec<Image>,
 }
 
 impl Pdf {
@@ -35,6 +36,7 @@ impl Pdf {
             pages: Vec::new(),
             cur: Vec::new(),
             y: PAGE_H - MARGIN_TOP,
+            images: Vec::new(),
         }
     }
 
@@ -137,6 +139,20 @@ impl Pdf {
         self.y -= h;
     }
 
+    /// Register an image and return its index (the resource name is Im<idx>).
+    fn add_image(&mut self, img: Image) -> usize {
+        self.images.push(img);
+        self.images.len() - 1
+    }
+
+    /// Draw image `idx` into a w x h box whose bottom-left corner is (x, y).
+    /// `cm` takes a b c d e f: the unit square scaled into the box.
+    fn draw_image(&mut self, idx: usize, x: f64, y: f64, w: f64, h: f64) {
+        self.cur.extend_from_slice(
+            format!("q {w:.2} 0 0 {h:.2} {x:.2} {y:.2} cm /Im{idx} Do Q\n").as_bytes(),
+        );
+    }
+
     fn build(mut self) -> Vec<u8> {
         self.new_page();
         if self.pages.is_empty() {
@@ -148,6 +164,7 @@ impl Pdf {
         let first_content = 3 + n_pages;
         let font_regular = first_content + n_pages;
         let font_bold = font_regular + 1;
+        let first_image = font_bold + 1;
 
         let mut out: Vec<u8> = Vec::new();
         let mut offsets: Vec<usize> = vec![0]; // object 0 is the free head
@@ -163,6 +180,18 @@ impl Pdf {
             "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_string(),
         );
         let kids: Vec<String> = (0..n_pages).map(|i| format!("{} 0 R", 3 + i)).collect();
+        // every page advertises every image: unused XObjects in a resource
+        // dictionary are legal, and the logo is drawn on the first page only
+        let xobjects: String = if self.images.is_empty() {
+            String::new()
+        } else {
+            let mut d = String::from(" /XObject <<");
+            for k in 0..self.images.len() {
+                d.push_str(&format!(" /Im{k} {} 0 R", first_image + k));
+            }
+            d.push_str(" >>");
+            d
+        };
         push(
             &mut out,
             &mut offsets,
@@ -177,7 +206,7 @@ impl Pdf {
                 &mut offsets,
                 format!(
                     "{} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_W:.2} {PAGE_H:.2}] \
-                     /Resources << /Font << /F1 {font_regular} 0 R /F2 {font_bold} 0 R >> >> \
+                     /Resources << /Font << /F1 {font_regular} 0 R /F2 {font_bold} 0 R >>{xobjects} >> \
                      /Contents {} 0 R >>\nendobj\n",
                     3 + i,
                     first_content + i
@@ -212,6 +241,35 @@ impl Pdf {
                 "{font_bold} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>\nendobj\n"
             ),
         );
+        for (k, img) in self.images.iter().enumerate() {
+            // PNG data is zlib + PNG predictors, which FlateDecode reads as-is;
+            // a JPEG is already DCTDecode. Neither is re-encoded, so the stored
+            // logo bytes reach the page unchanged.
+            let parms = if img.filter == "/FlateDecode" {
+                format!(
+                    " /DecodeParms << /Predictor 15 /Colors {} /BitsPerComponent {} /Columns {} >>",
+                    img.colors, img.bpc, img.w
+                )
+            } else {
+                String::new()
+            };
+            push(
+                &mut out,
+                &mut offsets,
+                format!(
+                    "{} 0 obj\n<< /Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace {} /BitsPerComponent {} /Filter {}{parms} /Length {} >>\nstream\n",
+                    first_image + k,
+                    img.w,
+                    img.h,
+                    img.cs,
+                    img.bpc,
+                    img.filter,
+                    img.data.len()
+                ),
+            );
+            out.extend_from_slice(&img.data);
+            out.extend_from_slice(b"endstream\nendobj\n");
+        }
 
         let xref_at = out.len();
         let count = offsets.len(); // includes object 0
@@ -225,6 +283,262 @@ impl Pdf {
         );
         out
     }
+}
+
+// ── images (native, no browser) ─────────────────────────────────────────────
+
+/// An image on its way to a PDF XObject. Where the source format allows it the
+/// bytes stay exactly as the file encoded them: PNG's IDAT is zlib data with
+/// PNG row predictors, which FlateDecode decodes verbatim through
+/// /Predictor 15, and a JPEG's scan data is already DCTDecode. Neither is
+/// re-encoded, so a stored logo reaches the page byte-for-byte.
+///
+/// The exception is an image with an alpha channel. A PDF XObject has no notion
+/// of "transparent means paper", and a logo whose transparent pixels are black
+/// would print as a black box — so those are decoded and composited onto white,
+/// which is what the paper does anyway.
+struct Image {
+    w: u32,
+    h: u32,
+    /// /DeviceGray, /DeviceRGB, or an /Indexed array carrying its palette
+    cs: String,
+    bpc: u8,
+    /// /FlateDecode (PNG) or /DCTDecode (JPEG)
+    filter: &'static str,
+    /// DecodeParms /Colors — FlateDecode only
+    colors: u8,
+    data: Vec<u8>,
+}
+
+fn image_from_bytes(bytes: &[u8], mime: &str) -> Option<Image> {
+    // The bytes decide, not the MIME type: a logo can be stored under either.
+    if bytes.starts_with(&[0xFF, 0xD8]) {
+        return image_from_jpeg(bytes);
+    }
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return image_from_png(bytes);
+    }
+    if mime.contains("jpeg") || mime.contains("jpg") {
+        return image_from_jpeg(bytes);
+    }
+    if mime.contains("png") {
+        return image_from_png(bytes);
+    }
+    // SVG would need a vector renderer. Those logos still render in the invoice
+    // email; the PDF draws no logo rather than a wrong one.
+    None
+}
+
+fn inflate(data: &[u8]) -> Option<Vec<u8>> {
+    use flate2::read::ZlibDecoder;
+    use std::io::Read;
+    let mut out = Vec::new();
+    ZlibDecoder::new(data).read_to_end(&mut out).ok()?;
+    Some(out)
+}
+
+fn deflate(data: &[u8]) -> Option<Vec<u8>> {
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
+    e.write_all(data).ok()?;
+    e.finish().ok()
+}
+
+/// Undo PNG's per-row filters — only needed for the alpha path, because the
+/// verbatim path lets the PDF reader do it.
+fn unfilter(raw: &[u8], row_len: usize, rows: usize, bpp: usize) -> Option<Vec<u8>> {
+    let stride = row_len + 1;
+    if raw.len() < stride * rows {
+        return None;
+    }
+    let mut out = vec![0u8; row_len * rows];
+    for r in 0..rows {
+        let ft = raw[r * stride];
+        let base = r * row_len;
+        for i in 0..row_len {
+            let x = raw[r * stride + 1 + i];
+            let a = if i >= bpp { out[base + i - bpp] } else { 0 };
+            let b = if r > 0 { out[base - row_len + i] } else { 0 };
+            let c = if r > 0 && i >= bpp {
+                out[base - row_len + i - bpp]
+            } else {
+                0
+            };
+            out[base + i] = match ft {
+                0 => x,
+                1 => x.wrapping_add(a),
+                2 => x.wrapping_add(b),
+                3 => x.wrapping_add(((a as u16 + b as u16) / 2) as u8),
+                4 => {
+                    let (ai, bi, ci) = (a as i16, b as i16, c as i16);
+                    let pp = ai + bi - ci;
+                    let (pa, pb, pc) = ((pp - ai).abs(), (pp - bi).abs(), (pp - ci).abs());
+                    let pred = if pa <= pb && pa <= pc {
+                        ai
+                    } else if pb <= pc {
+                        bi
+                    } else {
+                        ci
+                    };
+                    x.wrapping_add(pred as u8)
+                }
+                _ => return None,
+            };
+        }
+    }
+    Some(out)
+}
+
+fn image_from_png(bytes: &[u8]) -> Option<Image> {
+    let mut pos = 8; // past the signature
+    let mut ihdr: Option<(u32, u32, u8, u8, u8)> = None; // w, h, depth, colour, interlace
+    let mut plte: Option<Vec<u8>> = None;
+    let mut idat: Vec<u8> = Vec::new();
+    while pos + 12 <= bytes.len() {
+        let len = u32::from_be_bytes(bytes[pos..pos + 4].try_into().ok()?) as usize;
+        let kind = &bytes[pos + 4..pos + 8];
+        let body = bytes.get(pos + 8..pos + 8 + len)?;
+        match kind {
+            b"IHDR" => {
+                ihdr = Some((
+                    u32::from_be_bytes(body[0..4].try_into().ok()?),
+                    u32::from_be_bytes(body[4..8].try_into().ok()?),
+                    body[8],
+                    body[9],
+                    body[12],
+                ));
+            }
+            b"PLTE" => plte = Some(body.to_vec()),
+            b"IDAT" => idat.extend_from_slice(body),
+            b"IEND" => break,
+            _ => {}
+        }
+        pos += 12 + len;
+    }
+    let (w, h, depth, colour, interlace) = ihdr?;
+    // Interlaced (Adam7) rows are not contiguous, so they cannot be predicted.
+    if w == 0 || h == 0 || interlace != 0 || !matches!(depth, 1 | 2 | 4 | 8 | 16) {
+        return None;
+    }
+    match colour {
+        0 => Some(Image {
+            w,
+            h,
+            cs: "/DeviceGray".into(),
+            bpc: depth,
+            filter: "/FlateDecode",
+            colors: 1,
+            data: idat,
+        }),
+        2 => Some(Image {
+            w,
+            h,
+            cs: "/DeviceRGB".into(),
+            bpc: depth,
+            filter: "/FlateDecode",
+            colors: 3,
+            data: idat,
+        }),
+        3 => {
+            let palette = plte?;
+            if palette.is_empty() || palette.len() % 3 != 0 {
+                return None;
+            }
+            let entries = palette.len() / 3;
+            let hex: String = palette.iter().map(|b| format!("{b:02x}")).collect();
+            Some(Image {
+                w,
+                h,
+                cs: format!("[/Indexed /DeviceRGB {} <{hex}>]", entries - 1),
+                bpc: depth,
+                filter: "/FlateDecode",
+                colors: 1,
+                data: idat,
+            })
+        }
+        4 | 6 => {
+            // alpha: decode, composite onto white, re-emit as plain samples
+            if depth != 8 {
+                return None;
+            }
+            let raw = inflate(&idat)?;
+            let coloured = colour == 6;
+            let ch = if coloured { 4 } else { 2 };
+            let rows = unfilter(&raw, w as usize * ch, h as usize, ch)?;
+            let mut flat =
+                Vec::with_capacity(rows.len() / ch * if coloured { 3 } else { 1 } + h as usize);
+            for r in rows.chunks(w as usize * ch) {
+                flat.push(0); // filter type None per row
+                for px in r.chunks(ch) {
+                    let a = px[ch - 1] as u32;
+                    if coloured {
+                        for c in 0..3 {
+                            flat.push(((px[c] as u32 * a + 255 * (255 - a)) / 255) as u8);
+                        }
+                    } else {
+                        flat.push(((px[0] as u32 * a + 255 * (255 - a)) / 255) as u8);
+                    }
+                }
+            }
+            Some(Image {
+                w,
+                h,
+                cs: if coloured {
+                    "/DeviceRGB".into()
+                } else {
+                    "/DeviceGray".into()
+                },
+                bpc: 8,
+                filter: "/FlateDecode",
+                colors: if coloured { 3 } else { 1 },
+                data: deflate(&flat)?,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn image_from_jpeg(bytes: &[u8]) -> Option<Image> {
+    let mut i = 2;
+    while i + 9 < bytes.len() {
+        if bytes[i] != 0xFF {
+            i += 1;
+            continue;
+        }
+        let marker = bytes[i + 1];
+        // stand-alone markers carry no length
+        if marker == 0x01 || (0xD0..=0xD9).contains(&marker) {
+            i += 2;
+            continue;
+        }
+        let len = ((bytes[i + 2] as usize) << 8) | bytes[i + 3] as usize;
+        // SOF0..SOF15, excluding DHT (C4), JPG (C8) and DAC (CC)
+        if (0xC0..=0xCF).contains(&marker) && !matches!(marker, 0xC4 | 0xC8 | 0xCC) {
+            let h = ((bytes[i + 5] as u32) << 8) | bytes[i + 6] as u32;
+            let w = ((bytes[i + 7] as u32) << 8) | bytes[i + 8] as u32;
+            let cs = match bytes[i + 9] {
+                1 => "/DeviceGray",
+                3 => "/DeviceRGB",
+                _ => return None, // CMYK and exotic 4-component encodings
+            };
+            return Some(Image {
+                w,
+                h,
+                cs: cs.into(),
+                bpc: 8,
+                filter: "/DCTDecode",
+                colors: 0,
+                data: bytes.to_vec(),
+            });
+        }
+        if len < 2 {
+            return None;
+        }
+        i += 2 + len;
+    }
+    None
 }
 
 // ── HTML (unchanged shape: mirrors the JS template) ─────────────────────────
@@ -1042,8 +1356,25 @@ pub fn invoice_pdf(db: &Connection, invoice: &Value) -> Vec<u8> {
 
     let mut p = Pdf::new();
     let right_edge = PAGE_W - MARGIN_X;
+    // The logo sits at the top-left and the supplier block moves right of it,
+    // the way the HTML flex header lays out. The HTML's max-height/max-width are
+    // CSS pixels; points are close enough on a page that is scaled to A4.
+    let (text_x, logo_bottom) = match crate::company::get_logo(db) {
+        Ok((bytes, mime)) if !bytes.is_empty() => match image_from_bytes(&bytes, &mime) {
+            Some(img) => {
+                let scale = (60.0 / img.h as f64).min(160.0 / img.w as f64).min(1.0);
+                let (iw, ih) = (img.w as f64 * scale, img.h as f64 * scale);
+                let idx = p.add_image(img);
+                let top = PAGE_H - MARGIN_TOP + 12.0;
+                p.draw_image(idx, MARGIN_X, top - ih, iw, ih);
+                (MARGIN_X + iw + 12.0, Some(top - ih))
+            }
+            None => (MARGIN_X, None),
+        },
+        _ => (MARGIN_X, None),
+    };
     p.text_at(
-        MARGIN_X,
+        text_x,
         PAGE_H - MARGIN_TOP,
         16.0,
         true,
@@ -1062,12 +1393,12 @@ pub fn invoice_pdf(db: &Connection, invoice: &Value) -> Vec<u8> {
     .enumerate()
     {
         y -= 12.0;
-        p.text_at(MARGIN_X, y, 9.5, false, line);
+        p.text_at(text_x, y, 9.5, false, line);
         let _ = i;
     }
     y -= 12.0;
     p.text_at(
-        MARGIN_X,
+        text_x,
         y,
         9.5,
         false,
@@ -1119,7 +1450,11 @@ pub fn invoice_pdf(db: &Connection, invoice: &Value) -> Vec<u8> {
         );
     }
 
-    p.y = y - 26.0;
+    // keep the body clear of a logo that is taller than the supplier block
+    p.y = match logo_bottom {
+        Some(b) => (y - 26.0).min(b - 12.0),
+        None => y - 26.0,
+    };
     p.text(9.0, true, &lab("billedTo").to_uppercase());
     p.text(10.0, true, contact["name"].as_str().unwrap_or(""));
     p.text(9.5, false, contact["address"].as_str().unwrap_or(""));

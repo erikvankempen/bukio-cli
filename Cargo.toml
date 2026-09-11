@@ -30,3 +30,7 @@ regex = "1"
 tiny_http = "0.12"
 pkcs8 = { version = "0.10", features = ["encryption", "pem"] }
 rust_xlsxwriter = "0.99.0"
+flate2 = "1"
+
+[dev-dependencies]
+flate2 = "1"

@@ -110,6 +110,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "ed25519-dalek",
+ "flate2",
  "hex",
  "lettre",
  "mime_guess",
