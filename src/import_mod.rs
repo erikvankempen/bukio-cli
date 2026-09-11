@@ -334,6 +334,8 @@ pub fn import_opening_balances(
             cost_center_code: None,
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         })
         .collect();
     let entry = create_entry(
@@ -652,6 +654,8 @@ pub fn import_journal_csv(
                 cost_center_code: None,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             });
             postings.push(PostingSpec {
                 code: teg.to_string(),
@@ -659,6 +663,8 @@ pub fn import_journal_csv(
                 cost_center_code: None,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             });
         }
         let entry = create_entry(
@@ -1391,6 +1397,8 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
                 cost_center_code: None,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             });
             postings.push(PostingSpec {
                 code: p["tegenrekening"].as_str().unwrap_or("").to_string(),
@@ -1398,6 +1406,8 @@ pub fn import_xaf(db: &Connection, xml_text: &str, actor: &str, dry_run: bool) -
                 cost_center_code: None,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             });
         }
         let description = m["postings"]
@@ -2093,6 +2103,8 @@ pub fn import_audit_file_layout(
                 cost_center_code: None,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             })
             .collect();
         let entry = create_entry(
@@ -2681,6 +2693,8 @@ mod tests {
                 cost_center_code: None,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             })
             .collect()
     }

@@ -552,6 +552,8 @@ pub fn post_from_transaction(
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
                 PostingSpec {
                     code: account_code.to_string(),
@@ -559,6 +561,8 @@ pub fn post_from_transaction(
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
             ],
             source: "bank",
@@ -1125,6 +1129,8 @@ mod tests {
             cost_center_code: None,
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         }
     }
 

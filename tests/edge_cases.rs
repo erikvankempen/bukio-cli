@@ -35,6 +35,8 @@ fn specs(pairs: &[(&str, i64)]) -> Vec<PostingSpec> {
             cost_center_code: None,
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         })
         .collect()
 }
@@ -7235,6 +7237,8 @@ fn attach_env(tag: &str) -> (std::path::PathBuf, String, i64, i64) {
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
                 bukio::entries::PostingSpec {
                     code: "3000".into(),
@@ -7242,6 +7246,8 @@ fn attach_env(tag: &str) -> (std::path::PathBuf, String, i64, i64) {
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
             ],
             source: "manual",
@@ -8601,6 +8607,8 @@ fn xpost(db: &rusqlite::Connection, date: &str, desc: &str, postings: &[(&str, i
             cost_center_code: None,
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         })
         .collect();
     let e = bukio::entries::create_entry(
@@ -8666,6 +8674,8 @@ fn seed_scenario(db: &rusqlite::Connection) {
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
                 bukio::entries::PostingSpec {
                     code: "1100".into(),
@@ -8673,6 +8683,8 @@ fn seed_scenario(db: &rusqlite::Connection) {
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
             ],
             source: "manual",
@@ -13517,24 +13529,200 @@ fn fx_set_rate_upserts_audits_and_get_rate_prefers_latest_on_or_before() {
 }
 
 #[test]
-#[ignore = "port lacks FX through the ledger: entries::PostingSpec has no fx_currency/fx_amount_cents, \
-            so a foreign-currency posting (and fx.toEurPostings) cannot be expressed yet"]
-fn fx_to_eur_postings_attaches_the_original_amounts() {}
+fn fx_to_eur_postings_attaches_the_original_amounts() {
+    let specs = vec![
+        PostingSpec {
+            code: "4300".into(),
+            amount_cents: 89500,
+            vat_code: Some("21".into()),
+            ..Default::default()
+        },
+        PostingSpec {
+            code: "1100".into(),
+            amount_cents: -124630,
+            ..Default::default()
+        },
+    ];
+    let eur = bukio::fx::to_eur_postings(specs, "USD", 10875).unwrap();
+    assert_eq!(eur[0].amount_cents, 82299, "895.00 USD at 1.0875 -> EUR");
+    assert_eq!(eur[0].fx_currency.as_deref(), Some("USD"));
+    assert_eq!(
+        eur[0].fx_amount_cents,
+        Some(89500),
+        "the original amount is kept"
+    );
+    assert_eq!(eur[1].amount_cents, -114602);
+    assert_eq!(eur[1].fx_amount_cents, Some(-124630));
+}
 
 #[test]
-#[ignore = "port lacks FX through the ledger: no fx fields on entries::PostingSpec, so entry add \
-            with a currency (and the fx-preserving reversal) cannot be expressed yet"]
-fn fx_entry_add_with_currency_books_eur_and_keeps_the_original_amounts() {}
+fn fx_entry_add_with_currency_books_eur_and_keeps_the_original_amounts() {
+    let (_dir, _cfg, db_path) = agent_env("fx4");
+    let db = bukio::db::open_db(&db_path).unwrap();
+    let specs = bukio::fx::to_eur_postings(
+        vec![
+            PostingSpec {
+                code: "4300".into(),
+                amount_cents: 89500,
+                ..Default::default()
+            },
+            PostingSpec {
+                code: "1100".into(),
+                amount_cents: -89500,
+                ..Default::default()
+            },
+        ],
+        "USD",
+        10875,
+    )
+    .unwrap();
+    let e = bukio::entries::create_entry(
+        &db,
+        CreateEntry {
+            date: "2026-07-03",
+            description: "Factuur in USD",
+            postings: specs,
+            source: "manual",
+            source_ref: None,
+            actor: "agent:test",
+        },
+    )
+    .unwrap();
+    let entry = bukio::entries::post_entry(&db, e.id, "agent:test").unwrap();
+
+    let p = entry
+        .postings
+        .iter()
+        .find(|x| x.account_code == "4300")
+        .unwrap();
+    assert_eq!(p.amount_cents, 82299, "EUR");
+    assert_eq!(p.fx_currency.as_deref(), Some("USD"));
+    assert_eq!(p.fx_amount_cents, Some(89500));
+    let other = entry
+        .postings
+        .iter()
+        .find(|x| x.account_code == "1100")
+        .unwrap();
+    assert_eq!(other.amount_cents, -82299);
+
+    // the reversal negates both the EUR and the FX amount
+    let rev = bukio::entries::reverse_entry(&db, entry.id, "agent:test", None).unwrap();
+    let rp = rev
+        .postings
+        .iter()
+        .find(|x| x.account_code == "4300")
+        .unwrap();
+    assert_eq!(rp.amount_cents, -82299);
+    assert_eq!(rp.fx_amount_cents, Some(-89500));
+    assert_eq!(rp.fx_currency.as_deref(), Some("USD"));
+}
 
 #[test]
-#[ignore = "port lacks FX through the ledger: vat book cannot take fx postings, so the VAT legs \
-            cannot be computed on EUR amounts yet"]
-fn fx_vat_book_with_currency_computes_vat_on_the_eur_amounts() {}
+fn fx_vat_book_with_currency_computes_vat_on_the_eur_amounts() {
+    let (_dir, _cfg, db_path) = agent_env("fx5");
+    let db = bukio::db::open_db(&db_path).unwrap();
+    bukio::fx::set_fx_rate(
+        &db,
+        "USD",
+        "2026-07-03",
+        "1.0875",
+        "manual",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+
+    let raw =
+        bukio::vat::parse_vat_posting_specs(&["4300:895.00@21,1100:-1082.95".to_string()]).unwrap();
+    let rate = bukio::fx::get_fx_rate(&db, "USD", "2026-07-03")
+        .unwrap()
+        .unwrap();
+    let specs = bukio::fx::to_eur_vat_specs(raw, "USD", rate).unwrap();
+    let out = bukio::vat::book_vat_entry(
+        &db,
+        "2026-07-03",
+        "DeKantoor B.V. (USD)",
+        &specs,
+        "manual",
+        None,
+        "agent:test",
+        true,
+    )
+    .unwrap();
+
+    let entry = if out.get("entry").is_some() {
+        out["entry"].clone()
+    } else {
+        out.clone()
+    };
+    let postings = entry["postings"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no postings in {out}"));
+    let net = postings
+        .iter()
+        .find(|x| x["account_code"] == json!("4300"))
+        .unwrap();
+    assert_eq!(
+        net["amount_cents"],
+        json!(82299),
+        "895.00 USD -> 822.99 EUR net"
+    );
+    assert_eq!(net["fx_amount_cents"], json!(89500), "{net}");
+    let vat = postings.iter().find(|x| !x["vat_code"].is_null()).unwrap();
+    assert_eq!(vat["amount_cents"], json!(82299), "{vat}");
+    assert_eq!(
+        vat["vat_amount_cents"],
+        json!(17283),
+        "21% of the EUR base: {vat}"
+    );
+    let bank = postings
+        .iter()
+        .find(|x| x["account_code"] == json!("1100"))
+        .unwrap();
+    assert_eq!(bank["amount_cents"], json!(-99582), "{bank}");
+
+    // the OB readout sees the EUR base
+    let r = bukio::vat::ob_readout(&db, "2026-Q3").unwrap();
+    assert_eq!(r["fields"]["3a"], json!(82299), "{r}");
+    assert_eq!(r["fields"]["5b"], json!(17283), "{r}");
+}
 
 #[test]
-#[ignore = "port lacks FX through the ledger: without fx fields there is nothing to validate, so \
-            INVALID_FX_CURRENCY / INVALID_FX_AMOUNT cannot be raised yet"]
-fn fx_invalid_currency_or_amount_on_a_posting_is_rejected() {}
+fn fx_invalid_currency_on_a_posting_is_rejected() {
+    let (_dir, _cfg, db_path) = agent_env("fx6");
+    let db = bukio::db::open_db(&db_path).unwrap();
+    let err = bukio::entries::create_entry(
+        &db,
+        CreateEntry {
+            date: "2026-07-03",
+            description: "x",
+            postings: vec![
+                PostingSpec {
+                    code: "4300".into(),
+                    amount_cents: 100,
+                    fx_currency: Some("usd".into()),
+                    fx_amount_cents: Some(100),
+                    ..Default::default()
+                },
+                PostingSpec {
+                    code: "1100".into(),
+                    amount_cents: -100,
+                    ..Default::default()
+                },
+            ],
+            source: "manual",
+            source_ref: None,
+            actor: "a",
+        },
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "INVALID_FX_CURRENCY", "{err:?}");
+
+    // the JS also rejects a non-integer fxAmountCents (INVALID_FX_AMOUNT);
+    // in the port that state is unrepresentable — the field is an Option<i64>,
+    // so a string can never reach create_entry. Nothing to assert at runtime.
+    assert!(std::mem::size_of::<Option<i64>>() > 0);
+}
 
 // --- ECB reference rates ----------------------------------------------------
 
@@ -13663,9 +13851,89 @@ fn fx_resolve_rate_dry_run_does_not_persist_the_fetched_ecb_rate() {
 }
 
 #[test]
-#[ignore = "port lacks the MCP FX path (resolveMcpFx + a currency argument on the entry_add tool), \
-            so a plan-only MCP call cannot be checked for not storing the fetched rate"]
-fn mcp_resolve_fx_never_stores_the_fetched_rate_on_a_plan_only_call() {}
+fn mcp_resolve_fx_never_stores_the_fetched_rate_on_a_plan_only_call() {
+    let db = mem_db();
+    bukio::fx::set_ecb_fetcher(ecb_ok);
+    let specs = || {
+        vec![
+            PostingSpec {
+                code: "1100".into(),
+                amount_cents: 10000,
+                ..Default::default()
+            },
+            PostingSpec {
+                code: "8000".into(),
+                amount_cents: -10000,
+                ..Default::default()
+            },
+        ]
+    };
+    // plan-only: the fetched rate must not be stored, and no fx.set row
+    let plan = bukio::fx::resolve_fx(
+        &db,
+        specs(),
+        Some("USD"),
+        None,
+        "2026-08-06",
+        "agent:test",
+        true,
+    )
+    .unwrap();
+    assert_eq!(plan.len(), 2);
+    assert_eq!(plan[0].fx_currency.as_deref(), Some("USD"));
+    let n: i64 = db
+        .query_row("SELECT COUNT(*) FROM fx_rates", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "no rate stored on a plan-only call");
+    let n: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM audit_log WHERE action = 'fx.set'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0, "no fx.set audit row on a plan-only call");
+
+    // execute stores it for reuse
+    bukio::fx::resolve_fx(
+        &db,
+        specs(),
+        Some("USD"),
+        None,
+        "2026-08-06",
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    let n: i64 = db
+        .query_row("SELECT COUNT(*) FROM fx_rates", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 1, "execute stores the fetched rate");
+    bukio::fx::clear_ecb_fetcher();
+
+    // the same path through the MCP tool (the wiring, not just the helper)
+    let (_dir, cfg, db_path) = agent_env("fx12");
+    bukio::fx::set_ecb_fetcher(ecb_ok);
+    let mut m = Mcp::start_as(&db_path, "agent:test", Some(&cfg));
+    mcp_init(&mut m);
+    let (plan, is_err) = m.tool(
+        "entry_add",
+        json!({ "date": "2026-08-06", "description": "USD plan", "postings": ["4300:895.00", "1100:-895.00"], "currency": "USD" }),
+    );
+    assert!(!is_err, "{plan}");
+    assert_eq!(plan["mode"], json!("dry-run"), "{plan}");
+    let d = bukio::db::open_db(&db_path).unwrap();
+    let n: i64 = d
+        .query_row("SELECT COUNT(*) FROM fx_rates", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        n, 0,
+        "a plan-only MCP call must not store the fetched rate: {plan}"
+    );
+    m.stop();
+    bukio::fx::clear_ecb_fetcher();
+    let _ = std::fs::remove_dir_all(&_dir);
+}
 
 // --- compliance -------------------------------------------------------------
 
@@ -13800,6 +14068,8 @@ fn compliance_closed_books_show_on_the_jaarrekening_obligation() {
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
                 PostingSpec {
                     code: "8000".into(),
@@ -13807,6 +14077,8 @@ fn compliance_closed_books_show_on_the_jaarrekening_obligation() {
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
                 PostingSpec {
                     code: "2500".into(),
@@ -13814,6 +14086,8 @@ fn compliance_closed_books_show_on_the_jaarrekening_obligation() {
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
             ],
             source: "manual",

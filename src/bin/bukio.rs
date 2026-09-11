@@ -702,6 +702,24 @@ fn cmd_entry_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> 
     let desc = arg(argv, "--desc").ok_or_else(|| missing_arg("--desc"))?;
     let postings_raw = repeated(argv, "--postings");
     let specs = bukio::entries::parse_posting_specs(&postings_raw)?;
+    // --currency: convert to EUR up front so BOTH the plan and the booking
+    // show the amounts that will be booked (the JS applyFx runs before the
+    // dry-run branch too)
+    let currency = arg(argv, "--currency");
+    let specs = if currency.is_some() {
+        let fx_db = open_existing(db_path)?;
+        bukio::fx::resolve_fx(
+            &fx_db,
+            specs,
+            currency.as_deref(),
+            arg(argv, "--rate").as_deref(),
+            &date,
+            actor,
+            dry_run,
+        )?
+    } else {
+        specs
+    };
     if dry_run {
         bukio::dates::validate_date(&date)?;
         if desc.trim().is_empty() {
@@ -759,7 +777,7 @@ fn cmd_entry_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> 
         };
         return Ok(json!({
             "action": "create journal entry", "date": date, "description": desc,
-            "currency": null,
+            "currency": currency.clone(),
             "postings": plan, "sum_cents": sum, "sum": bukio::money::format_amount(sum), "state": "draft",
             "post": has_flag(argv, "--post"), "account_validation": validation, "dryRun": true,
         }));

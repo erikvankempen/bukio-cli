@@ -1,44 +1,9 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-10 21:08:02 UTC — **✅ 273 passing · 0 failing (273 tests)**
+**Latest run:** 2026-09-11 03:40:23 UTC — **✅ 243 passing · 0 failing (243 tests)**
 **Command:** `npm test` (per-file `node --test --test-reporter=tap`)
 
 ## All tests
-
-### agent-layer.test.js — MCP server, FX/ECB, tool gates, compliance calendar, MCP signed execution (verified rows, enforce refusal, nonces, per-DB registry)
-
-30 passing · 0 failing
-
-    - ✅ fx: parseRate and convertFx — integer math, round-half-up
-    - ✅ fx: setFxRate upsert + audit; getFxRate exact then latest-on/before
-    - ✅ fx: toEurPostings attaches the original amounts
-    - ✅ fx: entry add with currency books EUR + keeps the original amounts (reversal too)
-    - ✅ fx: vat book with currency — VAT legs computed on the EUR amounts
-    - ✅ fx: invalid currency on a posting is rejected
-    - ✅ ecb: parses SDMX observations and falls back to the last business day
-    - ✅ ecb: 404 (unknown currency) -> null; network failure -> ECB_FETCH_FAILED
-    - ✅ fx: missing rate auto-fetches from ECB, stores it, and reuses it
-    - ✅ fx: BUKIO_FX_NO_FETCH blocks the ECB fallback
-    - ✅ fx: ECB has no rate for the currency -> ECB_RATE_NOT_AVAILABLE
-    - ✅ MCP: resolveMcpFx never stores the fetched ECB rate on a plan-only call (dry-run write regression)
-    - ✅ compliance: quarterly deadlines
-    - ✅ compliance: jaarrekening deadline is 13 months after the fiscal year end
-    - ✅ compliance: calendar shows obligations, statuses flip with filings
-    - ✅ compliance: closed books show on the jaarrekening obligation
-    - ✅ MCP: initialize + tools/list + read-only calls work end-to-end
-    - ✅ MCP: params:null on a call answers cleanly (no -32603 internal error)
-    - ✅ MCP: invoices tool derives the overdue status (regression)
-    - ✅ MCP: non-object JSON-RPC messages get Invalid Request, server survives
-    - ✅ MCP: mutations are plan-only by default; execute books with the actor
-    - ✅ MCP: assets_run books DEPRECIATION, not recurring entries (import-collision regression)
-    - ✅ MCP: contact_add preserves postal_code and vat_id (regression)
-    - ✅ MCP: BUKIO_MCP_READONLY blocks execution
-    - ✅ fx resolveRate: a dry-run must not persist the fetched ECB rate
-    - ✅ MCP: signed execute call -> audit row verified; audit verify reports ok
-    - ✅ MCP: enforce on + missing key -> error response, no mutation (dry-run too)
-    - ✅ MCP: repeated signed calls verify (fresh nonces, no replay refusal)
-    - ✅ MCP: malformed actor still rejected (INVALID_ACTOR)
-    - ✅ MCP: a second company DB uses its own registry/enforce state
 
 ### company-simulation.test.js — 
 

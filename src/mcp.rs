@@ -55,7 +55,7 @@ fn tool_defs() -> Vec<Value> {
         json!({"name": "pnl", "description": "profit & loss for a year", "inputSchema": {"type": "object", "properties": {"year": {"type": "string"}}, "required": ["year"]}}),
         json!({"name": "journal", "description": "journal export for a year", "inputSchema": {"type": "object", "properties": {"year": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["year"]}}),
         json!({"name": "accounts", "description": "chart of accounts", "inputSchema": {"type": "object", "properties": {"include_inactive": {"type": "boolean"}}}}),
-        json!({"name": "entry_add", "description": "create a journal entry", "inputSchema": {"type": "object", "properties": {"date": {"type": "string"}, "description": {"type": "string"}, "postings": {"type": "array", "items": {"type": "string"}}, "post": {"type": "boolean"}, "mode": {"type": "string"}}, "required": ["date", "description", "postings"]}}),
+        json!({"name": "entry_add", "description": "create a journal entry", "inputSchema": {"type": "object", "properties": {"date": {"type": "string"}, "description": {"type": "string"}, "postings": {"type": "array", "items": {"type": "string"}}, "post": {"type": "boolean"}, "mode": {"type": "string"}, "currency": {"type": "string"}, "rate": {"type": "string"}}, "required": ["date", "description", "postings"]}}),
         json!({"name": "entry_post", "description": "post a draft entry", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "mode": {"type": "string"}}, "required": ["id"]}}),
         json!({"name": "entry_reverse", "description": "reverse a posted entry", "inputSchema": {"type": "object", "properties": {"id": {"type": "integer"}, "reason": {"type": "string"}, "mode": {"type": "string"}}, "required": ["id"]}}),
         json!({"name": "invoices", "description": "list invoices", "inputSchema": {"type": "object", "properties": {"status": {"type": "string"}, "limit": {"type": "integer"}}}}),
@@ -361,6 +361,8 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                             cost_center_code: None,
                             vat_code: None,
                             vat_amount_cents: None,
+                            fx_currency: None,
+                            fx_amount_cents: None,
                         });
                     }
                 }
@@ -372,8 +374,19 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                     format!("date '{date}' must be YYYY-MM-DD"),
                 ));
             }
-            // Dry-run: validate without creating
             let mode = arg_str(args, "mode").unwrap_or_else(|| "dry-run".into());
+            // the JS resolveMcpFx: with a currency the postings are converted
+            // to EUR (and a fetched ECB rate is only stored on execute)
+            let postings = crate::fx::resolve_fx(
+                db,
+                postings,
+                arg_str(args, "currency").as_deref(),
+                arg_str(args, "rate").as_deref(),
+                &date,
+                actor,
+                mode == "dry-run",
+            )?;
+            // Dry-run: validate without creating
             if mode == "dry-run" {
                 if postings.len() < 2 {
                     return Err(BukioError::new(

@@ -430,6 +430,8 @@ pub fn run_due(db: &Connection, period: &str, actor: &str, dry_run: bool) -> Res
                             cost_center_code: None,
                             vat_code: None,
                             vat_amount_cents: None,
+                            fx_currency: None,
+                            fx_amount_cents: None,
                         },
                         PostingSpec {
                             code: cum.clone(),
@@ -437,6 +439,8 @@ pub fn run_due(db: &Connection, period: &str, actor: &str, dry_run: bool) -> Res
                             cost_center_code: None,
                             vat_code: None,
                             vat_amount_cents: None,
+                            fx_currency: None,
+                            fx_amount_cents: None,
                         },
                     ],
                     source: "assets",
@@ -925,6 +929,8 @@ pub fn dispose_asset(
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 })
                 .collect(),
             source: "assets",
@@ -1186,6 +1192,8 @@ mod tests {
             cost_center_code: None,
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         }
     }
 

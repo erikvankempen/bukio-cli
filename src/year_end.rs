@@ -203,6 +203,8 @@ pub fn year_end_close(db: &Connection, year: &str, actor: &str, dry_run: bool) -
                 cost_center_code: None,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             })
         })
         .collect();
@@ -213,6 +215,8 @@ pub fn year_end_close(db: &Connection, year: &str, actor: &str, dry_run: bool) -
             cost_center_code: None,
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         });
     }
 
@@ -225,6 +229,8 @@ pub fn year_end_close(db: &Connection, year: &str, actor: &str, dry_run: bool) -
                 cost_center_code: None,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             },
             PostingSpec {
                 code: equity_account.to_string(),
@@ -232,6 +238,8 @@ pub fn year_end_close(db: &Connection, year: &str, actor: &str, dry_run: bool) -
                 cost_center_code: None,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             },
         ]
     } else {
@@ -357,6 +365,8 @@ mod tests {
                         cost_center_code: None,
                         vat_code: None,
                         vat_amount_cents: None,
+                        fx_currency: None,
+                        fx_amount_cents: None,
                     },
                     PostingSpec {
                         code: "8000".into(),
@@ -364,6 +374,8 @@ mod tests {
                         cost_center_code: None,
                         vat_code: None,
                         vat_amount_cents: None,
+                        fx_currency: None,
+                        fx_amount_cents: None,
                     },
                 ],
                 source: "manual",
@@ -385,6 +397,8 @@ mod tests {
                         cost_center_code: None,
                         vat_code: None,
                         vat_amount_cents: None,
+                        fx_currency: None,
+                        fx_amount_cents: None,
                     },
                     PostingSpec {
                         code: "1100".into(),
@@ -392,6 +406,8 @@ mod tests {
                         cost_center_code: None,
                         vat_code: None,
                         vat_amount_cents: None,
+                        fx_currency: None,
+                        fx_amount_cents: None,
                     },
                 ],
                 source: "manual",

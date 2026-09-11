@@ -532,6 +532,8 @@ mod tests {
                         cost_center_code: None,
                         vat_code: None,
                         vat_amount_cents: None,
+                        fx_currency: None,
+                        fx_amount_cents: None,
                     },
                     crate::entries::PostingSpec {
                         code: "1000".into(),
@@ -539,6 +541,8 @@ mod tests {
                         cost_center_code: None,
                         vat_code: None,
                         vat_amount_cents: None,
+                        fx_currency: None,
+                        fx_amount_cents: None,
                     },
                 ],
                 source: "manual",

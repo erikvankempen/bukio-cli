@@ -62,6 +62,8 @@ pub fn parse_posting_specs(raw: &[String]) -> Result<Vec<PostingSpec>> {
                 cost_center_code: cc.map(String::from),
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             });
         }
     }
@@ -84,7 +86,7 @@ fn valid_cc_code(c: &str) -> bool {
         .all(|ch| alnum(*ch) || matches!(ch, b' ' | b'.' | b'_' | b'-'))
 }
 
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PostingSpec {
     pub code: String,
@@ -95,6 +97,11 @@ pub struct PostingSpec {
     pub vat_code: Option<String>,
     /// VAT amount in cents carried alongside the base (JS: `vatAmountCents`).
     pub vat_amount_cents: Option<i64>,
+    /// Original foreign currency (JS: `fxCurrency`) — ISO 4217, set when the
+    /// posting was converted to EUR.
+    pub fx_currency: Option<String>,
+    /// The original amount in the foreign currency (JS: `fxAmountCents`).
+    pub fx_amount_cents: Option<i64>,
 }
 
 /// Entry as returned by get_entry — the JSON shape matches serializeEntry.
@@ -126,6 +133,8 @@ pub struct Posting {
     pub vat_amount_cents: Option<i64>,
     pub cost_center_code: Option<String>,
     pub cost_center_name: Option<String>,
+    pub fx_currency: Option<String>,
+    pub fx_amount_cents: Option<i64>,
 }
 
 pub fn get_entry(db: &Connection, id: i64) -> Option<Entry> {
@@ -152,7 +161,7 @@ pub fn get_entry(db: &Connection, id: i64) -> Option<Entry> {
         .ok()?;
     let mut stmt = db
         .prepare(
-            "SELECT p.id, a.code, a.name, a.type, p.amount_cents, vc.code, p.vat_amount_cents, cc.code, cc.name
+            "SELECT p.id, a.code, a.name, a.type, p.amount_cents, vc.code, p.vat_amount_cents, cc.code, cc.name, p.fx_currency, p.fx_amount_cents
              FROM postings p
              JOIN accounts a ON a.id = p.account_id
              LEFT JOIN vat_codes vc ON vc.id = p.vat_code_id
@@ -172,6 +181,8 @@ pub fn get_entry(db: &Connection, id: i64) -> Option<Entry> {
                 vat_amount_cents: r.get(6)?,
                 cost_center_code: r.get(7)?,
                 cost_center_name: r.get(8)?,
+                fx_currency: r.get(9)?,
+                fx_amount_cents: r.get(10)?,
             })
         })
         .ok()?
@@ -231,7 +242,15 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
     }
 
     // resolve postings: accounts exist + active; cost centers exist + active
-    let mut resolved: Vec<(i64, i64, Option<i64>, Option<i64>, Option<i64>)> = Vec::new(); // (account_id, amount, cc_id, vat_code_id, vat_amount_cents)
+    let mut resolved: Vec<(
+        i64,
+        i64,
+        Option<i64>,
+        Option<i64>,
+        Option<i64>,
+        Option<String>,
+        Option<i64>,
+    )> = Vec::new(); // (account_id, amount, cc_id, vat_code_id, vat_amount_cents)
     for p in &input.postings {
         if p.amount_cents == 0 {
             return Err(BukioError::new(
@@ -299,12 +318,22 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
                 })?,
             ),
         };
+        if let Some(cur) = &p.fx_currency {
+            if cur.len() != 3 || !cur.chars().all(|c| c.is_ascii_uppercase()) {
+                return Err(BukioError::new(
+                    "INVALID_FX_CURRENCY",
+                    format!("fx currency '{cur}' must be ISO 4217"),
+                ));
+            }
+        }
         resolved.push((
             account.0,
             p.amount_cents,
             cc_id,
             vat_code_id,
             p.vat_amount_cents,
+            p.fx_currency.clone(),
+            p.fx_amount_cents,
         ));
     }
 
@@ -331,11 +360,29 @@ pub fn create_entry(db: &Connection, input: CreateEntry<'_>) -> Result<Entry> {
         )
         .map_err(sql_err)?;
         let id = tx.last_insert_rowid();
-        for (account_id, amount, cc_id, vat_code_id, vat_amount_cents) in &resolved {
+        for (
+            account_id,
+            amount,
+            cc_id,
+            vat_code_id,
+            vat_amount_cents,
+            fx_currency,
+            fx_amount_cents,
+        ) in &resolved
+        {
             tx.execute(
                 "INSERT INTO postings (entry_id, account_id, amount_cents, vat_code_id, vat_amount_cents, fx_currency, fx_amount_cents, cost_center_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6)",
-                rusqlite::params![id, account_id, amount, vat_code_id, vat_amount_cents, cc_id],
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                rusqlite::params![
+                    id,
+                    account_id,
+                    amount,
+                    vat_code_id,
+                    vat_amount_cents,
+                    fx_currency,
+                    fx_amount_cents,
+                    cc_id
+                ],
             )
             .map_err(sql_err)?;
         }
@@ -688,6 +735,8 @@ mod tests {
                 cost_center_code: None,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             })
             .collect()
     }

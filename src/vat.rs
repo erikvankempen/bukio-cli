@@ -140,6 +140,10 @@ pub struct VatSpec {
     pub code: String,
     pub amount_cents: i64,
     pub vat_code: Option<String>,
+    /// FX passthrough (see PostingSpec) — the JS carries these onto the base
+    /// legs so a foreign-currency VAT split keeps the original amounts.
+    pub fx_currency: Option<String>,
+    pub fx_amount_cents: Option<i64>,
 }
 
 /// Parse posting specs with optional VAT: "CODE:AMOUNT[@VATCODE]".
@@ -176,6 +180,8 @@ pub fn parse_vat_posting_specs(raw: &[String]) -> Result<Vec<VatSpec>> {
                 code: code.to_string(),
                 amount_cents: parse_amount(amount)?,
                 vat_code: vat.map(String::from),
+                fx_currency: None,
+                fx_amount_cents: None,
             });
         }
     }
@@ -216,6 +222,8 @@ pub fn expand_vat_postings(
         amount_cents: i64,
         vat_code: Option<String>,
         vat_amount_cents: Option<i64>,
+        fx_currency: Option<String>,
+        fx_amount_cents: Option<i64>,
     }
     let mut expanded: Vec<Expanded> = Vec::new();
     let mut vat_legs: Vec<PostingSpec> = Vec::new();
@@ -272,6 +280,8 @@ pub fn expand_vat_postings(
                     amount_cents: spec.amount_cents,
                     vat_code: Some(vc.clone()),
                     vat_amount_cents: Some(vat_amount),
+                    fx_currency: spec.fx_currency.clone(),
+                    fx_amount_cents: spec.fx_amount_cents,
                 });
                 if vat_amount != 0 && vtype != "reverse" {
                     vat_legs.push(PostingSpec {
@@ -280,6 +290,8 @@ pub fn expand_vat_postings(
                         cost_center_code: None,
                         vat_code: None,
                         vat_amount_cents: None,
+                        fx_currency: None,
+                        fx_amount_cents: None,
                     });
                 }
             }
@@ -288,6 +300,8 @@ pub fn expand_vat_postings(
                 amount_cents: spec.amount_cents,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: spec.fx_currency.clone(),
+                fx_amount_cents: spec.fx_amount_cents,
             }),
         }
     }
@@ -301,6 +315,8 @@ pub fn expand_vat_postings(
             cost_center_code: e.vat_code.clone().and(None),
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: e.fx_currency.clone(),
+            fx_amount_cents: e.fx_amount_cents,
         })
         .collect();
     // carry vat info separately — resolved inside create_entry via vat_code? No:
@@ -425,7 +441,9 @@ pub fn book_vat_entry(
                 "vat_code": vat_code,
                 "vat_amount_cents": vat_amount_cents,
                 "vat_amount": vat_amount_cents.map(format_amount),
-                "fx_currency": null, "fx_amount_cents": null, "fx_amount": null,
+                "fx_currency": p.fx_currency.clone(),
+                "fx_amount_cents": p.fx_amount_cents,
+                "fx_amount": p.fx_amount_cents.map(format_amount),
             })
         })
         .collect();
@@ -699,6 +717,8 @@ pub fn vat_file(
             cost_center_code: None,
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         },
         PostingSpec {
             code: input_code.clone(),
@@ -706,6 +726,8 @@ pub fn vat_file(
             cost_center_code: None,
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         },
         PostingSpec {
             code: account.clone(),
@@ -713,6 +735,8 @@ pub fn vat_file(
             cost_center_code: None,
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         },
     ];
     postings.retain(|p| p.amount_cents != 0);
@@ -946,6 +970,8 @@ pub fn vat_settle(
             cost_center_code: None,
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         },
         PostingSpec {
             code: bank_account_code.to_string(),
@@ -953,6 +979,8 @@ pub fn vat_settle(
             cost_center_code: None,
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         },
     ];
     if difference != 0 {
@@ -962,6 +990,8 @@ pub fn vat_settle(
             cost_center_code: None,
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         });
     }
     let description = desc.map(String::from).unwrap_or_else(|| {
@@ -1310,6 +1340,8 @@ mod tests {
                         cost_center_code: None,
                         vat_code: None,
                         vat_amount_cents: None,
+                        fx_currency: None,
+                        fx_amount_cents: None,
                     },
                     crate::entries::PostingSpec {
                         code: "8000".into(),
@@ -1317,6 +1349,8 @@ mod tests {
                         cost_center_code: None,
                         vat_code: Some("21".into()),
                         vat_amount_cents: Some(-2100),
+                        fx_currency: None,
+                        fx_amount_cents: None,
                     },
                     crate::entries::PostingSpec {
                         code: "2500".into(),
@@ -1324,6 +1358,8 @@ mod tests {
                         cost_center_code: None,
                         vat_code: Some("21".into()),
                         vat_amount_cents: Some(-2100),
+                        fx_currency: None,
+                        fx_amount_cents: None,
                     },
                 ],
                 source: "manual",
@@ -2037,11 +2073,15 @@ mod tests {
                     code: "1100".into(),
                     amount_cents: 12100,
                     vat_code: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
                 VatSpec {
                     code: "8000".into(),
                     amount_cents: -10000,
                     vat_code: Some("21".into()),
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
             ],
             "manual",
@@ -2069,11 +2109,15 @@ mod tests {
                     code: "1100".into(),
                     amount_cents: 12100,
                     vat_code: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
                 VatSpec {
                     code: "8000".into(),
                     amount_cents: -10000,
                     vat_code: Some("21".into()),
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
             ],
             "manual",

@@ -1387,6 +1387,8 @@ pub fn finalize_invoice(db: &Connection, id: i64, actor: &str, dry_run: bool) ->
                             // 1a/1b/1c/2a from tagged income postings
                             vat_code: p.get("vatCode").and_then(|v| v.as_str()).map(String::from),
                             vat_amount_cents: p.get("vatAmountCents").and_then(|v| v.as_i64()),
+                            fx_currency: None,
+                            fx_amount_cents: None,
                         })
                         .collect(),
                     source: "invoice",

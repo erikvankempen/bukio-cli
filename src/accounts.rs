@@ -707,6 +707,8 @@ mod tests {
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
                 PostingSpec {
                     code: "1100".into(),
@@ -714,6 +716,8 @@ mod tests {
                     cost_center_code: None,
                     vat_code: None,
                     vat_amount_cents: None,
+                    fx_currency: None,
+                    fx_amount_cents: None,
                 },
             ]
         };
@@ -925,6 +929,8 @@ mod tests {
             cost_center_code: cc.map(String::from),
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         }
     }
 

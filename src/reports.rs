@@ -2053,6 +2053,8 @@ mod tests {
                 cost_center_code: None,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             })
             .collect();
         let e = create_entry(
@@ -2286,6 +2288,8 @@ mod tests {
             cost_center_code: cc.map(String::from),
             vat_code: None,
             vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
         }
     }
 
@@ -2471,6 +2475,8 @@ mod reports_tests {
                 cost_center_code: None,
                 vat_code: None,
                 vat_amount_cents: None,
+                fx_currency: None,
+                fx_amount_cents: None,
             })
             .collect()
     }

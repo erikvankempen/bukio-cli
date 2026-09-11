@@ -1,3 +1,5 @@
+use crate::entries::PostingSpec;
+use crate::vat::VatSpec;
 // bukio-cli — agent-first double-entry bookkeeping for SMEs.
 // Copyright (c) 2026 Erik van Kempen.
 // SPDX-License-Identifier: Apache-2.0
@@ -346,6 +348,74 @@ pub fn resolve_rate_opt(
             Ok(rate_x10000)
         }
     }
+}
+
+/// The JS `toEurPostings`: convert each posting to EUR and keep the original
+/// foreign amount alongside (that is what makes a later reversal reversible).
+pub fn to_eur_postings(
+    specs: Vec<PostingSpec>,
+    currency: &str,
+    rate_x10000: i64,
+) -> Result<Vec<PostingSpec>> {
+    specs
+        .into_iter()
+        .map(|p| {
+            Ok(PostingSpec {
+                code: p.code,
+                amount_cents: convert_fx(p.amount_cents, rate_x10000)?,
+                cost_center_code: p.cost_center_code,
+                vat_code: p.vat_code,
+                vat_amount_cents: p.vat_amount_cents,
+                fx_currency: Some(currency.to_string()),
+                fx_amount_cents: Some(p.amount_cents),
+            })
+        })
+        .collect()
+}
+
+/// The same conversion for VAT posting specs (the JS duck-types both shapes;
+/// Rust needs the typed twin). The VAT code rides along so the split is
+/// computed on the converted EUR base.
+pub fn to_eur_vat_specs(
+    specs: Vec<VatSpec>,
+    currency: &str,
+    rate_x10000: i64,
+) -> Result<Vec<VatSpec>> {
+    specs
+        .into_iter()
+        .map(|p| {
+            Ok(VatSpec {
+                code: p.code,
+                amount_cents: convert_fx(p.amount_cents, rate_x10000)?,
+                vat_code: p.vat_code,
+                fx_currency: Some(currency.to_string()),
+                fx_amount_cents: Some(p.amount_cents),
+            })
+        })
+        .collect()
+}
+
+/// The JS `resolveMcpFx` / the CLI's `applyFx`: no currency -> unchanged;
+/// otherwise resolve the rate (explicit > stored > ECB) and convert. A
+/// plan-only call must not persist a fetched rate, hence `dry_run`.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_fx(
+    db: &Connection,
+    specs: Vec<PostingSpec>,
+    currency: Option<&str>,
+    rate: Option<&str>,
+    date: &str,
+    actor: &str,
+    dry_run: bool,
+) -> Result<Vec<PostingSpec>> {
+    let Some(currency) = currency.filter(|c| !c.is_empty()) else {
+        return Ok(specs);
+    };
+    let no_fetch = std::env::var("BUKIO_FX_NO_FETCH")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+    let rate_x10000 = resolve_rate_opt(db, currency, rate, date, actor, no_fetch, dry_run)?;
+    to_eur_postings(specs, currency, rate_x10000)
 }
 
 fn sql_err(e: rusqlite::Error) -> BukioError {
