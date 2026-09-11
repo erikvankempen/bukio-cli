@@ -93,10 +93,6 @@ fn require_actor(actor: &str) -> Result<()> {
     }
 }
 
-fn not_ported(cmd: &str) -> BukioError {
-    BukioError::new("NOT_YET_PORTED", format!("{cmd} is not ported to Rust yet"))
-}
-
 fn missing_arg(flag: &str) -> BukioError {
     BukioError::new("MISSING_ARG", format!("{flag} is required"))
 }
