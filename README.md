@@ -39,16 +39,31 @@ bukio-cli is a double-entry bookkeeping engine and CLI that runs natively on a V
 
 ## Quick start
 
-Let your agent do it. Paste this prompt to any agentic assistant — the agent
-installs from source and stops before touching any financial data:
+**New here?** One line. No toolchain, no Node, no compiler:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/erikvankempen/bukio-cli/main/install.sh | sh
+bukio --version
+```
+
+Then let your agent drive. Paste this prompt to any agentic assistant — it
+installs the release binary and stops before touching any financial data:
 
 ```
 Install bukio-cli from github.com/erikvankempen/bukio-cli.
 
-Clone the repository, run `cargo build --release`, and confirm with `target/release/bukio --version`. Alternatively, `cargo install --path .` puts `bukio` on PATH.
+Run the installer — do NOT clone and build, and do not install Node; the release
+binary is the product:
+
+  curl -fsSL https://raw.githubusercontent.com/erikvankempen/bukio-cli/main/install.sh | sh
+
+Confirm with `bukio --version` (it should print 0.18.0 or newer).
 
 Read the repository README.md and AGENTS.md files, configure `bukio mcp` as a local stdio MCP server, and explain the setup you made. Do not create a company or book real transactions yet. When we start, use named actors, preview every mutation with --dry-run, and ask for confirmation before writing.
 ```
+
+**Already running the Node version?** Your books, actor keys and audit history
+carry over unchanged — see [Upgrading from 0.17 (Node)](#upgrading-from-017-node).
 
 ## Screenshot
 
@@ -62,7 +77,7 @@ Read the repository README.md and AGENTS.md files, configure `bukio mcp` as a lo
 2. [Quick start](#quick-start)
 3. [Screenshot](#screenshot)
 4. [Status](#status)
-5. [Requirements & Install](#requirements--install)
+5. [Install](#install)
 6. [Core Concepts](#core-concepts)
 7. [Command Reference](#command-reference)
 8. [Global Flags](#global-flags)
@@ -97,7 +112,7 @@ This branch is **Rust-only**: the JavaScript reference implementation the port w
 **No toolchain, no Node, no browser.** One binary, and the operating system's
 own facilities do the rest.
 
-### Install the release binary (recommended)
+### Install the release binary (new install)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/erikvankempen/bukio-cli/main/install.sh | sh
@@ -132,11 +147,30 @@ updates through git. Neither needs a compiler.
 
 ### Upgrading from 0.17 (Node)
 
-Nothing to convert. The database schema and the migration set are unchanged, so
-your books, actor keys and audit history carry over — and the 0.17 binary still
-opens a book that 0.18 wrote, which means going back is a real option, not a
-hope. Replace the command and you are done; [CHANGELOG.md](CHANGELOG.md) lists
-what changed.
+If you already run the Node version, this is a replacement, not a migration:
+
+```bash
+npm uninstall -g bukio-cli        # whatever you installed it as — `npm ls -g --depth=0` shows it
+curl -fsSL https://raw.githubusercontent.com/erikvankempen/bukio-cli/main/install.sh | sh
+which -a bukio                    # should now be ~/.local/bin/bukio, and nothing else
+bukio --version                   # 0.18.0
+```
+
+**Remove the npm package first.** Both installs provide a `bukio` command, and
+whichever comes first on `PATH` wins — so a leftover Node install quietly shadows
+the binary and leaves you, or your agent, running the old code. `which -a bukio`
+lists every one on `PATH`; you want exactly one.
+
+Nothing else to convert. The database schema and the migration set are unchanged,
+so your books, actor keys and audit history carry over — and the 0.17 binary still
+opens a book that 0.18 wrote, so going back is a real option, not a hope.
+[CHANGELOG.md](CHANGELOG.md) lists what changed.
+
+**If you are an agent** doing this on a user's behalf, exactly one instruction of
+yours changes: install from the release (`install.sh`, or `cargo binstall
+bukio-cli`) and never by compiling, then update with `bukio update`. Commands,
+flags, JSON shapes and exit codes are unchanged, so the rest of your playbook
+still applies. AGENTS.md §Install is the canonical version.
 
 ### Build from source
 
@@ -845,7 +879,7 @@ via the harmonized baseline + their localised PDFs).
 |---------|---------|
 | `backup [--out <path>] [--encrypt] [--passphrase] [--keep N] [--dry-run]` | Consistent SQLite backup (default `~/.bukio/backups/bukio-<ts>.db`). **`--encrypt` (v0.14)** wraps it in AES-256-GCM (scrypt-derived key) — file extension `.enc`, passphrase from `--passphrase` or `BUKIO_BACKUP_PASSPHRASE` env (never in the repo). **`--keep N`** prunes the oldest backups in the default folder (rejects `--out` — rotation only applies to the default location) |
 | `restore --from <file> [--to <path>] [--force] [--passphrase]` | Restore from a backup file (validated first); **encrypted backups are auto-detected** by the `BUKIOENC1` magic header and decrypted with `--passphrase` / `BUKIO_BACKUP_PASSPHRASE` |
-| `update [--yes] [--repo <path>] [--trust-remote] [--dry-run]` | **Self-update** from the GitHub main branch: fetch `origin/main` and reset the working tree to it (audit row when a company DB exists; works without one). ⚠️ The reset **overwrites local customizations** — `--dry-run` first (incoming commits + modified files + local commits that would be lost), and the real run refuses without `--yes`. `--trust-remote` for forks/mirrors, `--repo` for a different install. Rebuild with `cargo build --release` after updating the source. |
+| `update [--yes] [--repo <path>] [--trust-remote] [--dry-run]` | **Self-update** from the GitHub main branch: fetch `origin/main` and reset the working tree to it (audit row when a company DB exists; works without one). ⚠️ The reset **overwrites local customizations** — `--dry-run` first (incoming commits + modified files + local commits that would be lost), and the real run refuses without `--yes`. `--trust-remote` for forks/mirrors, `--repo` for a different install. An installed binary updates itself from the release artifacts (checksum-verified, atomic); a git clone still updates through git and needs a rebuild with `cargo build --release`. |
 | `attach add --invoice N \| --entry N --file F [--store db\|file] [--note] [--dry-run]` | **Source documents (v0.14)**: store the original PDF/scans against an invoice or entry. Default `--store db` = BLOB in the SQLite file (travels with backups; 25 MB/file cap; sha256 dedupe). `--store file` = content-addressed copy in `<db>-attachments/` |
 | `attach list --invoice N \| --entry N` / `show --id [--out F]` / `remove --id` | Metadata-only listing (never reads the BLOB); `show` extracts the bytes (`--force` to overwrite); `remove` deletes the BLOB/copy. Add/remove are audited |
 

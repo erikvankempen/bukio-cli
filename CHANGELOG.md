@@ -6,7 +6,7 @@ match `Cargo.toml` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
-## [Unreleased] — targeting 0.18.0
+## [0.18.0] — 2026-09-11
 
 ### Changed
 
