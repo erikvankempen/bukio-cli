@@ -57,7 +57,13 @@ jobs:
           - { target: x86_64-unknown-linux-gnu,  os: ubuntu-22.04,     strip: strip }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm, strip: strip }
           - { target: aarch64-apple-darwin,      os: macos-14,        strip: strip }
-          - { target: x86_64-apple-darwin,       os: macos-13,        strip: strip }
+          # Intel macOS is cross-built on the arm64 runner on purpose:
+          # `macos-13` was retired on 2025-12-04, so a job pinned to it queues forever
+          # and the release job (needs: build) never starts — which is what happened to
+          # v0.18.0's first run. `macos-15-intel` is the last x86_64 image and is gone in
+          # Fall 2027. Rust cross-builds between macOS architectures with the same SDK, and
+          # the toolchain step below already installs the target.
+          - { target: x86_64-apple-darwin,       os: macos-14,        strip: strip }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
