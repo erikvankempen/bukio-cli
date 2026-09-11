@@ -34,7 +34,7 @@ const FX_MATCH_FLOOR_CENTS: i64 = 25;
 
 /// 4840 Koersverschillen (FX differences on invoice payments), created on
 /// demand for pre-2026-08-07 databases.
-fn ensure_fx_difference_account(db: &Connection, actor: &str) -> Result<String> {
+pub(crate) fn ensure_fx_difference_account(db: &Connection, actor: &str) -> Result<String> {
     if get_account_by_code(db, "4840").is_some() {
         return Ok("4840".into());
     }
@@ -828,129 +828,15 @@ pub fn auto_match(db: &Connection, window_days: i64, actor: &str, dry_run: bool)
                 let kind = m["kind"].as_str().unwrap_or("entry");
                 if kind == "invoice" {
                     let invoice_id = m["invoice_id"].as_i64().unwrap();
-                    let amount = m["amount_cents"].as_i64().unwrap_or(0);
-                    let tx_date_str = m["tx_date"].as_str().unwrap_or("");
-                    let fx_cents = m["fx_delta_cents"].as_i64().unwrap_or(0);
-                    // Settle in FULL: the outstanding comes from the discounted
-                    // totals engine; any gap within the FX bound is an FX move.
-                    let outstanding = crate::invoice::get_invoice(&tx_ref, invoice_id)
-                        .ok()
-                        .flatten()
-                        .map(|inv| {
-                            inv["gross_cents"].as_i64().unwrap_or(0)
-                                - inv["paid_cents"].as_i64().unwrap_or(0)
-                        })
-                        .unwrap_or(0);
-                    // Mark invoice paid
-                    tx_ref.execute(
-                        "INSERT INTO invoice_payments (invoice_id, date, amount_cents, method, bank_tx_id, created_by)
-                         VALUES (?1, ?2, ?3, 'bank', ?4, ?5)",
-                        rusqlite::params![invoice_id, tx_date_str, outstanding, tx_id, actor],
-                    ).map_err(sql_err)?;
-                    tx_ref
-                        .execute(
-                            "UPDATE invoices SET status = 'paid' WHERE id = ?1",
-                            [invoice_id],
-                        )
-                        .map_err(sql_err)?;
-                    // Get bank account code
-                    let bank_account_id = m
-                        .get("bank_account_id")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    let account_code: String = tx_ref
-                        .query_row(
-                            "SELECT account_code FROM bank_accounts WHERE id = ?1",
-                            [bank_account_id],
-                            |r| r.get(0),
-                        )
-                        .unwrap_or_else(|_| "1100".into());
-                    let inv_num: String = m
-                        .get("invoice_number")
-                        .and_then(|v| v.as_str())
-                        .map(String::from)
-                        .unwrap_or_default();
-                    let mut desc = format!("Payment {inv_num}");
-                    if let Some(cn) = m.get("contact_name").and_then(|v| v.as_str()) {
-                        if !cn.is_empty() {
-                            desc.push_str(&format!(" - {cn}"));
-                        }
-                    }
-                    // Look up debtors account from profile
-                    let debtors_code: String = {
-                        let profile = crate::accounts::resolve_profile(&tx_ref).ok();
-                        profile
-                            .and_then(|p| {
-                                p["reporting"]["debtorsAccount"].as_str().map(String::from)
-                            })
-                            .unwrap_or_else(|| "1200".into())
-                    };
-                    let bank_acct_id: i64 = tx_ref
-                        .query_row(
-                            "SELECT id FROM accounts WHERE code = ?1",
-                            [&account_code],
-                            |r| r.get(0),
-                        )
-                        .unwrap_or(0);
-                    let debtors_acct_id: i64 = tx_ref
-                        .query_row(
-                            "SELECT id FROM accounts WHERE code = ?1",
-                            [&debtors_code],
-                            |r| r.get(0),
-                        )
-                        .unwrap_or(0);
-                    let mut legs: Vec<(i64, i64)> =
-                        vec![(bank_acct_id, amount), (debtors_acct_id, -outstanding)];
-                    if fx_cents != 0 {
-                        let fx_code = ensure_fx_difference_account(&tx_ref, actor)?;
-                        let fx_acct_id: i64 = tx_ref
-                            .query_row("SELECT id FROM accounts WHERE code = ?1", [&fx_code], |r| {
-                                r.get(0)
-                            })
-                            .unwrap_or(0);
-                        legs.push((fx_acct_id, -fx_cents));
-                        desc.push_str(&format!(" (fx difference {})", format_amount(fx_cents)));
-                    }
-                    // Create draft entry first, add postings, then post
-                    tx_ref.execute(
-                        "INSERT INTO journal_entries (date, description, state, source, source_ref, created_by)
-                         VALUES (?1, ?2, 'draft', 'bank', ?3, ?4)",
-                        rusqlite::params![tx_date_str, desc, format!("tx:{}", tx_id), actor],
-                    ).map_err(sql_err)?;
-                    let entry_id: i64 = tx_ref.last_insert_rowid();
-                    for (acct_id, leg_cents) in &legs {
-                        tx_ref.execute(
-                            "INSERT INTO postings (entry_id, account_id, amount_cents) VALUES (?1, ?2, ?3)",
-                            rusqlite::params![entry_id, acct_id, leg_cents],
-                        ).map_err(sql_err)?;
-                    }
-                    // Now post it
-                    tx_ref
-                        .execute(
-                            "UPDATE journal_entries SET state = 'posted' WHERE id = ?1",
-                            [entry_id],
-                        )
-                        .map_err(sql_err)?;
-                    let recon_method = if actor.starts_with("agent") {
-                        "agent"
-                    } else {
-                        "manual"
-                    };
-                    tx_ref.execute(
-                        "INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
-                         VALUES (?1, 'invoice', ?2, ?3, 1.0, ?4)",
-                        rusqlite::params![tx_id, invoice_id, recon_method, actor],
-                    ).map_err(sql_err)?;
-                    record(
+                    // the JS routes the invoice case through paymentFromBank,
+                    // which owns the FX bound, the guards and the posting — one
+                    // implementation instead of two that drift apart
+                    crate::invoice::payment_from_bank(
                         &tx_ref,
-                        RecordArgs {
-                            actor,
-                            action: "invoice.payment_bank",
-                            command: Some("bank match"),
-                            args: Some(json!({ "invoiceId": invoice_id, "bankTxId": tx_id })),
-                            outcome: "ok",
-                            entry_ids: vec![entry_id],
-                        },
+                        invoice_id,
+                        tx_id,
+                        actor,
+                        crate::invoice::FX_MATCH_TOLERANCE_BP,
                     )?;
                 } else {
                     let entry_id = m["entry_id"].as_i64().unwrap();

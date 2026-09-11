@@ -2704,6 +2704,7 @@ fn cmd_invoice_pay(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
         &method,
         actor,
         dry_run,
+        None,
     )?;
     if inv.get("dryRun").and_then(|v| v.as_bool()).unwrap_or(false) {
         Ok(json!({ "plan": inv }))

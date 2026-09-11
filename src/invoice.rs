@@ -9,6 +9,7 @@
 use crate::accounts::resolve_profile;
 use crate::audit::{record, RecordArgs};
 use crate::contacts::get_contact;
+use crate::entries::PostingSpec;
 use crate::items::get_item;
 use crate::money::{format_amount, BukioError, Result};
 use crate::vat::{is_vat_enabled, list_vat_codes};
@@ -1111,6 +1112,18 @@ pub fn create_invoice(
 ) -> Result<Value> {
     // the JS validates the date at create; a 2026-02-30 used to be stored
     crate::dates::validate_date(date)?;
+    // and it rejects a negative payment term before touching the database —
+    // Option<i64> already makes a non-integer unrepresentable, so only the sign
+    // needs guarding (the CLI checks it too, but MCP and the recurring engine
+    // call the engine directly)
+    if let Some(dd) = due_days {
+        if dd < 0 {
+            return Err(invoice_error(
+                "INVALID_DUE_DAYS",
+                format!("due-days must be a non-negative integer, got '{dd}'"),
+            ));
+        }
+    }
     // every i18n table is a valid document language; anything else is rejected
     // (the stored column may be NULL — get_invoice then reports the 'nl' default)
     if let Some(l) = language {
@@ -1583,6 +1596,9 @@ pub fn mark_paid(
     method: &str,
     actor: &str,
     dry_run: bool,
+    // the reconciliation link (JS markPaid takes bankTxId); None for a manual
+    // payment, Some(tx) when the payment comes off a bank transaction
+    bank_tx_id: Option<i64>,
 ) -> Result<Value> {
     let invoice = get_invoice(db, id)?
         .ok_or_else(|| invoice_error("NOT_FOUND", format!("invoice {id} does not exist")))?;
@@ -1633,8 +1649,8 @@ pub fn mark_paid(
     // used to leave the payment recorded with the invoice still 'sent'
     let tx = crate::entries::begin(db)?;
     tx.execute(
-        "INSERT INTO invoice_payments (invoice_id, date, amount_cents, method, created_by) VALUES (?1, ?2, ?3, ?4, ?5)",
-        rusqlite::params![id, date, amount_cents, method, actor],
+        "INSERT INTO invoice_payments (invoice_id, date, amount_cents, method, bank_tx_id, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![id, date, amount_cents, method, bank_tx_id, actor],
     ).map_err(sql_err)?;
 
     if paid + amount_cents >= gross {
@@ -1655,6 +1671,200 @@ pub fn mark_paid(
         },
     )?;
     get_invoice(db, id)?.ok_or_else(|| BukioError::new("DB_ERROR", "invoice not found"))
+}
+
+/// FX-match sanity bound shared by the autoMatch SQL (src/bank.rs) and
+/// payment_from_bank: a payment may differ from an invoice's outstanding by up
+/// to 2% (floor 25 cents) and the gap is booked to 4840 Koersverschillen. Keep
+/// the two consumers in sync — drift would make autoMatch match what
+/// payment_from_bank then rejects (FX_DIFFERENCE_TOO_LARGE).
+pub const FX_MATCH_TOLERANCE_BP: i64 = 200; // 2%
+pub const FX_MATCH_FLOOR_CENTS: i64 = 25; // small-invoice absolute floor
+
+/// Apply a bank payment to an invoice: record the payment, post the bank entry
+/// (Bank / Debiteuren) and reconcile the transaction. Mirrors the JS
+/// paymentFromBank, which the bank auto-match engine routes through.
+///
+/// An invoice booked from a foreign-currency price is translated at the invoice
+/// date and the incoming transfer converted at the PAYMENT date, so the amount
+/// received can differ. Within the sanity bound it is booked to 4840
+/// Koersverschillen and the invoice settles in full; beyond it the difference
+/// is not an FX move but a wrong amount, and is rejected. The whole flow is one
+/// unit (entries::begin nests when the caller already holds a transaction, like
+/// better-sqlite3): a half-written payment with no entry would double-pay on a
+/// re-match.
+pub fn payment_from_bank(
+    db: &Connection,
+    invoice_id: i64,
+    bank_tx_id: i64,
+    actor: &str,
+    fx_tolerance_bp: i64,
+) -> Result<Value> {
+    let tx = crate::entries::begin(db)?;
+    let invoice = get_invoice(&tx, invoice_id)?.ok_or_else(|| {
+        invoice_error("NOT_FOUND", format!("invoice {invoice_id} does not exist"))
+    })?;
+    let row: rusqlite::Result<(String, i64, i64, String)> = tx.query_row(
+        "SELECT date, amount_cents, bank_account_id, state FROM bank_transactions WHERE id = ?1",
+        [bank_tx_id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+    );
+    let (tx_date, tx_amount, tx_account_id, tx_state) = row.map_err(|_| {
+        invoice_error(
+            "NOT_FOUND",
+            format!("bank transaction {bank_tx_id} does not exist"),
+        )
+    })?;
+    if tx_state != "unmatched" {
+        return Err(invoice_error(
+            "ALREADY_MATCHED",
+            format!("bank transaction {bank_tx_id} is already {tx_state}"),
+        ));
+    }
+    let bank_code: Option<String> = tx
+        .query_row(
+            "SELECT account_code FROM bank_accounts WHERE id = ?1",
+            [tx_account_id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .unwrap_or(None)
+        .filter(|c| !c.is_empty());
+    let bank_code = bank_code.ok_or_else(|| {
+        invoice_error(
+            "ACCOUNT_NOT_FOUND",
+            format!("bank account {tx_account_id} has no ledger account — set one before matching"),
+        )
+    })?;
+
+    let outstanding =
+        invoice["gross_cents"].as_i64().unwrap_or(0) - invoice["paid_cents"].as_i64().unwrap_or(0);
+    let delta = tx_amount - outstanding; // + paid more (FX gain), - paid less (FX loss)
+    let mut fx_cents = 0i64;
+    if delta != 0 {
+        // floor 25 cents: absorbs cent-level rounding on tiny invoices, and
+        // stays small enough that a €10 invoice paid €9 is still rejected
+        let tolerance = std::cmp::max(
+            ((outstanding as f64 * fx_tolerance_bp as f64) / 10000.0).round() as i64,
+            FX_MATCH_FLOOR_CENTS,
+        );
+        if delta.abs() > tolerance {
+            return Err(invoice_error(
+                "FX_DIFFERENCE_TOO_LARGE",
+                format!("payment {tx_amount} differs from the outstanding {outstanding} by {delta} cents — beyond the {fx_tolerance_bp}bp sanity bound; check the amount before booking"),
+            ));
+        }
+        fx_cents = delta;
+    }
+
+    // settle the invoice in full — the FX difference absorbs the cent-level gap
+    let paid = mark_paid(
+        &tx,
+        invoice_id,
+        &tx_date,
+        outstanding,
+        "bank",
+        actor,
+        false,
+        Some(bank_tx_id),
+    )?;
+    let debtors_code = crate::accounts::resolve_profile(&tx)
+        .ok()
+        .and_then(|p| p["reporting"]["debtorsAccount"].as_str().map(String::from))
+        .unwrap_or_else(|| "1200".into());
+    let mut postings = vec![
+        PostingSpec {
+            code: bank_code,
+            amount_cents: tx_amount,
+            cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
+        },
+        PostingSpec {
+            code: debtors_code,
+            amount_cents: -outstanding,
+            cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
+        },
+    ];
+    let number = invoice["invoice_number"].as_str().unwrap_or("");
+    let mut description = if number.is_empty() {
+        format!("Payment {invoice_id}")
+    } else {
+        format!("Payment {number}")
+    };
+    if let Some(name) = invoice["contact"]["name"].as_str() {
+        if !name.is_empty() {
+            description.push_str(&format!(" - {name}"));
+        }
+    }
+    if fx_cents != 0 {
+        let fx_code = crate::bank::ensure_fx_difference_account(&tx, actor)?;
+        postings.push(PostingSpec {
+            code: fx_code,
+            amount_cents: -fx_cents,
+            cost_center_code: None,
+            vat_code: None,
+            vat_amount_cents: None,
+            fx_currency: None,
+            fx_amount_cents: None,
+        });
+        description.push_str(&format!(
+            " (fx difference {})",
+            crate::money::format_amount(fx_cents)
+        ));
+    }
+
+    let source_ref = format!("tx:{bank_tx_id}");
+    let entry = crate::entries::create_entry(
+        &tx,
+        crate::entries::CreateEntry {
+            date: &tx_date,
+            description: &description,
+            postings,
+            source: "bank",
+            source_ref: Some(&source_ref),
+            actor,
+        },
+    )?;
+    let posted = crate::entries::post_entry(&tx, entry.id, actor)?;
+    let method = if actor.starts_with("agent") {
+        "agent"
+    } else {
+        "manual"
+    };
+    tx.execute(
+        "INSERT INTO reconciliations (bank_tx_id, target_type, target_id, method, confidence, created_by)
+         VALUES (?1, 'invoice', ?2, ?3, 1.0, ?4)",
+        rusqlite::params![bank_tx_id, invoice_id, method, actor],
+    )
+    .map_err(sql_err)?;
+    tx.execute(
+        "UPDATE bank_transactions SET state = 'matched' WHERE id = ?1",
+        [bank_tx_id],
+    )
+    .map_err(sql_err)?;
+    crate::audit::record(
+        &tx,
+        crate::audit::RecordArgs {
+            actor,
+            action: "invoice.payment_bank",
+            command: Some("bank match"),
+            args: Some(json!({ "invoiceId": invoice_id, "bankTxId": bank_tx_id })),
+            outcome: "ok",
+            entry_ids: vec![posted.id],
+        },
+    )?;
+    tx.commit()?;
+
+    Ok(json!({
+        "invoice": paid,
+        "entry": serde_json::to_value(&posted).unwrap_or(Value::Null),
+    }))
 }
 
 pub fn invoice_reminders(db: &Connection, within_days: i64) -> Result<Value> {
@@ -2222,6 +2432,7 @@ mod tests {
             "bank",
             "agent:test",
             false,
+            None,
         )
         .unwrap();
         assert_eq!(partial["status"].as_str(), Some("sent"));
@@ -2235,6 +2446,7 @@ mod tests {
             "bank",
             "agent:test",
             false,
+            None,
         )
         .unwrap();
         assert_eq!(paid["status"].as_str(), Some("paid"));
@@ -2247,7 +2459,8 @@ mod tests {
                 100,
                 "bank",
                 "agent:test",
-                false
+                false,
+                None
             )
             .unwrap_err()
             .code,
@@ -2265,7 +2478,8 @@ mod tests {
                 40000,
                 "bank",
                 "agent:test",
-                false
+                false,
+                None
             )
             .unwrap_err()
             .code,
@@ -2309,6 +2523,7 @@ mod tests {
             "bank",
             "agent:test",
             false,
+            None,
         );
         db.execute("DROP TRIGGER boom", []).unwrap();
         assert!(result.is_err());

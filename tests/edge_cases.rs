@@ -467,7 +467,7 @@ fn invoice_credit_note_of_a_paid_invoice_and_credit_of_credit_rejected() {
     .unwrap();
     let id = inv["id"].as_i64().unwrap();
     finalize_invoice(&d, id, "agent:test", false).unwrap();
-    mark_paid(&d, id, "2026-07-20", 12100, "transfer", "agent:test", false).unwrap();
+    mark_paid(&d, id, "2026-07-20", 12100, "transfer", "agent:test", false, None).unwrap();
     let credit = credit_invoice(&d, id, None, None, "agent:test", false).unwrap();
     let cid = credit["id"].as_i64().unwrap();
     finalize_invoice(&d, cid, "agent:test", false).unwrap();
@@ -506,8 +506,7 @@ fn invoice_lifecycle_pay_draft_overpay_overdue() {
             100,
             "bank",
             "agent:test",
-            false
-        )),
+            false, None)),
         "NOT_PAYABLE"
     );
     finalize_invoice(&d, id, "agent:test", false).unwrap();
@@ -519,8 +518,7 @@ fn invoice_lifecycle_pay_draft_overpay_overdue() {
             999999,
             "bank",
             "agent:test",
-            false
-        )),
+            false, None)),
         "OVERPAYMENT"
     );
     // overdue is DERIVED at read time (due 2026-01-31 is in the past)
@@ -2154,8 +2152,7 @@ fn aging_debtors_buckets_totals_paid_excluded_sorted() {
         paid["gross_cents"].as_i64().unwrap(),
         "bank",
         "agent:test",
-        false,
-    )
+        false, None)
     .unwrap();
     // due after the as-of -> current
     make_finalized(&d, beta, "2026-08-01", Some(30), &["Ding @ 100.00"]);
@@ -2409,8 +2406,7 @@ fn contact_statement_running_balance_and_supplier_side() {
         4000,
         "bank",
         "agent:test",
-        false,
-    )
+        false, None)
     .unwrap();
 
     let r = bukio::contacts::contact_statement(&d, acme, Some("2026-08-08")).unwrap();
@@ -2487,8 +2483,8 @@ fn contact_statement_excludes_payments_after_as_of() {
     let acme = contact_id(&d, "Acme BV");
     let inv = make_finalized(&d, acme, "2026-07-01", None, &["Ding @ 100.00"]);
     let id = inv["id"].as_i64().unwrap();
-    mark_paid(&d, id, "2026-07-20", 2000, "transfer", "agent:test", false).unwrap();
-    mark_paid(&d, id, "2026-08-20", 3000, "transfer", "agent:test", false).unwrap();
+    mark_paid(&d, id, "2026-07-20", 2000, "transfer", "agent:test", false, None).unwrap();
+    mark_paid(&d, id, "2026-08-20", 3000, "transfer", "agent:test", false, None).unwrap();
 
     let r = bukio::contacts::contact_statement(&d, acme, Some("2026-08-08")).unwrap();
     let payments: Vec<&Value> = r["rows"]
@@ -17391,7 +17387,7 @@ fn hard_lib_mark_paid_dry_run_writes_nothing_but_still_validates() {
     let db = hard_open(&dbp);
     let inv = hfx_inv(&db, &dbp, 12100);
     let plan =
-        bukio::invoice::mark_paid(&db, inv, "2099-02-01", 5000, "manual", "agent:test", true)
+        bukio::invoice::mark_paid(&db, inv, "2099-02-01", 5000, "manual", "agent:test", true, None)
             .unwrap();
     assert_eq!(plan["dryRun"], json!(true), "{plan}");
     let remaining = plan["remaining_cents"].as_i64().unwrap_or(-1);
@@ -17404,7 +17400,7 @@ fn hard_lib_mark_paid_dry_run_writes_nothing_but_still_validates() {
     assert_eq!(status, json!("sent"), "the invoice stays sent");
 
     let err =
-        bukio::invoice::mark_paid(&db, inv, "2099-02-01", 999999, "manual", "agent:test", true)
+        bukio::invoice::mark_paid(&db, inv, "2099-02-01", 999999, "manual", "agent:test", true, None)
             .unwrap_err();
     assert_eq!(
         err.code, "OVERPAYMENT",
@@ -17929,7 +17925,7 @@ fn hard_payment_from_bank_fx_gain_books_a_credit_on_4840() {
             |r| r.get(0),
         )
         .unwrap();
-    bukio::bank::auto_match(&db, 14, "agent:test", false).unwrap();
+    bukio::invoice::payment_from_bank(&db, inv, tx_id, "agent:test", 200).unwrap();
     let tb = bukio::reports::trial_balance(&db, None).unwrap();
     assert_eq!(tb["balanced"], json!(true), "{tb}");
     let net_4840 = tb["accounts"]
@@ -17983,17 +17979,15 @@ fn hard_a_difference_beyond_the_sanity_bound_is_rejected() {
             |r| r.get(0),
         )
         .unwrap();
-    // the JS also rejects this on the explicit paymentFromBank path; the port
-    // exposes no such entry point, so auto_match refusing to propose it is the
-    // whole guarantee here.
-    let state: String = db
-        .query_row(
-            "SELECT state FROM bank_transactions WHERE state = 'unmatched'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or_default();
-    assert_eq!(state, "unmatched", "the bank line stays open for a human");
+    // and the explicit entry point refuses it as well (the JS asserts both
+    // paths): tolerance 0 still leaves the 25-cent floor, so 5% is over the top
+    let err = bukio::invoice::payment_from_bank(&db, inv, tx_id, "agent:test", 0).unwrap_err();
+    assert_eq!(err.code, "FX_DIFFERENCE_TOO_LARGE", "{err:?}");
+    assert_eq!(
+        bukio::invoice::get_invoice(&db, inv).unwrap().unwrap()["status"],
+        json!("sent"),
+        "a rejected payment must not settle the invoice"
+    );
 }
 
 #[test]
@@ -18021,6 +18015,17 @@ fn hard_fx_sanity_floor_is_25_cents() {
         n, 0,
         "10% off a 10 euro invoice must not auto-settle: {res}"
     );
+    let tx_id: i64 = db
+        .query_row(
+            "SELECT id FROM bank_transactions WHERE state = 'unmatched'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    // 100 cents of difference on a 10 euro invoice is over the floor and far
+    // over 0bp: the abs floor of 25 cents does not make a 10% haircut acceptable
+    let err = bukio::invoice::payment_from_bank(&db, inv, tx_id, "agent:test", 0).unwrap_err();
+    assert_eq!(err.code, "FX_DIFFERENCE_TOO_LARGE", "{err:?}");
     assert_eq!(
         bukio::invoice::get_invoice(&db, inv).unwrap().unwrap()["status"],
         json!("sent")
@@ -18051,7 +18056,7 @@ fn hard_4840_is_created_on_demand_and_audited() {
             |r| r.get(0),
         )
         .unwrap();
-    bukio::bank::auto_match(&db, 14, "agent:test", false).unwrap();
+    bukio::invoice::payment_from_bank(&db, inv, tx_id, "agent:test", 200).unwrap();
 
     let fx = bukio::accounts::get_account_by_code(&db, "4840").expect("4840 created on demand");
     assert_eq!(fx["taxonomy_code"], json!("WFBE.84"), "{fx}");
@@ -18078,11 +18083,11 @@ fn hard_4840_is_created_on_demand_and_audited() {
 
 #[test]
 fn hard_payment_from_bank_is_atomic() {
-    // NOTE: the JS paymentFromBank books a bank leg and therefore fails with
-    // ACCOUNT_INACTIVE when the bank ledger account is deactivated. The port
-    // settles through bank::auto_match without that leg, so the failure does
-    // not occur; what is asserted here is the invariant that survives either
-    // way — a settled invoice and a balanced ledger, nothing half-written.
+    // The bank ledger account is inactive, so the posting cannot be created:
+    // the payment row, the entry and the reconciliation must all roll back.
+    // A recorded payment with no entry would double-pay on a re-match, which is
+    // why the JS wraps paymentFromBank in one transaction and why entries::begin
+    // nests a savepoint instead of starting a second one.
     let (_d, _c, dbp) = hard_full("h67", false);
     let db = hard_open(&dbp);
     let inv = hfx_inv(&db, &dbp, 50000);
@@ -18095,23 +18100,39 @@ fn hard_payment_from_bank_is_atomic() {
         "agent:test",
     )
     .unwrap();
-    bukio::bank::auto_match(&db, 14, "agent:test", false).unwrap();
-    assert_eq!(
-        bukio::invoice::get_invoice(&db, inv).unwrap().unwrap()["status"],
-        json!("paid")
-    );
-    assert_eq!(
-        bukio::reports::trial_balance(&db, None).unwrap()["balanced"],
-        json!(true)
-    );
-    let stray: i64 = db
+    let tx_id: i64 = db
         .query_row(
-            "SELECT COUNT(*) FROM reconciliations WHERE target_id IS NULL",
+            "SELECT id FROM bank_transactions WHERE state = 'unmatched'",
             [],
             |r| r.get(0),
         )
-        .unwrap_or(0);
-    assert_eq!(stray, 0, "no dangling reconciliation");
+        .unwrap();
+    bukio::accounts::deactivate_account(&db, "1100").unwrap();
+
+    let err = bukio::invoice::payment_from_bank(&db, inv, tx_id, "agent:test", 200).unwrap_err();
+    assert_eq!(err.code, "ACCOUNT_INACTIVE", "{err:?}");
+
+    let payments: i64 = db
+        .query_row("SELECT COUNT(*) FROM invoice_payments", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(payments, 0, "no payment row may survive a failed bank payment");
+    assert_eq!(
+        bukio::invoice::get_invoice(&db, inv).unwrap().unwrap()["status"],
+        json!("sent"),
+        "the invoice must not be settled"
+    );
+    let state: String = db
+        .query_row(
+            "SELECT state FROM bank_transactions WHERE id = ?1",
+            [tx_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(state, "unmatched", "the bank line stays open for a human");
+    let recon: i64 = db
+        .query_row("SELECT COUNT(*) FROM reconciliations", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(recon, 0, "no dangling reconciliation");
 }
 
 #[test]
@@ -18608,4 +18629,35 @@ fn hard_credit_invoice_dry_run_validates_like_the_real_run() {
         )
         .unwrap();
     assert_eq!(n, 0, "a credit dry-run writes no credit note");
+}
+
+#[test]
+fn hard_create_invoice_rejects_negative_due_days() {
+    // the JS throws INVALID_DUE_DAYS before touching the database. The Rust
+    // signature takes Option<i64>, so a non-integer term cannot even be
+    // expressed; the sign is the part that still needs a guard (MCP and the
+    // recurring engine call the engine directly, not through the CLI).
+    let d = setup();
+    add_contact(&d, None);
+    let err = create_invoice(
+        &d,
+        1,
+        "2026-07-10",
+        Some(-5),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines(&["1x Pennen @ 1.00 @21"]),
+        "agent:test",
+        false,
+    )
+    .unwrap_err();
+    assert_eq!(err.code, "INVALID_DUE_DAYS", "{err:?}");
+    let n: i64 = d
+        .query_row("SELECT COUNT(*) FROM invoices", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "a rejected term must not write an invoice");
 }

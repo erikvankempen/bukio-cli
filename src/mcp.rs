@@ -672,7 +672,8 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 .ok_or_else(|| BukioError::new("NOT_FOUND", format!("invoice {id} not found")))?;
             let outstanding =
                 inv["gross_cents"].as_i64().unwrap_or(0) - inv["paid_cents"].as_i64().unwrap_or(0);
-            let paid = crate::invoice::mark_paid(db, id, &date, outstanding, "bank", actor, false)?;
+            let paid =
+                crate::invoice::mark_paid(db, id, &date, outstanding, "bank", actor, false, None)?;
             Ok(json!({"ok": true, "invoice": paid}))
         }
         "invoice_credit" => {
