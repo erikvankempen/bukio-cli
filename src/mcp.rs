@@ -4,19 +4,15 @@
 //
 // MCP server — JSON-RPC 2.0 over stdio (newline-delimited).
 
-use crate::accounts::{
-    create_account, deactivate_account, get_account_by_code, list_accounts, reactivate_account,
-    resolve_profile, NewAccount,
-};
-use crate::audit;
+use crate::accounts::list_accounts;
 use crate::company::get_company;
 use crate::contacts::{create_contact, list_contacts};
 use crate::db::open_db;
 use crate::entries::{
-    create_entry, list_entries, post_entry, reverse_entry, CreateEntry, PostingSpec,
+    create_entry, post_entry, reverse_entry, CreateEntry, PostingSpec,
 };
 use crate::import_mod;
-use crate::money::{format_amount, BukioError, Result};
+use crate::money::{BukioError, Result};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
@@ -40,10 +36,6 @@ fn rpc_error_content(code: &str, message: &str) -> Value {
     let err = json!({"ok": false, "error": {"code": code, "message": message}});
     let text = serde_json::to_string_pretty(&err).unwrap_or_else(|_| err.to_string());
     json!({"content": [{"type": "text", "text": text}], "isError": true})
-}
-
-fn json_value(s: &str) -> Value {
-    serde_json::from_str(s).unwrap_or(Value::Null)
 }
 
 /// Tool definitions
@@ -754,7 +746,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
             Ok(json!({"invoices": r}))
         }
         "contacts" => {
-            let limit = arg_i64(args, "limit").map(|l| l as usize).unwrap_or(50);
+            let _limit = arg_i64(args, "limit").map(|l| l as usize).unwrap_or(50);
             let r = list_contacts(db)?;
             Ok(json!({"contacts": r}))
         }

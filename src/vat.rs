@@ -244,7 +244,7 @@ pub fn expand_vat_postings(
                         |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? == 1)),
                     )
                     .ok();
-                let Some((rate_bp, vtype, eu_reverse)) = vat else {
+                let Some((rate_bp, vtype, _eu_reverse)) = vat else {
                     return Err(BukioError::new(
                         "VAT_CODE_NOT_FOUND",
                         format!("vat code '{vc}' does not exist"),
@@ -359,7 +359,7 @@ pub fn book_vat_entry(
     actor: &str,
     post: bool,
 ) -> Result<Value> {
-    let (expanded_specs, vat_info) = expand_vat_postings(db, specs)?;
+    let (expanded_specs, _vat_info) = expand_vat_postings(db, specs)?;
     let entry = create_entry(
         db,
         CreateEntry {

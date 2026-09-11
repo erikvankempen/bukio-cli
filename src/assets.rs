@@ -4,10 +4,9 @@
 //
 // Fixed assets: schemes, register, runs, disposal.
 
-use crate::accounts::get_account_by_code;
 use crate::audit::{record, RecordArgs};
 use crate::entries::{create_entry, post_entry, CreateEntry, PostingSpec};
-use crate::money::{format_amount, BukioError, Result};
+use crate::money::{BukioError, Result};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
@@ -821,7 +820,7 @@ pub fn dispose_asset(
     proceeds_cents: i64,
     bank_account_code: Option<&str>,
     result_account_code: Option<&str>,
-    note: Option<&str>,
+    _note: Option<&str>,
     actor: &str,
     dry_run: bool,
 ) -> Result<Value> {

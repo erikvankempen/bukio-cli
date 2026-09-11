@@ -168,7 +168,7 @@ impl Pdf {
 
         let mut out: Vec<u8> = Vec::new();
         let mut offsets: Vec<usize> = vec![0]; // object 0 is the free head
-        let mut push = |out: &mut Vec<u8>, offsets: &mut Vec<usize>, body: String| {
+        let push = |out: &mut Vec<u8>, offsets: &mut Vec<usize>, body: String| {
             offsets.push(out.len());
             out.extend_from_slice(body.as_bytes());
         };
@@ -789,7 +789,7 @@ pub fn jaarrekening_pdf(report: &Value) -> Vec<u8> {
     let as_of = report["as_of"].as_str().unwrap_or("");
     p.text(12.0, true, &format!("BALANS PER {as_of}"));
     p.rule(0.7);
-    let mut render_side = |p: &mut Pdf, header: &str, groups: &[Value], total: i64| {
+    let render_side = |p: &mut Pdf, header: &str, groups: &[Value], total: i64| {
         p.row(0.0, true, 10.5, header, None);
         for g in groups {
             let sections = g["sections"].as_array().cloned().unwrap_or_default();
@@ -1060,7 +1060,7 @@ fn company_row(db: &Connection) -> Value {
 
 pub fn invoice_html(db: &Connection, invoice: &Value) -> String {
     let company = company_row(db);
-    let logo = logo_img(db);
+    let _logo = logo_img(db);
     let contact = &invoice["contact"];
     let is_credit = invoice["invoice_type"] == serde_json::json!("credit");
     let lang = invoice["language"].as_str().unwrap_or("en");
@@ -1553,7 +1553,7 @@ pub fn invoice_pdf(db: &Connection, invoice: &Value) -> Vec<u8> {
     p.rule(0.8);
     p.space(6.0);
 
-    let mut amount_row = |p: &mut Pdf, label: &str, amount: String, bold: bool| {
+    let amount_row = |p: &mut Pdf, label: &str, amount: String, bold: bool| {
         p.cols(
             10.0,
             bold,

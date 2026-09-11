@@ -5,7 +5,7 @@
 // Audit log (mirrors src/audit/index.js): append-only record of every
 // mutation, signature plumbing, trail verification.
 
-use crate::actor::{get_key_by_keyid, now_iso};
+use crate::actor::get_key_by_keyid;
 use crate::canonical::build_digest;
 use crate::money::{BukioError, Result};
 use crate::sign::verify;

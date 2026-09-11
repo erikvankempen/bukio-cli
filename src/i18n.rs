@@ -2578,7 +2578,7 @@ mod tests {
 #[cfg(test)]
 mod i18n_ported_tests {
     use super::*;
-    use crate::entries::PostingSpec;
+    
     use rusqlite::Connection;
 
     /// the 26 full locale tables (en pivot + nl/de/fr/da/fi/nb/sv/it/es/pt +

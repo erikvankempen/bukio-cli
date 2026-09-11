@@ -30,7 +30,6 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::process::Command;
 
-const ACTOR: &[&str] = &["--actor", "agent:fixture"];
 
 fn fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/node-0.17-book.db")

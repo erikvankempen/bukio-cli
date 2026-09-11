@@ -510,12 +510,12 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
 
     // Try full match first, then try dropping trailing positional tokens
     // (extra tokens from multi-word flag values like --postal-code '1000 AA')
-    if let Some(result) = try_match_cmd(&positional, argv.clone(), db_path, actor, dry_run) {
+    if let Some(result) = try_match_cmd(&positional, argv, db_path, actor, dry_run) {
         return result;
     }
     for trim in 1..positional.len() {
         let shorter = &positional[..positional.len() - trim];
-        if let Some(result) = try_match_cmd(shorter, argv.clone(), db_path, actor, dry_run) {
+        if let Some(result) = try_match_cmd(shorter, argv, db_path, actor, dry_run) {
             return result;
         }
     }
@@ -1196,7 +1196,7 @@ fn emit_csv(
     columns: &[&str],
     flat_fn: impl Fn(&Value) -> Vec<Vec<String>>,
 ) -> Result<bool> {
-    if let Some(fmt) = arg(argv, "--format").filter(|f| f == "csv") {
+    if let Some(_fmt) = arg(argv, "--format").filter(|f| f == "csv") {
         if let Some(path) = arg(argv, "--out") {
             let rows = flat_fn(data);
             write_csv(&path, columns, &rows)?;
@@ -1213,7 +1213,7 @@ fn emit_csv(
         return Ok(true);
     }
     // XLSX format
-    if let Some(fmt) = arg(argv, "--format").filter(|f| f == "xlsx") {
+    if let Some(_fmt) = arg(argv, "--format").filter(|f| f == "xlsx") {
         let path = arg(argv, "--out").ok_or_else(|| {
             BukioError::new("OUT_REQUIRED", "--out <path> is required for xlsx output")
         })?;
@@ -1254,7 +1254,7 @@ fn cmd_tb(argv: &[String], db_path: &str) -> Result<Value> {
         &db,
         arg(argv, "--year").as_deref().filter(|s| !s.is_empty()),
     )?;
-    if let Some(fmt) = arg(argv, "--format").filter(|f| f == "csv") {
+    if let Some(_fmt) = arg(argv, "--format").filter(|f| f == "csv") {
         if let Some(path) = arg(argv, "--out") {
             let empty_accounts: Vec<serde_json::Value> = vec![];
             let accounts = data["accounts"].as_array().unwrap_or(&empty_accounts);
@@ -1523,7 +1523,7 @@ fn cmd_audit_list(argv: &[String], db_path: &str) -> Result<Value> {
             ));
         }
         Ok(json!({ "ok": true, "path": path }))
-    } else if let Some(fmt) = arg(argv, "--format").filter(|f| f == "json") {
+    } else if let Some(_fmt) = arg(argv, "--format").filter(|f| f == "json") {
         // --format json: wrap in {ok, data} even without --json flag
         Ok(json!({ "ok": true, "data": { "entries": rows } }))
     } else {
@@ -2083,7 +2083,7 @@ fn cmd_vat_settle(argv: &[String], db_path: &str, actor: &str, dry_run: bool) ->
         &bukio::i18n::resolve_locale(arg(argv, "--locale").as_deref()),
     )?;
     if !dry_run {
-        if let Some(entry_id) = result["entry_id"].as_i64() {
+        if let Some(_entry_id) = result["entry_id"].as_i64() {
             let _ = db.execute(
                 "UPDATE bank_transactions SET state = 'matched' WHERE id = ?1",
                 rusqlite::params![tx],
@@ -3233,7 +3233,7 @@ fn cmd_payable_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
     } else {
         method_raw
     };
-    let entry_id = parse_i64(argv, "--entry-id");
+    let _entry_id = parse_i64(argv, "--entry-id");
     bukio::payments::add_payable(
         &db,
         &contact_ref,
@@ -3547,7 +3547,7 @@ fn fetch_bytes(location: &str) -> Result<Vec<u8>> {
         .timeout_global(Some(std::time::Duration::from_secs(60)))
         .build();
     let agent = ureq::Agent::new_with_config(config);
-    let mut resp = agent
+    let resp = agent
         .get(location)
         // GitHub's API refuses requests without a User-Agent
         .header("User-Agent", "bukio-cli")
@@ -4041,7 +4041,7 @@ fn cmd_actor_keygen(argv: &[String], actor: &str, dry_run: bool) -> Result<Value
     bukio::actor_cli::cmd_keygen(actor, force, dry_run)
 }
 
-fn cmd_actor_register(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
+fn cmd_actor_register(_argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Result<Value> {
     require_actor(actor)?;
     bukio::actor_cli::cmd_register(db_path, actor, dry_run)
 }
@@ -4074,7 +4074,7 @@ fn cmd_actor_unlock(argv: &[String], actor: &str) -> Result<Value> {
     bukio::actor_cli::cmd_unlock(actor, ttl)
 }
 
-fn cmd_actor_lock(argv: &[String], actor: &str) -> Result<Value> {
+fn cmd_actor_lock(_argv: &[String], actor: &str) -> Result<Value> {
     require_actor(actor)?;
     bukio::actor_cli::cmd_lock(actor)
 }
@@ -4131,11 +4131,6 @@ fn cmd_actor_can(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
 fn cmd_actor_verify_key(db_path: &str, actor: &str) -> Result<Value> {
     require_actor(actor)?;
     bukio::actor_cli::cmd_verify_actor(db_path, actor)
-}
-
-fn cmd_actor_verify(db_path: &str) -> Result<Value> {
-    let db = open_existing(db_path)?;
-    bukio::audit::verify_trail(&db, None, None)
 }
 
 fn cmd_actor_who_can(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {

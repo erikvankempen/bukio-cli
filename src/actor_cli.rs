@@ -433,7 +433,7 @@ pub fn cmd_roles(db_path: &str, actor: &str, for_who: Option<&str>) -> Result<Va
 
 /// Can: capability check against the ACTUAL mutation (`--post` flips
 /// entry.draft -> entry.post; `mcp:<tool>` maps through the MCP table).
-pub fn cmd_can(db_path: &str, actor: &str, who: &str, action: &str) -> Result<Value> {
+pub fn cmd_can(db_path: &str, _actor: &str, who: &str, action: &str) -> Result<Value> {
     let tokens: Vec<&str> = action.split_whitespace().collect();
     let path = tokens
         .iter()

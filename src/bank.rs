@@ -5,7 +5,6 @@
 // Bank module — accounts, import, matching, reconciliation (mirrors src/bank/).
 
 use crate::accounts::get_account_by_code;
-use crate::actor::now_iso;
 use crate::audit::{record, RecordArgs};
 use crate::dates::validate_date;
 use crate::entries::{create_entry, get_entry, post_entry, CreateEntry, PostingSpec};

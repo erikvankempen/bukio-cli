@@ -9,10 +9,10 @@ use crate::accounts::get_account_by_code;
 use crate::audit::{record, RecordArgs};
 use crate::contacts::get_contact;
 use crate::entries::{
-    create_entry, list_entries, post_entry, reverse_entry, CreateEntry, PostingSpec,
+    create_entry, post_entry, CreateEntry, PostingSpec,
 };
 use crate::invoice::{
-    create_invoice, parse_item_spec, parse_line_spec, split_item_specs, split_line_specs,
+    create_invoice, split_item_specs, split_line_specs,
 };
 use crate::items::get_item;
 use crate::money::{format_amount, BukioError, Result};
@@ -89,7 +89,7 @@ pub fn validate_postings(db: &Connection, postings: &[PostingSpec]) -> Result<()
                 format!("posting for account {} must be non-zero", p.code),
             ));
         }
-        let account = get_account_by_code(db, &p.code).ok_or_else(|| {
+        let _account = get_account_by_code(db, &p.code).ok_or_else(|| {
             recurring_error(
                 "ACCOUNT_NOT_FOUND",
                 format!("account {} does not exist", p.code),
@@ -826,7 +826,7 @@ pub fn run_due(
     let mut stmt = db.prepare(&templates_sql).map_err(sql_err)?;
     let tpl_rows: Vec<Value> = stmt.query_map([], |r| {
         let posts: String = r.get(8)?;
-        let fp: Option<String> = r.get(19)?;
+        let _fp: Option<String> = r.get(19)?;
         let il: Option<String> = r.get(20)?;
         let it: Option<String> = r.get(21)?;
         Ok(json!({
@@ -886,7 +886,7 @@ pub fn run_due(
                         .get("postings")
                         .cloned()
                         .unwrap_or_else(|| json!([]));
-                    let mut run = json!({
+                    let run = json!({
                         "kind": "entry",
                         "entry": {
                             "date": run_date,

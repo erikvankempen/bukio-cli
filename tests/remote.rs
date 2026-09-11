@@ -186,19 +186,6 @@ impl RemoteEnv {
     }
 
     /// Raw (non-JSON) invocation, for byte-comparisons and human output.
-    fn raw(&self, args: &[&str]) -> (String, bool) {
-        let out = Command::new(exe())
-            .args(args)
-            .env("BUKIO_CONFIG_DIR", &self.cfg)
-            .env("BUKIO_DB", &self.db)
-            .env("BUKIO_ACTOR", "agent:op")
-            .output()
-            .unwrap();
-        (
-            String::from_utf8_lossy(&out.stdout).to_string(),
-            out.status.success(),
-        )
-    }
 
     fn mint_token(&self, actor: &str, ttl: &str) -> String {
         let out = Command::new(exe())

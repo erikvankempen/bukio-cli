@@ -10,7 +10,6 @@ use crate::accounts::resolve_profile;
 use crate::audit::{record, RecordArgs};
 use crate::contacts::get_contact;
 use crate::entries::PostingSpec;
-use crate::items::get_item;
 use crate::money::{format_amount, BukioError, Result};
 use crate::vat::{is_vat_enabled, list_vat_codes};
 use rusqlite::Connection;
@@ -1147,7 +1146,7 @@ pub fn create_invoice(
             ));
         }
     }
-    let contact = get_contact(db, contact_id)?.ok_or_else(|| {
+    let _contact = get_contact(db, contact_id)?.ok_or_else(|| {
         invoice_error(
             "CONTACT_NOT_FOUND",
             format!("contact {contact_id} does not exist"),
@@ -1331,7 +1330,7 @@ pub fn create_invoice(
         let y: i64 = date[..4].parse().unwrap_or(2026);
         let m: i64 = date[5..7].parse().unwrap_or(1);
         let d: i64 = date[8..10].parse().unwrap_or(1);
-        let total_days = d + dd;
+        let _total_days = d + dd;
         // Simple date arithmetic (handles month overflow)
         let dt = chrono::NaiveDate::from_ymd_opt(y as i32, m as u32, d as u32)
             .unwrap_or(chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap());

@@ -6,8 +6,8 @@
 
 use crate::accounts::{create_account, get_account_by_code, resolve_profile, NewAccount};
 use crate::audit::{record, RecordArgs};
-use crate::entries::{create_entry, list_entries, post_entry, CreateEntry, PostingSpec};
-use crate::money::{format_amount, BukioError, Result};
+use crate::entries::{create_entry, post_entry, CreateEntry, PostingSpec};
+use crate::money::{BukioError, Result};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 

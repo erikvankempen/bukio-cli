@@ -422,7 +422,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn update_contact_name() {
         let d = test_db();
         let c = create_contact(

@@ -2839,7 +2839,7 @@ fn mcp_report_aging_and_report_sales_share_the_shapes() {
     let mut stdin = child.stdin.take().unwrap();
     let mut reader = BufReader::new(child.stdout.take().unwrap());
 
-    let mut call = |stdin: &mut dyn Write,
+    let call = |stdin: &mut dyn Write,
                     reader: &mut BufReader<_>,
                     id: u64,
                     method: &str,
@@ -6883,7 +6883,7 @@ fn if_recurring_invoice_template_snapshots_catalog_prices_per_run() {
     assert!(ok, "{out}");
     assert_eq!(v["data"]["template"]["vat_aware"], json!(1), "{v}");
 
-    let (v, ok, out) = run_cli(&[
+    let (_v, ok, out) = run_cli(&[
         "--json",
         "recurring",
         "run",
@@ -7148,7 +7148,7 @@ fn if_company_logo_set_extract_round_trip_and_remove() {
     );
 
     let extract = dir.join("out.png");
-    let (v, ok, out) = run_cli(&[
+    let (_v, ok, out) = run_cli(&[
         "--json",
         "company",
         "logo",
@@ -7535,10 +7535,6 @@ fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-fn b64(bytes: &[u8]) -> String {
-    use base64::Engine;
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
 
 fn unb64(s: &str) -> Vec<u8> {
     use base64::Engine;
@@ -10025,7 +10021,7 @@ fn actor_read_session_key_treats_missing_and_expired_files_as_locked() {
     let t = actor_cfg("ac20");
     let saved = std::env::var("BUKIO_CONFIG_DIR").ok();
     std::env::set_var("BUKIO_CONFIG_DIR", &t.cfg);
-    let result = (|| {
+    let _result = (|| {
         assert!(
             bukio::actor_cli::read_session_key("human:erik").is_none(),
             "no file yet"
@@ -11552,7 +11548,7 @@ fn gate_covers_reads_too() {
     let (tb, ok, _) = c.run("agent:nobody", &["report", "trial-balance"]);
     assert!(!ok);
     assert_eq!(tb["error"]["code"], json!("AUTHZ_DENIED"), "{tb}");
-    let (tb_b, ok, out) = c.run("agent:payments-b", &["report", "trial-balance"]);
+    let (_tb_b, ok, out) = c.run("agent:payments-b", &["report", "trial-balance"]);
     assert!(ok, "{out}");
     let _ = std::fs::remove_dir_all(&c.dir);
 }

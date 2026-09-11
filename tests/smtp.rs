@@ -907,7 +907,7 @@ fn smtp_mcp_invoice_email_dry_run_then_execute() {
     let mut stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
     let mut reader = BufReader::new(stdout);
-    let mut call = |stdin: &mut std::process::ChildStdin,
+    let call = |stdin: &mut std::process::ChildStdin,
                     reader: &mut BufReader<std::process::ChildStdout>,
                     msg: Value|
      -> Value {

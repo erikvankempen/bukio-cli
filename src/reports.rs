@@ -385,7 +385,7 @@ fn sectionize_pnl(groups: &[&str], rows: &[NetRow]) -> Vec<Value> {
     for code in groups {
         let accounts: Vec<Value> = rows
             .iter()
-            .filter(|r| (r.taxonomy_code.clone().unwrap_or("overig".into()) == *code))
+            .filter(|r| r.taxonomy_code.clone().unwrap_or("overig".into()) == *code)
             .map(|r| {
                 json!({
                     "code": r.code, "name": r.name, "type": r.type_,
@@ -1485,20 +1485,6 @@ fn group_by_prefix_lines(sections: &[Value], lines: &[Value]) -> Vec<Value> {
     out
 }
 
-/// Flatten balans sections into a flat list of accounts with balance_cents.
-fn flatten_sections(sections: &[Value]) -> Vec<Value> {
-    sections
-        .iter()
-        .flat_map(|s| {
-            s["accounts"]
-                .as_array()
-                .map(|a| a.iter())
-                .unwrap_or_default()
-        })
-        .cloned()
-        .collect()
-}
-
 /// Statutory annual accounts (jaarrekening) — mirrors src/report/jaarrekening.js.
 /// JS parity: the statutory balans account rows expose `amount_cents` (the raw
 /// balans report uses `balance_cents`, the pnl report `amount_cents`; the
@@ -1510,7 +1496,7 @@ fn with_amount_cents(rows: &[Value]) -> Vec<Value> {
         .map(|mut g| {
             // both levels expose amount_cents: the group rollup and each
             // section's account rows (the renderer and the JS read the latter)
-            let mut normalize = |accs: &mut Vec<Value>| {
+            let normalize = |accs: &mut Vec<Value>| {
                 for a in accs.iter_mut() {
                     let amt = a["balance_cents"]
                         .as_i64()

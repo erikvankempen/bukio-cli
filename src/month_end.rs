@@ -6,7 +6,6 @@
 // Read-only: drafts, unmatched bank txs, invoices, recurring, VAT.
 
 use crate::bank::list_transactions;
-use crate::entries::list_entries;
 use crate::money::{format_amount, BukioError, Result};
 use crate::vat::{is_vat_enabled, ob_readout};
 use rusqlite::Connection;

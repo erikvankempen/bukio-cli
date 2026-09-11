@@ -10,7 +10,6 @@ use base64::Engine as _;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 
 pub const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
 
@@ -278,7 +277,7 @@ pub fn extract_attachment(db: &Connection, id: i64, out: &str, force: bool) -> R
             ))
         },
     );
-    let (mode, data, path, file_name) = match row {
+    let (mode, _data, _path, file_name) = match row {
         Ok(v) => v,
         Err(rusqlite::Error::QueryReturnedNoRows) => {
             return Err(attachment_error(

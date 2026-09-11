@@ -7,11 +7,8 @@ use crate::vat::VatSpec;
 // FX translation (mirrors src/fx/index.js + src/fx/ecb.js):
 // EUR-conversion rates stored per currency per date; ECB reference-rate fetch.
 
-use crate::accounts::resolve_profile;
-use crate::actor::now_iso;
 use crate::audit::{record, RecordArgs};
-use crate::dates::today_iso;
-use crate::money::{format_amount, BukioError, Result};
+use crate::money::{BukioError, Result};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 

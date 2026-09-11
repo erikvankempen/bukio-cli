@@ -2218,9 +2218,6 @@ pub fn import_invoice(
             None => s,
         }
     }
-    fn top_is(stack: &[String], name: &str) -> bool {
-        stack.last().map(|t| t == name).unwrap_or(false)
-    }
     fn has_ancestor(stack: &[String], name: &str) -> bool {
         stack.iter().any(|t| t == name)
     }

@@ -66,7 +66,7 @@ pub fn update_company(
     logo_mime: Option<&str>,
     actor: &str,
 ) -> Result<(Value, Value)> {
-    let row = get_company(db)?;
+    let _row = get_company(db)?;
 
     // validate each change
     let mut updates: Vec<(String, String)> = Vec::new();
@@ -74,7 +74,7 @@ pub fn update_company(
         if val.is_empty() && col != "tax_id" {
             let label = COMPANY_FIELDS
                 .iter()
-                .find(|(opt, c, _)| *c == *col)
+                .find(|(_opt, c, _)| *c == *col)
                 .map(|f| f.2)
                 .unwrap_or("field");
             return Err(BukioError::new(
