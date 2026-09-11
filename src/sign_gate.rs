@@ -726,6 +726,20 @@ mod tests {
     use super::*;
     use crate::db::open_db;
 
+    /// Point the config dir at a throwaway path. The nonce store and the key
+    /// files are real files under ~/.bukio, so a test that writes them without
+    /// this races any concurrently running bukio process — which is how
+    /// nonce_management flaked — and leaves junk in the user's own config.
+    fn isolate_config_dir() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let dir =
+                std::env::temp_dir().join(format!("bukio-test-config-{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&dir);
+            std::env::set_var("BUKIO_CONFIG_DIR", &dir);
+        });
+    }
+
     #[test]
     fn exempt_commands() {
         assert!(is_signing_exempt("actor keygen"));
@@ -741,6 +755,7 @@ mod tests {
 
     #[test]
     fn nonce_management() {
+        isolate_config_dir();
         let keyid = "testkey123";
         let nonce = uuid_v4();
         assert!(!is_nonce_used(keyid, &nonce));

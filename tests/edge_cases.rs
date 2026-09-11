@@ -13408,10 +13408,10 @@ fn cli_audit_verify_reports_a_tampered_row_with_exit_one() {
 }
 
 #[test]
-fn cli_version_matches_package_json() {
-    let pkg =
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/package.json")).unwrap();
-    let pkg: Value = serde_json::from_str(&pkg).unwrap();
+fn cli_version_matches_the_crate_version() {
+    // This used to compare against package.json — the JS tree's version file,
+    // which this branch no longer carries. Cargo's own package version is the
+    // source of truth, and env!() resolves it at compile time.
     let exe = env!("CARGO_BIN_EXE_bukio");
     let out = std::process::Command::new(exe)
         .arg("--version")
@@ -13420,8 +13420,8 @@ fn cli_version_matches_package_json() {
     let version = String::from_utf8_lossy(&out.stdout).trim().to_string();
     assert_eq!(
         version,
-        pkg["version"].as_str().unwrap(),
-        "bukio --version must equal package.json"
+        env!("CARGO_PKG_VERSION"),
+        "bukio --version must equal Cargo.toml's version"
     );
 }
 // ==== agent layer: fx, ECB, compliance, MCP (ported from test/agent-layer.test.js) ====
