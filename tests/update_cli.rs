@@ -456,3 +456,138 @@ fn a_dry_run_records_no_audit_row() {
         .unwrap();
     assert_eq!(n, 0, "a dry run must not write an update audit row");
 }
+
+/// install.sh leaves `<config>/install.json`, and a copy installed that way has
+/// no git clone and no toolchain — so `update` has to maintain the binary
+/// itself from the release artifacts.
+mod binary_install {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    /// Any consistent label works: it only names the release asset.
+    const TRIPLE: &str = "x86_64-unknown-linux-gnu";
+
+    struct Release {
+        dir: std::path::PathBuf,
+        payload: Vec<u8>,
+    }
+
+    /// A local release directory shaped exactly like the workflow publishes it.
+    fn release(tag: &str) -> Release {
+        let dir = tmpdir(&format!("rel{tag}"));
+        let payload = b"#!/bin/sh\necho replaced\n".to_vec();
+        std::fs::write(dir.join(format!("bukio-{TRIPLE}")), &payload).unwrap();
+        let sum = format!("{:x}", Sha256::digest(&payload));
+        std::fs::write(dir.join("SHA256SUMS"), format!("{sum}  bukio-{TRIPLE}\n")).unwrap();
+        Release { dir, payload }
+    }
+
+    /// Its own binary copy, its own config dir, its own database: three tests run
+    /// in parallel threads, so anything shared would be a race. That is not
+    /// hypothetical — a shared marker dir made one test delete the marker while
+    /// another was running, sending that child down the git-clone path.
+    struct Install {
+        dir: std::path::PathBuf,
+        exe: std::path::PathBuf,
+        cfg: std::path::PathBuf,
+        db: std::path::PathBuf,
+    }
+
+    fn install(tag: &str) -> Install {
+        let dir = tmpdir(&format!("bin{tag}"));
+        let exe = dir.join("bukio");
+        std::fs::copy(env!("CARGO_BIN_EXE_bukio"), &exe).unwrap();
+        let cfg = dir.join("config");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(
+            cfg.join("install.json"),
+            format!(r#"{{"method":"script","version":"0.17.0","target":"{TRIPLE}"}}"#),
+        )
+        .unwrap();
+        let db = dir.join("book.db");
+        Install { dir, exe, cfg, db }
+    }
+
+    impl Install {
+        fn run(&self, args: &[&str]) -> (Value, bool) {
+            let out = Command::new(&self.exe)
+                .args(args)
+                .env("BUKIO_CONFIG_DIR", &self.cfg)
+                .env("BUKIO_DB", &self.db)
+                .env("BUKIO_ACTOR", "agent:test")
+                .env("GIT_CEILING_DIRECTORIES", std::env::temp_dir())
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            (
+                serde_json::from_str(&stdout)
+                    .unwrap_or_else(|_| json!({ "raw": stdout.to_string() })),
+                out.status.success(),
+            )
+        }
+
+        fn update_args<'a>(&self, rel: &'a Release, extra: &[&'a str]) -> Vec<&'a str> {
+            let mut v = vec!["update"];
+            v.extend_from_slice(extra);
+            v.extend_from_slice(&["--release-base", rel.dir.to_str().unwrap(), "--json"]);
+            v
+        }
+    }
+
+    #[test]
+    fn updates_from_the_release_and_keeps_the_previous_binary() {
+        let rel = release("ok");
+        let inst = install("ok");
+        let (v, ok) = inst.run(&inst.update_args(&rel, &[]));
+        assert!(ok, "{v}");
+        assert_eq!(v["data"]["method"], "binary", "{v}");
+        assert_eq!(v["data"]["updated"], true);
+        assert_eq!(
+            std::fs::read(&inst.exe).unwrap(),
+            rel.payload,
+            "the binary was not replaced"
+        );
+        assert!(inst.dir.join("bukio.old").exists(), "no fallback copy kept");
+    }
+
+    #[test]
+    fn refuses_an_artifact_whose_checksum_does_not_match() {
+        let rel = release("bad");
+        // corrupt the artifact after the checksum file was written
+        std::fs::write(rel.dir.join(format!("bukio-{TRIPLE}")), b"tampered").unwrap();
+        let inst = install("bad");
+        let before = std::fs::read(&inst.exe).unwrap();
+        let (v, ok) = inst.run(&inst.update_args(&rel, &[]));
+        assert!(!ok, "a bad checksum must fail: {v}");
+        assert_eq!(v["error"]["code"], "UPDATE_CHECKSUM_MISMATCH", "{v}");
+        assert_eq!(
+            std::fs::read(&inst.exe).unwrap(),
+            before,
+            "the binary was touched"
+        );
+    }
+
+    #[test]
+    fn a_dry_run_plans_the_update_and_touches_nothing() {
+        let rel = release("dry");
+        let inst = install("dry");
+        let before = std::fs::read(&inst.exe).unwrap();
+        let (v, ok) = inst.run(&inst.update_args(&rel, &["--dry-run"]));
+        assert!(ok, "{v}");
+        assert_eq!(v["data"]["dryRun"], true, "{v}");
+        assert_eq!(v["data"]["asset"], format!("bukio-{TRIPLE}"));
+        assert_eq!(
+            std::fs::read(&inst.exe).unwrap(),
+            before,
+            "a dry run modified the binary"
+        );
+        assert!(
+            !inst.dir.join("bukio.old").exists(),
+            "dry run wrote a fallback"
+        );
+        assert!(
+            !inst.dir.join(".bukio.new").exists(),
+            "dry run staged a download"
+        );
+    }
+}

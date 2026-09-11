@@ -1,6 +1,6 @@
 [package]
 name = "bukio"
-version = "0.17.0"
+version = "0.18.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Agent-first, local-first double-entry bookkeeping for SMEs across eleven jurisdictions. SQLite backend, VAT-optional, Peppol BIS 3.0 e-invoicing, MCP-native. No cloud, no lock-in. (Rust port)"
@@ -24,7 +24,16 @@ ureq = "3"
 quick-xml = "0.37"
 ring = "0.17"
 scrypt = "0.11"
-lettre = { version = "0.11", features = ["builder", "hostname", "native-tls"] }
+# rustls + the OS trust store: the binary links no OpenSSL, so it runs on
+# any Linux from 2021 on, and an internal SMTP CA still verifies.
+lettre = { version = "0.11", default-features = false, features = [
+    "builder",
+    "hostname",
+    "smtp-transport",
+    "pool",
+    "rustls-tls",
+    "rustls-native-certs",
+] }
 mime_guess = "2"
 regex = "1"
 tiny_http = "0.12"
@@ -33,4 +42,5 @@ rust_xlsxwriter = "0.99.0"
 flate2 = "1"
 
 [dev-dependencies]
+sha2 = "0.10"
 flate2 = "1"

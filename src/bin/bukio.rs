@@ -147,7 +147,8 @@ fn main() {
         std::process::exit(0);
     }
     if has_flag(&argv, "--version") || has_flag(&argv, "-V") {
-        println!("0.17.0");
+        // one source of truth: Cargo.toml
+        println!(env!("CARGO_PKG_VERSION"));
         std::process::exit(0);
     }
 
@@ -3497,7 +3498,269 @@ fn cmd_item_update(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
     )
 }
 
+// ── updates for a script-installed binary ───────────────────────────────────
+//
+// A user who installed a release has no git clone and no toolchain, so the
+// clone-based path below cannot help them. When install.sh leaves a marker, the
+// binary updates itself from the release artifacts instead: download, verify the
+// checksum, replace atomically, keep the previous binary as `bukio.old`.
+//
+// Only the *source* is overridable (--release-base, for mirrors and tests). The
+// destination is always the running binary: making that configurable would turn
+// an environment variable into "overwrite any file on this machine".
+
+const RELEASE_REPO: &str = "erikvankempen/bukio-cli";
+
+fn config_dir() -> std::path::PathBuf {
+    std::env::var("BUKIO_CONFIG_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(format!(
+                "{}/.bukio",
+                std::env::var("HOME").unwrap_or_else(|_| "/root".into())
+            ))
+        })
+}
+
+/// What install.sh wrote when it installed this copy, if anything.
+fn install_marker() -> Option<Value> {
+    let dir = config_dir();
+    let raw = std::fs::read_to_string(dir.join("install.json")).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn is_local_base(base: &str) -> bool {
+    base.starts_with('/') || base.starts_with("./")
+}
+
+fn fetch_bytes(location: &str) -> Result<Vec<u8>> {
+    if is_local_base(location) {
+        return std::fs::read(location).map_err(|e| {
+            BukioError::new(
+                "UPDATE_DOWNLOAD_FAILED",
+                format!("cannot read {location}: {e}"),
+            )
+        });
+    }
+    let config = ureq::config::Config::builder()
+        .http_status_as_error(false)
+        .timeout_global(Some(std::time::Duration::from_secs(60)))
+        .build();
+    let agent = ureq::Agent::new_with_config(config);
+    let mut resp = agent
+        .get(location)
+        // GitHub's API refuses requests without a User-Agent
+        .header("User-Agent", "bukio-cli")
+        .call()
+        .map_err(|e| {
+            BukioError::new(
+                "UPDATE_DOWNLOAD_FAILED",
+                format!("cannot reach {location}: {e}"),
+            )
+        })?;
+    let status = resp.status().as_u16();
+    let body = resp.into_body().read_to_vec().map_err(|e| {
+        BukioError::new(
+            "UPDATE_DOWNLOAD_FAILED",
+            format!("cannot read the response from {location}: {e}"),
+        )
+    })?;
+    if !(200..300).contains(&status) {
+        return Err(BukioError::new(
+            "UPDATE_DOWNLOAD_FAILED",
+            format!("{location} returned HTTP {status}"),
+        ));
+    }
+    Ok(body)
+}
+
+/// `<base>/SHA256SUMS` — the same file install.sh verifies against.
+fn checksum_for(sums: &str, asset: &str) -> Option<String> {
+    sums.lines().find_map(|line| {
+        let mut parts = line.split_whitespace();
+        let hash = parts.next()?;
+        let name = parts.next()?;
+        (name.trim_start_matches('*') == asset).then(|| hash.to_lowercase())
+    })
+}
+
+/// "v0.18.0" > "0.17.0" — tags carry a `v`, versions do not.
+fn version_newer(candidate: &str, current: &str) -> bool {
+    let parse = |v: &str| -> Vec<u64> {
+        v.trim_start_matches('v')
+            .split('.')
+            .map(|p| p.split('-').next().unwrap_or("0").parse().unwrap_or(0))
+            .collect()
+    };
+    let (a, b) = (parse(candidate), parse(current));
+    for i in 0..a.len().max(b.len()) {
+        let (x, y) = (
+            a.get(i).copied().unwrap_or(0),
+            b.get(i).copied().unwrap_or(0),
+        );
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
+fn cmd_update_binary(
+    argv: &[String],
+    db_path: &str,
+    actor: &str,
+    marker: &Value,
+    dry_run: bool,
+) -> Result<Value> {
+    use sha2::{Digest, Sha256};
+
+    let current = env!("CARGO_PKG_VERSION").to_string();
+    let target = marker["target"].as_str().unwrap_or("").to_string();
+    if target.is_empty() {
+        return Err(BukioError::new(
+            "UPDATE_BAD_MARKER",
+            format!(
+                "{} has no target triple — re-run install.sh to fix the installation",
+                config_dir().join("install.json").display()
+            ),
+        ));
+    }
+    let asset = format!("bukio-{target}");
+    let base = arg(argv, "--release-base")
+        .unwrap_or_else(|| format!("https://github.com/{RELEASE_REPO}/releases/latest/download"));
+
+    // A local mirror cannot say what "latest" means, so it installs what it has.
+    let mut available = String::new();
+    if !is_local_base(&base) {
+        let api = format!("https://api.github.com/repos/{RELEASE_REPO}/releases/latest");
+        let body = fetch_bytes(&api)?;
+        let parsed: Value = serde_json::from_slice(&body).map_err(|e| {
+            BukioError::new(
+                "UPDATE_DOWNLOAD_FAILED",
+                format!("cannot parse the release response: {e}"),
+            )
+        })?;
+        available = parsed["tag_name"].as_str().unwrap_or("").to_string();
+        if available.is_empty() {
+            return Err(BukioError::new(
+                "UPDATE_DOWNLOAD_FAILED",
+                "the latest release has no tag name",
+            ));
+        }
+        if !version_newer(&available, &current) {
+            return Ok(json!({
+                "action": "update", "method": "binary", "updated": false,
+                "current_version": current, "available_version": available,
+                "up_to_date": true, "install_path": running_exe()?,
+            }));
+        }
+    }
+
+    let sums = String::from_utf8_lossy(&fetch_bytes(&format!("{base}/SHA256SUMS"))?).to_string();
+    let expected = checksum_for(&sums, &asset).ok_or_else(|| {
+        BukioError::new(
+            "UPDATE_NO_ARTIFACT",
+            format!("{base}/SHA256SUMS has no entry for {asset} — no build for this platform"),
+        )
+    })?;
+
+    if dry_run {
+        return Ok(json!({
+            "action": "update", "method": "binary", "dryRun": true,
+            "current_version": current, "available_version": available,
+            "asset": asset, "url": format!("{base}/{asset}"),
+            "install_path": running_exe()?, "up_to_date": false,
+        }));
+    }
+
+    let bytes = fetch_bytes(&format!("{base}/{asset}"))?;
+    let got = format!("{:x}", Sha256::digest(&bytes));
+    if got != expected {
+        return Err(BukioError::new(
+            "UPDATE_CHECKSUM_MISMATCH",
+            format!("{asset} does not match SHA256SUMS (expected {expected}, got {got}) — refusing to install"),
+        ));
+    }
+
+    let exe = std::path::PathBuf::from(running_exe()?);
+    let dir = exe
+        .parent()
+        .ok_or_else(|| BukioError::new("UPDATE_FAILED", "the running binary has no directory"))?;
+    let staged = dir.join(".bukio.new");
+    std::fs::write(&staged, &bytes).map_err(|e| {
+        BukioError::new(
+            "UPDATE_FAILED",
+            format!(
+                "cannot write to {}: {e} — if bukio was installed system-wide, re-run with sudo",
+                dir.display()
+            ),
+        )
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755));
+    }
+    // Keep the outgoing binary: if the new one misbehaves, it is one rename away.
+    let backup = dir.join("bukio.old");
+    let _ = std::fs::copy(&exe, &backup);
+    std::fs::rename(&staged, &exe).map_err(|e| {
+        BukioError::new(
+            "UPDATE_FAILED",
+            format!("cannot replace {}: {e}", exe.display()),
+        )
+    })?;
+
+    // Same rule as the clone path: only a real run touches the books.
+    if let Ok(db) = open_existing(db_path) {
+        let _ = bukio::audit::record(
+            &db,
+            bukio::audit::RecordArgs {
+                actor,
+                action: "update",
+                command: Some("update"),
+                args: Some(json!({ "from": current, "to": available, "asset": asset })),
+                outcome: "ok",
+                entry_ids: vec![],
+            },
+        );
+    }
+
+    Ok(json!({
+        "action": "update", "method": "binary", "updated": true,
+        "from_version": current, "to_version": available,
+        "asset": asset, "install_path": exe.display().to_string(),
+        "previous_binary": backup.display().to_string(),
+        "deps_installed": false, "up_to_date": false,
+    }))
+}
+
+fn running_exe() -> Result<String> {
+    Ok(std::env::current_exe()
+        .map_err(|e| BukioError::new("UPDATE_FAILED", format!("cannot locate the binary: {e}")))?
+        .display()
+        .to_string())
+}
+
 fn cmd_update(argv: &[String], db_path: &str, actor: &str) -> Result<Value> {
+    // install.sh leaves a marker; without one this is a clone (or a copy someone
+    // built themselves) and the git-based path below applies. An explicit
+    // --repo means the user is talking about a clone, so it wins.
+    if arg(argv, "--repo").is_none() {
+        if let Some(marker) = install_marker() {
+            if let Some(Value::String(t)) = marker.get("target") {
+                if !t.is_empty() {
+                    return cmd_update_binary(
+                        argv,
+                        db_path,
+                        actor,
+                        &marker,
+                        has_flag(argv, "--dry-run"),
+                    );
+                }
+            }
+        }
+    }
     let repo = arg(argv, "--repo").unwrap_or_else(|| ".".into());
     let yes = has_flag(argv, "--yes");
     let dry_run = has_flag(argv, "--dry-run");
