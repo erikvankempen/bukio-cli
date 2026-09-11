@@ -88,7 +88,7 @@ Read the repository README.md and AGENTS.md files, configure `bukio mcp` as a lo
 
 **Rust binary is feature-complete against the original JavaScript reference.** All 28 command groups, 134 dispatch arms, 42 MCP tools, and 31 jurisdiction profiles are implemented and verified. The `bukio` binary is a single self-contained executable (~16 MB) with no runtime dependencies beyond SQLite (bundled via rusqlite).
 
-The JavaScript tree (`src/**/*.js`, `bin/bukio.js`, `test/*.test.js`) currently remains in the repository as the **parity oracle** (`node scripts/parity.mjs`, 324/324 steps passing) and will be removed at the Rust-only cut-over.
+This branch is **Rust-only**: the JavaScript reference implementation the port was verified against is *not* tracked here — it lives in this branch's history and in the porting sessions' working copies, where the 324-step parity harness and the ported suites gated equivalence. What the JS produced and the Rust build needs *is* committed: `src/profiles.json` (the 31 jurisdiction profiles) and `src/help.json` (the CLI help text). See `.gitignore` for how the JS tree is excluded and regenerated.
 
 ---
 
@@ -1070,22 +1070,22 @@ machine can propose and a human (or a verifying agent) disposes.
 
 ```
 bukio-cli/
-├── src/
-│   ├── main.rs            # CLI entry point + dispatch
-│   ├── lib.rs             # library root (all modules)
-│   ├── cli/               # command groups (init, entry, report, audit, ...)
-│   ├── core/              # db, accounts, chart, entries (posting engine), money
-│   ├── audit/             # append-only audit log
-│   ├── report/            # trial balance, balance sheet, P&L, journal
-│   ├── pdf.rs             # native PDF renderer (invoices + jaarrekening)
-│   ├── ubl.rs             # Peppol BIS 3.0 UBL generation
-│   ├── mcp.rs             # MCP server (stdio JSON-RPC 2.0)
-│   └── ...                # (43 Rust source files total)
-├── migrations/            # numbered SQL migrations
-├── tests/                 # integration tests (edge_cases, jurisdictions, markets, ...)
+├── src/                   # 43 Rust sources: flat modules plus three subdirs
+│   ├── bin/bukio.rs       # CLI entry point + dispatch
+│   ├── lib.rs             # library root
+│   ├── bank/              # CAMT.053 + bank CSV parsers
+│   ├── tests/fixtures/    # fixtures ported from the JS signing tests
+│   ├── pdf.rs            # native PDF renderer (invoices + jaarrekening)
+│   ├── ubl.rs            # Peppol BIS 3.0 UBL generation
+│   ├── mcp.rs            # MCP server (stdio JSON-RPC 2.0)
+│   └── ...               # posting engine, reports, actors, VAT, i18n, jurisdictions
+├── migrations/            # 26 numbered SQL migrations
+├── tests/                 # 6 integration suites (edge_cases, jurisdictions, markets, ...)
+├── test/report.md         # test report, generated
 ├── scripts/
-│   └── testreport.sh      # runs cargo test and writes test/report.md
+│   └── testreport.sh      # runs cargo test and writes test/report.md (+ the badge)
 ├── AGENTS.md              # agent manual — read before driving the tool
+├── Cargo.toml
 └── README.md
 ```
 
@@ -1378,27 +1378,26 @@ Stated plainly, so nothing is hidden:
 - **It was free:** the ≈ €3,150 is an imputed opportunity cost, not money paid.
   My out-of-pocket spend remains **$41.90** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
-  conventional code review of a 34.2 KLOC codebase would take; treat them as
+  conventional code review of a 62 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
 
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **37,250 non-blank, non-comment lines of JavaScript**
-across 193 files (21,322 in `src/`, 15,813 in `test/`, 115 in `bin/` +
-`scripts/`), i.e. **37.25 KLOC**
-(measured with `scc` v3.7.0).
+model (Boehm, 1981): **62,055 non-blank, non-comment lines of Rust**
+across 49 files (40,151 in `src/`, 21,904 in `tests/`), i.e. **62.05 KLOC**
+(measured with `scc` v3.7.0, the same tool the earlier JavaScript figure used).
 
-| COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\\* |
+| COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 95.9 PM | 14.1 months | ~7 developers | ≈ €864K |
-| Semi-detached | 165.9 PM | 14.9 months | ~11 developers | ≈ €1,494K |
-| Embedded | 304.2 PM | 15.2 months | ~20 developers | ≈ €2,736K |
+| Organic | 183.1 PM | 18.1 months | ~10 developers | ≈ €1,648K |
+| Semi-detached | 305.5 PM | 18.5 months | ~17 developers | ≈ €2,750K |
+| Embedded | 510.1 PM | 18.4 months | ~28 developers | ≈ €4,591K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 106–270
-person-months (≈ €954K–€2,430K)**; the AI-assisted build consumed **$41.90 in
+**Comparison:** a conventional team building this would estimate **≈ 183–510
+person-months (≈ €1.65M–€4.59M)**; the AI-assisted build consumed **$41.90 in
 API costs plus ≈ €3,150 of my review-and-direction time (contributed, unpaid
 — see above)** over 66 working sessions in under six weeks — still a tiny fraction of
 the conventional estimate.

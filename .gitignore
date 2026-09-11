@@ -13,3 +13,20 @@ data/
 docs-research/faia-src/
 /target
 /src/migrations_data.rs
+
+# ── JavaScript reference implementation ──────────────────────────────────────
+# Not part of this branch. The Rust port was written against the JS CLI, and the
+# tree stayed in the porting sessions' working copies as the parity oracle; a
+# clone of this branch is Rust-only.
+#
+# The artefacts it generated ARE tracked, because the Rust build needs them:
+#   src/profiles.json — the 31 jurisdiction profiles
+#   src/help.json     — the CLI help text
+# Regenerate either in a tree that still has the JS:
+#   node scripts/gen-profiles.mjs && node scripts/help-tree.mjs
+*.js
+*.mjs
+*.cjs
+package.json
+package-lock.json
+scripts/screenshot-template.html
