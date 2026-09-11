@@ -935,6 +935,22 @@ authz off.
 
 ---
 
+### 7.1 Generic / infrastructure codes
+
+These come from the shared plumbing rather than a domain module:
+
+`DB_ERROR`, `IO_ERROR`, `FILE_ERROR`, `FILE_READ_ERROR`, `FILE_WRITE_ERROR`,
+`PARSE_ERROR`, `INTERNAL` — a database, filesystem, parse or internal failure;
+the message carries the detail.
+
+`INVALID_ARGS`, `MISSING_ARG`, `UNKNOWN_COMMAND`, `UNKNOWN_SUBCOMMAND`,
+`UNKNOWN_TOOL` — the command line or tool call was malformed.
+
+`ACTOR_NOT_FOUND` — the acting identity has no key on file.
+`KEY_ERROR`, `KEY_NOT_ENCRYPTED`, `SIGN_ERROR` — signing/keystore problems.
+`AUDIT_READ_FAILED`, `AUDIT_WRITE_FAILED` — the audit log could not be read or appended.
+`GIT_ERROR`, `SERVER_START`, `NOT_YET_PORTED` — version control, MCP server start, porting gaps.
+
 ## 8. Anti-patterns (never do these)
 
 - ❌ Posting without `--dry-run` first.

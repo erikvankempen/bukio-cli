@@ -14751,3 +14751,2158 @@ fn mcp_a_second_company_db_uses_its_own_registry_and_enforce_state() {
     let _ = std::fs::remove_dir_all(&dir_a);
     let _ = std::fs::remove_dir_all(&dir_b);
 }
+// ==== hardening (ported from test/hardening.test.js) =========================
+
+/// A file DB with a named company (the JS's tmpDb + init).
+fn hard_db(tag: &str, vat: bool) -> (std::path::PathBuf, String, String) {
+    let (dir, db) = cdb(tag);
+    let cfg = dir.join("cfg").to_string_lossy().to_string();
+    std::fs::create_dir_all(&cfg).unwrap();
+    let mut args = vec![
+        "--json",
+        "init",
+        "--name",
+        "Test BV",
+        "--registration-id",
+        "12345678",
+        "--legal-form",
+        "bv",
+    ];
+    if vat {
+        args.extend(["--vat", "on"]);
+    }
+    args.extend(["--db", db.as_str()]);
+    let (out, ok, _) = acli(
+        &args,
+        &[("BUKIO_CONFIG_DIR", &cfg), ("BUKIO_ACTOR", "agent:test")],
+    );
+    assert!(ok, "init: {out}");
+    (dir, cfg, db)
+}
+
+// --- F1: reversal carries VAT fields ---------------------------------------
+
+#[test]
+fn hard_reversal_of_a_vat_entry_cancels_the_ob_readout_and_keeps_vat_fields() {
+    let (_dir, _cfg, db_path) = hard_db("h1", true);
+    let db = bukio::db::open_db(&db_path).unwrap();
+    let specs =
+        bukio::vat::parse_vat_posting_specs(&["8000:-100.00@21,1100:121.00".to_string()]).unwrap();
+    let out = bukio::vat::book_vat_entry(
+        &db,
+        "2026-01-15",
+        "verkoop",
+        &specs,
+        "manual",
+        None,
+        "agent:test",
+        true,
+    )
+    .unwrap();
+    let entry_id = out["id"].as_i64().unwrap();
+
+    let before = bukio::vat::ob_readout(&db, "2026-Q1").unwrap();
+    assert_eq!(before["fields"]["1a"], json!(10000), "{before}");
+    assert_eq!(before["fields"]["5a"], json!(2100), "{before}");
+
+    let rev = bukio::entries::reverse_entry(&db, entry_id, "agent:test", None).unwrap();
+    let after = bukio::vat::ob_readout(&db, "2026-Q1").unwrap();
+    assert_eq!(
+        after["fields"]["1a"],
+        json!(0),
+        "1a must cancel after reversal: {after}"
+    );
+    assert_eq!(
+        after["fields"]["5a"],
+        json!(0),
+        "5a must cancel after reversal: {after}"
+    );
+
+    // the reversal posting carries the VAT code + negated VAT amount
+    let rev_entry = bukio::entries::get_entry(&db, rev.id).unwrap();
+    let tagged = rev_entry
+        .postings
+        .iter()
+        .find(|p| p.account_code == "8000")
+        .expect("8000 posting");
+    assert_eq!(
+        tagged.vat_amount_cents,
+        Some(2100),
+        "original was -2100: {tagged:?}"
+    );
+}
+
+// --- F2: parsePeriod month bounds -------------------------------------------
+
+#[test]
+fn hard_parse_period_rejects_out_of_range_months() {
+    for bad in ["2026-13", "2026-00", "2026-99", "2026-1"] {
+        let err = bukio::vat::parse_period(bad).unwrap_err();
+        assert_eq!(err.code, "INVALID_PERIOD", "'{bad}' must be rejected");
+    }
+    let (from, to) = bukio::vat::parse_period("2026-Q4").unwrap();
+    assert_eq!((from.as_str(), to.as_str()), ("2026-10-01", "2026-12-31"));
+    let (from, to) = bukio::vat::parse_period("2026-12").unwrap();
+    assert_eq!((from.as_str(), to.as_str()), ("2026-12-01", "2026-12-31"));
+    let (_, to) = bukio::vat::parse_period("2024-02").unwrap();
+    assert_eq!(to, "2024-02-29", "leap February");
+}
+
+// --- F9: vat book with 0-rate codes ------------------------------------------
+
+#[test]
+fn hard_vat_book_with_v_and_0_books_without_a_zero_leg() {
+    let (_dir, _cfg, db_path) = hard_db("h9", true);
+    let db = bukio::db::open_db(&db_path).unwrap();
+    for code in ["V", "0"] {
+        let specs =
+            bukio::vat::parse_vat_posting_specs(&[format!("8000:-100.00@{code},1100:100.00")])
+                .unwrap();
+        let out = bukio::vat::book_vat_entry(
+            &db,
+            "2026-01-10",
+            &format!("code {code}"),
+            &specs,
+            "manual",
+            None,
+            "agent:test",
+            true,
+        )
+        .unwrap();
+        assert_eq!(out["state"], json!("posted"), "{out}");
+        let postings = out["postings"].as_array().unwrap();
+        let tagged = postings
+            .iter()
+            .find(|p| p["account_code"] == json!("8000"))
+            .expect("8000 posting");
+        assert_eq!(tagged["vat_code"], json!(code), "{tagged}");
+        assert_eq!(tagged["vat_amount_cents"], json!(0), "{tagged}");
+        assert!(
+            postings.iter().all(|p| p["amount_cents"] != json!(0)),
+            "no zero-amount leg may survive: {postings:?}"
+        );
+    }
+    let readout = bukio::vat::ob_readout(&db, "2026-Q1").unwrap();
+    assert_eq!(
+        readout["fields"]["1c"],
+        json!(20000),
+        "the base is still reported: {readout}"
+    );
+}
+
+#[test]
+fn hard_vat_book_with_r_books_no_vat_leg() {
+    let (_dir, _cfg, db_path) = hard_db("h9r", true);
+    let db = bukio::db::open_db(&db_path).unwrap();
+    let specs =
+        bukio::vat::parse_vat_posting_specs(&["8000:-100.00@R,1100:100.00".to_string()]).unwrap();
+    let out = bukio::vat::book_vat_entry(
+        &db,
+        "2026-01-10",
+        "verlegd",
+        &specs,
+        "manual",
+        None,
+        "agent:test",
+        true,
+    )
+    .unwrap();
+    let postings = out["postings"].as_array().unwrap();
+    assert_eq!(postings.len(), 2, "omzet + bank, no VAT leg: {out}");
+    assert!(
+        !postings
+            .iter()
+            .any(|p| p["account_code"] == json!("2500") || p["account_code"] == json!("1500")),
+        "{out}"
+    );
+}
+
+// --- F10: FX+VAT rounding drift ----------------------------------------------
+
+#[test]
+fn hard_fx_vat_booking_absorbs_rounding_drift() {
+    let (_dir, _cfg, db_path) = hard_db("h10", true);
+    let db = bukio::db::open_db(&db_path).unwrap();
+    let specs =
+        bukio::vat::parse_vat_posting_specs(&["8000:-41.33@21,1100:50.01".to_string()]).unwrap();
+    let converted = bukio::fx::to_eur_vat_specs(specs, "USD", 10001).unwrap();
+    let (expanded, _vat) = bukio::vat::expand_vat_postings(&db, &converted).unwrap();
+    let sum: i64 = expanded.iter().map(|p| p.amount_cents).sum();
+    assert_eq!(sum, 0, "converted legs must sum to zero, got {sum}");
+
+    let out = bukio::vat::book_vat_entry(
+        &db,
+        "2026-01-10",
+        "USD inkoop",
+        &converted,
+        "manual",
+        None,
+        "agent:test",
+        true,
+    )
+    .unwrap();
+    assert_eq!(out["state"], json!("posted"), "{out}");
+    let total: i64 = out["postings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["amount_cents"].as_i64().unwrap())
+        .sum();
+    assert_eq!(total, 0, "the booked entry must balance: {out}");
+}
+
+#[test]
+fn hard_fx_vat_a_range_of_amounts_never_trips_unbalanced() {
+    let (_dir, _cfg, db_path) = hard_db("h10b", true);
+    let db = bukio::db::open_db(&db_path).unwrap();
+    for fx in (4000..=4300).step_by(7) {
+        let gross = ((fx as f64) * 1.21).round() as i64;
+        let raw = format!(
+            "8000:-{:.2}@21,1100:{:.2}",
+            fx as f64 / 100.0,
+            gross as f64 / 100.0
+        );
+        let specs = bukio::vat::parse_vat_posting_specs(&[raw]).unwrap();
+        let converted = bukio::fx::to_eur_vat_specs(specs, "USD", 10001).unwrap();
+        let (expanded, _) = bukio::vat::expand_vat_postings(&db, &converted).unwrap();
+        let sum: i64 = expanded.iter().map(|p| p.amount_cents).sum();
+        assert_eq!(sum, 0, "fx={fx} unbalanced by {sum}");
+    }
+}
+
+// --- F11: vat book --json carries vat_code -----------------------------------
+
+#[test]
+fn hard_cli_vat_book_json_reports_the_vat_code_on_tagged_postings() {
+    let (_dir, _cfg, db) = hard_db("h11", true);
+    let (out, ok) = crun(
+        &db,
+        &[
+            "vat",
+            "book",
+            "--date",
+            "2026-01-10",
+            "--desc",
+            "verkoop",
+            "--postings",
+            "8000:-100.00@21,1100:121.00",
+            "--post",
+        ],
+    );
+    assert!(ok, "{out}");
+    let postings = out["data"]["entry"]["postings"].as_array().unwrap();
+    let tagged = postings
+        .iter()
+        .find(|p| p["account_code"] == json!("8000"))
+        .expect("8000 posting");
+    assert_eq!(tagged["vat_code"], json!("21"), "{tagged}");
+    assert_eq!(tagged["vat_amount_cents"], json!(-2100), "{tagged}");
+}
+
+// --- F12: invoice pay amount parsing ----------------------------------------
+
+#[test]
+fn hard_cli_invoice_pay_rejects_non_international_amounts() {
+    let (_dir, _cfg, db) = hard_db("h12", true);
+    let (_o, ok) = crun(
+        &db,
+        &[
+            "company",
+            "update",
+            "--tax-id",
+            "NL123456789B01",
+            "--address",
+            "Industrieweg 12",
+            "--postal-code",
+            "2712 CD",
+            "--city",
+            "Zoetermeer",
+            "--iban",
+            CLI_IBAN,
+        ],
+    );
+    assert!(ok);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "contact",
+            "add",
+            "--name",
+            "ACME BV",
+            "--address",
+            "Straat 1",
+            "--city",
+            "Amsterdam",
+        ],
+    );
+    assert!(ok);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "invoice",
+            "create",
+            "--contact",
+            "1",
+            "--lines",
+            "1x Test @ 100.00 @21",
+            "--date",
+            "2026-01-10",
+        ],
+    );
+    assert!(ok);
+    let (_, ok) = crun(&db, &["invoice", "finalize", "--id", "1"]);
+    assert!(ok);
+
+    for amount in ["12,34", "1e3"] {
+        let (bad, ok) = crun(
+            &db,
+            &[
+                "invoice",
+                "pay",
+                "--id",
+                "1",
+                "--date",
+                "2026-01-20",
+                "--amount",
+                amount,
+            ],
+        );
+        assert!(!ok, "'{amount}' must be rejected");
+        assert_eq!(bad["error"]["code"], json!("INVALID_AMOUNT"), "{bad}");
+    }
+    let (_, ok) = crun(
+        &db,
+        &[
+            "invoice",
+            "pay",
+            "--id",
+            "1",
+            "--date",
+            "2026-01-20",
+            "--amount",
+            "12.34",
+        ],
+    );
+    assert!(ok);
+    let (show, _) = crun(&db, &["invoice", "show", "--id", "1"]);
+    assert_eq!(show["data"]["invoice"]["paid"], json!("12.34"), "{show}");
+}
+
+// --- dry-run uniformity -----------------------------------------------------
+
+#[test]
+fn hard_cli_backup_dry_run_writes_no_file() {
+    let (dir, _cfg, db) = hard_db("h17", false);
+    let out_path = dir.join("never.db").to_string_lossy().to_string();
+    let (out, ok) = crun(&db, &["backup", "--out", &out_path, "--dry-run"]);
+    assert!(ok, "{out}");
+    assert_eq!(out["data"]["dryRun"], json!(true), "{out}");
+    assert!(
+        !std::path::Path::new(&out_path).exists(),
+        "dry-run must not write the file"
+    );
+}
+
+#[test]
+fn hard_cli_export_xaf_dry_run_writes_nothing_and_schemes_validate() {
+    let (dir, _cfg, db) = hard_db("h18", false);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-01-10",
+            "--desc",
+            "Start",
+            "--postings",
+            "1100:1000.00,3000:-1000.00",
+            "--post",
+        ],
+    );
+    assert!(ok);
+    let out_path = dir.join("never.xaf").to_string_lossy().to_string();
+    let (out, ok) = crun(
+        &db,
+        &[
+            "export",
+            "xaf",
+            "--year",
+            "2026",
+            "--out",
+            &out_path,
+            "--dry-run",
+        ],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(out["data"]["dryRun"], json!(true), "{out}");
+    assert!(!std::path::Path::new(&out_path).exists());
+
+    // scheme dry-run validates the life instead of printing a NaN plan
+    let (bad_scheme, ok) = crun(
+        &db,
+        &[
+            "assets",
+            "scheme",
+            "add",
+            "--name",
+            "X",
+            "--life-months",
+            "abc",
+            "--dry-run",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(
+        bad_scheme["error"]["code"],
+        json!("INVALID_LIFE"),
+        "{bad_scheme}"
+    );
+
+    // depreciation dry-run validates the non-positive-final guard
+    let (bad_dep, ok) = crun(
+        &db,
+        &[
+            "depreciation",
+            "add",
+            "--name",
+            "D",
+            "--cost",
+            "1.00",
+            "--life-months",
+            "150",
+            "--start",
+            "2026-01-01",
+            "--dry-run",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(bad_dep["error"]["code"], json!("INVALID_LIFE"), "{bad_dep}");
+}
+
+#[test]
+fn hard_cli_assets_register_csv_has_a_header_and_totals() {
+    let (_dir, _cfg, db) = hard_db("h15", false);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "assets",
+            "add",
+            "--name",
+            "Laptop",
+            "--purchase-date",
+            "2026-01-01",
+            "--purchase-price",
+            "1200.00",
+            "--depreciation-start",
+            "2026-01-01",
+            "--recognition-date",
+            "2026-01-01",
+        ],
+    );
+    assert!(ok);
+    let csv = crun_text(&db, &["assets", "register", "--format", "csv"]);
+    let header = csv.lines().next().unwrap_or("");
+    assert!(
+        header.starts_with("id,name,category"),
+        "header row expected, got: {header}"
+    );
+    assert!(csv.contains("Laptop"), "the asset row must be present");
+    assert!(csv.contains("TOTAL"), "the totals row must be present");
+}
+
+#[test]
+fn hard_cli_assets_register_json_without_the_global_flag() {
+    let (_dir, _cfg, db) = hard_db("h15b", false);
+    let raw = crun_text(&db, &["assets", "register", "--format", "json"]);
+    let parsed: Value =
+        serde_json::from_str(&raw).unwrap_or_else(|_| panic!("not JSON: {raw:.200}"));
+    assert_eq!(parsed["ok"], json!(true), "{parsed}");
+    assert!(parsed["data"]["assets"].is_array(), "{parsed}");
+}
+
+#[test]
+fn hard_cli_recurring_run_dry_run_renders_plans() {
+    let (_dir, _cfg, db) = hard_db("h16", false);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "recurring",
+            "add",
+            "--name",
+            "Huur",
+            "--postings",
+            "4300:1000.00,1100:-1000.00",
+            "--frequency",
+            "monthly",
+            "--start",
+            "2026-01-10",
+        ],
+    );
+    assert!(ok);
+    let out = crun_text(&db, &["recurring", "run", "--dry-run"]);
+    assert!(
+        !out.contains("#undefined"),
+        "dry-run must not render undefined ids: {out:.300}"
+    );
+    assert!(
+        out.contains("(plan)"),
+        "dry-run runs must render as plans: {out:.300}"
+    );
+}
+
+#[test]
+fn hard_cli_assets_pause_dry_run_leaves_the_status_unchanged() {
+    let (_dir, _cfg, db) = hard_db("h16b", false);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "assets",
+            "add",
+            "--name",
+            "Laptop",
+            "--purchase-date",
+            "2026-01-01",
+            "--purchase-price",
+            "1200.00",
+            "--depreciation-start",
+            "2026-01-01",
+            "--recognition-date",
+            "2026-01-01",
+        ],
+    );
+    assert!(ok);
+    let (_, ok) = crun(&db, &["assets", "pause", "--id", "1", "--dry-run"]);
+    assert!(ok);
+    let (show, _) = crun(&db, &["assets", "list"]);
+    assert_eq!(
+        show["data"]["assets"][0]["status"],
+        json!("active"),
+        "{show}"
+    );
+}
+
+// --- F13: numeric CLI inputs validate ---------------------------------------
+
+#[test]
+fn hard_cli_invoice_reminders_within_days_0_stays_0() {
+    let (_dir, _cfg, db) = hard_db("h13", false);
+    let (zero, ok) = crun(&db, &["invoice", "reminders", "--within-days", "0"]);
+    assert!(ok, "{zero}");
+    assert_eq!(
+        zero["data"]["within_days"],
+        json!(0),
+        "--within-days 0 must not become 7: {zero}"
+    );
+
+    let (garbage, ok) = crun(&db, &["invoice", "reminders", "--within-days", "abc"]);
+    assert!(!ok);
+    assert_eq!(
+        garbage["error"]["code"],
+        json!("INVALID_WINDOW"),
+        "{garbage}"
+    );
+    let (neg, ok) = crun(&db, &["invoice", "reminders", "--within-days", "-1"]);
+    assert!(!ok);
+    assert_eq!(neg["error"]["code"], json!("INVALID_WINDOW"), "{neg}");
+}
+
+#[test]
+fn hard_cli_limit_0_returns_0_rows_and_garbage_errors() {
+    let (_dir, _cfg, db) = hard_db("h13b", false);
+    for i in 0..2 {
+        let (_, ok) = crun(
+            &db,
+            &[
+                "entry",
+                "add",
+                "--date",
+                "2026-01-01",
+                "--desc",
+                &format!("e{i}"),
+                "--postings",
+                "1100:10.00,8000:-10.00",
+                "--post",
+            ],
+        );
+        assert!(ok);
+    }
+    let (zero, ok) = crun(&db, &["entry", "list", "--limit", "0"]);
+    assert!(ok, "{zero}");
+    assert_eq!(
+        zero["data"]["entries"].as_array().unwrap().len(),
+        0,
+        "--limit 0 must not become the default: {zero}"
+    );
+    let (one, _) = crun(&db, &["entry", "list", "--limit", "1"]);
+    assert_eq!(one["data"]["entries"].as_array().unwrap().len(), 1);
+    let (garbage, ok) = crun(&db, &["entry", "list", "--limit", "abc"]);
+    assert!(!ok);
+    assert_eq!(
+        garbage["error"]["code"],
+        json!("INVALID_LIMIT"),
+        "{garbage}"
+    );
+
+    let (audit_zero, ok) = crun(&db, &["audit", "--limit", "0"]);
+    assert!(ok, "{audit_zero}");
+    assert_eq!(audit_zero["data"]["entries"].as_array().unwrap().len(), 0);
+
+    let (fx_garbage, ok) = crun(&db, &["fx", "list", "--limit", "abc"]);
+    assert!(!ok);
+    assert_eq!(
+        fx_garbage["error"]["code"],
+        json!("INVALID_LIMIT"),
+        "{fx_garbage}"
+    );
+    let (fx_zero, ok) = crun(&db, &["fx", "list", "--limit", "0"]);
+    assert!(ok, "{fx_zero}");
+    assert_eq!(fx_zero["data"]["rates"].as_array().unwrap().len(), 0);
+}
+
+// --- F17: autoMatch window validation ---------------------------------------
+
+#[test]
+fn hard_cli_bank_match_auto_validates_window_days() {
+    let (_dir, _cfg, db) = hard_db("h17b", false);
+    let (garbage, ok) = crun(&db, &["bank", "match", "auto", "--window-days", "abc"]);
+    assert!(!ok);
+    assert_eq!(
+        garbage["error"]["code"],
+        json!("INVALID_WINDOW"),
+        "{garbage}"
+    );
+    // 0 stays 0 — an empty result, not an error
+    let (_, ok) = crun(&db, &["bank", "match", "auto", "--window-days", "0"]);
+    assert!(ok);
+}
+
+// --- F22: day-overflow calendar dates rejected at every money boundary -------
+
+#[test]
+fn hard_entry_add_rejects_day_overflow_dates() {
+    let (_dir, _cfg, db) = hard_db("h22", false);
+    let (bad, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-02-30",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:100.00,8000:-100.00",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(bad["error"]["code"], json!("INVALID_DATE"), "{bad}");
+
+    // valid dates (incl. leap day) still pass
+    let (_ok_r, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2024-02-29",
+            "--desc",
+            "leap",
+            "--postings",
+            "1100:1.00,8000:-1.00",
+        ],
+    );
+    assert!(ok, "a leap day must be accepted");
+}
+
+#[test]
+fn hard_opening_balances_rejects_a_day_overflow_date() {
+    let (dir, _cfg, db) = hard_db("h22b", false);
+    let csv = dir.join("ob.csv");
+    std::fs::write(&csv, "1100,10000.00\n3000,-10000.00\n").unwrap();
+    let (bad, ok) = crun(
+        &db,
+        &[
+            "import",
+            "opening-balances",
+            "--file",
+            &csv.to_string_lossy(),
+            "--date",
+            "2026-02-30",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(bad["error"]["code"], json!("INVALID_DATE"), "{bad}");
+    let d = bukio::db::open_db(&db).unwrap();
+    let n: i64 = d
+        .query_row("SELECT COUNT(*) FROM journal_entries", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "a rejected import writes nothing");
+}
+
+#[test]
+fn hard_fx_set_rejects_a_day_overflow_date() {
+    let (_dir, _cfg, db) = hard_db("h22c", false);
+    let (bad, ok) = crun(
+        &db,
+        &[
+            "fx",
+            "set",
+            "--currency",
+            "USD",
+            "--date",
+            "2026-02-30",
+            "--rate",
+            "1.0875",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(bad["error"]["code"], json!("INVALID_DATE"), "{bad}");
+}
+
+#[test]
+fn hard_report_balance_sheet_rejects_a_garbage_as_of() {
+    let (_dir, _cfg, db) = hard_db("h23", false);
+    let (bad, ok) = crun(&db, &["report", "balance-sheet", "--as-of", "garbage"]);
+    assert!(!ok);
+    assert_eq!(bad["error"]["code"], json!("INVALID_DATE"), "{bad}");
+}
+
+#[test]
+fn hard_reports_reject_a_garbage_year() {
+    let (_dir, _cfg, db) = hard_db("h24", false);
+    let (pnl_bad, ok) = crun(&db, &["report", "pnl", "--year", "abc"]);
+    assert!(!ok);
+    assert_eq!(pnl_bad["error"]["code"], json!("INVALID_DATE"), "{pnl_bad}");
+    let (journal_bad, ok) = crun(&db, &["report", "journal", "--year", "abc"]);
+    assert!(!ok);
+    assert_eq!(
+        journal_bad["error"]["code"],
+        json!("INVALID_DATE"),
+        "{journal_bad}"
+    );
+    let (tb_bad, ok) = crun(&db, &["report", "trial-balance", "--year", "abc"]);
+    assert!(!ok);
+    assert_eq!(tb_bad["error"]["code"], json!("INVALID_YEAR"), "{tb_bad}");
+    let (_ok_r, ok) = crun(&db, &["report", "pnl", "--year", "2026"]);
+    assert!(ok);
+}
+
+#[test]
+fn hard_entry_list_rejects_garbage_date_bounds() {
+    let (_dir, _cfg, db) = hard_db("h25", false);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-01-15",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:100.00,8000:-100.00",
+            "--post",
+        ],
+    );
+    assert!(ok);
+    let (bad_to, ok) = crun(&db, &["entry", "list", "--date-to", "garbage"]);
+    assert!(!ok);
+    assert_eq!(bad_to["error"]["code"], json!("INVALID_DATE"), "{bad_to}");
+    let (bad_from, ok) = crun(&db, &["entry", "list", "--date-from", "2026-02-30"]);
+    assert!(!ok);
+    assert_eq!(
+        bad_from["error"]["code"],
+        json!("INVALID_DATE"),
+        "{bad_from}"
+    );
+    let (ok_r, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "list",
+            "--date-from",
+            "2026-01-01",
+            "--date-to",
+            "2026-01-31",
+        ],
+    );
+    assert!(ok, "{ok_r}");
+    assert_eq!(
+        ok_r["data"]["entries"].as_array().unwrap().len(),
+        1,
+        "{ok_r}"
+    );
+}
+
+#[test]
+fn hard_opening_balances_accepts_the_documented_optional_header() {
+    let (dir, _cfg, db) = hard_db("h26", false);
+    // 2-column header layout
+    let csv2 = dir.join("ob2.csv");
+    std::fs::write(&csv2, "code,amount\n1100,10000.00\n3000,-10000.00\n").unwrap();
+    let (out, ok) = crun(
+        &db,
+        &[
+            "import",
+            "opening-balances",
+            "--file",
+            &csv2.to_string_lossy(),
+        ],
+    );
+    assert!(ok, "{out}");
+    assert_eq!(out["data"]["accounts"], json!(2), "{out}");
+
+    // 3-column header layout on a second database
+    let (dir3, _cfg3, db3) = hard_db("h26b", false);
+    let csv3 = dir3.join("ob3.csv");
+    std::fs::write(&csv3, "code,debet,credit\n1100,10000.00,\n3000,,10000.00\n").unwrap();
+    let (out3, ok) = crun(
+        &db3,
+        &[
+            "import",
+            "opening-balances",
+            "--file",
+            &csv3.to_string_lossy(),
+        ],
+    );
+    assert!(ok, "{out3}");
+    assert_eq!(out3["data"]["accounts"], json!(2), "{out3}");
+
+    // a data-only file (no header) still works (the first cell is a code)
+    let (dir4, _cfg4, db4) = hard_db("h26c", false);
+    let csv4 = dir4.join("ob4.csv");
+    std::fs::write(&csv4, "1100,10000.00\n3000,-10000.00\n").unwrap();
+    let (_o, ok) = crun(
+        &db4,
+        &[
+            "import",
+            "opening-balances",
+            "--file",
+            &csv4.to_string_lossy(),
+        ],
+    );
+    assert!(ok);
+}
+// --- dry-run uniformity (CLI surface) ---------------------------------------
+
+#[test]
+fn hard_cli_dry_runs_write_nothing() {
+    let (_dir, _cfg, db) = hard_db("h27", true);
+    // contact add / update
+    let (plan, ok) = crun(
+        &db,
+        &[
+            "contact",
+            "add",
+            "--name",
+            "Nieuwe BV",
+            "--iban",
+            CLI_IBAN,
+            "--dry-run",
+        ],
+    );
+    assert!(ok, "{plan}");
+    let d = bukio::db::open_db(&db).unwrap();
+    let n: i64 = d
+        .query_row(
+            "SELECT COUNT(*) FROM contacts WHERE name = 'Nieuwe BV'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0, "contact add --dry-run must write nothing");
+    let (_, ok) = crun(
+        &db,
+        &[
+            "contact",
+            "add",
+            "--name",
+            "ACME BV",
+            "--address",
+            "Straat 1",
+            "--city",
+            "Amsterdam",
+        ],
+    );
+    assert!(ok);
+    let (upd, ok) = crun(
+        &db,
+        &[
+            "contact",
+            "update",
+            "--id",
+            "1",
+            "--name",
+            "Gewijzigd BV",
+            "--dry-run",
+        ],
+    );
+    assert!(ok, "{upd}");
+    let name: String = d
+        .query_row("SELECT name FROM contacts WHERE id = 1", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        name, "ACME BV",
+        "contact update --dry-run must not change the row"
+    );
+
+    // compliance mark
+    let (filed, ok) = crun(
+        &db,
+        &[
+            "compliance",
+            "mark",
+            "--type",
+            "ICP",
+            "--period",
+            "2026-Q1",
+            "--dry-run",
+        ],
+    );
+    assert!(ok, "{filed}");
+    let n: i64 = d
+        .query_row("SELECT COUNT(*) FROM filings WHERE type = 'ICP'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(n, 0, "compliance mark --dry-run must write nothing");
+
+    // fx set
+    let (rate, ok) = crun(
+        &db,
+        &[
+            "fx",
+            "set",
+            "--currency",
+            "USD",
+            "--date",
+            "2026-01-10",
+            "--rate",
+            "1.0875",
+            "--dry-run",
+        ],
+    );
+    assert!(ok, "{rate}");
+    let n: i64 = d
+        .query_row(
+            "SELECT COUNT(*) FROM fx_rates WHERE currency = 'USD'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0, "fx set --dry-run must write nothing");
+    drop(d);
+
+    // recurring pause
+    let (_, ok) = crun(
+        &db,
+        &[
+            "recurring",
+            "add",
+            "--name",
+            "Huur",
+            "--postings",
+            "4300:1000.00,1100:-1000.00",
+            "--frequency",
+            "monthly",
+            "--start",
+            "2026-01-01",
+        ],
+    );
+    assert!(ok);
+    let (pause, ok) = crun(&db, &["recurring", "pause", "--id", "1", "--dry-run"]);
+    assert!(ok, "{pause}");
+    let d = bukio::db::open_db(&db).unwrap();
+    let status: String = d
+        .query_row(
+            "SELECT status FROM recurring_templates WHERE id = 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        status, "active",
+        "recurring pause --dry-run must not change the status"
+    );
+
+    // account reactivate
+    let (_, ok) = crun(&db, &["account", "deactivate", "--code", "1200"]);
+    assert!(ok);
+    let (react, ok) = crun(
+        &db,
+        &["account", "reactivate", "--code", "1200", "--dry-run"],
+    );
+    assert!(ok, "{react}");
+    let active: i64 = d
+        .query_row("SELECT active FROM accounts WHERE code = '1200'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        active, 0,
+        "account reactivate --dry-run must not flip the flag"
+    );
+}
+
+#[test]
+fn hard_cli_bank_add_and_ignore_dry_runs_write_nothing() {
+    let (_dir, _cfg, db) = hard_db("h28", false);
+    let (plan, ok) = crun(
+        &db,
+        &[
+            "bank",
+            "add",
+            "--iban",
+            CLI_IBAN,
+            "--name",
+            "Zakelijk",
+            "--dry-run",
+        ],
+    );
+    assert!(ok, "{plan}");
+    let d = bukio::db::open_db(&db).unwrap();
+    let n: i64 = d
+        .query_row("SELECT COUNT(*) FROM bank_accounts", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "bank add --dry-run must write nothing");
+
+    // import a transaction, then a dry-run ignore must leave it unmatched
+    let (_, ok) = crun(
+        &db,
+        &["bank", "add", "--iban", CLI_IBAN, "--name", "Zakelijk"],
+    );
+    assert!(ok);
+    let xml = format!(
+        "<?xml version=\"1.0\"?>\n<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:camt.053.001.02\">\n<BkToCstmrStmt><Stmt><Acct><Id><IBAN>{CLI_IBAN}</IBAN></Id></Acct>\n<Ntry><Amt>50.00</Amt><CdtDbtInd>DBIT</CdtDbtInd><BookgDt><Dt>2026-01-10</Dt></BookgDt><NtryDtls><TxDtls><RltdPties><Cdtr><Nm>ACME</Nm></Cdtr></RltdPties><RmtInf><Ustrd>factuur</Ustrd></RmtInf></TxDtls></NtryDtls></Ntry>\n</Stmt></BkToCstmrStmt></Document>"
+    );
+    let dir = std::path::Path::new(&db).parent().unwrap().to_path_buf();
+    let camt = dir.join("stmt.xml");
+    std::fs::write(&camt, xml).unwrap();
+    let (_, ok) = crun(
+        &db,
+        &[
+            "bank",
+            "import",
+            "--file",
+            &camt.to_string_lossy(),
+            "--iban",
+            CLI_IBAN,
+        ],
+    );
+    assert!(ok);
+    let (_, ok) = crun(&db, &["bank", "ignore", "--tx", "1", "--dry-run"]);
+    assert!(ok);
+    let state: String = d
+        .query_row(
+            "SELECT state FROM bank_transactions WHERE id = 1",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        state, "unmatched",
+        "bank ignore --dry-run must not change the state"
+    );
+}
+
+#[test]
+fn hard_cli_batch_delete_cascades_lines_and_releases_payables() {
+    let (_dir, _cfg, db) = hard_db("h29", false);
+    let (_, ok) = crun(&db, &["company", "update", "--iban", CLI_IBAN]);
+    assert!(ok);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "contact",
+            "add",
+            "--name",
+            "ACME BV",
+            "--iban",
+            "NL86INGB0002445588",
+        ],
+    );
+    assert!(ok);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "payments",
+            "payables",
+            "add",
+            "--contact",
+            "1",
+            "--ref",
+            "F1",
+            "--date",
+            "2026-01-01",
+            "--amount",
+            "50.00",
+        ],
+    );
+    assert!(ok);
+    let (batch, ok) = crun(
+        &db,
+        &[
+            "payments",
+            "batch",
+            "create",
+            "--type",
+            "transfer",
+            "--payable",
+            "1",
+        ],
+    );
+    assert!(ok, "{batch}");
+    let batch_id = batch["data"]["id"].as_i64().unwrap();
+    let d = bukio::db::open_db(&db).unwrap();
+    let n: i64 = d
+        .query_row(
+            "SELECT COUNT(*) FROM payment_batch_lines WHERE batch_id = ?1",
+            [batch_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 1);
+    drop(d);
+    let (_, ok) = crun(
+        &db,
+        &["payments", "batch", "delete", "--id", &batch_id.to_string()],
+    );
+    assert!(ok);
+    let d = bukio::db::open_db(&db).unwrap();
+    let n: i64 = d
+        .query_row(
+            "SELECT COUNT(*) FROM payment_batch_lines WHERE batch_id = ?1",
+            [batch_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0, "lines cascade with the batch");
+    let status: String = d
+        .query_row("SELECT status FROM payables WHERE id = 1", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(status, "unpaid", "the payable is released");
+}
+
+#[test]
+fn hard_cli_sepa_msg_id_stays_within_35_chars() {
+    let (_dir, _cfg, db) = hard_db("h30", false);
+    let (_, ok) = crun(&db, &["company", "update", "--iban", CLI_IBAN]);
+    assert!(ok);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "contact",
+            "add",
+            "--name",
+            "ACME BV",
+            "--iban",
+            "NL86INGB0002445588",
+        ],
+    );
+    assert!(ok);
+    // an explicit id beyond any realistic AUTOINCREMENT range
+    {
+        let d = bukio::db::open_db(&db).unwrap();
+        d.execute(
+            "INSERT INTO payment_batches (id, batch_date, debit_iban, debit_name, total_cents, created_by)
+             VALUES (99999999999999999, '2026-01-10', ?1, 'Demo BV', 10000, 'agent:test')",
+            [CLI_IBAN],
+        )
+        .unwrap();
+        d.execute(
+            "INSERT INTO payment_batch_lines (batch_id, contact_id, name, iban, amount_cents, reference)
+             VALUES (99999999999999999, 1, 'ACME BV', 'NL86INGB0002445588', 10000, 'F1')",
+            [],
+        )
+        .unwrap();
+    }
+    let (r, ok) = crun(
+        &db,
+        &["payments", "batch", "export", "--id", "99999999999999999"],
+    );
+    assert!(ok, "{r}");
+    let msg_id = r["data"]["msg_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no msg_id in {r}"));
+    assert!(
+        msg_id.len() <= 35,
+        "MsgId '{msg_id}' is {} chars",
+        msg_id.len()
+    );
+    assert!(msg_id.starts_with("BUKIO"), "{msg_id}");
+}
+
+#[test]
+fn hard_cli_ubl_uses_eur_and_the_supplier_postal_code() {
+    let (dir, _cfg, db) = hard_db("h31", true);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "company",
+            "update",
+            "--postal-code",
+            "2712 CD",
+            "--address",
+            "Industrieweg 12",
+            "--city",
+            "Zoetermeer",
+            "--tax-id",
+            "NL123456789B01",
+        ],
+    );
+    assert!(ok);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "contact",
+            "add",
+            "--name",
+            "Klant BV",
+            "--address",
+            "Straat 1",
+            "--city",
+            "Amsterdam",
+        ],
+    );
+    assert!(ok);
+    let (out, ok) = crun(
+        &db,
+        &[
+            "invoice",
+            "create",
+            "--contact",
+            "1",
+            "--lines",
+            "1x Werk @ 100.00 @21",
+            "--date",
+            "2099-01-10",
+        ],
+    );
+    assert!(ok, "{out}");
+    let (out, ok) = crun(&db, &["invoice", "finalize", "--id", "1"]);
+    assert!(ok, "{out}");
+    // the CLI writes the XML to --out (default <invoice_number>.xml)
+    let ubl_path = dir.join("inv.xml").to_string_lossy().to_string();
+    let (_, ok) = crun(&db, &["invoice", "ubl", "--id", "1", "--out", &ubl_path]);
+    assert!(ok);
+    let xml = std::fs::read_to_string(&ubl_path).unwrap();
+    assert!(
+        !xml.contains("currencyID=\"undefined\""),
+        "no undefined currency may leak: {xml:.400}"
+    );
+    assert!(xml.contains("currencyID=\"EUR\""), "currencyID must be EUR");
+    assert!(
+        xml.contains("<cbc:PostalZone>2712 CD</cbc:PostalZone>"),
+        "the supplier postal code must be present"
+    );
+}
+
+// --- F13 (MCP): journal limit + validation ----------------------------------
+
+#[test]
+fn hard_mcp_journal_honors_limit_with_truncation_and_validates() {
+    let (_dir, cfg, db) = hard_db("h32", false);
+    for i in 0..3 {
+        let (_, ok) = crun(
+            &db,
+            &[
+                "entry",
+                "add",
+                "--date",
+                "2026-01-01",
+                "--desc",
+                &format!("e{i}"),
+                "--postings",
+                "1100:10.00,8000:-10.00",
+                "--post",
+            ],
+        );
+        assert!(ok);
+    }
+    let mut m = Mcp::start_as(&db, "agent:test", Some(&cfg));
+    mcp_init(&mut m);
+
+    let (capped, is_err) = m.tool("journal", json!({ "year": "2026", "limit": 2 }));
+    assert!(!is_err, "{capped}");
+    assert_eq!(
+        capped["rows"].as_array().unwrap().len(),
+        2,
+        "the limit must cap the rows: {capped}"
+    );
+    assert_eq!(
+        capped["truncated"],
+        json!(true),
+        "truncation must be flagged: {capped}"
+    );
+
+    let (full, _) = m.tool("journal", json!({ "year": "2026" }));
+    assert_eq!(full["truncated"], json!(false), "{full}");
+    assert!(full["rows"].as_array().unwrap().len() > 2, "{full}");
+
+    for (tool, args, code) in [
+        ("journal", json!({ "year": "abcd" }), "INVALID_YEAR"),
+        (
+            "journal",
+            json!({ "year": "2026", "limit": "abc" }),
+            "INVALID_LIMIT",
+        ),
+        ("invoices", json!({ "limit": "abc" }), "INVALID_LIMIT"),
+        ("pnl", json!({ "year": "2026-13" }), "INVALID_YEAR"),
+    ] {
+        let (payload, is_err) = m.tool(tool, args.clone());
+        assert!(is_err, "{tool} {args}: {payload}");
+        assert_eq!(
+            payload["error"]["code"],
+            json!(code),
+            "{tool} {args}: {payload}"
+        );
+    }
+    m.stop();
+}
+
+#[test]
+fn hard_mcp_vat_book_leaves_a_draft_and_invoice_pay_defaults_to_outstanding() {
+    let (_dir, cfg, db) = hard_db("h33", true);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "company",
+            "update",
+            "--tax-id",
+            "NL123456789B01",
+            "--address",
+            "Industrieweg 12",
+            "--postal-code",
+            "2712 CD",
+            "--city",
+            "Zoetermeer",
+        ],
+    );
+    assert!(ok);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "contact",
+            "add",
+            "--name",
+            "Klant BV",
+            "--address",
+            "A",
+            "--city",
+            "B",
+        ],
+    );
+    assert!(ok);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "invoice",
+            "create",
+            "--contact",
+            "1",
+            "--lines",
+            "1x Werk @ 100.00 @21",
+            "--date",
+            "2099-01-10",
+        ],
+    );
+    assert!(ok);
+    let (_, ok) = crun(&db, &["invoice", "finalize", "--id", "1"]);
+    assert!(ok);
+
+    let mut m = Mcp::start_as(&db, "agent:test", Some(&cfg));
+    mcp_init(&mut m);
+    // vat_book without post=true leaves a draft
+    let (booked, is_err) = m.tool(
+        "vat_book",
+        json!({ "date": "2099-02-01", "description": "verkoop", "postings": ["8000:-50.00@21", "1100:60.50"], "mode": "execute", "actor": "agent:mcp-test" }),
+    );
+    assert!(!is_err, "{booked}");
+    assert_eq!(
+        booked["state"],
+        json!("draft"),
+        "vat_book must leave a draft: {booked}"
+    );
+
+    // invoice_pay without an amount pays the full outstanding
+    let (paid, is_err) = m.tool(
+        "invoice_pay",
+        json!({ "id": 1, "date": "2099-02-10", "mode": "execute", "actor": "agent:mcp-test" }),
+    );
+    assert!(!is_err, "{paid}");
+    assert_eq!(
+        paid["invoice"]["status"],
+        json!("paid"),
+        "invoice_pay should mark it paid: {paid}"
+    );
+    m.stop();
+}
+
+#[test]
+fn hard_mcp_dry_runs_validate_like_execute() {
+    let (_dir, cfg, db) = hard_db("h34", false);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "contact",
+            "add",
+            "--name",
+            "ACME BV",
+            "--address",
+            "Klantstraat 1",
+            "--city",
+            "Amsterdam",
+        ],
+    );
+    assert!(ok);
+    let mut m = Mcp::start_as(&db, "agent:test", Some(&cfg));
+    mcp_init(&mut m);
+
+    for (tool, args, code) in [
+        (
+            "entry_add",
+            json!({ "date": "abc", "description": "x", "postings": ["1100:100.00", "3000:-100.00"] }),
+            "INVALID_DATE",
+        ),
+        (
+            "entry_add",
+            json!({ "date": "2026-01-15", "description": "x", "postings": ["1100:5.00", "3000:-4.00"] }),
+            "UNBALANCED",
+        ),
+        (
+            "entry_add",
+            json!({ "date": "2026-01-15", "description": "x", "postings": ["1100:100.00"] }),
+            "TOO_FEW_POSTINGS",
+        ),
+        ("entry_reverse", json!({ "id": 999 }), "NOT_FOUND"),
+        ("entry_post", json!({ "id": 999 }), "NOT_FOUND"),
+        ("invoice_credit", json!({ "id": 999 }), "NOT_FOUND"),
+        (
+            "invoice_pay",
+            json!({ "id": 999, "date": "2026-01-15" }),
+            "NOT_FOUND",
+        ),
+        ("contact_add", json!({ "name": "  " }), "INVALID_NAME"),
+        ("invoice_finalize", json!({ "id": 999 }), "NOT_FOUND"),
+        (
+            "fx_set",
+            json!({ "currency": "USD", "date": "2026-02-30", "rate": "1.0875" }),
+            "INVALID_DATE",
+        ),
+    ] {
+        let (payload, is_err) = m.tool(tool, args.clone());
+        assert!(is_err, "{tool} {args} must fail: {payload}");
+        assert_eq!(
+            payload["error"]["code"],
+            json!(code),
+            "{tool} {args}: {payload}"
+        );
+    }
+
+    // a valid plan is still green
+    let (ok_plan, is_err) = m.tool("entry_add", json!({ "date": "2026-01-15", "description": "x", "postings": ["1100:100.00", "3000:-100.00"] }));
+    assert!(!is_err, "{ok_plan}");
+    assert_eq!(ok_plan["balanced"], json!(true), "{ok_plan}");
+    m.stop();
+}
+
+#[test]
+fn hard_mcp_on_a_missing_database_errors_instead_of_creating_one() {
+    let dir = temp_dir("h35");
+    let missing = dir.join("missing.db").to_string_lossy().to_string();
+    let exe = env!("CARGO_BIN_EXE_bukio");
+    let exe_path = exe;
+    let out = std::process::Command::new(exe_path)
+        .args(["mcp", "--db", &missing])
+        .env("BUKIO_ACTOR", "agent:test")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(
+        !out.status.success(),
+        "MCP must exit non-zero on a missing database"
+    );
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        combined.contains("no database at") && combined.contains("run 'bukio init' first"),
+        "expected the NO_DATABASE message, got: {combined:.300}"
+    );
+    assert!(
+        !std::path::Path::new(&missing).exists(),
+        "must not create the database file"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// --- init validation + audit trail ------------------------------------------
+
+#[test]
+fn hard_cli_init_validates_iban_vat_choice_and_fiscal_year_end() {
+    // every attempt needs a fresh database: init refuses an already-initialised file
+    let (dir, _cfg, _db) = hard_db("h36", false);
+    let db = dir.join("fresh.db").to_string_lossy().to_string();
+    let (bad_iban, ok) = crun(
+        &db,
+        &[
+            "init",
+            "--name",
+            "Test BV",
+            "--iban",
+            "NL00BOGUS",
+            "--db",
+            &db,
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(
+        bad_iban["error"]["code"],
+        json!("INVALID_IBAN"),
+        "{bad_iban}"
+    );
+    let (bad_vat, ok) = crun(
+        &db,
+        &["init", "--name", "Test BV", "--vat", "banana", "--db", &db],
+    );
+    assert!(!ok);
+    assert_eq!(
+        bad_vat["error"]["code"],
+        json!("INVALID_VAT_CHOICE"),
+        "{bad_vat}"
+    );
+    for fye in ["99-99", "02-30"] {
+        let (bad, ok) = crun(
+            &db,
+            &[
+                "init",
+                "--name",
+                "Test BV",
+                "--fiscal-year-end",
+                fye,
+                "--db",
+                &db,
+            ],
+        );
+        assert!(!ok, "'{fye}' must be rejected");
+        assert_eq!(
+            bad["error"]["code"],
+            json!("INVALID_FISCAL_YEAR_END"),
+            "{bad}"
+        );
+    }
+    let (ok_r, ok) = crun(
+        &db,
+        &[
+            "init",
+            "--name",
+            "Test BV",
+            "--iban",
+            CLI_IBAN,
+            "--fiscal-year-end",
+            "12-31",
+            "--vat",
+            "on",
+            "--db",
+            &db,
+        ],
+    );
+    assert!(ok, "{ok_r}");
+    assert_eq!(ok_r["data"]["company"]["vat_module"], json!(1), "{ok_r}");
+}
+
+#[test]
+fn hard_cli_account_lifecycle_is_audited() {
+    let (dir, _cfg, db) = hard_db("h37", false);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "account",
+            "add",
+            "--code",
+            "9999",
+            "--name",
+            "Test account",
+            "--type",
+            "asset",
+            "--normal-balance",
+            "debit",
+        ],
+    );
+    assert!(ok);
+    let (_, ok) = crun(&db, &["account", "deactivate", "--code", "9999"]);
+    assert!(ok);
+    let (_, ok) = crun(&db, &["account", "reactivate", "--code", "9999"]);
+    assert!(ok);
+    let csv = dir.join("chart.csv");
+    std::fs::write(
+        &csv,
+        "code,name,type,normal_balance,taxonomy_code\n8888,Nieuwe rekening,expense,debit,WKPR.70\n",
+    )
+    .unwrap();
+    let (_, ok) = crun(
+        &db,
+        &["account", "import", "--file", &csv.to_string_lossy()],
+    );
+    assert!(ok);
+
+    let (audit, _) = crun(&db, &["audit", "--limit", "100"]);
+    let actions: Vec<String> = audit["data"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["action"].as_str().unwrap_or("").to_string())
+        .collect();
+    for expected in [
+        "company.init",
+        "account.add",
+        "account.deactivate",
+        "account.reactivate",
+        "account.import",
+    ] {
+        assert!(
+            actions.iter().any(|a| a == expected),
+            "the audit log must contain {expected}: {actions:?}"
+        );
+    }
+    // a dry-run must not record
+    let (_, ok) = crun(
+        &db,
+        &["account", "deactivate", "--code", "8888", "--dry-run"],
+    );
+    assert!(ok);
+    let (audit2, _) = crun(&db, &["audit", "--limit", "100"]);
+    let n = audit2["data"]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["action"] == json!("account.deactivate"))
+        .count();
+    assert_eq!(n, 1, "a dry-run must not write an audit row");
+}
+
+// --- F14/F16/F19: date + period validation through the CLI -------------------
+
+#[test]
+fn hard_cli_add_payable_rejects_garbage_dates() {
+    let (_dir, _cfg, db) = hard_db("h38", false);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "contact",
+            "add",
+            "--name",
+            "ACME BV",
+            "--iban",
+            "NL86INGB0002445588",
+        ],
+    );
+    assert!(ok);
+    for date in ["garbage", "2026-02-30"] {
+        let (bad, ok) = crun(
+            &db,
+            &[
+                "payments",
+                "payables",
+                "add",
+                "--contact",
+                "1",
+                "--ref",
+                "F1",
+                "--date",
+                date,
+                "--amount",
+                "10.00",
+            ],
+        );
+        assert!(!ok, "'{date}' must be rejected");
+        assert_eq!(bad["error"]["code"], json!("INVALID_DATE"), "{bad}");
+    }
+    let (bad_due, ok) = crun(
+        &db,
+        &[
+            "payments",
+            "payables",
+            "add",
+            "--contact",
+            "1",
+            "--ref",
+            "F1",
+            "--date",
+            "2026-01-05",
+            "--due",
+            "nonsense",
+            "--amount",
+            "10.00",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(bad_due["error"]["code"], json!("INVALID_DATE"), "{bad_due}");
+    let (ok_r, ok) = crun(
+        &db,
+        &[
+            "payments",
+            "payables",
+            "add",
+            "--contact",
+            "1",
+            "--ref",
+            "F1",
+            "--date",
+            "2026-01-05",
+            "--due",
+            "2026-02-05",
+            "--amount",
+            "10.00",
+        ],
+    );
+    assert!(ok, "{ok_r}");
+    assert_eq!(ok_r["data"]["due_date"], json!("2026-02-05"), "{ok_r}");
+}
+
+#[test]
+fn hard_cli_assets_run_rejects_garbage_periods_and_dates() {
+    let (_dir, _cfg, db) = hard_db("h39", false);
+    let (out, ok) = crun(
+        &db,
+        &[
+            "assets",
+            "scheme",
+            "add",
+            "--name",
+            "3y",
+            "--life-months",
+            "36",
+        ],
+    );
+    assert!(ok, "{out}");
+    let (out, ok) = crun(
+        &db,
+        &[
+            "assets",
+            "add",
+            "--name",
+            "Laptop",
+            "--purchase-date",
+            "2026-01-01",
+            "--purchase-price",
+            "3600.00",
+            "--depreciation-start",
+            "2026-01-01",
+            "--recognition-date",
+            "2026-01-01",
+        ],
+    );
+    assert!(ok, "{out}");
+    for period in ["2026-13", "2026-00"] {
+        let (bad, ok) = crun(&db, &["assets", "run", "--period", period]);
+        assert!(!ok, "'{period}' must be rejected");
+        assert_eq!(bad["error"]["code"], json!("INVALID_PERIOD"), "{bad}");
+    }
+    for as_of in ["garbage", "2026-02-30"] {
+        let (bad, ok) = crun(&db, &["assets", "run", "--as-of", as_of]);
+        assert!(!ok, "'{as_of}' must be rejected");
+        assert_eq!(bad["error"]["code"], json!("INVALID_DATE"), "{bad}");
+    }
+    // a valid period books the due runs
+    let (ok_r, ok) = crun(&db, &["assets", "run", "--period", "2026-02"]);
+    assert!(ok, "{ok_r}");
+    let booked = ok_r["data"]["booked"].as_array().unwrap();
+    assert_eq!(booked.len(), 2, "Jan + Feb catch-up: {ok_r}");
+}
+
+#[test]
+fn hard_cli_recurring_run_rejects_a_garbage_as_of() {
+    let (_dir, _cfg, db) = hard_db("h40", false);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "recurring",
+            "add",
+            "--name",
+            "Huur",
+            "--postings",
+            "4600:100.00,1100:-100.00",
+            "--frequency",
+            "monthly",
+            "--start",
+            "2026-01-01",
+        ],
+    );
+    assert!(ok);
+    for as_of in ["garbage", "2026-02-30"] {
+        let (bad, ok) = crun(&db, &["recurring", "run", "--as-of", as_of]);
+        assert!(!ok, "'{as_of}' must be rejected");
+        assert_eq!(bad["error"]["code"], json!("INVALID_DATE"), "{bad}");
+    }
+    let (ok_r, ok) = crun(&db, &["recurring", "run", "--as-of", "2026-03-01"]);
+    assert!(ok, "{ok_r}");
+    let runs = ok_r["data"]["templates"][0]["runs"].as_array().unwrap();
+    assert_eq!(runs.len(), 3, "Jan, Feb, Mar: {ok_r}");
+}
+
+#[test]
+fn hard_cli_year_end_status_rejects_a_non_yyyy_year() {
+    let (_dir, _cfg, db) = hard_db("h41", false);
+    for year in ["abc", "20261"] {
+        let (bad, ok) = crun(&db, &["year-end", "status", "--year", year]);
+        assert!(!ok, "'{year}' must be rejected");
+        assert_eq!(bad["error"]["code"], json!("INVALID_YEAR"), "{bad}");
+    }
+    let (ok_r, ok) = crun(&db, &["year-end", "status", "--year", "2026"]);
+    assert!(ok, "{ok_r}");
+    assert_eq!(ok_r["data"]["status"]["closed"], json!(false), "{ok_r}");
+}
+
+#[test]
+fn hard_cli_recurring_numeric_inputs_pass_through_unmasked() {
+    let (_dir, _cfg, db) = hard_db("h42", false);
+    let (_, ok) = crun(
+        &db,
+        &[
+            "contact",
+            "add",
+            "--name",
+            "ACME BV",
+            "--address",
+            "Straat 1",
+            "--city",
+            "Amsterdam",
+        ],
+    );
+    assert!(ok);
+    // --due-days 0 must stay 0
+    let (zero, ok) = crun(
+        &db,
+        &[
+            "recurring",
+            "add",
+            "--kind",
+            "invoice",
+            "--contact",
+            "1",
+            "--lines",
+            "1x Coaching @ 100.00",
+            "--frequency",
+            "monthly",
+            "--start",
+            "2026-01-15",
+            "--due-days",
+            "0",
+            "--name",
+            "t0",
+        ],
+    );
+    assert!(ok, "{zero}");
+    let d = bukio::db::open_db(&db).unwrap();
+    let due: i64 = d
+        .query_row(
+            "SELECT due_days FROM recurring_templates WHERE name = 't0'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(due, 0, "due-days 0 must survive, not become 30");
+    // garbage --due-days errors
+    let (bad_due, ok) = crun(
+        &db,
+        &[
+            "recurring",
+            "add",
+            "--kind",
+            "invoice",
+            "--contact",
+            "1",
+            "--lines",
+            "1x Coaching @ 100.00",
+            "--frequency",
+            "monthly",
+            "--start",
+            "2026-01-15",
+            "--due-days",
+            "abc",
+            "--name",
+            "t2",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(
+        bad_due["error"]["code"],
+        json!("INVALID_DUE_DAYS"),
+        "{bad_due}"
+    );
+    // --day 0 / abc are rejected
+    for day in ["0", "abc"] {
+        let (bad, ok) = crun(
+            &db,
+            &[
+                "recurring",
+                "add",
+                "--postings",
+                "4300:100.00,1100:-100.00",
+                "--frequency",
+                "monthly",
+                "--start",
+                "2026-01-15",
+                "--day",
+                day,
+                "--name",
+                "t3",
+            ],
+        );
+        assert!(!ok, "--day {day} must be rejected");
+        assert_eq!(bad["error"]["code"], json!("INVALID_DATE"), "{bad}");
+    }
+}
+
+#[test]
+fn hard_cli_dry_runs_validate_like_the_real_run() {
+    let (dir, _cfg, db) = hard_db("h43", false);
+    // recurring add
+    let (bad_day, ok) = crun(
+        &db,
+        &[
+            "recurring",
+            "add",
+            "--postings",
+            "4300:100.00,1100:-100.00",
+            "--frequency",
+            "monthly",
+            "--start",
+            "2026-01-15",
+            "--day",
+            "abc",
+            "--name",
+            "t1",
+            "--dry-run",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(bad_day["error"]["code"], json!("INVALID_DATE"), "{bad_day}");
+    let (bad_post, ok) = crun(
+        &db,
+        &[
+            "recurring",
+            "add",
+            "--postings",
+            "BOGUS",
+            "--frequency",
+            "monthly",
+            "--start",
+            "2026-01-15",
+            "--name",
+            "t2",
+            "--dry-run",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(
+        bad_post["error"]["code"],
+        json!("INVALID_POSTING"),
+        "{bad_post}"
+    );
+    let (_, ok) = crun(
+        &db,
+        &[
+            "recurring",
+            "add",
+            "--postings",
+            "4300:100.00,1100:-100.00",
+            "--frequency",
+            "monthly",
+            "--start",
+            "2026-01-15",
+            "--name",
+            "t3",
+            "--dry-run",
+        ],
+    );
+    assert!(ok);
+    let d = bukio::db::open_db(&db).unwrap();
+    let n: i64 = d
+        .query_row("SELECT COUNT(*) FROM recurring_templates", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "a recurring dry-run must not write");
+
+    // invoice create
+    let (_, ok) = crun(
+        &db,
+        &[
+            "contact",
+            "add",
+            "--name",
+            "ACME BV",
+            "--address",
+            "Straat 1",
+            "--city",
+            "Amsterdam",
+        ],
+    );
+    assert!(ok);
+    let (bad_date, ok) = crun(
+        &db,
+        &[
+            "invoice",
+            "create",
+            "--contact",
+            "1",
+            "--lines",
+            "1x Coaching @ 100.00",
+            "--date",
+            "abc",
+            "--dry-run",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(
+        bad_date["error"]["code"],
+        json!("INVALID_DATE"),
+        "{bad_date}"
+    );
+    let (bad_contact, ok) = crun(
+        &db,
+        &[
+            "invoice",
+            "create",
+            "--contact",
+            "99",
+            "--lines",
+            "1x Coaching @ 100.00",
+            "--date",
+            "2026-01-15",
+            "--dry-run",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(
+        bad_contact["error"]["code"],
+        json!("CONTACT_NOT_FOUND"),
+        "{bad_contact}"
+    );
+    let (plan, ok) = crun(
+        &db,
+        &[
+            "invoice",
+            "create",
+            "--contact",
+            "1",
+            "--lines",
+            "1x Coaching @ 100.00",
+            "--date",
+            "2026-01-15",
+            "--dry-run",
+        ],
+    );
+    assert!(ok, "{plan}");
+    assert_eq!(plan["data"]["dryRun"], json!(true), "{plan}");
+    assert_eq!(plan["data"]["gross_cents"], json!(10000), "{plan}");
+    let n: i64 = d
+        .query_row("SELECT COUNT(*) FROM invoices", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "an invoice dry-run must not write");
+
+    // entry add
+    let (bad_e, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "abc",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:100.00,3000:-100.00",
+            "--dry-run",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(bad_e["error"]["code"], json!("INVALID_DATE"), "{bad_e}");
+    let (unbalanced, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-01-15",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:5.00,3000:-4.00",
+            "--dry-run",
+        ],
+    );
+    assert!(!ok);
+    assert_eq!(
+        unbalanced["error"]["code"],
+        json!("UNBALANCED"),
+        "{unbalanced}"
+    );
+    let (_, ok) = crun(
+        &db,
+        &[
+            "entry",
+            "add",
+            "--date",
+            "2026-01-15",
+            "--desc",
+            "x",
+            "--postings",
+            "1100:100.00,3000:-100.00",
+            "--dry-run",
+        ],
+    );
+    assert!(ok);
+    let n: i64 = d
+        .query_row("SELECT COUNT(*) FROM journal_entries", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "an entry dry-run must not write");
+    let _ = dir;
+}
+
+// --- error-code documentation guard -----------------------------------------
+
+#[test]
+fn hard_every_emitted_error_code_is_documented() {
+    // the port's counterpart of the JS guard: every code raised in src/ must
+    // appear in AGENTS.md §7
+    let agents =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/AGENTS.md")).unwrap();
+    let mut codes: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut stack = vec![std::path::PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src"
+    ))];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().map(|e| e == "rs").unwrap_or(false) {
+                let src = std::fs::read_to_string(&path).unwrap();
+                for cap in src.split("BukioError::new(").skip(1) {
+                    let rest = cap.trim_start();
+                    let rest = rest.strip_prefix('"').unwrap_or(rest);
+                    let code: String = rest
+                        .chars()
+                        .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || *c == '_')
+                        .collect();
+                    if code.len() >= 3 {
+                        codes.insert(code);
+                    }
+                }
+            }
+        }
+    }
+    let missing: Vec<&String> = codes
+        .iter()
+        .filter(|c| !agents.contains(c.as_str()))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "error codes emitted by src/ but missing from AGENTS.md: {missing:?}"
+    );
+}

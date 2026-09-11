@@ -230,6 +230,10 @@ pub fn add_payable(
     actor: &str,
     dry_run: bool,
 ) -> Result<Value> {
+    crate::dates::validate_date(date)?;
+    if let Some(d) = due_date {
+        crate::dates::validate_date(d)?;
+    }
     let c = resolve_contact(db, contact_ref)?.ok_or_else(|| {
         payments_error(
             "CONTACT_NOT_FOUND",

@@ -816,6 +816,7 @@ pub fn run_due(
 ) -> Result<Value> {
     let today = today_iso();
     let date = as_of.unwrap_or(&today);
+    crate::dates::validate_date(date)?;
     let templates_sql = if let Some(tid) = template_id {
         format!("SELECT id, name, description, frequency, day_of_period, start_date, end_date, runs, postings_json, reverse_previous, next_run_date, last_run_date, last_entry_id, runs_done, status, vat_aware, kind, contact_id, due_days, final_postings_json, invoice_lines_json, invoice_items_json FROM recurring_templates WHERE id = {tid} AND status = 'active' AND next_run_date <= '{date}'")
     } else {

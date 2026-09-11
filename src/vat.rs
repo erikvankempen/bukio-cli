@@ -481,7 +481,8 @@ pub fn parse_period(period: &str) -> Result<(String, String)> {
                 return Err(bad());
             }
             if let Ok(m) = parts[1].parse::<u32>() {
-                if (1..=12).contains(&m) {
+                // the month must be two digits (the JS rejects '2026-1')
+                if (1..=12).contains(&m) && parts[1].len() == 2 {
                     let y_num: i32 = y.parse().unwrap();
                     return Ok((
                         format!("{y}-{:02}-01", m),
