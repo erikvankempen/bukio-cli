@@ -7,6 +7,9 @@ name: release
 on:
   push:
     tags: ["v*"]
+    # Branch pushes run the suite (test job) and skip the builds: a release is
+    # only ever built from a tag.
+    branches: [main, rust-port]
   workflow_dispatch:
 
 permissions:
@@ -14,10 +17,6 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Keep test temp dirs off the checkout: a fixture inside the repo makes git
-  # walk up into the real clone (the tests set GIT_CEILING_DIRECTORIES too, but
-  # belt and braces).
-  TMPDIR: ${{ runner.temp }}
 
 jobs:
   test:
@@ -28,10 +27,17 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --release --no-fail-fast
+        env:
+          # `runner` exists in a step, not in a workflow-level env: using it
+          # there rejects the whole file before any job starts. Keep temp dirs
+          # off the checkout — a fixture inside the repo makes git walk up into
+          # the real clone (the tests set GIT_CEILING_DIRECTORIES as well).
+          TMPDIR: ${{ runner.temp }}
 
   build:
     name: ${{ matrix.target }}
     needs: test
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
