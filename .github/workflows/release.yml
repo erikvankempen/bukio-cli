@@ -42,7 +42,9 @@ jobs:
   build:
     name: ${{ matrix.target }}
     needs: test
-    if: startsWith(github.ref, 'refs/tags/')
+    # A tag is the normal path; a manual run can also build (and publish) so a CI
+    # fix never requires moving a tag.
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ${{ matrix.os }}
     env:
       RUSTFLAGS: -D warnings
@@ -129,9 +131,15 @@ jobs:
   release:
     name: publish
     needs: build
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-22.04
     steps:
+      # `gh` shells out to git to discover the repository, and the version comes
+      # from Cargo.toml. Without a checkout, publishing dies with
+      # "failed to run git: fatal: not a git repository" — which is exactly how
+      # v0.18.0's first two attempts failed, with every build green.
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
@@ -147,7 +155,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "bukio ${GITHUB_REF_NAME}" \
+          # Cargo.toml is the single source of truth: it is the version the binary
+          # reports, so a release can never be published under a tag its artifacts
+          # do not belong to.
+          TAG="v$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          if [[ "${GITHUB_REF}" == refs/tags/* && "${GITHUB_REF_NAME}" != "$TAG" ]]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match the Cargo.toml version ${TAG}"
+            exit 1
+          fi
+          echo "publishing $TAG"
+          gh release create "$TAG" \
+            --title "bukio $TAG" \
             --generate-notes \
             bukio-* SHA256SUMS
