@@ -1318,16 +1318,18 @@ is the measured token consumption and its cost at **official list prices**
 (per 1M tokens; OpenCode Go / DeepSeek API, Aug 2026): **DeepSeek V4 Flash**
 **$0.14** input (cache miss), **$0.0028** cached input, **$0.28** output;
 **MiMo-V2.5-Pro** **$0.435** input, **$0.003625** cached input, **$0.87**
-output. Reasoning tokens are billed at the output rate; other models
-(minimax-m2.5) are priced at the OpenCode Go list rate. Data is captured by
+output. Reasoning tokens are billed at the output rate; models without a
+published list rate (minimax-m2.5, glm, hy3, ox-alpha-free, …) are costed at
+the DeepSeek V4 Flash rate as the default. Data is captured by
 the `bukio-token-track` tool from the agent's session telemetry — including
-delegation subagent sessions, bukio-cli only (snapshot 2026-09-01).
+delegation subagent sessions, bukio-cli only (snapshot 2026-09-11).
 
 **Proven stack:** bukio-cli is developed and operated end-to-end with
 **Hermes Agent** (Nous Research) via OpenCode Go. The main development
-sessions ran **DeepSeek V4 Flash** (a handful of calls via the DeepSeek
-API and other providers directly); the parallel code-review subagents (delegation batches) ran
-**MiMo-V2.5-Pro**, also via OpenCode Go. The live day-to-day operations
+sessions ran **DeepSeek V4 Flash** and **MiMo-V2.5** (a handful of calls via
+the DeepSeek API and other providers directly); the parallel code-review
+subagents (delegation batches) ran **MiMo-V2.5-Pro** and later **hy3**, also
+via OpenCode Go. The live day-to-day operations
 (bank imports, invoice booking, month-end checks) run on the same stack
 against this same codebase.
 
@@ -1335,30 +1337,35 @@ against this same codebase.
 
 | Model | Sessions | API calls | Input | Cached input | Output | Reasoning | Est. cost |
 |---|---|---|---|---|---|---|---|
-| DeepSeek V4 Flash | 116 | 10,867 | 38.80M | 2,012.76M | 10.75M | 6.26M | $17.21 |
-| MiMo-V2.5-Pro (review subagents) | 37 | 680 | 7.12M | 46.41M | 1.09M | — | $4.05 |
-| Other models (ox-alpha, hy3, mimo-v2.5, minimax) | 22 | 461 | 3.87M | 64.44M | 0.20M | 0.08M | $0.79 |
-| **Total** | **149** | **12,008** | **49.75M** | **2,123.61M** | **12.00M** | **6.33M** | **$22.05** |
+| DeepSeek V4 Flash | 123 | 16,362 | 56.89M | 3,324.46M | 13.47M | 7.62M | $23.18 |
+| MiMo-V2.5 (main sessions, incl. the Rust port) | 93 | 8,623 | 42.20M | 1,177.02M | 3.17M | 0.04M | $10.10 |
+| MiMo-V2.5-Pro (review subagents) | 36 | 574 | 6.82M | 42.12M | 1.06M | — | $4.05 |
+| hy3 (delegation subagents) | 24 | 1,371 | 10.18M | 114.27M | 1.20M | 0.72M | $2.28 |
+| ox-alpha-free | 7 | 862 | 5.43M | 106.93M | 0.42M | 0.09M | $1.20 |
+| Other models (10: glm, deepseek-flash, qwen, minimax, …) | 24 | 741 | 4.93M | 68.91M | 0.49M | 0.26M | $1.09 |
+| **Total** | **251** | **28,533** | **126.48M** | **4,833.71M** | **19.81M** | **8.72M** | **$41.90** |
 
-**$22.05 total** at official list prices for the entire project (12,008
-API calls across 149 sessions, ≈ 2.19B tokens).
+**$41.90 total** at official list prices for the entire project (28,533
+API calls across 251 sessions, ≈ 4.98B tokens). A session can span several
+models, so the per-model session counts add up to more than the 251 distinct
+sessions; the per-model costs are the tracker's rounded figures.
 
 ### Developer Time (contributed, unpaid)
 
 Beyond API spend, this project took my review-and-direction time. Because
 the agent does the building, my own messages are the only interaction
-channel — so I measure my time by them: across the 24 working sessions
-(Aug 4–15, 2026, plus 178 review-subagent sessions) I sent **996 messages**, each costed at **≈ 60 s of
+channel — so I measure my time by them: across the 66 working sessions
+(Aug 4 – Sep 11, 2026, plus 265 review-subagent sessions) I sent **2,104 messages**, each costed at **≈ 60 s of
 overhead** (reading, deciding, reviewing) plus composition time scaled by
 message length and complexity (≈ 2 min/message effective). That works out to
-**≈ 33 hours total**, all contributed unpaid.
+**≈ 70 hours total**, all contributed unpaid.
 
 At a **senior** Dutch software-developer rate of **≈ €45/hour** (Amsterdam
 senior average, 2026: €45/h
 [Glassdoor](https://www.glassdoor.com/Salaries/amsterdam-netherlands-senior-software-engineer-salary-SRCH_IL.0,21_IM1112_KO22,46.htm),
 €45.50/h
 [SalaryExpert](https://www.salaryexpert.com/salary/job/software-developer/netherlands/amsterdam);
-the national average is lower), my time is worth **≈ €1,490**.
+the national average is lower), my time is worth **≈ €3,150**.
 
 Stated plainly, so nothing is hidden:
 
@@ -1368,8 +1375,8 @@ Stated plainly, so nothing is hidden:
   professional rate overstates the market value of my review time by a wide
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
-- **It was free:** the ≈ €1,490 is an imputed opportunity cost, not money paid.
-  My out-of-pocket spend remains **$22.05** in API costs.
+- **It was free:** the ≈ €3,150 is an imputed opportunity cost, not money paid.
+  My out-of-pocket spend remains **$41.90** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
   conventional code review of a 34.2 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
@@ -1391,9 +1398,9 @@ across 193 files (21,322 in `src/`, 15,813 in `test/`, 115 in `bin/` +
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
 **Comparison:** a conventional team building this would estimate **≈ 106–270
-person-months (≈ €954K–€2,430K)**; the AI-assisted build consumed **$22.05 in
-API costs plus ≈ €1,490 of my review-and-direction time (contributed, unpaid
-— see above)** over 25 working sessions in eleven days — still a tiny fraction of
+person-months (≈ €954K–€2,430K)**; the AI-assisted build consumed **$41.90 in
+API costs plus ≈ €3,150 of my review-and-direction time (contributed, unpaid
+— see above)** over 66 working sessions in under six weeks — still a tiny fraction of
 the conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.
