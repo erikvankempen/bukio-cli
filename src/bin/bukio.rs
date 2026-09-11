@@ -2566,7 +2566,19 @@ fn cmd_invoice_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool
     require_actor(actor)?;
     let db = open_existing(db_path)?;
     let contact_id: i64 = parse_i64(argv, "--contact").ok_or_else(|| missing_arg("--contact"))?;
-    let due_days = parse_i64(argv, "--due-days");
+    // parse_i64 turns garbage into None, which silently became the 30-day
+    // default; the JS throws INVALID_DUE_DAYS, and a wrong payment term is a
+    // wrong due date on a real invoice
+    let due_days = match arg(argv, "--due-days") {
+        None => None,
+        Some(v) => Some(v.parse::<i64>().map_err(|_| {
+            BukioError::new(
+                "INVALID_DUE_DAYS",
+                format!("invalid --due-days '{v}' — must be a non-negative integer"),
+            )
+        })?),
+    };
+    let delivery_date = arg(argv, "--delivery-date");
     let description = arg(argv, "--description");
     let reference = arg(argv, "--reference");
     let notes = arg(argv, "--notes");
@@ -2609,6 +2621,7 @@ fn cmd_invoice_create(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         contact_id,
         &date,
         due_days,
+        delivery_date.as_deref(),
         description.as_deref(),
         reference.as_deref(),
         notes.as_deref(),

@@ -997,6 +997,7 @@ fn call_tool(db: &Connection, actor: &str, tool: &str, args: &Value) -> Result<V
                 None,
                 None,
                 None,
+                None,
                 discount_type.as_deref(),
                 discount_value,
                 arg_str(args, "language").as_deref(),

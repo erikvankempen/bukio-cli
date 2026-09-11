@@ -1100,6 +1100,9 @@ pub fn create_invoice(
     contact_id: i64,
     date: &str,
     due_days: Option<i64>,
+    // the JS createInvoice({deliveryDate}) — the service/delivery date when it
+    // differs from the invoice date; validated and stored, not just read
+    delivery_date: Option<&str>,
     description: Option<&str>,
     reference: Option<&str>,
     notes: Option<&str>,
@@ -1121,6 +1124,16 @@ pub fn create_invoice(
             return Err(invoice_error(
                 "INVALID_DUE_DAYS",
                 format!("due-days must be a non-negative integer, got '{dd}'"),
+            ));
+        }
+    }
+    // the JS checks both the shape and that the date exists — a 2026-02-30
+    // passes a naive YYYY-MM-DD test and must not be stored
+    if let Some(dd) = delivery_date {
+        if dd.len() != 10 || crate::dates::validate_date(dd).is_err() {
+            return Err(invoice_error(
+                "INVALID_DATE",
+                format!("delivery-date '{dd}' must be a valid YYYY-MM-DD date"),
             ));
         }
     }
@@ -1329,7 +1342,8 @@ pub fn create_invoice(
     if dry_run {
         return Ok(json!({
             "action": "invoice.create", "contact_id": contact_id, "date": date,
-            "due_days": due_days, "description": description, "reference": reference,
+            "due_days": due_days, "delivery_date": delivery_date,
+            "description": description, "reference": reference,
             "notes": notes, "discount_type": discount_type, "discount_value": discount_value,
             "discount_cents": totals["discount_cents"],
             "lines": parsed_lines, "net_cents": totals["net_cents"],
@@ -1340,9 +1354,9 @@ pub fn create_invoice(
 
     // Insert invoice
     db.execute(
-        "INSERT INTO invoices (contact_id, date, due_date, description, reference, notes, discount_type, discount_value, language, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO invoices (contact_id, date, due_date, delivery_date, description, reference, notes, discount_type, discount_value, language, created_by) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         // the column is NOT NULL; the JS default is 'nl' (get_invoice keeps the same fallback for old rows)
-        rusqlite::params![contact_id, date, due_date, description, reference, notes, discount_type, discount_value, language
+        rusqlite::params![contact_id, date, due_date, delivery_date, description, reference, notes, discount_type, discount_value, language
             .map(String::from)
             .unwrap_or_else(|| default_document_language(db)), actor],
     ).map_err(sql_err)?;
@@ -1543,6 +1557,8 @@ pub fn credit_invoice(
         db,
         contact_id,
         credit_date,
+        None,
+        // a credit note carries no service date of its own
         None,
         Some(reason.unwrap_or(&format!(
             "Credit note for {}",
@@ -2083,6 +2099,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             lines,
             "agent:test",
             false,
@@ -2132,6 +2149,7 @@ mod tests {
             &db,
             1,
             "2026-07-10",
+            None,
             None,
             None,
             None,
@@ -2291,6 +2309,7 @@ mod tests {
             &db,
             1,
             "2026-07-10",
+            None,
             None,
             None,
             None,

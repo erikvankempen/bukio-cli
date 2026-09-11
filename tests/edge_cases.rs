@@ -314,6 +314,7 @@ fn invoice_quantity_and_price_guards() {
                 None,
                 None,
                 None,
+                None,
                 &lines(&[spec]),
                 "agent:test",
                 false
@@ -386,6 +387,7 @@ fn invoice_per_line_rounding_three_pennies() {
         None,
         None,
         None,
+        None,
         &lines(&["3x Pennen @ 0.01 @21"]),
         "agent:test",
         false,
@@ -405,6 +407,7 @@ fn invoice_zero_and_exempt_lines_book_without_vat() {
         &d,
         1,
         "2026-07-10",
+        None,
         None,
         None,
         None,
@@ -460,6 +463,7 @@ fn invoice_credit_note_of_a_paid_invoice_and_credit_of_credit_rejected() {
         None,
         None,
         None,
+        None,
         &lines(&["1x Werk @ 100.00 @21"]),
         "agent:test",
         false,
@@ -467,7 +471,17 @@ fn invoice_credit_note_of_a_paid_invoice_and_credit_of_credit_rejected() {
     .unwrap();
     let id = inv["id"].as_i64().unwrap();
     finalize_invoice(&d, id, "agent:test", false).unwrap();
-    mark_paid(&d, id, "2026-07-20", 12100, "transfer", "agent:test", false, None).unwrap();
+    mark_paid(
+        &d,
+        id,
+        "2026-07-20",
+        12100,
+        "transfer",
+        "agent:test",
+        false,
+        None,
+    )
+    .unwrap();
     let credit = credit_invoice(&d, id, None, None, "agent:test", false).unwrap();
     let cid = credit["id"].as_i64().unwrap();
     finalize_invoice(&d, cid, "agent:test", false).unwrap();
@@ -492,6 +506,7 @@ fn invoice_lifecycle_pay_draft_overpay_overdue() {
         None,
         None,
         None,
+        None,
         &lines(&["1x X @ 100.00 @21"]),
         "agent:test",
         false,
@@ -506,7 +521,9 @@ fn invoice_lifecycle_pay_draft_overpay_overdue() {
             100,
             "bank",
             "agent:test",
-            false, None)),
+            false,
+            None
+        )),
         "NOT_PAYABLE"
     );
     finalize_invoice(&d, id, "agent:test", false).unwrap();
@@ -518,7 +535,9 @@ fn invoice_lifecycle_pay_draft_overpay_overdue() {
             999999,
             "bank",
             "agent:test",
-            false, None)),
+            false,
+            None
+        )),
         "OVERPAYMENT"
     );
     // overdue is DERIVED at read time (due 2026-01-31 is in the past)
@@ -534,6 +553,7 @@ fn invoice_ubl_escaping_and_verlegd_category() {
         &d,
         1,
         "2026-07-10",
+        None,
         None,
         None,
         None,
@@ -571,6 +591,7 @@ fn invoice_due_date_crosses_the_year_boundary() {
         1,
         "2026-12-20",
         Some(30),
+        None,
         None,
         None,
         None,
@@ -857,6 +878,7 @@ fn bank_auto_match_prefers_an_exact_entry_over_an_invoice() {
         None,
         None,
         None,
+        None,
         &lines(&["1x Werk @ 100.00 @21"]),
         "agent:test",
         false,
@@ -900,6 +922,7 @@ fn bank_partial_payment_does_not_auto_match_the_invoice() {
         &d,
         1,
         "2026-07-10",
+        None,
         None,
         None,
         None,
@@ -1166,6 +1189,7 @@ fn icp_credit_note_reduces_the_customer_total_and_period_boundaries_hold() {
         None,
         None,
         None,
+        None,
         &lines(&["1x Advies @ 2000.00 @RE"]),
         "a",
         false,
@@ -1209,6 +1233,7 @@ fn icp_re_base_uses_the_discounted_amount() {
         &d,
         de["id"].as_i64().unwrap(),
         "2026-07-10",
+        None,
         None,
         None,
         None,
@@ -1292,6 +1317,7 @@ fn all_mutating_paths_leave_no_trace_in_dry_run() {
         &d,
         1,
         "2026-07-10",
+        None,
         None,
         None,
         None,
@@ -1948,6 +1974,7 @@ fn ob_readout_verlegde_eu_sale_reports_2a() {
         None,
         None,
         None,
+        None,
         &lines(&["1x Advies @ 2000.00 @RE"]),
         "agent:test",
         false,
@@ -1992,6 +2019,7 @@ fn icp_readout_totals_per_eu_customer() {
             &d,
             cid,
             date,
+            None,
             None,
             None,
             None,
@@ -2055,6 +2083,7 @@ fn icp_readout_missing_customer_vat_id_fails_loudly() {
         None,
         None,
         None,
+        None,
         &lines(&["1x Advies @ 2000.00 @RE"]),
         "agent:test",
         false,
@@ -2097,6 +2126,7 @@ fn make_finalized(
         contact_id,
         date,
         due_days,
+        None,
         None,
         None,
         None,
@@ -2152,7 +2182,9 @@ fn aging_debtors_buckets_totals_paid_excluded_sorted() {
         paid["gross_cents"].as_i64().unwrap(),
         "bank",
         "agent:test",
-        false, None)
+        false,
+        None,
+    )
     .unwrap();
     // due after the as-of -> current
     make_finalized(&d, beta, "2026-08-01", Some(30), &["Ding @ 100.00"]);
@@ -2406,7 +2438,9 @@ fn contact_statement_running_balance_and_supplier_side() {
         4000,
         "bank",
         "agent:test",
-        false, None)
+        false,
+        None,
+    )
     .unwrap();
 
     let r = bukio::contacts::contact_statement(&d, acme, Some("2026-08-08")).unwrap();
@@ -2483,8 +2517,28 @@ fn contact_statement_excludes_payments_after_as_of() {
     let acme = contact_id(&d, "Acme BV");
     let inv = make_finalized(&d, acme, "2026-07-01", None, &["Ding @ 100.00"]);
     let id = inv["id"].as_i64().unwrap();
-    mark_paid(&d, id, "2026-07-20", 2000, "transfer", "agent:test", false, None).unwrap();
-    mark_paid(&d, id, "2026-08-20", 3000, "transfer", "agent:test", false, None).unwrap();
+    mark_paid(
+        &d,
+        id,
+        "2026-07-20",
+        2000,
+        "transfer",
+        "agent:test",
+        false,
+        None,
+    )
+    .unwrap();
+    mark_paid(
+        &d,
+        id,
+        "2026-08-20",
+        3000,
+        "transfer",
+        "agent:test",
+        false,
+        None,
+    )
+    .unwrap();
 
     let r = bukio::contacts::contact_statement(&d, acme, Some("2026-08-08")).unwrap();
     let payments: Vec<&Value> = r["rows"]
@@ -2522,6 +2576,7 @@ fn sales_by_contact_net_vat_gross_and_credits_excluded() {
         &d,
         acme,
         "2026-02-01",
+        None,
         None,
         None,
         None,
@@ -2997,6 +3052,7 @@ fn invoice_html_and_pdf_are_native_documents() {
         "2026-07-01",
         Some(30),
         None,
+        None,
         Some("PO-77"),
         None,
         None,
@@ -3211,6 +3267,7 @@ fn sales_uses_the_fiscal_window() {
                 &d,
                 c,
                 date,
+                None,
                 None,
                 None,
                 None,
@@ -5316,6 +5373,7 @@ fn inv_lines(db: &Connection, c: i64, ls: &[&str], date: &str) -> Value {
         None,
         None,
         None,
+        None,
         &lines(ls),
         "agent:test",
         false,
@@ -5328,6 +5386,7 @@ fn inv_disc(db: &Connection, c: i64, ls: &[&str], date: &str, dt: &str, dv: i64)
         db,
         c,
         date,
+        None,
         None,
         None,
         None,
@@ -5388,6 +5447,7 @@ fn if_line_discounts_parse_and_over_100_pct_is_rejected_at_creation() {
             &d,
             c,
             "2026-08-10",
+            None,
             None,
             None,
             None,
@@ -5677,6 +5737,7 @@ fn if_invoice_create_from_items_snapshots_catalog_values() {
         None,
         None,
         None,
+        None,
         &item_spec(&[&format!("{id}:2")]),
         "agent:test",
         false,
@@ -5731,6 +5792,7 @@ fn if_invoice_create_from_items_per_invoice_overrides() {
         None,
         None,
         None,
+        None,
         &item_spec(&[&format!("{id}:1.5@180.00@9@-10%")]),
         "agent:test",
         false,
@@ -5766,6 +5828,7 @@ fn if_item_guards_on_invoices() {
             &d,
             c,
             "2026-08-10",
+            None,
             None,
             None,
             None,
@@ -5840,6 +5903,7 @@ fn if_line_discount_pct_and_amount_reduce_net_and_vat() {
             &d,
             c,
             "2026-08-10",
+            None,
             None,
             None,
             None,
@@ -6045,6 +6109,7 @@ fn if_invoice_language_defaults_accepted_and_rejected() {
             None,
             None,
             None,
+            None,
             lang,
             &lines(&["Ding @ 10.00"]),
             "agent:test",
@@ -6122,6 +6187,7 @@ fn if_credit_note_inherits_language_and_discounts() {
         None,
         None,
         None,
+        None,
         Some("pct"),
         Some(500),
         Some("en"),
@@ -6186,6 +6252,7 @@ fn if_ubl_formatted_quantity_unit_code_language_and_discounted_bases() {
         &d,
         c,
         "2026-08-10",
+        None,
         None,
         None,
         None,
@@ -6275,6 +6342,7 @@ fn if_ubl_line_only_discounts_and_category_mapping() {
         None,
         None,
         None,
+        None,
         &lines(&["1.5x Consultancy @ 100.00 @21 @-10%"]),
         "agent:test",
         false,
@@ -6296,6 +6364,7 @@ fn if_ubl_line_only_discounts_and_category_mapping() {
         &d,
         c2,
         "2026-08-10",
+        None,
         None,
         None,
         None,
@@ -6330,6 +6399,7 @@ fn if_ubl_zero_vat_categories_still_emit_a_tax_subtotal() {
         &d,
         c,
         "2026-08-10",
+        None,
         None,
         None,
         None,
@@ -6382,6 +6452,7 @@ fn if_ubl_hour_unit_maps_to_hur() {
         None,
         None,
         None,
+        None,
         &lines(&["2x Coaching @ 50.00 @21"]),
         "agent:test",
         false,
@@ -6407,6 +6478,7 @@ fn if_pdf_dutch_labels_unit_column_vat_breakdown_and_discount_row() {
         &d,
         c,
         "2026-08-10",
+        None,
         None,
         None,
         None,
@@ -6479,6 +6551,7 @@ fn if_pdf_english_labels() {
         None,
         None,
         None,
+        None,
         Some("en"),
         &lines(&["1x Ding @ 100.00 @21"]),
         "agent:test",
@@ -6507,6 +6580,7 @@ fn if_pdf_company_logo_renders_as_a_data_uri() {
         &d,
         c,
         "2026-08-10",
+        None,
         None,
         None,
         None,
@@ -6547,6 +6621,7 @@ fn if_pdf_native_renderer_produces_a_valid_pdf() {
         &d,
         c,
         "2026-08-10",
+        None,
         None,
         None,
         None,
@@ -6756,6 +6831,7 @@ fn if_bank_auto_match_matches_a_discounted_invoice_at_its_discounted_gross() {
         None,
         None,
         None,
+        None,
         Some("pct"),
         Some(1000),
         None,
@@ -6815,6 +6891,7 @@ fn if_bank_auto_match_does_not_match_a_pre_discount_payment() {
         &d,
         c,
         "2026-08-01",
+        None,
         None,
         None,
         None,
@@ -7098,6 +7175,7 @@ fn if_review_fix_reverse_charge_label_and_email_language_follow_the_document() {
         None,
         None,
         None,
+        None,
         &lines(&["Servicio @ 100.00 @R"]),
         "agent:test",
         false,
@@ -7119,6 +7197,7 @@ fn if_review_fix_reverse_charge_label_and_email_language_follow_the_document() {
         &d,
         c,
         "2026-08-11",
+        None,
         None,
         None,
         None,
@@ -7209,6 +7288,7 @@ fn attach_env(tag: &str) -> (std::path::PathBuf, String, i64, i64) {
         &db,
         c["id"].as_i64().unwrap(),
         "2026-08-10",
+        None,
         None,
         None,
         None,
@@ -8049,6 +8129,7 @@ fn attach_dir_convention_is_the_db_name_with_an_attachments_suffix() {
         None,
         None,
         None,
+        None,
         &[json!("Ding @ 10.00")],
         "agent:test",
         false,
@@ -8133,6 +8214,7 @@ fn attach_file_mode_dir_is_created_next_to_a_nested_db() {
         &db,
         c["id"].as_i64().unwrap(),
         "2026-08-10",
+        None,
         None,
         None,
         None,
@@ -17024,6 +17106,7 @@ fn hfx_inv(db: &rusqlite::Connection, db_path: &str, gross_cents: i64) -> i64 {
         None,
         None,
         None,
+        None,
         &[json!(line)],
         "agent:test",
         false,
@@ -17212,6 +17295,7 @@ fn hard_invoice_create_rejects_impossible_calendar_dates() {
             None,
             None,
             None,
+            None,
             &[json!("1x Test @ 100.00")],
             "agent:test",
             false,
@@ -17227,6 +17311,7 @@ fn hard_invoice_create_rejects_impossible_calendar_dates() {
             &db,
             1,
             good,
+            None,
             None,
             None,
             None,
@@ -17386,9 +17471,17 @@ fn hard_lib_mark_paid_dry_run_writes_nothing_but_still_validates() {
     let (_d, _c, dbp) = hard_full("h50", true);
     let db = hard_open(&dbp);
     let inv = hfx_inv(&db, &dbp, 12100);
-    let plan =
-        bukio::invoice::mark_paid(&db, inv, "2099-02-01", 5000, "manual", "agent:test", true, None)
-            .unwrap();
+    let plan = bukio::invoice::mark_paid(
+        &db,
+        inv,
+        "2099-02-01",
+        5000,
+        "manual",
+        "agent:test",
+        true,
+        None,
+    )
+    .unwrap();
     assert_eq!(plan["dryRun"], json!(true), "{plan}");
     let remaining = plan["remaining_cents"].as_i64().unwrap_or(-1);
     assert!(remaining >= 0, "{plan}");
@@ -17399,9 +17492,17 @@ fn hard_lib_mark_paid_dry_run_writes_nothing_but_still_validates() {
     let status = bukio::invoice::get_invoice(&db, inv).unwrap().unwrap()["status"].clone();
     assert_eq!(status, json!("sent"), "the invoice stays sent");
 
-    let err =
-        bukio::invoice::mark_paid(&db, inv, "2099-02-01", 999999, "manual", "agent:test", true, None)
-            .unwrap_err();
+    let err = bukio::invoice::mark_paid(
+        &db,
+        inv,
+        "2099-02-01",
+        999999,
+        "manual",
+        "agent:test",
+        true,
+        None,
+    )
+    .unwrap_err();
     assert_eq!(
         err.code, "OVERPAYMENT",
         "overpay is rejected even in dry-run"
@@ -17676,6 +17777,7 @@ fn hard_invoice_list_status_overdue_filters_the_derived_status() {
             None,
             None,
             None,
+            None,
             &[json!("1x T @ 100.00")],
             "agent:test",
             false,
@@ -17719,6 +17821,7 @@ fn hard_invoice_finalize_with_a_zero_rate_line_books_a_tagged_zero_vat_posting()
         &db,
         1,
         "2099-01-10",
+        None,
         None,
         None,
         None,
@@ -18115,7 +18218,10 @@ fn hard_payment_from_bank_is_atomic() {
     let payments: i64 = db
         .query_row("SELECT COUNT(*) FROM invoice_payments", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(payments, 0, "no payment row may survive a failed bank payment");
+    assert_eq!(
+        payments, 0,
+        "no payment row may survive a failed bank payment"
+    );
     assert_eq!(
         bukio::invoice::get_invoice(&db, inv).unwrap().unwrap()["status"],
         json!("sent"),
@@ -18370,6 +18476,7 @@ fn hard_auto_match_fx_tolerance_matches_the_posting_tolerance() {
         None,
         None,
         None,
+        None,
         &[json!("1x Werk @ 123.45 @21")],
         "agent:test",
         false,
@@ -18601,6 +18708,7 @@ fn hard_credit_invoice_dry_run_validates_like_the_real_run() {
         None,
         None,
         None,
+        None,
         &[json!("1x Coaching @ 100.00")],
         "agent:test",
         false,
@@ -18650,6 +18758,7 @@ fn hard_create_invoice_rejects_negative_due_days() {
         None,
         None,
         None,
+        None,
         &lines(&["1x Pennen @ 1.00 @21"]),
         "agent:test",
         false,
@@ -18660,4 +18769,66 @@ fn hard_create_invoice_rejects_negative_due_days() {
         .query_row("SELECT COUNT(*) FROM invoices", [], |r| r.get(0))
         .unwrap();
     assert_eq!(n, 0, "a rejected term must not write an invoice");
+}
+
+#[test]
+fn hard_create_invoice_validates_and_stores_the_delivery_date() {
+    // The JS validates the delivery date at create — both the shape and that the
+    // date exists — and stores it; the port read the column in every projection
+    // but never wrote it, so the field was permanently NULL.
+    let d = setup();
+    add_contact(&d, None);
+    let lines = lines(&["1x Pennen @ 1.00 @21"]);
+
+    for bad in ["2026-02-30", "2026-7-1", "01-07-2026", "2026-13-01"] {
+        let err = create_invoice(
+            &d,
+            1,
+            "2026-07-10",
+            None,
+            Some(bad),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &lines,
+            "agent:test",
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(err.code, "INVALID_DATE", "delivery-date '{bad}': {err:?}");
+    }
+    let n: i64 = d
+        .query_row("SELECT COUNT(*) FROM invoices", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(n, 0, "a rejected delivery date must not write an invoice");
+
+    let inv = create_invoice(
+        &d,
+        1,
+        "2026-07-10",
+        None,
+        Some("2026-07-01"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &lines,
+        "agent:test",
+        false,
+    )
+    .unwrap();
+    assert_eq!(inv["delivery_date"], json!("2026-07-01"), "{inv}");
+    let stored: String = d
+        .query_row(
+            "SELECT delivery_date FROM invoices WHERE id = ?1",
+            [inv["id"].as_i64().unwrap()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored, "2026-07-01", "the date is stored, not just echoed");
 }
