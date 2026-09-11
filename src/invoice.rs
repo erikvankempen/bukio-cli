@@ -940,12 +940,51 @@ pub fn validate_compliance(db: &Connection, invoice: &Value) -> Result<()> {
     // the JS has one validator per rule, each with its own wording (NL counts
     // the 12 vereisten, the EU rule cites art. 226 and labels taxId "tax id")
     let is_nl = rule_key == "nl-12-vereisten";
-    let (supplier_msg, tax_label) = if is_nl {
-        ("supplier details missing (requirements 1-3)", "btw-id")
+    let is_lu = rule_key == "lu-invoice-vereisten";
+    // Per-rule wording, mirroring the JS validators: NL counts the twelve
+    // vereisten, LU speaks French (loi du 12 février 1979 art. 66 / RCS), the
+    // rest cite art. 226 of the EU VAT Directive.
+    let (
+        supplier_msg,
+        fix_hint,
+        name_label,
+        tax_label,
+        reg_label,
+        addr_label,
+        postal_label,
+        city_label,
+    ) = if is_nl {
+        (
+            "supplier details missing (requirements 1-3)",
+            "set them with init/company update",
+            "company name",
+            "btw-id",
+            "registration number",
+            "address",
+            "postal code",
+            "city",
+        )
+    } else if is_lu {
+        (
+            "données du fournisseur manquantes",
+            "définissez-les avec init/company update",
+            "dénomination",
+            "numéro de TVA",
+            "numéro RCS",
+            "adresse",
+            "code postal",
+            "ville",
+        )
     } else {
         (
             "supplier details missing (art. 226(a)-(c) EU VAT Directive)",
+            "set them with init/company update",
+            "company name",
             "tax id",
+            "registration number",
+            "address",
+            "postal code",
+            "city",
         )
     };
     // Simplified: check supplier and customer party fields
@@ -965,7 +1004,7 @@ pub fn validate_compliance(db: &Connection, invoice: &Value) -> Result<()> {
 
     let mut missing = Vec::new();
     if company["name"].as_str().is_none() {
-        missing.push("company name");
+        missing.push(name_label);
     }
     let supplier_has_vat =
         company["vat_module"].as_i64() == Some(1) || company["tax_id"].as_str().is_some();
@@ -973,25 +1012,21 @@ pub fn validate_compliance(db: &Connection, invoice: &Value) -> Result<()> {
         missing.push(tax_label);
     }
     if company["registration_id"].as_str().is_none() {
-        missing.push("registration number");
+        missing.push(reg_label);
     }
     if company["address"].as_str().is_none() {
-        missing.push("address");
+        missing.push(addr_label);
     }
     if company["postal_code"].as_str().is_none() {
-        missing.push("postal code");
+        missing.push(postal_label);
     }
     if company["city"].as_str().is_none() {
-        missing.push("city");
+        missing.push(city_label);
     }
     if !missing.is_empty() {
         return Err(invoice_error(
             "SUPPLIER_INCOMPLETE",
-            format!(
-                "{}: {} — set them with init/company update",
-                supplier_msg,
-                missing.join(", ")
-            ),
+            format!("{}: {} — {}", supplier_msg, missing.join(", "), fix_hint),
         ));
     }
 
@@ -1005,6 +1040,8 @@ pub fn validate_compliance(db: &Connection, invoice: &Value) -> Result<()> {
                 "CUSTOMER_INCOMPLETE",
                 if is_nl {
                     "customer details missing (requirement 6): name, address and city are required"
+                } else if is_lu {
+                    "données du client manquantes: nom, adresse et ville sont obligatoires"
                 } else {
                     "customer details missing (art. 226(5) EU VAT Directive): name, address and city are required"
                 },
@@ -1025,6 +1062,8 @@ pub fn validate_compliance(db: &Connection, invoice: &Value) -> Result<()> {
                     "CUSTOMER_VAT_REQUIRED",
                     if is_nl {
                         "reverse-charge invoice: the customer VAT id is required (requirement 7)"
+                    } else if is_lu {
+                        "auto-liquidation sur la facture: le numéro de TVA du client est obligatoire"
                     } else {
                         "reverse-charge invoice: the customer VAT id is required (art. 226(14) EU VAT Directive)"
                     },

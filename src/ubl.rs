@@ -134,10 +134,17 @@ fn buyer_scheme_id<'a>(profile: &'a Value, contact: &Value) -> &'a str {
         .and_then(|m| m.get("country"))
         .and_then(|v| v.as_str())
         .unwrap_or("NL");
-    if buyer_country.to_uppercase() == seller_country.to_uppercase() {
+    if buyer_country.eq_ignore_ascii_case(seller_country) {
         return seller_scheme;
     }
-    seller_scheme // ponytail: cross-border scheme lookup deferred
+    // Cross-border: the buyer's registration number was issued by the buyer's
+    // own registry, so it carries that market's scheme (an NL KVK number on a
+    // LU seller's invoice is still scheme 9944). A market without a profile
+    // (IS) keeps the seller's scheme.
+    crate::accounts::get_profile(buyer_country)
+        .ok()
+        .and_then(|p| p["identifiers"]["peppolSchemeId"].as_str())
+        .unwrap_or(seller_scheme)
 }
 
 fn fmt_pct(bp: i64) -> String {
