@@ -8,8 +8,8 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
 [![Website](https://img.shields.io/badge/website-agentic.bukio.nl-2b6cb0)](https://agentic.bukio.nl)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.17.0-blue)](https://github.com/erikvankempen/bukio-cli/releases)
-[![Tests](https://img.shields.io/badge/tests-930%20passing-red)](test/report.md)
+[![Version](https://img.shields.io/badge/version-0.18.0-blue)](https://github.com/erikvankempen/bukio-cli/releases)
+[![Tests](https://img.shields.io/badge/tests-936%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -92,10 +92,51 @@ This branch is **Rust-only**: the JavaScript reference implementation the port w
 
 ---
 
-## Requirements & Install
+## Install
 
-- **Rust toolchain** (stable; 2021 edition or later)
-- Linux or macOS (developed on a Linux VPS)
+**No toolchain, no Node, no browser.** One binary, and the operating system's
+own facilities do the rest.
+
+### Install the release binary (recommended)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/erikvankempen/bukio-cli/main/install.sh | sh
+bukio --version
+```
+
+The script detects your OS, CPU and C library (glibc or musl), downloads the
+matching build, verifies it against the release's `SHA256SUMS`, installs it into
+`~/.local/bin` and then proves it runs. It is non-interactive and idempotent, so
+agents and CI can run it as-is: `--version v0.18.0` pins a release, `--system`
+installs into `/usr/local/bin`, `--prefix <dir>` somewhere else.
+
+Already have Rust? `cargo binstall bukio-cli` installs the same prebuilt binary.
+(`cargo install bukio-cli` also works — it compiles, so it takes minutes.)
+
+### Supported platforms
+
+- **Linux**, glibc 2.35 or newer (any distribution from 2022 on), plus Alpine
+  and other musl systems through the static build — `install.sh` picks it.
+- **macOS**, Apple silicon and Intel.
+- Windows is not supported yet.
+
+### Updating
+
+```bash
+bukio update --dry-run   # what would change, and from where
+bukio update             # checksum-verified, atomic, keeps the old binary as bukio.old
+```
+
+A downloaded binary updates itself from the release artifacts; a git clone still
+updates through git. Neither needs a compiler.
+
+### Upgrading from 0.17 (Node)
+
+Nothing to convert. The database schema and the migration set are unchanged, so
+your books, actor keys and audit history carry over — and the 0.17 binary still
+opens a book that 0.18 wrote, which means going back is a real option, not a
+hope. Replace the command and you are done; [CHANGELOG.md](CHANGELOG.md) lists
+what changed.
 
 ### Build from source
 
@@ -103,18 +144,16 @@ This branch is **Rust-only**: the JavaScript reference implementation the port w
 git clone https://github.com/erikvankempen/bukio-cli.git
 cd bukio-cli
 cargo build --release          # → target/release/bukio (~16 MB single binary)
-target/release/bukio --version
+cargo test --release           # the full suite; scripts/testreport.sh writes test/report.md
 ```
 
-### Install to PATH
+To put it on your PATH: copy `target/release/bukio` anywhere on it, or
+`cargo install --path .`.
 
-```bash
-cargo install --path .         # puts `bukio` on ~/.cargo/bin (on PATH)
-```
-
-Or simply copy `target/release/bukio` to any directory on your PATH (e.g. `/usr/local/bin/bukio`).
-
-**No runtime dependencies.** SQLite is bundled (via rusqlite), PDFs are rendered natively (src/pdf.rs), TLS is in-process. There is no Node.js, no browser, and no external process required.
+**No runtime dependencies.** SQLite is bundled (via rusqlite), PDFs are rendered
+natively (src/pdf.rs), TLS is in-process through rustls with the operating
+system's certificate store — no OpenSSL, no Node, no browser, no external
+process.
 
 ---
 
@@ -1384,20 +1423,20 @@ Stated plainly, so nothing is hidden:
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **62,945 non-blank, non-comment lines of Rust**
-across 50 files (40,231 in `src/`, 22,714 in `tests/`), i.e. **62.95 KLOC**
+model (Boehm, 1981): **63,880 non-blank, non-comment lines of Rust**
+across 51 files (40,749 in `src/`, 23,131 in `tests/`), i.e. **63.88 KLOC**
 (measured with `scc` v3.7.0, the same tool the earlier JavaScript figure used).
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 185.8 PM | 18.2 months | ~10 developers | ≈ €1,672K |
-| Semi-detached | 310.4 PM | 18.6 months | ~17 developers | ≈ €2,794K |
-| Embedded | 518.9 PM | 18.5 months | ~28 developers | ≈ €4,670K |
+| Organic | 188.7 PM | 18.3 months | ~10 developers | ≈ €1,699K |
+| Semi-detached | 315.6 PM | 18.7 months | ~17 developers | ≈ €2,840K |
+| Embedded | 528.1 PM | 18.6 months | ~28 developers | ≈ €4,753K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 186–519
-person-months (≈ €1.67M–€4.67M)**; the AI-assisted build consumed **$41.90 in
+**Comparison:** a conventional team building this would estimate **≈ 189–528
+person-months (≈ €1.70M–€4.75M)**; the AI-assisted build consumed **$41.90 in
 API costs plus ≈ €3,150 of my review-and-direction time (contributed, unpaid
 — see above)** over 66 working sessions in under six weeks — still a tiny fraction of
 the conventional estimate.

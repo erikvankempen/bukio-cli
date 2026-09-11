@@ -30,3 +30,6 @@ docs-research/faia-src/
 package.json
 package-lock.json
 scripts/screenshot-template.html
+
+# the cross-version fixture is a real book, committed deliberately
+!tests/fixtures/*.db

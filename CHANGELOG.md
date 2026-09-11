@@ -2,11 +2,45 @@
 
 All notable changes to **bukio-cli** are recorded in this file. The format
 loosely follows [Keep a Changelog](https://keepachangelog.com/); versions
-match `package.json` and are bumped at release time. Work in progress on the
+match `Cargo.toml` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
-## [Unreleased]
+## [Unreleased] — targeting 0.18.0
+
+### Changed
+
+- **bukio is a native binary.** The Node implementation is gone: one executable,
+  no Node, no npm, no Chromium. Every command keeps its name, flags, JSON shape
+  and exit codes. The invoice PDF is now drawn by a built-in renderer instead of
+  a headless browser — that is the largest single change (an invoice PDF went
+  from ~2 s to ~15 ms; ordinary commands are 10–30× faster, mostly because
+  nothing has to boot an interpreter for each one).
+- **Your books are untouched.** The schema and the migration set are identical,
+  so a book written by 0.17 opens in 0.18 and the 0.17 binary still opens a book
+  0.18 wrote — both directions verified, with byte-identical reports. Actor
+  keys, enrolled companies, audit history and backups carry over, and rolling
+  back to the Node version is safe.
+- **Installing changed.** No package manager and no toolchain: download the
+  binary (see the README) or, if you already have Rust, `cargo binstall
+  bukio-cli`.
+- **`bukio update`** now maintains a downloaded binary from the release
+  artifacts: it verifies the checksum from `SHA256SUMS`, replaces the binary
+  atomically and keeps the previous one as `bukio.old`. A git clone continues to
+  update through git, exactly as before.
+
+### Added
+
+- **The company logo is embedded in the invoice PDF** (PNG and JPEG). It
+  previously rendered only in the invoice email. SVG logos still appear in the
+  email but not in the PDF, which has no vector engine.
+
+### Notes for existing Node users
+
+The Node implementation is kept in this repository's history (see
+`RELEASING.md`); nothing was deleted from the project, only from the Rust
+branch. If 0.18 ever gets in your way, the previous version still reads and
+writes your books.
 
 ## [0.17.0] — 2026-09-01
 

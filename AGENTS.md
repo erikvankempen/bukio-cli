@@ -4,6 +4,19 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 
 ---
 
+## Install (no toolchain)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/erikvankempen/bukio-cli/main/install.sh | sh
+bukio --version
+```
+
+The installer is non-interactive and idempotent: it detects the platform,
+verifies the download against the release's `SHA256SUMS` and installs into
+`~/.local/bin`. Use `--version v0.18.0` to pin a release, `--system` for
+`/usr/local/bin`. If this machine already has Rust, `cargo binstall bukio-cli`
+does the same thing. Update with `bukio update` (see §3) — never by compiling.
+
 ## 1. House rules (non-negotiable)
 
 1. **Dry-run before you mutate.** Every mutating command accepts `--dry-run`. Run it, read the plan, then run without `--dry-run`.
@@ -79,7 +92,7 @@ This file is the **agent's manual** for bukio-cli. Read it before driving the to
 | `bukio contact add --name N [--address] [--vat-id]` / `list` | Invoice counterparties. |
 | `bukio invoice create --contact N --lines "..." \| --items "..." --date D [--discount-pct P \| --discount-amount A] [--language nl\|en]` | Draft invoice. Lines: `[QTYx] DESC @ PRICE [@ VATCODE] [@ -DISCOUNT]` (fractional qty allowed, per-line discount `@-10%`/`@-25.00`). Items: `ID[:QTY][@PRICE][@VATCODE][@-DISCOUNT]` with per-invoice overrides. Total discount applies BEFORE VAT. |
 | `bukio company show` / `update --name --registration-id --tax-id --iban --address --postal-code --city [--country read-only] [--dry-run]` | Company record (audited; country immutable after init); supplier gegevens must be complete before finalize (12-vereisten 1-3). |
-| `bukio company update --logo FILE` / `--remove-logo` / `company logo --out FILE` | Store/extract the invoice logo (PNG/JPEG/SVG ≤ 1 MB, ≤ 2048×2048 px, stored as a BLOB in the DB — travels with backups). |
+| `bukio company update --logo FILE` / `--remove-logo` / `company logo --out FILE` | Store/extract the invoice logo (PNG/JPEG/SVG ≤ 1 MB, ≤ 2048×2048 px, stored as a BLOB in the DB — travels with backups). PNG and JPEG logos are embedded in the invoice PDF; an SVG logo appears in the invoice email only, so use a raster logo if the PDF must carry it. |
 | `bukio attach add --invoice N\|--entry N --file F [--store db\|file] [--note] [--dry-run]` / `attach list --invoice N\|--entry N` / `attach show --id N [--out F] [--force]` / `attach remove --id N [--dry-run]` | Store source documents against invoices/entries. Default `--store db` = BLOB in the DB (travels with backups); `--store file` = copy in `<db>-attachments/` with the path stored. Lists are metadata-only. `show --out` refuses to overwrite without `--force`. |
 | `bukio invoice create --contact N --lines "2x DESC @ PRICE @21" --date D` | Draft invoice (12-vereisten validated at finalize). |
 | `bukio invoice list [--status draft\|sent\|paid\|overdue] [--type sales\|credit]` / `show --id N` | Inspect invoices. |
@@ -902,6 +915,7 @@ authz off.
 | `PEPPOL_NOT_CONFIGURED` / `PEPPOL_SEND_FAILED` / `PEPPOL_BUYER_MISSING_ID` / `PEPPOL_BUYER_REFERENCE_MISSING` | No Peppol endpoint, the provider rejected/unreachable, the buyer has no KVK number (BT-49 requires it), or the invoice has no buyer reference (BT-10, PEPPOL-EN16931-R003 / DE-R-015) | Set `BUKIO_PEPPOL_ENDPOINT`/`BUKIO_PEPPOL_TOKEN`; check the provider response; set the buyer KVK via `contact update --id <id> --kvk <number>`; set the reference at `invoice create ... --reference <text>` |
 | `SMTP_NOT_CONFIGURED` / `SMTP_CONNECT_FAILED` / `SMTP_AUTH_FAILED` / `SMTP_SEND_FAILED` / `CONTACT_EMAIL_MISSING` | `invoice email`: SMTP env vars missing, server unreachable/TLS failed, auth rejected, send rejected, or the contact has no email (and no `--to`) | Set `BUKIO_SMTP_HOST`/`PORT`/`USER`/`PASS`/`FROM`; add the contact email or pass `--to` |
 | `UPDATE_NOT_A_CLONE` / `UPDATE_WRONG_REMOTE` / `UPDATE_NO_REMOTE_BRANCH` / `UPDATE_CONFIRM_REQUIRED` / `UPDATE_GIT_FAILED` | `bukio update`: path is not a git clone / origin is not the official repo (forks: `--trust-remote`) / no `origin/main` after fetch / local changes present but no `--yes` / a git command failed | Run `--dry-run` first, add `--yes` to confirm the overwrite, `--trust-remote` on a fork, or fix the git failure |
+| `UPDATE_DOWNLOAD_FAILED` / `UPDATE_NO_ARTIFACT` / `UPDATE_CHECKSUM_MISMATCH` / `UPDATE_BAD_MARKER` / `UPDATE_FAILED` | `bukio update` on a downloaded binary: the release, its `SHA256SUMS` or the artifact could not be fetched / no artifact for this platform / the artifact does not match its checksum (refused) / `install.json` carries no target triple / the binary or its directory could not be replaced | Check the network or `--release-base`; re-run `install.sh` to rewrite the marker; for a system-wide install re-run with sudo |
 | `INVALID_CAMT` / `INVALID_CSV_HEADER` / `EMPTY_STATEMENT` / `ALREADY_MATCHED` | Bank file unparsable, bad header, empty statement, or a matched transaction re-linked | Use a real CAMT.053/CSV export; unmatch first |
 | `MANDATE_REQUIRED` / `MANDATE_NOT_FOUND` / `MANDATE_DUPLICATE` / `INVALID_MANDATE_REF` / `INVALID_SCHEME` / `PAYABLE_NOT_DIRECT_DEBIT` | Direct-debit batch: contact has no mandate (or it was deleted), duplicate/oversized/empty ref, scheme not core\|b2b, or a transfer payable in an incasso batch | `payments mandate add --contact N --ref R [--type b2b]` first; keep refs ≤ 35 chars; match the payable's payment term to the batch kind |
 | `INVALID_XAF` / `EMPTY_CSV` / `IMPORT_VALIDATION_FAILED` / `FILE_NOT_FOUND` | Import file unreadable/empty/structurally invalid, or validation failed with per-line details | The error lists every offending line — fix and re-run |
