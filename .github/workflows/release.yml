@@ -1,0 +1,134 @@
+name: release
+
+# Push a tag (git tag v0.18.0 && git push origin v0.18.0) and this builds the
+# artifacts that install.sh and `bukio update` consume. Pushing to a branch
+# publishes nothing; a workflow_dispatch run is a dry run that only leaves
+# artifacts behind.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep test temp dirs off the checkout: a fixture inside the repo makes git
+  # walk up into the real clone (the tests set GIT_CEILING_DIRECTORIES too, but
+  # belt and braces).
+  TMPDIR: ${{ runner.temp }}
+
+jobs:
+  test:
+    name: test suite
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --release --no-fail-fast
+
+  build:
+    name: ${{ matrix.target }}
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The runner's libc becomes the floor for the artifact. Stay on 22.04
+          # (glibc 2.35) instead of ubuntu-latest, which would raise the floor
+          # every time GitHub moves the label. Linux users on an older glibc or
+          # on Alpine need the static musl build — see RELEASING.md.
+          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-22.04,     strip: strip }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm, strip: strip }
+          - { target: aarch64-apple-darwin,      os: macos-14,        strip: strip }
+          - { target: x86_64-apple-darwin,       os: macos-13,        strip: strip }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Two shapes on purpose: the raw binary is what install.sh and
+          # `bukio update` consume (no untar step to get wrong), the tarball is
+          # what cargo-binstall looks for.
+          cp "target/${{ matrix.target }}/release/bukio" bukio
+          ${{ matrix.strip }} bukio
+          tar -czf "bukio-${{ matrix.target }}.tar.gz" bukio
+          mv bukio "bukio-${{ matrix.target }}"
+          ls -l bukio-*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: bukio-*
+          if-no-files-found: error
+
+  # Optional: a fully static musl build, for Alpine and for glibc older than the
+  # floor above (Debian 11, RHEL 8). install.sh already resolves the musl triple
+  # on a musl host, so publishing this asset is the whole job. It needs a musl C
+  # toolchain because bundled SQLite and `ring` both compile C.
+  #
+  # If you enable it, add `build-musl` to the release job's `needs:` as well, or
+  # the release will be published before this artifact exists and the checksum
+  # file will miss it.
+  #
+  # build-musl:
+  #   name: x86_64-unknown-linux-musl
+  #   needs: test
+  #   runs-on: ubuntu-22.04
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         targets: x86_64-unknown-linux-musl
+  #     - run: sudo apt-get update && sudo apt-get install -y musl-tools
+  #     - run: |
+  #         export CC_x86_64_unknown_linux_musl=musl-gcc
+  #         cargo build --release --locked --target x86_64-unknown-linux-musl
+  #     - run: |
+  #         cp target/x86_64-unknown-linux-musl/release/bukio bukio
+  #         strip bukio
+  #         tar -czf bukio-x86_64-unknown-linux-musl.tar.gz bukio
+  #         mv bukio bukio-x86_64-unknown-linux-musl
+  #     - uses: actions/upload-artifact@v4
+  #       with:
+  #         name: x86_64-unknown-linux-musl
+  #         path: bukio-*
+  #         if-no-files-found: error
+
+  release:
+    name: publish
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          sha256sum bukio-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "bukio ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            bukio-* SHA256SUMS
