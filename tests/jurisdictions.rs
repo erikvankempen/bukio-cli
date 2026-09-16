@@ -864,10 +864,15 @@ fn jur_lu_invoice_finalizes_end_to_end() {
         ],
     );
     let c = open(&db);
-    let id = inv(&c, "2026-08-15", &["1x Prestation @ 100.00 @17"]);
+    let today = bukio::dates::today_iso();
+    let id = inv(&c, &today, &["1x Prestation @ 100.00 @17"]);
     let fin = bukio::invoice::finalize_invoice(&c, id, "agent:test", false).unwrap();
     let invoice = fin.get("invoice").cloned().unwrap_or(fin.clone());
-    assert_eq!(invoice["invoice_number"], json!("2026-0001"), "{fin}");
+    assert_eq!(
+        invoice["invoice_number"],
+        json!(format!("{}-0001", &today[..4])),
+        "{fin}"
+    );
     assert_eq!(invoice["status"], json!("sent"));
     let entry_id = invoice["entry_id"].as_i64().unwrap();
     let entry = bukio::entries::get_entry(&c, entry_id).unwrap();
@@ -992,7 +997,8 @@ fn jur_lu_reverse_charge_requires_the_customer_vat_number() {
         ],
     );
     let c = open(&db);
-    let id = inv(&c, "2026-08-15", &["1x Prestation @ 100.00 @RE"]);
+    let today = bukio::dates::today_iso();
+    let id = inv(&c, &today, &["1x Prestation @ 100.00 @RE"]);
     let err = bukio::invoice::finalize_invoice(&c, id, "agent:test", false).unwrap_err();
     assert_eq!(err.code, "CUSTOMER_VAT_REQUIRED", "{err:?}");
     assert!(err.message.contains("auto-liquidation"), "{}", err.message);
@@ -1052,7 +1058,8 @@ fn jur_nl_invoice_compliance_is_unchanged() {
         ],
     );
     let c = open(&db);
-    let id = inv(&c, "2026-08-15", &["2x Consultancy @ 150.00 @21"]);
+    let today = bukio::dates::today_iso();
+    let id = inv(&c, &today, &["2x Consultancy @ 150.00 @21"]);
     bukio::invoice::finalize_invoice(&c, id, "agent:test", false).unwrap();
     let invoice = bukio::invoice::get_invoice(&c, id).unwrap().unwrap();
     bukio::invoice::validate_compliance(&c, &invoice).unwrap();
