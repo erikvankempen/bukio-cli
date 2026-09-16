@@ -587,6 +587,15 @@ pub fn reverse_entry(db: &Connection, id: i64, actor: &str, reason: Option<&str>
             rusqlite::params![now_iso(), rid],
         )
         .map_err(sql_err)?;
+        // The booking is gone, so the invoice it belonged to is no longer a
+        // receivable. Without this the invoice keeps claiming status 'sent' and
+        // every reader that trusts it (aging, ICP readout, bank matching) reports
+        // a receivable that nets to zero in the ledger.
+        tx.execute(
+            "UPDATE invoices SET status = 'void' WHERE entry_id = ?1 AND status != 'void'",
+            [id],
+        )
+        .map_err(sql_err)?;
         record(
             &tx,
             RecordArgs {

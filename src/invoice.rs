@@ -2218,6 +2218,31 @@ mod tests {
     }
 
     #[test]
+    fn reversing_an_invoice_booking_voids_the_invoice() {
+        // Reported against the production book: the invoice kept status 'sent'
+        // after its booking was reversed, so aging, the ICP readout and bank
+        // matching all reported a receivable that nets to zero in the ledger.
+        let db = company_db(true, true);
+        mk_contact(&db, None);
+        let inv = mk_invoice(&db);
+        let iid = inv["id"].as_i64().unwrap();
+        let fin = finalize_invoice(&db, iid, "agent:test", false).unwrap();
+        assert_eq!(
+            get_invoice(&db, iid).unwrap().unwrap()["status"].as_str(),
+            Some("sent")
+        );
+
+        let entry_id = fin["entry"]["id"].as_i64().unwrap();
+        crate::entries::reverse_entry(&db, entry_id, "agent:test", Some("cleanup")).unwrap();
+
+        assert_eq!(
+            get_invoice(&db, iid).unwrap().unwrap()["status"].as_str(),
+            Some("void"),
+            "a reversed booking must void the invoice"
+        );
+    }
+
+    #[test]
     fn finalize_multiple_vat_rates_gives_per_rate_postings_with_exact_vat() {
         let db = company_db(true, true);
         mk_contact(&db, None);
