@@ -8,7 +8,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
 [![Website](https://img.shields.io/badge/website-agentic.bukio.nl-2b6cb0)](https://agentic.bukio.nl)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.18.0-blue)](https://github.com/erikvankempen/bukio-cli/releases)
+[![Version](https://img.shields.io/badge/version-0.18.1-blue)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Tests](https://img.shields.io/badge/tests-936%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
@@ -57,7 +57,7 @@ binary is the product:
 
   curl -fsSL https://raw.githubusercontent.com/erikvankempen/bukio-cli/main/install.sh | sh
 
-Confirm with `bukio --version` (it should print 0.18.0 or newer).
+Confirm with `bukio --version` (it should print 0.18.1 or newer).
 
 Read the repository README.md and AGENTS.md files, configure `bukio mcp` as a local stdio MCP server, and explain the setup you made. Do not create a company or book real transactions yet. When we start, use named actors, preview every mutation with --dry-run, and ask for confirmation before writing.
 ```
@@ -122,7 +122,7 @@ bukio --version
 The script detects your OS, CPU and C library (glibc or musl), downloads the
 matching build, verifies it against the release's `SHA256SUMS`, installs it into
 `~/.local/bin` and then proves it runs. It is non-interactive and idempotent, so
-agents and CI can run it as-is: `--version v0.18.0` pins a release, `--system`
+agents and CI can run it as-is: `--version v0.18.1` pins a release, `--system`
 installs into `/usr/local/bin`, `--prefix <dir>` somewhere else.
 
 Already have Rust? `cargo binstall bukio-cli` installs the same prebuilt binary.
@@ -153,7 +153,7 @@ If you already run the Node version, this is a replacement, not a migration:
 npm uninstall -g bukio-cli        # whatever you installed it as — `npm ls -g --depth=0` shows it
 curl -fsSL https://raw.githubusercontent.com/erikvankempen/bukio-cli/main/install.sh | sh
 which -a bukio                    # should now be ~/.local/bin/bukio, and nothing else
-bukio --version                   # 0.18.0
+bukio --version                   # 0.18.1
 ```
 
 **Remove the npm package first.** Both installs provide a `bukio` command, and
@@ -1457,15 +1457,15 @@ Stated plainly, so nothing is hidden:
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **63,880 non-blank, non-comment lines of Rust**
-across 51 files (40,749 in `src/`, 23,131 in `tests/`), i.e. **63.88 KLOC**
+model (Boehm, 1981): **63,821 non-blank, non-comment lines of Rust**
+across 51 files (40,633 in `src/`, 23,188 in `tests/`), i.e. **63.82 KLOC**
 (measured with `scc` v3.7.0, the same tool the earlier JavaScript figure used).
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 188.7 PM | 18.3 months | ~10 developers | ≈ €1,699K |
-| Semi-detached | 315.6 PM | 18.7 months | ~17 developers | ≈ €2,840K |
-| Embedded | 528.1 PM | 18.6 months | ~28 developers | ≈ €4,753K |
+| Organic | 188.5 PM | 18.3 months | ~10 developers | ≈ €1,697K |
+| Semi-detached | 315.3 PM | 18.7 months | ~17 developers | ≈ €2,837K |
+| Embedded | 527.5 PM | 18.6 months | ~28 developers | ≈ €4,748K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 

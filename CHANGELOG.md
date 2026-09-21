@@ -6,6 +6,30 @@ match `Cargo.toml` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
+## [0.18.1] — 2026-09-21
+
+### Fixed
+
+- **Reversing an invoice's booking now voids the invoice.** `entry reverse`
+  posted the contra-entry but left the invoice claiming `sent`, so debtors
+  aging, the ICP readout and bank matching all kept reporting a receivable that
+  had already netted to zero in the ledger. The invoice now moves to `void`
+  inside the same transaction as the reversal — the single place where invoice
+  state can go stale, so the three readers need no change of their own.
+  `finalize` then refuses the voided invoice rather than booking it a second
+  time. Reported in [#4](https://github.com/erikvankempen/bukio-cli/issues/4).
+- **Three `jurisdictions` tests had aged out.** They finalized an invoice dated
+  2026-08-15 with no due date, so the default 30-day term fell on 2026-09-14 and
+  the engine correctly reported `overdue` from the 15th onward while the
+  assertions still expected `sent`. They now derive their date from the engine's
+  own `today_iso()`, so they cannot expire again.
+
+### Changed
+
+- README COCOMO figures re-measured with `scc` (63,821 lines of Rust across 51
+  files, 63.82 KLOC). The figures published with 0.18.0 described an earlier
+  tree and were ~120 lines high.
+
 ## [0.18.0] — 2026-09-11
 
 ### Changed
