@@ -714,18 +714,28 @@ mod tests {
     use super::*;
     use crate::db::open_db;
 
+    /// Serialises every test that reads or writes `BUKIO_CONFIG_DIR`. The
+    /// variable is process-global, and `config_dir()` re-resolves it on each
+    /// call — so when a neighbour restored the environment (the
+    /// sign_command_no_key_* tests remove_var when they finish) in the middle
+    /// of another test's write-then-read, the read went looking in a different
+    /// file. That is what made nonce_management flake in CI: locally it failed
+    /// 66 times in 150 runs of these three tests under contention.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Point the config dir at a throwaway path. The nonce store and the key
     /// files are real files under ~/.bukio, so a test that writes them without
-    /// this races any concurrently running bukio process — which is how
-    /// nonce_management flaked — and leaves junk in the user's own config.
+    /// this leaves junk in the user's own config. Re-asserted on every call,
+    /// because a neighbour may have restored the environment since the last
+    /// one. Hold `env_guard()` across the whole sequence.
     fn isolate_config_dir() {
-        static ONCE: std::sync::Once = std::sync::Once::new();
-        ONCE.call_once(|| {
-            let dir =
-                std::env::temp_dir().join(format!("bukio-test-config-{}", std::process::id()));
-            let _ = std::fs::create_dir_all(&dir);
-            std::env::set_var("BUKIO_CONFIG_DIR", &dir);
-        });
+        let dir = std::env::temp_dir().join(format!("bukio-test-config-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::env::set_var("BUKIO_CONFIG_DIR", &dir);
     }
 
     #[test]
@@ -743,6 +753,7 @@ mod tests {
 
     #[test]
     fn nonce_management() {
+        let _env = env_guard();
         isolate_config_dir();
         let keyid = "testkey123";
         let nonce = uuid_v4();
@@ -776,6 +787,7 @@ mod tests {
 
     #[test]
     fn sign_command_no_key_record_mode() {
+        let _env = env_guard();
         let tmp = std::env::temp_dir().join(format!("bukio_sg_test_{}", uuid_v4()));
         std::fs::create_dir_all(&tmp).ok();
         std::env::set_var("BUKIO_CONFIG_DIR", &tmp);
@@ -795,6 +807,7 @@ mod tests {
 
     #[test]
     fn sign_command_no_key_enforce_throws() {
+        let _env = env_guard();
         let tmp = std::env::temp_dir().join(format!("bukio_sg_test_{}", uuid_v4()));
         std::fs::create_dir_all(&tmp).ok();
         std::env::set_var("BUKIO_CONFIG_DIR", &tmp);
