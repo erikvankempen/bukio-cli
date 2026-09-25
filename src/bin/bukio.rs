@@ -3626,12 +3626,19 @@ fn fetch_bytes(location: &str) -> Result<Vec<u8>> {
             )
         })?;
     let status = resp.status().as_u16();
-    let body = resp.into_body().read_to_vec().map_err(|e| {
-        BukioError::new(
-            "UPDATE_DOWNLOAD_FAILED",
-            format!("cannot read the response from {location}: {e}"),
-        )
-    })?;
+    // Release assets are ~14 MB and ureq caps read_to_vec() at 10 MiB by
+    // default, so without this `bukio update` failed on every release artifact.
+    let mut raw = resp.into_body();
+    let body = raw
+        .with_config()
+        .limit(64 * 1024 * 1024)
+        .read_to_vec()
+        .map_err(|e| {
+            BukioError::new(
+                "UPDATE_DOWNLOAD_FAILED",
+                format!("cannot read the response from {location}: {e}"),
+            )
+        })?;
     if !(200..300).contains(&status) {
         return Err(BukioError::new(
             "UPDATE_DOWNLOAD_FAILED",
@@ -4877,4 +4884,37 @@ fn cmd_import_invoice(argv: &[String], db_path: &str, actor: &str, dry_run: bool
         dry_run,
     )?;
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    /// `fetch_bytes` has to swallow a release-sized body. ureq's
+    /// `read_to_vec()` caps at 10 MiB by default and every published binary is
+    /// larger, so `bukio update` died with UPDATE_DOWNLOAD_FAILED from 0.18.0
+    /// until this limit was raised — the release/API downloads are tiny, so
+    /// only an asset-sized body catches it.
+    #[test]
+    fn fetch_bytes_reads_a_body_larger_than_ureqs_default_limit() {
+        let body = vec![0u8; 11 * 1024 * 1024]; // > ureq's 10 MiB default
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let serve = body.clone();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                serve.len()
+            );
+            stream.write_all(head.as_bytes()).unwrap();
+            stream.write_all(&serve).unwrap();
+        });
+        let got = fetch_bytes(&format!("http://{addr}/asset")).unwrap();
+        assert_eq!(got.len(), body.len(), "the body was truncated or rejected");
+    }
 }
