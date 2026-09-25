@@ -6,6 +6,24 @@ match `Cargo.toml` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
+## [0.18.3] — 2026-09-25
+
+### Fixed
+
+- **`bukio update` works again.** It failed with
+  `UPDATE_DOWNLOAD_FAILED: the response body is larger than request limit:
+  10485760` — the updater fetched release assets through ureq's default 10 MiB
+  body cap, while every published binary is ~13.7 MB, so the self-update path
+  had been broken since 0.18.0 (the release API and `SHA256SUMS` are small
+  enough to hide it). The download limit is now 64 MiB, and a regression test
+  serves an asset-sized body over HTTP — it fails with the old limit.
+
+### Notes
+
+- **Binaries installed as 0.18.0–0.18.2 carry the old cap** and therefore
+  cannot pull this release themselves; re-run `install.sh` once. From 0.18.3
+  onward, `bukio update` upgrades normally.
+
 ## [0.18.2] — 2026-09-25
 
 ### Fixed
