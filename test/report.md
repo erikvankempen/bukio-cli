@@ -1,8 +1,8 @@
 # bukio-cli — test report
 
-**Latest run:** 2026-09-25 09:00:15 UTC — ✅ 942 passing · 0 failing (942 tests)
+**Latest run:** 2026-09-25 09:37:12 UTC — ✅ 942 passing · 0 failing (942 tests)
 **Command:** `cargo test --release --no-fail-fast` — Rust suite, all targets
-**Revision:** `d1ccbf6` · **Binary:** `target/release/bukio`, 16290888 bytes
+**Revision:** `afd612f` · **Binary:** `target/release/bukio`, 16264024 bytes
 
 ## Suites
 
@@ -28,59 +28,59 @@ suites carry no per-test doc comments, so nothing here is invented.
 
 ### `src/lib.rs`
 
-- `account_validation_matches_js` — account validation matches js
 - `a_reversal_carries_the_cost_center_to_the_contra_entry` — a reversal carries the cost center to the contra entry
+- `account_validation_matches_js` — account validation matches js
 - `an_entry_carries_the_cost_center_and_surfaces_it` — an entry carries the cost center and surfaces it
-- `chart_csv_import` — chart csv import
 - `cost_center_basic_crud` — cost center basic crud
+- `chart_csv_import` — chart csv import
 - `cost_center_lifecycle` — cost center lifecycle
 - `chart_csv_import_details_and_quoting` — chart csv import details and quoting
 - `cost_center_rejects_a_duplicate_code` — cost center rejects a duplicate code
-- `cost_center_rejects_an_invalid_code` — cost center rejects an invalid code
 - `create_account_valid_and_validation_codes` — create account valid and validation codes
+- `cost_center_rejects_an_invalid_code` — cost center rejects an invalid code
 - `deactivate_reactivate_lifecycle_blocks_new_postings` — deactivate reactivate lifecycle blocks new postings
 - `posting_specs_with_an_at_cc_suffix` — posting specs with an at cc suffix
 - `posting_specs_without_a_cost_center` — posting specs without a cost center
 - `profiles_load_all_31` — profiles load all 31
-- `deactivating_a_cost_center_blocks_new_bookings_but_keeps_history` — deactivating a cost center blocks new bookings but keeps history
-- `actor_regex_matches_js` — actor regex matches js
 - `list_accounts_type_filter_and_include_inactive` — list accounts type filter and include inactive
+- `actor_regex_matches_js` — actor regex matches js
+- `deactivating_a_cost_center_blocks_new_bookings_but_keeps_history` — deactivating a cost center blocks new bookings but keeps history
 - `seeds_nl_default_chart_of_29` — seeds nl default chart of 29
 - `can_act_is_true_only_for_enrolled_actors` — can act is true only for enrolled actors
 - `authz_flag_defaults_off_and_toggles_per_db` — authz flag defaults off and toggles per db
+- `enforce_flag_defaults_off_and_toggles_per_db` — enforce flag defaults off and toggles per db
 - `authz_flag_and_role_grants_persist_to_disk` — authz flag and role grants persist to disk
 - `enrol_rejects_a_duplicate_while_an_active_key_exists` — enrol rejects a duplicate while an active key exists
-- `enrol_rejects_an_invalid_actor_or_missing_key_material` — enrol rejects an invalid actor or missing key material
-- `enforce_flag_defaults_off_and_toggles_per_db` — enforce flag defaults off and toggles per db
 - `enrol_writes_a_registry_row_with_keyid_public_key_and_timestamp` — enrol writes a registry row with keyid public key and timestamp
+- `enrol_rejects_an_invalid_actor_or_missing_key_material` — enrol rejects an invalid actor or missing key material
 - `grant_role_rejects_invalid_actors_and_roles` — grant role rejects invalid actors and roles
-- `grant_role_writes_a_row_and_is_idempotent` — grant role writes a row and is idempotent
 - `list_role_grants_lists_every_grant_with_grantor_and_timestamp` — list role grants lists every grant with grantor and timestamp
+- `grant_role_writes_a_row_and_is_idempotent` — grant role writes a row and is idempotent
 - `registry_roundtrip_on_memory_db` — registry roundtrip on memory db
 - `registry_is_per_company_db` — registry is per company db
 - `revoke_marks_the_row_with_a_reason_and_keeps_it_as_history` — revoke marks the row with a reason and keeps it as history
 - `revoke_requires_a_reason_and_rejects_unknown_or_already_revoked_actors` — revoke requires a reason and rejects unknown or already revoked actors
+- `registry_persists_to_disk_and_survives_reopen` — registry persists to disk and survives reopen
 - `revoke_role_removes_the_row_and_rejects_roles_not_held` — revoke role removes the row and rejects roles not held
 - `rotation_reenrols_a_fresh_key_and_retains_the_old_row` — rotation reenrols a fresh key and retains the old row
-- `registry_persists_to_disk_and_survives_reopen` — registry persists to disk and survives reopen
 - `keygen_and_verify` — keygen and verify
 - `valid_actor_format` — valid actor format
-- `role_grants_are_per_company_db` — role grants are per company db
 - `the_last_owner_can_never_be_revoked` — the last owner can never be revoked
+- `role_grants_are_per_company_db` — role grants are per company db
 - `add_asset_dry_run_writes_nothing` — add asset dry run writes nothing
 - `add_asset_mid_life_adoption_keeps_only_the_remaining_depreciation` — add asset mid life adoption keeps only the remaining depreciation
 - `add_asset_missing_entry_link_fails_entry_not_found` — add asset missing entry link fails entry not found
-- `add_asset_rejects_cum_dep_at_recognition_above_cost_minus_residual` — add asset rejects cum dep at recognition above cost minus residual
 - `add_asset_recognises_an_already_fully_depreciated_asset` — add asset recognises an already fully depreciated asset
+- `add_asset_rejects_cum_dep_at_recognition_above_cost_minus_residual` — add asset rejects cum dep at recognition above cost minus residual
 - `add_months_clamps_day` — add months clamps day
 - `add_asset_standard_5y_linear_warns_when_the_purchase_is_not_booked` — add asset standard 5y linear warns when the purchase is not booked
-- `create_and_list_schemes` — create and list schemes
 - `add_asset_validates_account_types` — add asset validates account types
+- `create_and_list_schemes` — create and list schemes
 - `create_scheme_rejects_duplicate_names_and_bad_methods` — create scheme rejects duplicate names and bad methods
-- `dispose_asset_entry_and_status_are_atomic_on_rollback` — dispose asset entry and status are atomic on rollback
 - `dispose_asset_dry_run_books_nothing` — dispose asset dry run books nothing
-- `dispose_asset_sale_with_winst_books_the_full_entry_and_closes_the_asset` — dispose asset sale with winst books the full entry and closes the asset
+- `dispose_asset_entry_and_status_are_atomic_on_rollback` — dispose asset entry and status are atomic on rollback
 - `dispose_asset_rejects_double_disposal` — dispose asset rejects double disposal
+- `dispose_asset_sale_with_winst_books_the_full_entry_and_closes_the_asset` — dispose asset sale with winst books the full entry and closes the asset
 - `first_run_period_logic` — first run period logic
 - `next_period_wraps_year` — next period wraps year
 - `dispose_asset_scrap_books_a_verlies` — dispose asset scrap books a verlies
@@ -96,11 +96,11 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `schedule_stops_at_the_residual_and_never_overshoots` — schedule stops at the residual and never overshoots
 - `run_due_dry_run_plans_but_books_nothing` — run due dry run plans but books nothing
 - `run_due_skips_paused_assets_and_resuming_restarts_them` — run due skips paused assets and resuming restarts them
+- `add_and_list_attachment` — add and list attachment
 - `trial_balance_stays_balanced_through_the_whole_lifecycle` — trial balance stays balanced through the whole lifecycle
 - `duplicate_rejected` — duplicate rejected
-- `add_and_list_attachment` — add and list attachment
-- `remove_attachment_test` — remove attachment test
 - `args_null_is_stored_and_read_back_as_null` — args null is stored and read back as null
+- `remove_attachment_test` — remove attachment test
 - `audit_log_is_append_only` — audit log is append only
 - `empty_map_default_record` — empty map default record
 - `record_and_list_with_filters` — record and list with filters
@@ -114,14 +114,14 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `verify_trail_rejects_a_negative_limit` — verify trail rejects a negative limit
 - `verify_trail_marks_a_since_revoked_key_as_revoked` — verify trail marks a since revoked key as revoked
 - `verify_trail_reports_a_clean_signed_trail` — verify trail reports a clean signed trail
-- `can_act_deny_by_default_and_role_scoping` — can act deny by default and role scoping
+- `verify_trail_since_filters_by_timestamp` — verify trail since filters by timestamp
 - `capability_of_basic` — capability of basic
 - `capability_of_resolves_entry_add_by_the_actual_mutation` — capability of resolves entry add by the actual mutation
-- `verify_trail_since_filters_by_timestamp` — verify trail since filters by timestamp
+- `can_act_deny_by_default_and_role_scoping` — can act deny by default and role scoping
 - `check_authz_denial_names_actor_capability_and_roles` — check authz denial names actor capability and roles
 - `check_authz_off_by_default_never_refuses` — check authz off by default never refuses
-- `check_authz_resolves_by_actual_mutation` — check authz resolves by actual mutation
 - `check_authz_owner_kill_needs_owner_regardless_of_mode` — check authz owner kill needs owner regardless of mode
+- `check_authz_resolves_by_actual_mutation` — check authz resolves by actual mutation
 - `every_cli_path_maps_or_is_exempt` — every cli path maps or is exempt
 - `every_mcp_mutating_tool_maps` — every mcp mutating tool maps
 - `is_authz_exempt_basic` — is authz exempt basic
@@ -147,23 +147,23 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `rabo_style_export_with_af_bij_sign` — rabo style export with af bij sign
 - `unparseable_date_is_skipped_and_reported_never_silently_dropped` — unparseable date is skipped and reported never silently dropped
 - `check_authz_unmapped_denies_when_on` — check authz unmapped denies when on
-- `verify_trail_works_on_a_copied_db_file` — verify trail works on a copied db file
 - `auto_match_exact_then_fuzzy_dry_run_writes_nothing` — auto match exact then fuzzy dry run writes nothing
 - `dashed_iban_normalizes_to_the_stored_form_without_a_duplicate_account` — dashed iban normalizes to the stored form without a duplicate account
+- `verify_trail_works_on_a_copied_db_file` — verify trail works on a copied db file
 - `get_or_create_bank_account_idempotent` — get or create bank account idempotent
+- `import_and_list_transactions` — import and list transactions
 - `get_or_create_bank_account_validates_iban_and_links_the_ledger_account` — get or create bank account validates iban and links the ledger account
 - `import_is_idempotent_via_hash_duplicates_skipped` — import is idempotent via hash duplicates skipped
-- `import_and_list_transactions` — import and list transactions
 - `normalize_iban_strips_and_uppercases` — normalize iban strips and uppercases
 - `link_transaction_links_a_posted_entry_and_guards` — link transaction links a posted entry and guards
-- `list_bank_accounts_reports_balance_and_counts` — list bank accounts reports balance and counts
 - `outside_the_window_stays_unmatched` — outside the window stays unmatched
+- `list_bank_accounts_reports_balance_and_counts` — list bank accounts reports balance and counts
 - `post_from_transaction_creates_entry` — post from transaction creates entry
 - `post_from_transaction_posts_bank_and_counter_leg_and_reconciles` — post from transaction posts bank and counter leg and reconciles
 - `post_from_transaction_refuses_already_matched_transactions` — post from transaction refuses already matched transactions
 - `preview_import_counts_without_writing` — preview import counts without writing
-- `set_transaction_state_ignores_and_reopens` — set transaction state ignores and reopens
 - `state_change_and_link` — state change and link
+- `set_transaction_state_ignores_and_reopens` — set transaction state ignores and reopens
 - `suggest_unmatched_proposes_expense_and_income_accounts` — suggest unmatched proposes expense and income accounts
 - `tx_hash_deterministic` — tx hash deterministic
 - `arrays_sort_by_canonical_string` — arrays sort by canonical string
@@ -175,10 +175,10 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `identity_flags_are_excluded_but_dry_run_is_signed` — identity flags are excluded but dry run is signed
 - `nested_posting_arrays_are_order_insensitive` — nested posting arrays are order insensitive
 - `sorts_keys_recursively` — sorts keys recursively
-- `two_same_amount_transactions_match_two_distinct_entries` — two same amount transactions match two distinct entries
 - `two_same_amount_transactions_never_claim_the_same_entry_in_one_run` — two same amount transactions never claim the same entry in one run
+- `two_same_amount_transactions_match_two_distinct_entries` — two same amount transactions match two distinct entries
 - `get_company_basic` — get company basic
-- `nothing_to_update_rejected` — nothing to update rejected
+- `update_empty_name_rejected` — update empty name rejected
 - `compute_deadline_be_monthly` — compute deadline be monthly
 - `compute_deadline_de_quarterly` — compute deadline de quarterly
 - `compute_deadline_nl_quarterly` — compute deadline nl quarterly
@@ -186,17 +186,17 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `no_bimonthly_p6` — no bimonthly p6
 - `quarter_deadline_basic` — quarter deadline basic
 - `se_quarterly_august_exception` — se quarterly august exception
-- `update_empty_name_rejected` — update empty name rejected
+- `nothing_to_update_rejected` — nothing to update rejected
 - `update_name` — update name
 - `create_and_get_contact` — create and get contact
 - `date_validation_matches_js` — date validation matches js
-- `iban_checks` — iban checks
-- `month_arithmetic_clamps` — month arithmetic clamps
 - `empty_name_rejected` — empty name rejected
 - `update_contact_name` — update contact name
-- `a_fresh_db_gains_the_signature_columns_actor_keys_and_settings` — a fresh db gains the signature columns actor keys and settings
-- `a_v17_db_keeps_legacy_audit_rows_as_unsigned` — a v17 db keeps legacy audit rows as unsigned
+- `iban_checks` — iban checks
+- `month_arithmetic_clamps` — month arithmetic clamps
 - `a_v18_db_with_a_single_actor_keys_row_upgrades_without_data_loss` — a v18 db with a single actor keys row upgrades without data loss
+- `a_v17_db_keeps_legacy_audit_rows_as_unsigned` — a v17 db keeps legacy audit rows as unsigned
+- `a_fresh_db_gains_the_signature_columns_actor_keys_and_settings` — a fresh db gains the signature columns actor keys and settings
 - `actor_keys_gains_a_composite_actor_keyid_primary_key` — actor keys gains a composite actor keyid primary key
 - `fresh_memory_db_reaches_latest_migration` — fresh memory db reaches latest migration
 - `migration_chain_keeps_company_data_lossless` — migration chain keeps company data lossless
@@ -204,8 +204,8 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `reopen_existing_db_does_not_reapply` — reopen existing db does not reapply
 - `rerunning_migrate_on_the_current_version_is_a_noop` — rerunning migrate on the current version is a noop
 - `agent_actor_is_recorded` — agent actor is recorded
-- `balanced_two_posting_entry_lands_as_draft` — balanced two posting entry lands as draft
 - `create_post_reverse_lifecycle` — create post reverse lifecycle
+- `balanced_two_posting_entry_lands_as_draft` — balanced two posting entry lands as draft
 - `db_trigger_blocks_an_unbalanced_draft` — db trigger blocks an unbalanced draft
 - `db_trigger_requires_at_least_two_postings` — db trigger requires at least two postings
 - `parse_posting_specs_is_repeatable_and_comma_separated` — parse posting specs is repeatable and comma separated
@@ -217,13 +217,13 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `rejects_invalid_date_and_missing_description` — rejects invalid date and missing description
 - `rejects_like_js` — rejects like js
 - `rejects_unbalanced_few_and_zero_amount_postings` — rejects unbalanced few and zero amount postings
-- `rejects_unknown_and_inactive_accounts` — rejects unknown and inactive accounts
 - `reversal_guards` — reversal guards
+- `rejects_unknown_and_inactive_accounts` — rejects unknown and inactive accounts
 - `to_boekingen_pairs` — to boekingen pairs
 - `convert_fx_basic` — convert fx basic
-- `export_xaf_dry_run` — export xaf dry run
-- `parse_rate_exact` — parse rate exact
 - `reversal_posts_a_linked_contra_entry_and_leaves_the_original_posted` — reversal posts a linked contra entry and leaves the original posted
+- `parse_rate_exact` — parse rate exact
+- `export_xaf_dry_run` — export xaf dry run
 - `captured_help_covers_the_command_tree` — captured help covers the command tree
 - `resolution_picks_the_longest_known_path` — resolution picks the longest known path
 - `all_26_full_locale_tables_carry_the_identical_key_set` — all 26 full locale tables carry the identical key set
@@ -245,12 +245,12 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `amount_errors` — amount errors
 - `vat_file_description_is_dutch_when_localized` — vat file description is dutch when localized
 - `vat_file_description_is_english_by_default` — vat file description is english by default
-- `auditfile_accounts_with_postings_are_not_renamed` — auditfile accounts with postings are not renamed
 - `auditfile_company_name_mismatch_is_only_a_warning` — auditfile company name mismatch is only a warning
 - `auditfile_company_id_mismatch_is_an_error` — auditfile company id mismatch is an error
-- `auditfile_created_accounts_carry_inferred_rgs_codes` — auditfile created accounts carry inferred rgs codes
+- `auditfile_accounts_with_postings_are_not_renamed` — auditfile accounts with postings are not renamed
 - `auditfile_dry_run_lists_renames_and_writes_nothing` — auditfile dry run lists renames and writes nothing
 - `auditfile_idempotent_per_transaction_id` — auditfile idempotent per transaction id
+- `auditfile_created_accounts_carry_inferred_rgs_codes` — auditfile created accounts carry inferred rgs codes
 - `csv_basic` — csv basic
 - `csv_quoted` — csv quoted
 - `csv_semicolon` — csv semicolon
@@ -262,8 +262,8 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `import_contacts_idempotent_by_name` — import contacts idempotent by name
 - `import_contacts_suppliers_and_customers_mapped` — import contacts suppliers and customers mapped
 - `infer_rgs_keywords_within_type_then_type_based_fallbacks` — infer rgs keywords within type then type based fallbacks
-- `import_journal_create_missing_accounts_also_get_rgs_codes` — import journal create missing accounts also get rgs codes
 - `import_xaf_reimport_backfills_rgs_codes_on_accounts_that_lack_them` — import xaf reimport backfills rgs codes on accounts that lack them
+- `import_journal_create_missing_accounts_also_get_rgs_codes` — import journal create missing accounts also get rgs codes
 - `journal_bad_amount_and_date_mismatch_are_both_collected` — journal bad amount and date mismatch are both collected
 - `journal_comma_delimited_with_semicolon_inside_a_quoted_field` — journal comma delimited with semicolon inside a quoted field
 - `journal_create_missing_infers_type_from_net_movement` — journal create missing infers type from net movement
@@ -271,16 +271,16 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `journal_missing_required_header_column_rejected` — journal missing required header column rejected
 - `journal_one_posted_entry_per_boekstuk_two_postings_per_line` — journal one posted entry per boekstuk two postings per line
 - `journal_unknown_account_fails_whole_file_validation_without_create_missing` — journal unknown account fails whole file validation without create missing
+- `opening_balances_dutch_code_debet_credit_layout` — opening balances dutch code debet credit layout
 - `opening_balances_dry_run_validates_and_writes_nothing` — opening balances dry run validates and writes nothing
 - `opening_balances_imports_one_posted_beginbalans_entry` — opening balances imports one posted beginbalans entry
-- `opening_balances_dutch_code_debet_credit_layout` — opening balances dutch code debet credit layout
-- `opening_balances_reimport_is_rejected` — opening balances reimport is rejected
-- `opening_balances_validation_collects_all_errors_and_writes_nothing` — opening balances validation collects all errors and writes nothing
-- `parse_import_amount_international_dutch_and_thousands_dot` — parse import amount international dutch and thousands dot
 - `opening_balances_reimport_succeeds_after_reversing_the_opening_entry` — opening balances reimport succeeds after reversing the opening entry
+- `opening_balances_reimport_is_rejected` — opening balances reimport is rejected
+- `parse_import_amount_international_dutch_and_thousands_dot` — parse import amount international dutch and thousands dot
+- `opening_balances_validation_collects_all_errors_and_writes_nothing` — opening balances validation collects all errors and writes nothing
 - `opening_balances_zero_amount_rejected` — opening balances zero amount rejected
-- `xaf_company_mismatch_blocks_importing_another_company` — xaf company mismatch blocks importing another company
 - `xaf_btw_codes_are_reported_not_booked` — xaf btw codes are reported not booked
+- `xaf_company_mismatch_blocks_importing_another_company` — xaf company mismatch blocks importing another company
 - `xaf_dry_run_validates_and_writes_nothing` — xaf dry run validates and writes nothing
 - `xaf_idempotent_per_boekstuknummer` — xaf idempotent per boekstuknummer
 - `xaf_imports_mutaties_and_creates_file_chart_accounts` — xaf imports mutaties and creates file chart accounts
@@ -292,16 +292,16 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `build_invoice_postings_honours_the_line_gl_account_with_the_vat_module_off` — build invoice postings honours the line gl account with the vat module off
 - `build_invoice_postings_sales_vs_credit_sign_flip` — build invoice postings sales vs credit sign flip
 - `create_invoice_draft_line_math_and_due_date` — create invoice draft line math and due date
-- `finalize_assigns_a_sequential_number_and_books_the_invoice` — finalize assigns a sequential number and books the invoice
 - `credit_note_reverses_the_booking_and_the_sequence_continues` — credit note reverses the booking and the sequence continues
+- `finalize_assigns_a_sequential_number_and_books_the_invoice` — finalize assigns a sequential number and books the invoice
 - `finalize_multiple_vat_rates_gives_per_rate_postings_with_exact_vat` — finalize multiple vat rates gives per rate postings with exact vat
-- `create_invoice_guards` — create invoice guards
 - `finalize_never_reuses_an_existing_invoice_number` — finalize never reuses an existing invoice number
+- `create_invoice_guards` — create invoice guards
 - `line_discount_amount` — line discount amount
 - `line_discount_pct` — line discount pct
 - `finalize_rejects_a_finalized_invoice_and_a_dry_run_writes_nothing` — finalize rejects a finalized invoice and a dry run writes nothing
-- `mark_paid_payment_and_status_update_are_atomic` — mark paid payment and status update are atomic
 - `finalize_with_the_vat_module_off_books_net_only` — finalize with the vat module off books net only
+- `mark_paid_payment_and_status_update_are_atomic` — mark paid payment and status update are atomic
 - `parse_item_spec_basic` — parse item spec basic
 - `parse_line_basic` — parse line basic
 - `parse_line_spec_qty_description_price_vat` — parse line spec qty description price vat
@@ -325,15 +325,15 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `draft_invoices_are_warned` — draft invoices are warned
 - `validate_compliance_requires_supplier_and_customer_data` — validate compliance requires supplier and customer data
 - `drafts_and_unmatched_bank_transactions_are_flagged` — drafts and unmatched bank transactions are flagged
-- `invalid_period_is_rejected` — invalid period is rejected
 - `overdue_invoice_warning_with_outstanding_total` — overdue invoice warning with outstanding total
+- `invalid_period_is_rejected` — invalid period is rejected
 - `profit_is_income_minus_expense_for_the_period` — profit is income minus expense for the period
 - `vat_quarter_readout_when_module_on` — vat quarter readout when module on
 - `add_list_mandate` — add list mandate
 - `add_payable_and_list` — add payable and list
-- `batch_collects_every_bad_line` — batch collects every bad line
-- `batch_csv_detects_the_delimiter_once_from_the_first_line` — batch csv detects the delimiter once from the first line
 - `add_payable_rejects_the_same_contact_and_ref_while_unpaid` — add payable rejects the same contact and ref while unpaid
+- `batch_csv_detects_the_delimiter_once_from_the_first_line` — batch csv detects the delimiter once from the first line
+- `batch_collects_every_bad_line` — batch collects every bad line
 - `batch_contact_without_iban_reports_details` — batch contact without iban reports details
 - `batch_csv_reports_every_bad_line_and_keeps_the_batch_unwritten` — batch csv reports every bad line and keeps the batch unwritten
 - `batch_csv_supports_comma_and_semicolon_with_dutch_amounts` — batch csv supports comma and semicolon with dutch amounts
@@ -357,46 +357,46 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `payables_add_transfer_and_direct_debit_with_audit_and_filters` — payables add transfer and direct debit with audit and filters
 - `payables_reject_unknown_contact_bad_amount_missing_ref_and_bad_method` — payables reject unknown contact bad amount missing ref and bad method
 - `invoice_template_dry_run_shows_the_plan_and_writes_nothing` — invoice template dry run shows the plan and writes nothing
-- `invoice_template_generated_drafts_finalize_normally` — invoice template generated drafts finalize normally
 - `invoice_template_generates_drafts_on_schedule` — invoice template generates drafts on schedule
-- `invoice_template_keeps_entry_templates_working_alongside` — invoice template keeps entry templates working alongside
+- `invoice_template_generated_drafts_finalize_normally` — invoice template generated drafts finalize normally
 - `invoice_template_guards` — invoice template guards
+- `invoice_template_keeps_entry_templates_working_alongside` — invoice template keeps entry templates working alongside
 - `invoice_template_runs_limit_completes_the_template` — invoice template runs limit completes the template
 - `peppol_buyer_without_kvk_is_rejected_up_front` — peppol buyer without kvk is rejected up front
 - `peppol_invoice_without_buyer_reference_is_rejected_up_front` — peppol invoice without buyer reference is rejected up front
-- `peppol_send_not_configured_provider_error_and_dry_run` — peppol send not configured provider error and dry run
+- `ubl_buyer_reference_follows_document_currency_code` — ubl buyer reference follows document currency code
 - `add_period_monthly` — add period monthly
 - `add_period_monthly_quarterly_yearly_keeps_the_day` — add period monthly quarterly yearly keeps the day
-- `ubl_buyer_reference_follows_document_currency_code` — ubl buyer reference follows document currency code
+- `peppol_send_not_configured_provider_error_and_dry_run` — peppol send not configured provider error and dry run
 - `build_depreciation_basic` — build depreciation basic
 - `peppol_send_posts_the_ubl_to_the_provider` — peppol send posts the ubl to the provider
 - `build_depreciation_template_adjusts_the_final_run` — build depreciation template adjusts the final run
 - `build_depreciation_template_validates` — build depreciation template validates
-- `create_template_normalizes_the_first_run_to_day_of_period` — create template normalizes the first run to day of period
 - `create_and_list_entry_template` — create and list entry template
+- `create_template_normalizes_the_first_run_to_day_of_period` — create template normalizes the first run to day of period
 - `create_template_rejects_an_inactive_account` — create template rejects an inactive account
 - `create_template_validates_postings_balance_accounts` — create template validates postings balance accounts
 - `generated_entries_are_posted_and_the_books_stay_balanced` — generated entries are posted and the books stay balanced
-- `list_templates_filters_by_status` — list templates filters by status
 - `invoice_template_create_and_run_generates_drafts` — invoice template create and run generates drafts
+- `list_templates_filters_by_status` — list templates filters by status
 - `preview_due_is_read_only_and_matches_run_due` — preview due is read only and matches run due
 - `reverse_previous_completed_chain_leaves_the_last_accrual_outstanding` — reverse previous completed chain leaves the last accrual outstanding
 - `reverse_previous_dry_run_preview_mirrors_the_execute_shape` — reverse previous dry run preview mirrors the execute shape
 - `reverse_previous_reverses_the_prior_entry_each_run` — reverse previous reverses the prior entry each run
-- `run_due_completes_the_template_at_end_date` — run due completes the template at end date
-- `run_due_completes_the_template_after_the_run_limit` — run due completes the template after the run limit
 - `run_due_books_one_entry_per_period_on_schedule` — run due books one entry per period on schedule
+- `run_due_completes_the_template_after_the_run_limit` — run due completes the template after the run limit
+- `run_due_completes_the_template_at_end_date` — run due completes the template at end date
 - `run_due_dry_run_writes_nothing` — run due dry run writes nothing
-- `run_due_skips_paused_templates` — run due skips paused templates
 - `run_due_is_idempotent` — run due is idempotent
-- `vat_aware_template_requires_the_vat_module` — vat aware template requires the vat module
+- `run_due_skips_paused_templates` — run due skips paused templates
 - `run_due_with_a_template_id_runs_only_that_template` — run due with a template id runs only that template
 - `vat_aware_keeps_object_postings_mixed_into_a_tagged_list` — vat aware keeps object postings mixed into a tagged list
-- `balans_assets_equal_liabilities_plus_equity_plus_result` — balans assets equal liabilities plus equity plus result
+- `vat_aware_template_requires_the_vat_module` — vat aware template requires the vat module
 - `vat_aware_template_stores_the_expansion_and_replays_it` — vat aware template stores the expansion and replays it
+- `balans_assets_equal_liabilities_plus_equity_plus_result` — balans assets equal liabilities plus equity plus result
 - `balans_empty_books_balance_at_zero` — balans empty books balance at zero
-- `balans_excludes_drafts_and_nets_out_reversals` — balans excludes drafts and nets out reversals
 - `balans_result_is_zero_before_any_income_or_expense` — balans result is zero before any income or expense
+- `balans_excludes_drafts_and_nets_out_reversals` — balans excludes drafts and nets out reversals
 - `journal_one_row_per_posting_ordered_by_date` — journal one row per posting ordered by date
 - `pnl_catch_all_section_for_unknown_taxonomy` — pnl catch all section for unknown taxonomy
 - `pnl_empty_period_gives_zero_result_and_no_sections` — pnl empty period gives zero result and no sections
@@ -407,10 +407,10 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `cost_center_report_filters_by_period` — cost center report filters by period
 - `cost_center_report_groups_postings_by_center` — cost center report groups postings by center
 - `fiscal_year_windows` — fiscal year windows
-- `journal_lists_postings` — journal lists postings
 - `tb_excludes_drafts_and_nets_out_reversals` — tb excludes drafts and nets out reversals
+- `journal_lists_postings` — journal lists postings
 - `tb_per_account_totals` — tb per account totals
-- `trial_balance_balances` — trial balance balances
+- `tb_year_filter` — tb year filter
 - `format_parse_timestamp_roundtrip` — format parse timestamp roundtrip
 - `mint_and_consume_token` — mint and consume token
 - `decrypt_js_encrypted_key` — decrypt js encrypted key
@@ -423,19 +423,19 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `keyid_is_a_stable_32_hex_fingerprint` — keyid is a stable 32 hex fingerprint
 - `malformed_signature_or_key_returns_false_and_never_panics` — malformed signature or key returns false and never panics
 - `passphrase_key_refuses_to_sign_without_it_and_signs_with_it` — passphrase key refuses to sign without it and signs with it
-- `tb_year_filter` — tb year filter
 - `public_key_from_encrypted_private` — public key from encrypted private
+- `public_key_from_private_encrypted_needs_the_passphrase` — public key from private encrypted needs the passphrase
 - `public_key_from_private_plain_key_derives_itself` — public key from private plain key derives itself
 - `sign_verify_roundtrip_with_a_plain_key` — sign verify roundtrip with a plain key
 - `sign_verify_tampered_message_fails` — sign verify tampered message fails
 - `sign_verify_wrong_key_fails` — sign verify wrong key fails
-- `public_key_from_private_encrypted_needs_the_passphrase` — public key from private encrypted needs the passphrase
+- `sign_with_passphrase_encrypts_and_signs` — sign with passphrase encrypts and signs
 - `verifies_a_js_generated_keypair_and_signature` — verifies a js generated keypair and signature
 - `exempt_commands` — exempt commands
 - `nonce_management` — nonce management
 - `sign_command_exempt_returns_none` — sign command exempt returns none
-- `sign_with_passphrase_encrypts_and_signs` — sign with passphrase encrypts and signs
 - `sign_command_no_key_enforce_throws` — sign command no key enforce throws
+- `trial_balance_balances` — trial balance balances
 - `sign_command_no_key_record_mode` — sign command no key record mode
 - `uuid_v4_format` — uuid v4 format
 - `sign_with_explicit_key_roundtrip` — sign with explicit key roundtrip
@@ -444,40 +444,40 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `vat_categories` — vat categories
 - `verify_bundle_rejects_unknown_actor` — verify bundle rejects unknown actor
 - `verify_bundle_rejects_revoked_key` — verify bundle rejects revoked key
-- `enable_is_idempotent_and_seeds_codes` — enable is idempotent and seeds codes
 - `book_posts_a_three_leg_entry_with_vat_fields_persisted` — book posts a three leg entry with vat fields persisted
+- `enable_is_idempotent_and_seeds_codes` — enable is idempotent and seeds codes
 - `book_guards_module_off_and_unknown_code` — book guards module off and unknown code
 - `enable_refuses_on_a_kor_company` — enable refuses on a kor company
 - `enable_seeds_accounts_and_codes_then_is_idempotent` — enable seeds accounts and codes then is idempotent
 - `expand_adds_the_output_vat_leg` — expand adds the output vat leg
 - `expand_routes_the_input_side_to_1500` — expand routes the input side to 1500
-- `file_and_settle_roundtrip` — file and settle roundtrip
 - `file_dry_run_plans_the_next_free_code_without_creating_anything` — file dry run plans the next free code without creating anything
-- `file_falls_to_the_next_free_code_when_2510_is_taken` — file falls to the next free code when 2510 is taken
+- `file_and_settle_roundtrip` — file and settle roundtrip
 - `file_dry_run_writes_nothing_and_does_not_create_the_account` — file dry run writes nothing and does not create the account
+- `file_falls_to_the_next_free_code_when_2510_is_taken` — file falls to the next free code when 2510 is taken
 - `file_nothing_to_file_when_the_position_is_zero` — file nothing to file when the position is zero
-- `file_owe_clears_2500_and_books_the_liability_to_2510` — file owe clears 2500 and books the liability to 2510
-- `file_refund_position_clears_1500_and_debits_2510` — file refund position clears 1500 and debits 2510
 - `file_reuses_the_same_reassigned_account_across_filings` — file reuses the same reassigned account across filings
+- `file_refund_position_clears_1500_and_debits_2510` — file refund position clears 1500 and debits 2510
+- `file_owe_clears_2500_and_books_the_liability_to_2510` — file owe clears 2500 and books the liability to 2510
 - `file_uses_a_custom_account_when_requested_and_settle_cancels_it` — file uses a custom account when requested and settle cancels it
-- `mark_filed_records_the_filing_and_is_an_idempotent_upsert` — mark filed records the filing and is an idempotent upsert
-- `ob_readout_is_period_isolated_and_ignores_drafts` — ob readout is period isolated and ignores drafts
 - `ob_readout_full_scenario_fields` — ob readout full scenario fields
+- `mark_filed_records_the_filing_and_is_an_idempotent_upsert` — mark filed records the filing and is an idempotent upsert
+- `ob_readout_reverse_charge_nets_out` — ob readout reverse charge nets out
 - `parse_period_quarters_months_and_rejects` — parse period quarters months and rejects
 - `parse_specs_handles_the_vat_suffix` — parse specs handles the vat suffix
 - `period_parsing` — period parsing
+- `ob_readout_is_period_isolated_and_ignores_drafts` — ob readout is period isolated and ignores drafts
 - `ob_readout_guards_module_off_and_bad_period` — ob readout guards module off and bad period
 - `readout_5d_agrees_with_the_booked_net_position` — readout 5d agrees with the booked net position
-- `ob_readout_reverse_charge_nets_out` — ob readout reverse charge nets out
-- `settle_direction_guard_blocks_incoming_against_a_payable` — settle direction guard blocks incoming against a payable
-- `settle_difference_beyond_five_euro_is_rejected` — settle difference beyond five euro is rejected
 - `settle_custom_difference_account` — settle custom difference account
+- `settle_difference_beyond_five_euro_is_rejected` — settle difference beyond five euro is rejected
+- `settle_direction_guard_blocks_incoming_against_a_payable` — settle direction guard blocks incoming against a payable
 - `settle_dry_run_books_nothing_and_leaves_the_tx_unmatched` — settle dry run books nothing and leaves the tx unmatched
-- `settle_paying_more_than_booked_books_a_loss` — settle paying more than booked books a loss
 - `settle_nothing_without_a_filed_balance` — settle nothing without a filed balance
+- `settle_paying_more_than_booked_books_a_loss` — settle paying more than booked books a loss
 - `settle_refund_received_in_your_favour_books_a_gain` — settle refund received in your favour books a gain
-- `settle_rounding_in_your_favour_books_a_gain_to_4700` — settle rounding in your favour books a gain to 4700
 - `settle_rejects_an_invalid_difference_account` — settle rejects an invalid difference account
+- `settle_rounding_in_your_favour_books_a_gain_to_4700` — settle rounding in your favour books a gain to 4700
 - `vat_booking_and_readout` — vat booking and readout
 - `is_year_closed_prevents_double_close` — is year closed prevents double close
 - `result_accounts_picks_income_and_expense` — result accounts picks income and expense
@@ -487,9 +487,9 @@ suites carry no per-test doc comments, so nothing here is invented.
 
 - `one_account_per_role_and_explicit_flags_are_validated` — one account per role and explicit flags are validated
 - `invoice_finalize_books_the_receivable_to_the_charts_debtors_account` — invoice finalize books the receivable to the charts debtors account
+- `cli_flags_an_account_and_refuses_a_second_claim_before_writing` — cli flags an account and refuses a second claim before writing
 - `the_resolver_trusts_the_flag_then_a_matching_profile_code_then_the_chart` — the resolver trusts the flag then a matching profile code then the chart
 - `the_default_chart_flags_every_special_account` — the default chart flags every special account
-- `cli_flags_an_account_and_refuses_a_second_claim_before_writing` — cli flags an account and refuses a second claim before writing
 
 ### `tests/company_simulation.rs`
 
@@ -497,27 +497,27 @@ suites carry no per-test doc comments, so nothing here is invented.
 
 ### `tests/cross_version.rs`
 
-- `a_book_written_by_the_node_version_reads_identically` — a book written by the node version reads identically
 - `reports_on_a_node_book_match_the_values_the_node_version_produced` — reports on a node book match the values the node version produced
+- `a_book_written_by_the_node_version_reads_identically` — a book written by the node version reads identically
 
 ### `tests/edge_cases.rs`
 
 - `a_read_command_never_creates_a_missing_database` — a read command never creates a missing database
-- `a_tampered_encrypted_backup_is_a_passphrase_wrong` — a tampered encrypted backup is a passphrase wrong
 - `actor_can_for_another_actor_is_owner_only` — actor can for another actor is owner only
 - `actor_cli_bare_role_is_rejected` — actor cli bare role is rejected
+- `a_tampered_encrypted_backup_is_a_passphrase_wrong` — a tampered encrypted backup is a passphrase wrong
 - `actor_can_is_a_self_service_check_of_the_actual_mutation` — actor can is a self service check of the actual mutation
 - `actor_cli_missing_actor_is_actor_required` — actor cli missing actor is actor required
-- `actor_cli_env_actor_satisfies_the_requirement` — actor cli env actor satisfies the requirement
-- `actor_commands_reject_invalid_actor_strings` — actor commands reject invalid actor strings
 - `actor_cli_env_actor_is_recorded_in_the_audit_trail` — actor cli env actor is recorded in the audit trail
+- `actor_commands_reject_invalid_actor_strings` — actor commands reject invalid actor strings
+- `actor_cli_named_actor_works_and_json_errors_have_the_shape` — actor cli named actor works and json errors have the shape
 - `actor_error_messages_for_missing_and_malformed_actors` — actor error messages for missing and malformed actors
 - `actor_is_valid_actor_role_name_formats` — actor is valid actor role name formats
 - `actor_keygen_agent_writes_a_plain_0600_key_file` — actor keygen agent writes a plain 0600 key file
 - `actor_keygen_human_key_is_passphrase_encrypted` — actor keygen human key is passphrase encrypted
 - `actor_keygen_human_without_a_passphrase_is_passphrase_required` — actor keygen human without a passphrase is passphrase required
-- `actor_cli_named_actor_works_and_json_errors_have_the_shape` — actor cli named actor works and json errors have the shape
 - `actor_keygen_refuses_to_overwrite_and_force_replaces` — actor keygen refuses to overwrite and force replaces
+- `actor_cli_env_actor_satisfies_the_requirement` — actor cli env actor satisfies the requirement
 - `actor_enforce_toggles_the_company_flag_and_audits_it` — actor enforce toggles the company flag and audits it
 - `actor_read_session_key_treats_missing_and_expired_files_as_locked` — actor read session key treats missing and expired files as locked
 - `actor_list_shows_enrolled_and_revoked_actors` — actor list shows enrolled and revoked actors
@@ -530,15 +530,15 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `aging_debtors_buckets_totals_paid_excluded_sorted` — aging debtors buckets totals paid excluded sorted
 - `actor_lifecycle_across_two_companies` — actor lifecycle across two companies
 - `aging_debtors_excludes_invoices_after_as_of_and_nets_credits_fifo` — aging debtors excludes invoices after as of and nets credits fifo
-- `actor_verify_reports_key_state_against_the_registry` — actor verify reports key state against the registry
 - `aging_debtors_finalized_credits_reduce_drafts_do_not` — aging debtors finalized credits reduce drafts do not
 - `aging_validation_rejects_bad_as_of_and_kind` — aging validation rejects bad as of and kind
 - `all_mutating_paths_leave_no_trace_in_dry_run` — all mutating paths leave no trace in dry run
+- `actor_verify_reports_key_state_against_the_registry` — actor verify reports key state against the registry
 - `attach_add_db_mode_stores_a_blob_round_trips_and_infers_mime` — attach add db mode stores a blob round trips and infers mime
 - `attach_add_dry_run_writes_nothing_and_audits_nothing` — attach add dry run writes nothing and audits nothing
 - `attach_add_validation_errors` — attach add validation errors
-- `attach_add_works_for_entries_too` — attach add works for entries too
 - `attach_cli_dry_run_writes_nothing` — attach cli dry run writes nothing
+- `attach_add_works_for_entries_too` — attach add works for entries too
 - `attach_cli_file_mode_end_to_end` — attach cli file mode end to end
 - `attach_cli_rejects_both_refs_and_an_unknown_store` — attach cli rejects both refs and an unknown store
 - `attach_cli_round_trip_with_audit` — attach cli round trip with audit
@@ -556,13 +556,13 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `authz_off_by_a_non_owner_is_authz_denied` — authz off by a non owner is authz denied
 - `authz_lifecycle_owner_splits_bookkeeping_and_payments` — authz lifecycle owner splits bookkeeping and payments
 - `authz_on_dry_run_writes_nothing` — authz on dry run writes nothing
-- `authz_requires_exactly_one_of_on_or_off` — authz requires exactly one of on or off
 - `authz_on_sets_the_mode_implies_enforce_and_grants_the_flipper_owner` — authz on sets the mode implies enforce and grants the flipper owner
 - `backup_encrypt_decrypt_unit_round_trip_and_wrong_key` — backup encrypt decrypt unit round trip and wrong key
+- `authz_requires_exactly_one_of_on_or_off` — authz requires exactly one of on or off
 - `backup_and_restore_plain_work_and_both_are_audited` — backup and restore plain work and both are audited
-- `backup_encrypt_writes_the_magic_header_and_restores_byte_identical` — backup encrypt writes the magic header and restores byte identical
 - `backup_keep_prunes_the_oldest_and_a_dry_run_deletes_nothing` — backup keep prunes the oldest and a dry run deletes nothing
 - `bank_auto_match_prefers_an_exact_entry_over_an_invoice` — bank auto match prefers an exact entry over an invoice
+- `backup_encrypt_writes_the_magic_header_and_restores_byte_identical` — backup encrypt writes the magic header and restores byte identical
 - `bank_import_is_idempotent` — bank import is idempotent
 - `bank_partial_payment_does_not_auto_match_the_invoice` — bank partial payment does not auto match the invoice
 - `bank_rabo_csv_with_af_bij_and_dutch_decimals` — bank rabo csv with af bij and dutch decimals
@@ -591,13 +591,13 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `cli_entry_reverse_keeps_the_trial_balance_balanced` — cli entry reverse keeps the trial balance balanced
 - `cli_export_xaf_year_out_writes_a_file` — cli export xaf year out writes a file
 - `cli_init_dry_run_shows_a_plan_and_creates_nothing` — cli init dry run shows a plan and creates nothing
-- `cli_import_invoice_end_to_end` — cli import invoice end to end
 - `cli_init_creates_the_company_and_the_vat_chart` — cli init creates the company and the vat chart
+- `cli_import_invoice_end_to_end` — cli import invoice end to end
 - `cli_mandate_and_direct_debit_batch_end_to_end` — cli mandate and direct debit batch end to end
 - `cli_second_init_is_already_initialised` — cli second init is already initialised
 - `cli_reports_json_csv_and_xlsx` — cli reports json csv and xlsx
-- `cli_update_fetches_from_a_fixture_origin` — cli update fetches from a fixture origin
 - `cli_trial_balance_csv_totaal_row_net_is_zero` — cli trial balance csv totaal row net is zero
+- `cli_update_fetches_from_a_fixture_origin` — cli update fetches from a fixture origin
 - `cli_vat_book_dry_run_validates_date_and_description` — cli vat book dry run validates date and description
 - `cli_vat_enable_book_readout_mark_filed_end_to_end` — cli vat enable book readout mark filed end to end
 - `cli_vat_file_and_settle_end_to_end_with_a_rounding_difference` — cli vat file and settle end to end with a rounding difference
@@ -635,11 +635,11 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `fx_no_fetch_blocks_the_ecb_fallback` — fx no fetch blocks the ecb fallback
 - `fx_parse_rate_and_convert_fx_use_integer_math_rounded_half_up` — fx parse rate and convert fx use integer math rounded half up
 - `fx_rate_raw_float_parses_as_1_0875_not_scaled_again` — fx rate raw float parses as 1 0875 not scaled again
-- `fx_entry_add_with_currency_books_eur_and_keeps_the_original_amounts` — fx entry add with currency books eur and keeps the original amounts
 - `fx_resolve_rate_dry_run_does_not_persist_the_fetched_ecb_rate` — fx resolve rate dry run does not persist the fetched ecb rate
-- `fx_to_eur_postings_attaches_the_original_amounts` — fx to eur postings attaches the original amounts
-- `fx_invalid_currency_on_a_posting_is_rejected` — fx invalid currency on a posting is rejected
 - `fx_set_rate_upserts_audits_and_get_rate_prefers_latest_on_or_before` — fx set rate upserts audits and get rate prefers latest on or before
+- `fx_to_eur_postings_attaches_the_original_amounts` — fx to eur postings attaches the original amounts
+- `fx_entry_add_with_currency_books_eur_and_keeps_the_original_amounts` — fx entry add with currency books eur and keeps the original amounts
+- `fx_invalid_currency_on_a_posting_is_rejected` — fx invalid currency on a posting is rejected
 - `fx_vat_book_with_currency_computes_vat_on_the_eur_amounts` — fx vat book with currency computes vat on the eur amounts
 - `gate_covers_reads_too` — gate covers reads too
 - `gate_denies_a_wrong_capability_before_any_mutation` — gate denies a wrong capability before any mutation
@@ -671,8 +671,8 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `hard_cli_dry_runs_write_nothing` — hard cli dry runs write nothing
 - `hard_cli_export_xaf_dry_run_writes_nothing_and_schemes_validate` — hard cli export xaf dry run writes nothing and schemes validate
 - `hard_cli_import_xaf_failure_prints_cleanly` — hard cli import xaf failure prints cleanly
-- `hard_cli_invoice_reminders_within_days_0_stays_0` — hard cli invoice reminders within days 0 stays 0
 - `hard_cli_invoice_pay_rejects_non_international_amounts` — hard cli invoice pay rejects non international amounts
+- `hard_cli_invoice_reminders_within_days_0_stays_0` — hard cli invoice reminders within days 0 stays 0
 - `hard_cli_init_validates_iban_vat_choice_and_fiscal_year_end` — hard cli init validates iban vat choice and fiscal year end
 - `hard_cli_limit_0_returns_0_rows_and_garbage_errors` — hard cli limit 0 returns 0 rows and garbage errors
 - `hard_cli_recurring_numeric_inputs_pass_through_unmasked` — hard cli recurring numeric inputs pass through unmasked
@@ -681,12 +681,12 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `hard_cli_sepa_msg_id_stays_within_35_chars` — hard cli sepa msg id stays within 35 chars
 - `hard_cli_ubl_uses_eur_and_the_supplier_postal_code` — hard cli ubl uses eur and the supplier postal code
 - `hard_create_invoice_rejects_negative_due_days` — hard create invoice rejects negative due days
-- `hard_cli_vat_book_json_reports_the_vat_code_on_tagged_postings` — hard cli vat book json reports the vat code on tagged postings
 - `hard_create_invoice_validates_and_stores_the_delivery_date` — hard create invoice validates and stores the delivery date
+- `hard_cli_vat_book_json_reports_the_vat_code_on_tagged_postings` — hard cli vat book json reports the vat code on tagged postings
 - `hard_cli_year_end_status_rejects_a_non_yyyy_year` — hard cli year end status rejects a non yyyy year
 - `hard_create_payment_batch_rejects_a_garbage_date` — hard create payment batch rejects a garbage date
-- `hard_credit_invoice_dry_run_validates_like_the_real_run` — hard credit invoice dry run validates like the real run
 - `hard_csv_exports_neuter_formula_injection` — hard csv exports neuter formula injection
+- `hard_credit_invoice_dry_run_validates_like_the_real_run` — hard credit invoice dry run validates like the real run
 - `hard_entry_add_rejects_day_overflow_dates` — hard entry add rejects day overflow dates
 - `hard_every_emitted_error_code_is_documented` — hard every emitted error code is documented
 - `hard_fetch_ecb_rate_rejects_a_malformed_date` — hard fetch ecb rate rejects a malformed date
@@ -695,23 +695,23 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `hard_fx_set_rejects_a_day_overflow_date` — hard fx set rejects a day overflow date
 - `hard_fx_sanity_floor_is_25_cents` — hard fx sanity floor is 25 cents
 - `hard_fx_vat_a_range_of_amounts_never_trips_unbalanced` — hard fx vat a range of amounts never trips unbalanced
-- `hard_fx_vat_booking_absorbs_rounding_drift` — hard fx vat booking absorbs rounding drift
 - `hard_import_transactions_rejects_garbage_dates` — hard import transactions rejects garbage dates
+- `hard_fx_vat_booking_absorbs_rounding_drift` — hard fx vat booking absorbs rounding drift
 - `hard_import_xaf_skips_a_duplicate_boekstuknummer` — hard import xaf skips a duplicate boekstuknummer
-- `hard_invoice_create_rejects_impossible_calendar_dates` — hard invoice create rejects impossible calendar dates
 - `hard_invoice_finalize_with_a_zero_rate_line_books_a_tagged_zero_vat_posting` — hard invoice finalize with a zero rate line books a tagged zero vat posting
+- `hard_invoice_create_rejects_impossible_calendar_dates` — hard invoice create rejects impossible calendar dates
 - `hard_invoice_list_status_overdue_filters_the_derived_status` — hard invoice list status overdue filters the derived status
 - `hard_jaarrekening_and_export_xaf_reject_a_non_yyyy_year` — hard jaarrekening and export xaf reject a non yyyy year
 - `hard_lib_bank_dry_runs_write_nothing` — hard lib bank dry runs write nothing
 - `hard_lib_dry_runs_write_nothing` — hard lib dry runs write nothing
 - `hard_list_limits_validate_at_the_module_boundary` — hard list limits validate at the module boundary
-- `hard_mcp_dry_runs_validate_like_execute` — hard mcp dry runs validate like execute
-- `hard_mcp_on_a_missing_database_errors_instead_of_creating_one` — hard mcp on a missing database errors instead of creating one
 - `hard_lib_mark_paid_dry_run_writes_nothing_but_still_validates` — hard lib mark paid dry run writes nothing but still validates
+- `hard_mcp_on_a_missing_database_errors_instead_of_creating_one` — hard mcp on a missing database errors instead of creating one
+- `hard_mcp_dry_runs_validate_like_execute` — hard mcp dry runs validate like execute
 - `hard_no_unreferenced_public_items` — hard no unreferenced public items
 - `hard_mcp_journal_honors_limit_with_truncation_and_validates` — hard mcp journal honors limit with truncation and validates
-- `hard_ob_readout_period_with_a_year_boundary_stays_within_the_period` — hard ob readout period with a year boundary stays within the period
 - `hard_mcp_vat_book_leaves_a_draft_and_invoice_pay_defaults_to_outstanding` — hard mcp vat book leaves a draft and invoice pay defaults to outstanding
+- `hard_ob_readout_period_with_a_year_boundary_stays_within_the_period` — hard ob readout period with a year boundary stays within the period
 - `hard_parse_amount_boundaries` — hard parse amount boundaries
 - `hard_parse_period_rejects_out_of_range_months` — hard parse period rejects out of range months
 - `hard_opening_balances_rejects_a_day_overflow_date` — hard opening balances rejects a day overflow date
@@ -727,23 +727,23 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `hard_reversal_of_an_fx_entry_negates_the_fx_amounts` — hard reversal of an fx entry negates the fx amounts
 - `hard_vat_book_with_r_books_no_vat_leg` — hard vat book with r books no vat leg
 - `icp_credit_note_reduces_the_customer_total_and_period_boundaries_hold` — icp credit note reduces the customer total and period boundaries hold
-- `hard_vat_book_with_v_and_0_books_without_a_zero_leg` — hard vat book with v and 0 books without a zero leg
 - `icp_re_base_uses_the_discounted_amount` — icp re base uses the discounted amount
 - `icp_readout_missing_customer_vat_id_fails_loudly` — icp readout missing customer vat id fails loudly
-- `hard_year_end_close_handles_a_zero_result_year` — hard year end close handles a zero result year
-- `if_allocate_largest_remainder_sums_exactly_and_is_deterministic` — if allocate largest remainder sums exactly and is deterministic
-- `icp_readout_totals_per_eu_customer` — icp readout totals per eu customer
+- `hard_vat_book_with_v_and_0_books_without_a_zero_leg` — hard vat book with v and 0 books without a zero leg
 - `icp_readout_no_re_lines_gives_an_empty_listing` — icp readout no re lines gives an empty listing
+- `if_allocate_largest_remainder_sums_exactly_and_is_deterministic` — if allocate largest remainder sums exactly and is deterministic
+- `hard_year_end_close_handles_a_zero_result_year` — hard year end close handles a zero result year
+- `icp_readout_totals_per_eu_customer` — icp readout totals per eu customer
 - `if_bank_auto_match_does_not_match_a_pre_discount_payment` — if bank auto match does not match a pre discount payment
 - `if_booking_with_discounts_uses_discounted_nets_and_vat_per_rate` — if booking with discounts uses discounted nets and vat per rate
 - `if_bank_auto_match_matches_a_discounted_invoice_at_its_discounted_gross` — if bank auto match matches a discounted invoice at its discounted gross
 - `if_cli_rejects_discount_pct_and_amount_together` — if cli rejects discount pct and amount together
-- `if_company_logo_set_extract_round_trip_and_remove` — if company logo set extract round trip and remove
-- `if_company_logo_format_size_and_dimension_guards` — if company logo format size and dimension guards
 - `if_compute_invoice_totals_is_deterministic_across_recomputes` — if compute invoice totals is deterministic across recomputes
-- `if_fractional_quantities_parse_to_milli_units` — if fractional quantities parse to milli units
 - `if_credit_note_inherits_language_and_discounts` — if credit note inherits language and discounts
 - `if_finalize_with_discounts_books_a_balanced_entry` — if finalize with discounts books a balanced entry
+- `if_fractional_quantities_parse_to_milli_units` — if fractional quantities parse to milli units
+- `if_company_logo_set_extract_round_trip_and_remove` — if company logo set extract round trip and remove
+- `if_company_logo_format_size_and_dimension_guards` — if company logo format size and dimension guards
 - `if_fractional_quantity_line_math` — if fractional quantity line math
 - `if_invoice_create_from_items_per_invoice_overrides` — if invoice create from items per invoice overrides
 - `if_invoice_create_from_items_snapshots_catalog_values` — if invoice create from items snapshots catalog values
@@ -753,8 +753,8 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `if_item_guards` — if item guards
 - `if_item_guards_on_invoices` — if item guards on invoices
 - `if_item_update_empty_string_clears_vat_code_and_gl_account` — if item update empty string clears vat code and gl account
-- `if_item_without_vat_code_is_allowed_when_the_vat_module_is_off` — if item without vat code is allowed when the vat module is off
 - `if_line_discount_pct_and_amount_reduce_net_and_vat` — if line discount pct and amount reduce net and vat
+- `if_item_without_vat_code_is_allowed_when_the_vat_module_is_off` — if item without vat code is allowed when the vat module is off
 - `if_line_discounts_parse_and_over_100_pct_is_rejected_at_creation` — if line discounts parse and over 100 pct is rejected at creation
 - `if_pdf_company_logo_renders_as_a_data_uri` — if pdf company logo renders as a data uri
 - `if_pdf_composites_a_transparent_logo_onto_white` — if pdf composites a transparent logo onto white
@@ -771,13 +771,13 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `if_ubl_line_only_discounts_and_category_mapping` — if ubl line only discounts and category mapping
 - `if_ubl_zero_vat_categories_still_emit_a_tax_subtotal` — if ubl zero vat categories still emit a tax subtotal
 - `if_unit_labels_localize` — if unit labels localize
-- `if_recurring_invoice_template_snapshots_catalog_prices_per_run` — if recurring invoice template snapshots catalog prices per run
 - `if_review_fix_reverse_charge_label_and_email_language_follow_the_document` — if review fix reverse charge label and email language follow the document
+- `if_recurring_invoice_template_snapshots_catalog_prices_per_run` — if recurring invoice template snapshots catalog prices per run
 - `import_ubl_create_missing_makes_the_supplier_contact` — import ubl create missing makes the supplier contact
 - `import_ubl_dry_run_validates_but_writes_nothing` — import ubl dry run validates but writes nothing
 - `import_ubl_due_date_defaults_to_issue_plus_30_days` — import ubl due date defaults to issue plus 30 days
-- `import_ubl_malformed_payable_amount_is_collected_with_the_other_errors` — import ubl malformed payable amount is collected with the other errors
 - `import_ubl_explicit_contact_wins_and_missing_contact_is_refused` — import ubl explicit contact wins and missing contact is refused
+- `import_ubl_malformed_payable_amount_is_collected_with_the_other_errors` — import ubl malformed payable amount is collected with the other errors
 - `import_ubl_missing_document_currency_code_is_rejected` — import ubl missing document currency code is rejected
 - `import_ubl_missing_invoice_type_code_is_rejected` — import ubl missing invoice type code is rejected
 - `import_ubl_multiple_party_tax_scheme_entries_still_extract_the_vat_number` — import ubl multiple party tax scheme entries still extract the vat number
@@ -797,14 +797,14 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `invoice_zero_and_exempt_lines_book_without_vat` — invoice zero and exempt lines book without vat
 - `jaarrekening_account_amounts_are_numbers_never_nan` — jaarrekening account amounts are numbers never nan
 - `jaarrekening_after_closing_result_sits_in_equity_and_micro_has_no_wv` — jaarrekening after closing result sits in equity and micro has no wv
-- `jaarrekening_html_escapes_quotes_in_the_company_name` — jaarrekening html escapes quotes in the company name
 - `jaarrekening_custom_account_lands_in_overig_and_still_balances` — jaarrekening custom account lands in overig and still balances
+- `jaarrekening_html_escapes_quotes_in_the_company_name` — jaarrekening html escapes quotes in the company name
 - `jaarrekening_html_renders_account_detail_without_nan` — jaarrekening html renders account detail without nan
-- `jaarrekening_klein_counts_inkoop_once_and_adds_overige_opbrengsten` — jaarrekening klein counts inkoop once and adds overige opbrengsten
 - `jaarrekening_invalid_model_rejected` — jaarrekening invalid model rejected
+- `jaarrekening_klein_counts_inkoop_once_and_adds_overige_opbrengsten` — jaarrekening klein counts inkoop once and adds overige opbrengsten
 - `jaarrekening_klein_pnl_follows_the_fiscal_year` — jaarrekening klein pnl follows the fiscal year
-- `jaarrekening_micro_with_no_activity_is_zero_and_balanced` — jaarrekening micro with no activity is zero and balanced
 - `jaarrekening_klein_statutory_balans_and_wv` — jaarrekening klein statutory balans and wv
+- `jaarrekening_micro_with_no_activity_is_zero_and_balanced` — jaarrekening micro with no activity is zero and balanced
 - `jaarrekening_pdf_renders_bytes` — jaarrekening pdf renders bytes
 - `jaarrekening_pnl_includes_the_afschrijvingen_line` — jaarrekening pnl includes the afschrijvingen line
 - `ledger_drafts_excluded_from_balans_and_pnl` — ledger drafts excluded from balans and pnl
@@ -827,24 +827,24 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `mcp_non_object_json_rpc_messages_get_invalid_request_and_the_server_survives` — mcp non object json rpc messages get invalid request and the server survives
 - `mcp_null_params_answer_cleanly_instead_of_an_internal_error` — mcp null params answer cleanly instead of an internal error
 - `mcp_pnl_reports_the_fiscal_window` — mcp pnl reports the fiscal window
-- `mcp_read_only_tools_are_not_gated` — mcp read only tools are not gated
 - `mcp_readonly_env_blocks_execution` — mcp readonly env blocks execution
+- `mcp_read_only_tools_are_not_gated` — mcp read only tools are not gated
 - `mcp_repeated_signed_calls_verify_and_record_fresh_nonces` — mcp repeated signed calls verify and record fresh nonces
 - `mcp_report_aging_and_report_sales_share_the_shapes` — mcp report aging and report sales share the shapes
 - `mcp_resolve_fx_never_stores_the_fetched_rate_on_a_plan_only_call` — mcp resolve fx never stores the fetched rate on a plan only call
 - `ob_readout_verlegde_eu_sale_reports_2a` — ob readout verlegde eu sale reports 2a
-- `mcp_signed_execute_call_stores_a_verified_audit_row` — mcp signed execute call stores a verified audit row
 - `ob_readout_verlegde_inkoop_and_verkoop` — ob readout verlegde inkoop and verkoop
+- `mcp_signed_execute_call_stores_a_verified_audit_row` — mcp signed execute call stores a verified audit row
 - `mcp_vat_book_maps_to_vat_book_capability` — mcp vat book maps to vat book capability
 - `pnl_still_shows_the_year_result_after_closing` — pnl still shows the year result after closing
 - `prune_backups_on_a_missing_folder_is_a_noop` — prune backups on a missing folder is a noop
 - `recurring_day_28_keeps_the_28th_every_month` — recurring day 28 keeps the 28th every month
+- `payment_term_isolation_between_transfer_and_direct_debit` — payment term isolation between transfer and direct debit
 - `recurring_depreciation_with_residual_absorbs_the_remainder_in_the_final_run` — recurring depreciation with residual absorbs the remainder in the final run
 - `recurring_end_date_stops_the_schedule` — recurring end date stops the schedule
-- `payment_term_isolation_between_transfer_and_direct_debit` — payment term isolation between transfer and direct debit
 - `pnl_and_journal_with_explicit_dates_ignore_the_fiscal_window` — pnl and journal with explicit dates ignore the fiscal window
-- `recurring_template_id_runs_only_that_template` — recurring template id runs only that template
 - `recurring_quarterly_and_yearly_frequencies` — recurring quarterly and yearly frequencies
+- `recurring_template_id_runs_only_that_template` — recurring template id runs only that template
 - `recurring_pause_and_resume_dry_run_render_a_plan` — recurring pause and resume dry run render a plan
 - `report_journal_year_uses_the_fiscal_window` — report journal year uses the fiscal window
 - `report_pnl_year_uses_the_fiscal_window` — report pnl year uses the fiscal window
@@ -856,37 +856,37 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `roles_are_inert_data_when_authz_is_off` — roles are inert data when authz is off
 - `roles_are_self_service_but_viewing_another_actor_is_owner_only` — roles are self service but viewing another actor is owner only
 - `roles_grant_and_revoke_audit_and_warn_on_sod_conflicts` — roles grant and revoke audit and warn on sod conflicts
-- `roles_rejects_an_invalid_role_and_grantee` — roles rejects an invalid role and grantee
-- `roles_revoke_guards_absent_roles_and_the_last_owner` — roles revoke guards absent roles and the last owner
-- `sales_by_item_groups_catalog_items_and_ad_hoc_lines` — sales by item groups catalog items and ad hoc lines
 - `sales_by_contact_net_vat_gross_and_credits_excluded` — sales by contact net vat gross and credits excluded
-- `sign_gate_enforce_with_a_rotated_unregistered_key_is_signature_invalid` — sign gate enforce with a rotated unregistered key is signature invalid
-- `sign_gate_dry_run_fails_identically_before_any_mutation` — sign gate dry run fails identically before any mutation
+- `roles_rejects_an_invalid_role_and_grantee` — roles rejects an invalid role and grantee
+- `sales_by_item_groups_catalog_items_and_ad_hoc_lines` — sales by item groups catalog items and ad hoc lines
+- `roles_revoke_guards_absent_roles_and_the_last_owner` — roles revoke guards absent roles and the last owner
 - `sales_uses_the_fiscal_window` — sales uses the fiscal window
+- `sign_gate_dry_run_fails_identically_before_any_mutation` — sign gate dry run fails identically before any mutation
+- `sign_gate_enforce_with_a_rotated_unregistered_key_is_signature_invalid` — sign gate enforce with a rotated unregistered key is signature invalid
 - `sign_gate_enforce_without_a_key_is_signature_required_and_mutates_nothing` — sign gate enforce without a key is signature required and mutates nothing
-- `sign_gate_locked_human_key_is_passphrase_required_then_env_unlocks` — sign gate locked human key is passphrase required then env unlocks
 - `sign_gate_keygen_stays_exempt_and_enforce_off_needs_an_enrolled_actor` — sign gate keygen stays exempt and enforce off needs an enrolled actor
-- `sign_gate_record_mode_without_a_key_logs_unsigned` — sign gate record mode without a key logs unsigned
+- `sign_gate_locked_human_key_is_passphrase_required_then_env_unlocks` — sign gate locked human key is passphrase required then env unlocks
 - `sign_gate_record_mode_with_an_enrolled_key_marks_the_row_verified` — sign gate record mode with an enrolled key marks the row verified
+- `sign_gate_record_mode_without_a_key_logs_unsigned` — sign gate record mode without a key logs unsigned
 - `sign_gate_revoked_key_is_actor_key_revoked` — sign gate revoked key is actor key revoked
+- `vat_book_dry_run_rejects_unbalanced_postings` — vat book dry run rejects unbalanced postings
+- `sign_gate_unknown_actor_key_is_actor_key_unknown` — sign gate unknown actor key is actor key unknown
 - `vat_mixed_rates_in_one_entry_monthly_readout` — vat mixed rates in one entry monthly readout
 - `vat_private_use_is_always_owed_regardless_of_the_posting_sign` — vat private use is always owed regardless of the posting sign
 - `vat_private_use_p_goes_to_1d_and_5a_at_the_standard_rate` — vat private use p goes to 1d and 5a at the standard rate
 - `vat_reverse_charge_income_reports_the_base_in_1c` — vat reverse charge income reports the base in 1c
-- `verify_bundle_record_mode_tolerates_unknown_revoked_and_invalid_as_unsigned` — verify bundle record mode tolerates unknown revoked and invalid as unsigned
 - `verify_bundle_reused_nonce_is_nonce_reused_even_in_record_mode` — verify bundle reused nonce is nonce reused even in record mode
 - `verify_bundle_stale_timestamp_is_signature_stale_under_enforce` — verify bundle stale timestamp is signature stale under enforce
-- `vat_book_dry_run_rejects_unbalanced_postings` — vat book dry run rejects unbalanced postings
-- `sign_gate_unknown_actor_key_is_actor_key_unknown` — sign gate unknown actor key is actor key unknown
 - `year_end_close_follows_the_fiscal_year` — year end close follows the fiscal year
+- `verify_bundle_record_mode_tolerates_unknown_revoked_and_invalid_as_unsigned` — verify bundle record mode tolerates unknown revoked and invalid as unsigned
 - `year_end_close_posts_closing_and_appropriation` — year end close posts closing and appropriation
 - `year_end_closing_two_years_works_independently` — year end closing two years works independently
+- `who_can_is_the_sod_review_lens_owner_only` — who can is the sod review lens owner only
 - `year_end_dry_run_writes_nothing` — year end dry run writes nothing
 - `year_end_fiscal_year_end_0630_drives_the_jaarrekening_as_of` — year end fiscal year end 0630 drives the jaarrekening as of
 - `year_end_guards_drafts_block_and_empty_year_reports` — year end guards drafts block and empty year reports
 - `year_end_loss_year_closes_with_negative_result_into_equity` — year end loss year closes with negative result into equity
 - `year_end_reversing_the_closing_entries_reopens_the_year` — year end reversing the closing entries reopens the year
-- `who_can_is_the_sod_review_lens_owner_only` — who can is the sod review lens owner only
 
 ### `tests/jurisdictions.rs`
 
@@ -894,8 +894,8 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `jur_bank_import_resolves_the_profile` — jur bank import resolves the profile
 - `jur_be_vat_book_lands_on_the_profile_ledger` — jur be vat book lands on the profile ledger
 - `jur_company_update_country_is_immutable` — jur company update country is immutable
-- `jur_be_vat_file_defaults_to_the_profile_account` — jur be vat file defaults to the profile account
 - `jur_company_update_country_same_value_passes` — jur company update country same value passes
+- `jur_be_vat_file_defaults_to_the_profile_account` — jur be vat file defaults to the profile account
 - `jur_company_update_registration_id` — jur company update registration id
 - `jur_de_bank_add_defaults_to_the_profile_bank_account` — jur de bank add defaults to the profile bank account
 - `jur_cross_border_buyer_endpoint_uses_the_buyer_country_scheme` — jur cross border buyer endpoint uses the buyer country scheme
@@ -925,8 +925,8 @@ suites carry no per-test doc comments, so nothing here is invented.
 - `jur_nl_profile_tax_section_matches_the_legacy_vat_module` — jur nl profile tax section matches the legacy vat module
 - `jur_nl_financial_statements_keep_the_klein_default` — jur nl financial statements keep the klein default
 - `jur_nl_invoice_compliance_is_unchanged` — jur nl invoice compliance is unchanged
-- `jur_profile_indirection_is_live_in_every_command` — jur profile indirection is live in every command
 - `jur_resolve_profile_defaults_to_nl_when_no_company_row_exists` — jur resolve profile defaults to nl when no company row exists
+- `jur_profile_indirection_is_live_in_every_command` — jur profile indirection is live in every command
 - `jur_resolve_profile_defaults_to_nl_without_a_country` — jur resolve profile defaults to nl without a country
 - `jur_resolve_profile_returns_nl_for_a_dutch_company` — jur resolve profile returns nl for a dutch company
 - `jur_ubl_resolves_the_profile` — jur ubl resolves the profile
@@ -984,17 +984,17 @@ suites carry no per-test doc comments, so nothing here is invented.
 
 - `a_non_clone_directory_is_refused` — a non clone directory is refused
 - `a_non_official_remote_is_refused` — a non official remote is refused
-- `a_dry_run_plans_the_update_and_touches_nothing` — a dry run plans the update and touches nothing
 - `a_url_embedding_the_official_path_as_substring_is_refused` — a url embedding the official path as substring is refused
+- `a_dry_run_plans_the_update_and_touches_nothing` — a dry run plans the update and touches nothing
 - `refuses_an_artifact_whose_checksum_does_not_match` — refuses an artifact whose checksum does not match
 - `updates_from_the_release_and_keeps_the_previous_binary` — updates from the release and keeps the previous binary
 - `local_modifications_are_reported_as_overwrite_warnings` — local modifications are reported as overwrite warnings
 - `a_dry_run_records_no_audit_row` — a dry run records no audit row
-- `reinstalls_dependencies_when_package_json_changed` — reinstalls dependencies when package json changed
-- `records_an_audit_row_when_a_company_db_exists` — records an audit row when a company db exists
 - `the_plan_shows_the_incoming_commit_and_current_version` — the plan shows the incoming commit and current version
+- `records_an_audit_row_when_a_company_db_exists` — records an audit row when a company db exists
 - `update_refuses_to_run_without_yes` — update refuses to run without yes
 - `yes_drops_local_commits` — yes drops local commits
 - `yes_overwrites_a_local_customization` — yes overwrites a local customization
 - `yes_resets_the_working_tree_to_origin_main` — yes resets the working tree to origin main
+- `reinstalls_dependencies_when_package_json_changed` — reinstalls dependencies when package json changed
 Generated by `scripts/testreport.sh` — do not edit by hand.
