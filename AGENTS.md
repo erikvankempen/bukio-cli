@@ -13,7 +13,7 @@ bukio --version
 
 The installer is non-interactive and idempotent: it detects the platform,
 verifies the download against the release's `SHA256SUMS` and installs into
-`~/.local/bin`. Use `--version v0.18.0` to pin a release, `--system` for
+`~/.local/bin`. Use `--version v0.18.2` to pin a release, `--system` for
 `/usr/local/bin`. If this machine already has Rust, `cargo binstall bukio-cli`
 does the same thing. Update with `bukio update` (see §3) — never by compiling.
 

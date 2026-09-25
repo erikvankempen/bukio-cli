@@ -8,7 +8,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 
 [![Website](https://img.shields.io/badge/website-agentic.bukio.nl-2b6cb0)](https://agentic.bukio.nl)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.18.1-blue)](https://github.com/erikvankempen/bukio-cli/releases)
+[![Version](https://img.shields.io/badge/version-0.18.2-blue)](https://github.com/erikvankempen/bukio-cli/releases)
 [![Tests](https://img.shields.io/badge/tests-942%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
@@ -57,7 +57,7 @@ binary is the product:
 
   curl -fsSL https://raw.githubusercontent.com/erikvankempen/bukio-cli/main/install.sh | sh
 
-Confirm with `bukio --version` (it should print 0.18.1 or newer).
+Confirm with `bukio --version` (it should print 0.18.2 or newer).
 
 Read the repository README.md and AGENTS.md files, configure `bukio mcp` as a local stdio MCP server, and explain the setup you made. Do not create a company or book real transactions yet. When we start, use named actors, preview every mutation with --dry-run, and ask for confirmation before writing.
 ```
@@ -101,7 +101,7 @@ carry over unchanged — see [Upgrading from 0.17 (Node)](#upgrading-from-017-no
 
 ## Status
 
-**Rust binary is feature-complete against the original JavaScript reference.** All 28 command groups, 134 dispatch arms, 42 MCP tools, and 31 jurisdiction profiles are implemented and verified. The `bukio` binary is a single self-contained executable (~16 MB) with no runtime dependencies beyond SQLite (bundled via rusqlite).
+**Rust binary is feature-complete against the original JavaScript reference.** All 28 command groups, 135 dispatch arms, 42 MCP tools, and 31 jurisdiction profiles are implemented and verified. The `bukio` binary is a single self-contained executable (~16 MB) with no runtime dependencies beyond SQLite (bundled via rusqlite).
 
 This branch is **Rust-only**: the JavaScript reference implementation the port was verified against is *not* tracked here — it lives in this branch's history and in the porting sessions' working copies, where the 324-step parity harness and the ported suites gated equivalence. What the JS produced and the Rust build needs *is* committed: `src/profiles.json` (the 31 jurisdiction profiles) and `src/help.json` (the CLI help text). See `.gitignore` for how the JS tree is excluded and regenerated.
 
@@ -122,7 +122,7 @@ bukio --version
 The script detects your OS, CPU and C library (glibc or musl), downloads the
 matching build, verifies it against the release's `SHA256SUMS`, installs it into
 `~/.local/bin` and then proves it runs. It is non-interactive and idempotent, so
-agents and CI can run it as-is: `--version v0.18.1` pins a release, `--system`
+agents and CI can run it as-is: `--version v0.18.2` pins a release, `--system`
 installs into `/usr/local/bin`, `--prefix <dir>` somewhere else.
 
 Already have Rust? `cargo binstall bukio-cli` installs the same prebuilt binary.
@@ -153,7 +153,7 @@ If you already run the Node version, this is a replacement, not a migration:
 npm uninstall -g bukio-cli        # whatever you installed it as — `npm ls -g --depth=0` shows it
 curl -fsSL https://raw.githubusercontent.com/erikvankempen/bukio-cli/main/install.sh | sh
 which -a bukio                    # should now be ~/.local/bin/bukio, and nothing else
-bukio --version                   # 0.18.1
+bukio --version                   # 0.18.2
 ```
 
 **Remove the npm package first.** Both installs provide a `bukio` command, and
@@ -161,9 +161,10 @@ whichever comes first on `PATH` wins — so a leftover Node install quietly shad
 the binary and leaves you, or your agent, running the old code. `which -a bukio`
 lists every one on `PATH`; you want exactly one.
 
-Nothing else to convert. The database schema and the migration set are unchanged,
-so your books, actor keys and audit history carry over — and the 0.17 binary still
-opens a book that 0.18 wrote, so going back is a real option, not a hope.
+Nothing else to convert. Your books, actor keys and audit history carry over —
+and older binaries still open the book: the one migration 0.18.2 adds is a
+nullable column on `accounts`, appended last and never required by earlier
+versions, so going back is a real option, not a hope.
 [CHANGELOG.md](CHANGELOG.md) lists what changed.
 
 **If you are an agent** doing this on a user's behalf, exactly one instruction of
@@ -1397,14 +1398,14 @@ output. Reasoning tokens are billed at the output rate; models without a
 published list rate (minimax-m2.5, glm, hy3, ox-alpha-free, …) are costed at
 the DeepSeek V4 Flash rate as the default. Data is captured by
 the `bukio-token-track` tool from the agent's session telemetry — including
-delegation subagent sessions, bukio-cli only (snapshot 2026-09-11).
+delegation subagent sessions, bukio-cli only (snapshot 2026-09-25).
 
 **Proven stack:** bukio-cli is developed and operated end-to-end with
 **Hermes Agent** (Nous Research) via OpenCode Go. The main development
-sessions ran **DeepSeek V4 Flash** and **MiMo-V2.5** (a handful of calls via
-the DeepSeek API and other providers directly); the parallel code-review
-subagents (delegation batches) ran **MiMo-V2.5-Pro** and later **hy3**, also
-via OpenCode Go. The live day-to-day operations
+sessions ran **DeepSeek V4 Flash**, **MiMo-V2.5** and, most recently,
+**MiMo-V2.6-Flash** (a handful of calls via the DeepSeek API and other
+providers directly); the parallel code-review subagents (delegation batches)
+ran **MiMo-V2.5-Pro** and later **hy3**, also via OpenCode Go. The live day-to-day operations
 (bank imports, invoice booking, month-end checks) run on the same stack
 against this same codebase.
 
@@ -1412,35 +1413,35 @@ against this same codebase.
 
 | Model | Sessions | API calls | Input | Cached input | Output | Reasoning | Est. cost |
 |---|---|---|---|---|---|---|---|
-| DeepSeek V4 Flash | 123 | 16,362 | 56.89M | 3,324.46M | 13.47M | 7.62M | $23.18 |
-| MiMo-V2.5 (main sessions, incl. the Rust port) | 93 | 8,623 | 42.20M | 1,177.02M | 3.17M | 0.04M | $10.10 |
+| DeepSeek V4 Flash | 122 | 16,349 | 56.78M | 3,323.73M | 13.45M | 7.60M | $23.15 |
+| MiMo-V2.5 (main sessions, incl. the Rust port) | 120 | 9,852 | 49.46M | 1,309.79M | 3.97M | 0.07M | $11.72 |
 | MiMo-V2.5-Pro (review subagents) | 36 | 574 | 6.82M | 42.12M | 1.06M | — | $4.05 |
-| hy3 (delegation subagents) | 24 | 1,371 | 10.18M | 114.27M | 1.20M | 0.72M | $2.28 |
+| hy3 (delegation subagents) | 30 | 1,380 | 10.44M | 114.27M | 1.28M | 0.77M | $2.36 |
 | ox-alpha-free | 7 | 862 | 5.43M | 106.93M | 0.42M | 0.09M | $1.20 |
-| Other models (10: glm, deepseek-flash, qwen, minimax, …) | 24 | 741 | 4.93M | 68.91M | 0.49M | 0.26M | $1.09 |
-| **Total** | **251** | **28,533** | **126.48M** | **4,833.71M** | **19.81M** | **8.72M** | **$41.90** |
+| Other models (12: deepseek-flash, glm, mimo-v2.6-flash, qwen, minimax, …) | 32 | 3,357 | 18.37M | 496.12M | 3.83M | 2.25M | $5.66 |
+| **Total** | **285** | **32,374** | **147.30M** | **5,392.95M** | **24.01M** | **10.77M** | **$48.14** |
 
-**$41.90 total** at official list prices for the entire project (28,533
-API calls across 251 sessions, ≈ 4.98B tokens). A session can span several
-models, so the per-model session counts add up to more than the 251 distinct
+**$48.14 total** at official list prices for the entire project (32,374
+API calls across 285 sessions, ≈ 5.58B tokens). A session can span several
+models, so the per-model session counts add up to more than the 285 distinct
 sessions; the per-model costs are the tracker's rounded figures.
 
 ### Developer Time (contributed, unpaid)
 
 Beyond API spend, this project took my review-and-direction time. Because
 the agent does the building, my own messages are the only interaction
-channel — so I measure my time by them: across the 66 working sessions
-(Aug 4 – Sep 11, 2026, plus 265 review-subagent sessions) I sent **2,104 messages**, each costed at **≈ 60 s of
+channel — so I measure my time by them: across the 59 working sessions
+(Aug 4 – Sep 25, 2026, plus 226 review-subagent sessions) I sent **2,413 messages**, each costed at **≈ 60 s of
 overhead** (reading, deciding, reviewing) plus composition time scaled by
 message length and complexity (≈ 2 min/message effective). That works out to
-**≈ 70 hours total**, all contributed unpaid.
+**≈ 80 hours total**, all contributed unpaid.
 
 At a **senior** Dutch software-developer rate of **≈ €45/hour** (Amsterdam
 senior average, 2026: €45/h
 [Glassdoor](https://www.glassdoor.com/Salaries/amsterdam-netherlands-senior-software-engineer-salary-SRCH_IL.0,21_IM1112_KO22,46.htm),
 €45.50/h
 [SalaryExpert](https://www.salaryexpert.com/salary/job/software-developer/netherlands/amsterdam);
-the national average is lower), my time is worth **≈ €3,150**.
+the national average is lower), my time is worth **≈ €3,600**.
 
 Stated plainly, so nothing is hidden:
 
@@ -1450,31 +1451,31 @@ Stated plainly, so nothing is hidden:
   professional rate overstates the market value of my review time by a wide
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
-- **It was free:** the ≈ €3,150 is an imputed opportunity cost, not money paid.
-  My out-of-pocket spend remains **$41.90** in API costs.
+- **It was free:** the ≈ €3,600 is an imputed opportunity cost, not money paid.
+  My out-of-pocket spend remains **$48.14** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
-  conventional code review of a 63 KLOC codebase would take; treat them as
+  conventional code review of a 64 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
 
 ### COCOMO benchmark
 
 For a frame of reference, the same codebase priced by the classic COCOMO
-model (Boehm, 1981): **63,821 non-blank, non-comment lines of Rust**
-across 51 files (40,633 in `src/`, 23,188 in `tests/`), i.e. **63.82 KLOC**
+model (Boehm, 1981): **64,342 non-blank, non-comment lines of Rust**
+across 52 files (40,871 in `src/`, 23,471 in `tests/`), i.e. **64.34 KLOC**
 (measured with `scc` v3.7.0, the same tool the earlier JavaScript figure used).
 
 | COCOMO mode | Effort (person-months) | Duration | Team size | Cost @ €9,000/PM\* |
 |---|---|---|---|---|
-| Organic | 188.5 PM | 18.3 months | ~10 developers | ≈ €1,697K |
-| Semi-detached | 315.3 PM | 18.7 months | ~17 developers | ≈ €2,837K |
-| Embedded | 527.5 PM | 18.6 months | ~28 developers | ≈ €4,748K |
+| Organic | 190.2 PM | 18.4 months | ~10 developers | ≈ €1,711K |
+| Semi-detached | 318.2 PM | 18.8 months | ~17 developers | ≈ €2,863K |
+| Embedded | 532.7 PM | 18.6 months | ~29 developers | ≈ €4,794K |
 
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
-**Comparison:** a conventional team building this would estimate **≈ 189–528
-person-months (≈ €1.70M–€4.75M)**; the AI-assisted build consumed **$41.90 in
-API costs plus ≈ €3,150 of my review-and-direction time (contributed, unpaid
-— see above)** over 66 working sessions in under six weeks — still a tiny fraction of
+**Comparison:** a conventional team building this would estimate **≈ 190–533
+person-months (≈ €1.71M–€4.79M)**; the AI-assisted build consumed **$48.14 in
+API costs plus ≈ €3,600 of my review-and-direction time (contributed, unpaid
+— see above)** over 59 working sessions in under eight weeks — still a tiny fraction of
 the conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.

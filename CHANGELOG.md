@@ -6,6 +6,53 @@ match `Cargo.toml` and are bumped at release time. Work in progress on the
 `dev` branch lives under **[Unreleased]** and moves to a version heading when
 merged to `main` and released.
 
+## [0.18.2] — 2026-09-25
+
+### Fixed
+
+- **Posting follows your chart's special accounts now, not a built-in code.**
+  Every account the engine picks on your behalf — the receivable on `invoice
+  finalize` and on a bank payment, the sales and output-VAT legs, the bank
+  account used by `bank add` / `bank import` and by asset disposal, the equity
+  account at year-end close — was read from a *code* in the jurisdiction
+  profile (NL: `1200` debtors, `1100` bank). A book whose chart came from
+  another package numbers its accounts differently, so an open invoice's
+  receivable could land on an unrelated account: silent, balanced, and wrong —
+  on one book, on a fixed asset, where it sat until the invoice was paid. The
+  engine now uses the account **flagged for the job in your own chart**, and
+  only falls back to the profile's code when that account really is that
+  account. Reported in
+  [#5](https://github.com/erikvankempen/bukio-cli/issues/5).
+
+### Added
+
+- **Account roles.** An account can be flagged with a role — `debtors`,
+  `creditors`, `bank`, `revenue`, `vat_liability`, `equity` — so the engine
+  knows which one to use when you have not said so yourself. Roles are
+  inferred from the account's name and type whenever a chart is created or
+  imported (`init`, `import xaf`, `import journal --create-missing`,
+  `account import`), and can be set or cleared by hand:
+  - `bukio account add … --role <role>` — create and claim in one step;
+  - `bukio account set-role --code <code> --role <role>`, or `--clear` to
+    release, both with `--dry-run`;
+  - `account show` and `account list --json` report the `role`.
+  A second account claiming a role that is already held is refused
+  (`ROLE_TAKEN`) instead of quietly moving the flag, and an unknown role is
+  `INVALID_ROLE`.
+- Chart imports keep the flags honest: when an import renames an account, a
+  role that account no longer justifies is released and handed to the account
+  that now deserves it — so the result does not depend on the order the file
+  lists its accounts in.
+
+### Changed
+
+- **Database format: this release adds migration 027** — one nullable `role`
+  column on `accounts` plus a unique index per role, the schema change
+  `RELEASING.md` asks a patch release to declare instead of hide. Rollback
+  stays safe: the column is nullable and appended last, and no binary ever
+  lowers `PRAGMA user_version`, so 0.18.1 (and 0.17) open a book written by
+  0.18.2 unchanged and simply ignore the flag they do not know about.
+
 ## [0.18.1] — 2026-09-21
 
 ### Fixed
