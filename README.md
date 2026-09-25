@@ -1398,7 +1398,10 @@ output. Reasoning tokens are billed at the output rate; models without a
 published list rate (minimax-m2.5, glm, hy3, ox-alpha-free, …) are costed at
 the DeepSeek V4 Flash rate as the default. Data is captured by
 the `bukio-token-track` tool from the agent's session telemetry — including
-delegation subagent sessions, bukio-cli only (snapshot 2026-09-25).
+delegation subagent sessions, bukio-cli **development** only: the tracker
+excludes sessions that merely mention the project (personal, operations and
+other-project work, together with their delegation children), so the figures
+below describe this repository and nothing else (snapshot 2026-09-25).
 
 **Proven stack:** bukio-cli is developed and operated end-to-end with
 **Hermes Agent** (Nous Research) via OpenCode Go. The main development
@@ -1413,35 +1416,38 @@ against this same codebase.
 
 | Model | Sessions | API calls | Input | Cached input | Output | Reasoning | Est. cost |
 |---|---|---|---|---|---|---|---|
-| DeepSeek V4 Flash | 122 | 16,349 | 56.78M | 3,323.73M | 13.45M | 7.60M | $23.15 |
-| MiMo-V2.5 (main sessions, incl. the Rust port) | 120 | 9,852 | 49.46M | 1,309.79M | 3.97M | 0.07M | $11.72 |
+| DeepSeek V4 Flash | 115 | 15,817 | 53.86M | 3,246.05M | 12.91M | 7.29M | $22.29 |
+| MiMo-V2.5 (main sessions, incl. the Rust port) | 44 | 6,287 | 23.91M | 913.26M | 1.96M | 0.02M | $6.46 |
 | MiMo-V2.5-Pro (review subagents) | 36 | 574 | 6.82M | 42.12M | 1.06M | — | $4.05 |
-| hy3 (delegation subagents) | 30 | 1,380 | 10.44M | 114.27M | 1.28M | 0.77M | $2.36 |
-| ox-alpha-free | 7 | 862 | 5.43M | 106.93M | 0.42M | 0.09M | $1.20 |
-| Other models (12: deepseek-flash, glm, mimo-v2.6-flash, qwen, minimax, …) | 32 | 3,357 | 18.37M | 496.12M | 3.83M | 2.25M | $5.66 |
-| **Total** | **285** | **32,374** | **147.30M** | **5,392.95M** | **24.01M** | **10.77M** | **$48.14** |
+| hy3 (delegation subagents) | 16 | 854 | 5.68M | 69.92M | 0.80M | 0.48M | $1.35 |
+| ox-alpha-free | 4 | 308 | 3.31M | 43.78M | 0.11M | 0.02M | $0.62 |
+| Other models (8: deepseek-flash, glm, mimo-v2.6-flash, …) | 7 | 1,695 | 7.01M | 260.13M | 1.63M | 1.04M | $2.46 |
+| **Total** | **194** | **25,535** | **100.60M** | **4,575.27M** | **18.47M** | **8.85M** | **$37.22** |
 
-**$48.14 total** at official list prices for the entire project (32,374
-API calls across 285 sessions, ≈ 5.58B tokens). A session can span several
-models, so the per-model session counts add up to more than the 285 distinct
-sessions; the per-model costs are the tracker's rounded figures.
+**$37.22 total** at official list prices for the entire project (25,535
+API calls across 194 sessions, ≈ 4.70B tokens). A session can span several
+models, so the per-model session counts add up to more than the 194 distinct
+sessions; the per-model costs are the tracker's rounded figures, and the total
+is theirs too — the columns can therefore differ from their own sum by a cent.
 
 ### Developer Time (contributed, unpaid)
 
 Beyond API spend, this project took my review-and-direction time. Because
 the agent does the building, my own messages are the only interaction
-channel — so I measure my time by them: across the 59 working sessions
-(Aug 4 – Sep 25, 2026, plus 226 review-subagent sessions) I sent **2,413 messages**, each costed at **≈ 60 s of
+channel — so I measure my time by them: across the 35 working sessions
+(Aug 4 – Sep 25, 2026, plus 159 review-subagent sessions) I sent **1,891 messages**, each costed at **≈ 60 s of
 overhead** (reading, deciding, reviewing) plus composition time scaled by
 message length and complexity (≈ 2 min/message effective). That works out to
-**≈ 80 hours total**, all contributed unpaid.
+**≈ 63 hours total**, all contributed unpaid. The working-session count is the
+deduplicated set of sessions this project actually owns — sessions that merely
+mention it are excluded the same way they are above.
 
 At a **senior** Dutch software-developer rate of **≈ €45/hour** (Amsterdam
 senior average, 2026: €45/h
 [Glassdoor](https://www.glassdoor.com/Salaries/amsterdam-netherlands-senior-software-engineer-salary-SRCH_IL.0,21_IM1112_KO22,46.htm),
 €45.50/h
 [SalaryExpert](https://www.salaryexpert.com/salary/job/software-developer/netherlands/amsterdam);
-the national average is lower), my time is worth **≈ €3,600**.
+the national average is lower), my time is worth **≈ €2,835**.
 
 Stated plainly, so nothing is hidden:
 
@@ -1451,8 +1457,8 @@ Stated plainly, so nothing is hidden:
   professional rate overstates the market value of my review time by a wide
   margin. I include it high on purpose: every cost of this project is
   quantified rather than tucked away as unmeasured "effort and work".
-- **It was free:** the ≈ €3,600 is an imputed opportunity cost, not money paid.
-  My out-of-pocket spend remains **$48.14** in API costs.
+- **It was free:** the ≈ €2,835 is an imputed opportunity cost, not money paid.
+  My out-of-pocket spend remains **$37.22** in API costs.
 - **Not a full review:** these hours do not come close to the effort a
   conventional code review of a 64 KLOC codebase would take; treat them as
   my direction-and-check time, not a substitute for professional review.
@@ -1473,9 +1479,9 @@ across 52 files (40,871 in `src/`, 23,471 in `tests/`), i.e. **64.34 KLOC**
 \*Fully-loaded senior developer rate in the Netherlands (2026).
 
 **Comparison:** a conventional team building this would estimate **≈ 190–533
-person-months (≈ €1.71M–€4.79M)**; the AI-assisted build consumed **$48.14 in
-API costs plus ≈ €3,600 of my review-and-direction time (contributed, unpaid
-— see above)** over 59 working sessions in under eight weeks — still a tiny fraction of
+person-months (≈ €1.71M–€4.79M)**; the AI-assisted build consumed **$37.22 in
+API costs plus ≈ €2,835 of my review-and-direction time (contributed, unpaid
+— see above)** over 35 working sessions in under eight weeks — still a tiny fraction of
 the conventional estimate.
 COCOMO is a rough 1981-era estimate (organic/semi-detached/embedded are the
 three standard modes); treat the ratios, not the decimals, as the point.
