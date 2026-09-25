@@ -59,7 +59,7 @@ does the same thing. Update with `bukio update` (see §3) — never by compiling
 | `bukio entry reverse --id N [--reason ".."] [--dry-run]` | Post a contra-entry that cancels entry N. |
 | `bukio entry list [--state draft\|posted] [--limit N]` | List entries (newest first). |
 | `bukio entry show --id N` | One entry + postings. |
-| `bukio account add/list/show/deactivate/reactivate` | Chart of accounts management. |
+| `bukio account add/list/show/deactivate/reactivate/set-role` | Chart of accounts management. Some accounts play a fixed role in the books — flag them with `account add --role <r>` or `account set-role --code <c> --role <r>` (clear with `--clear`): `debtors`, `creditors`, `bank`, `revenue`, `vat_liability`, `equity`. The engine posts to the flagged account by default; charts seeded or imported get the flag inferred from the account name and type, so an imported chart works without configuration. |
 | `bukio account import --file chart.csv [--dry-run]` | Import a chart: `code,name,type,normal_balance[,taxonomy_code]` (legacy header `rgs_code` still accepted). |
 | `bukio cost-center add --code C --name N` / `list` / `show --code C` / `deactivate` / `reactivate` | Cost-center registry (analytical dimension for management reporting). `admin.chart` role. |
 | `bukio report cost-center [--year YYYY] [--period YYYY-Qn\|YYYY-MM] [--from D --to D] [--cost-center CODE]` | Cost-center analysis: revenue/costs/result per center for any period. `report.read` role. |
@@ -933,6 +933,7 @@ authz off.
 | `BAD_JSON` / `BODY_TOO_LARGE` / `INVALID_ENVELOPE` / `CMD_MISMATCH` / `INVALID_LISTEN` / `TLS_KEY_REQUIRED` | Server rejected the request: body not JSON, > 10 MB, envelope missing `args.argv`, `cmd` does not match the argv's first words, `--listen` not `host:port`, or `--tls-cert` without `--tls-key` | Use the official CLI as the client; fix the `--listen`/TLS flags on `server start` |
 | `SERVER_EXEC` | The server could not spawn its own CLI to run the verified envelope | Check that the bukio binary is on the server's PATH |
 | `ACCOUNT_EXISTS` / `ACCOUNT_TYPE` / `INVALID_CODE` / `INVALID_NORMAL_BALANCE` / `INVALID_RGS_CODE` | Account code taken, bad type, or malformed code/balance/rgs on `account add`/`import` | Fix the account arguments (RGS like `WKPR.70`) |
+| `INVALID_ROLE` / `ROLE_TAKEN` | Unknown role name, or another account already carries that role (`account add --role`, `account set-role`) | `account list --json` shows each account's `role`; clear the current holder first |
 | `COST_CENTER_EXISTS` / `COST_CENTER_NOT_FOUND` / `COST_CENTER_INACTIVE` / `INVALID_CODE` / `INVALID_NAME` | Cost center code taken, unknown, or inactive on `cost-center add`/`deactivate`; malformed code/name | Check `cost-center list` first; reactivate before re-booking |
 | `ALREADY_ACTIVE` / `ALREADY_INACTIVE` / `ALREADY_COMPLETED` / `ALREADY_DISPOSED` / `SCHEME_NAME_TAKEN` / `SCHEME_NOT_FOUND` | Assets state conflicts (activate/pause/dispose/completed) or scheme name taken/unknown | Check `assets list` / `assets schemes list` first |
 | `INVALID_COMBINATION` / `INVALID_DEPRECIATION` / `INVALID_LINE` / `INVALID_MODEL` / `INVALID_RESIDUAL` | Assets/jaarrekening argument combos malformed (depreciation method, line spec, micro/klein model) | Use the values the flag help shows |

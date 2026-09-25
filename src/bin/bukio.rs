@@ -237,6 +237,7 @@ fn try_match_cmd(
         ["account", "show"] => cmd_account_show(argv, db_path),
         ["account", "deactivate"] => cmd_account_deactivate(argv, db_path, actor, dry_run),
         ["account", "reactivate"] => cmd_account_reactivate(argv, db_path, actor, dry_run),
+        ["account", "set-role"] => cmd_account_set_role(argv, db_path, actor, dry_run),
         ["account", "import"] => cmd_account_import(argv, db_path, actor, dry_run),
 
         // ── cost-center ───────────────────────────────────────────────
@@ -464,6 +465,7 @@ fn dispatch(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> Resul
                     | "--on"
                     | "--off"
                     | "--mark-filed"
+                    | "--clear"
                     | "--peppol"
             );
             if takes_value && i + 1 < argv.len() && !argv[i + 1].starts_with('-') {
@@ -905,6 +907,9 @@ fn cmd_account_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
     let type_ = arg(argv, "--type").ok_or_else(|| missing_arg("--type"))?;
     let nb = arg(argv, "--normal-balance").ok_or_else(|| missing_arg("--normal-balance"))?;
     let tax = arg(argv, "--taxonomy-code");
+    // --role: flag the account for a special job (debtors, creditors, bank,
+    // revenue, vat_liability, equity) so the engine posts to it by default
+    let role = arg(argv, "--role");
     let new = bukio::accounts::NewAccount {
         code: &code,
         name: &name,
@@ -916,14 +921,26 @@ fn cmd_account_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
         bukio::accounts::validate_account(&new)?;
         let db = open_existing(db_path)?;
         let exists = bukio::accounts::get_account_by_code(&db, &code).is_some();
+        if let Some(r) = role.as_deref() {
+            bukio::accounts::ensure_role_available(&db, &code, r)?;
+        }
         return Ok(json!({
             "action": "add account",
-            "account": { "code": code, "name": name, "type": type_, "normal_balance": nb, "taxonomy_code": tax },
+            "account": { "code": code, "name": name, "type": type_, "normal_balance": nb, "taxonomy_code": tax, "role": role },
             "exists": exists, "dryRun": true,
         }));
     }
     let db = open_existing(db_path)?;
+    // check the flag BEFORE writing: a refused role must not leave a new
+    // account behind
+    if let Some(r) = role.as_deref() {
+        bukio::accounts::ensure_role_available(&db, &code, r)?;
+    }
     let account = bukio::accounts::create_account(&db, &new)?;
+    let account = match role.as_deref() {
+        Some(r) => bukio::accounts::set_account_role(&db, &code, Some(r), false)?,
+        None => account,
+    };
     bukio::audit::record(
         &db,
         bukio::audit::RecordArgs {
@@ -931,13 +948,59 @@ fn cmd_account_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
             action: "account.add",
             command: Some("account add"),
             args: Some(
-                json!({ "code": code, "name": name, "type": type_, "normal_balance": nb, "taxonomy_code": tax }),
+                json!({ "code": code, "name": name, "type": type_, "normal_balance": nb, "taxonomy_code": tax, "role": role }),
             ),
             outcome: "ok",
             entry_ids: vec![],
         },
     )?;
     Ok(account)
+}
+
+/// `account set-role --code C --role R` (or `--clear`): flag an existing
+/// account for — or clear it from — a special job. This is how an agent
+/// overrides what the chart inference decided.
+fn cmd_account_set_role(
+    argv: &[String],
+    db_path: &str,
+    actor: &str,
+    dry_run: bool,
+) -> Result<Value> {
+    require_actor(actor)?;
+    let code = arg(argv, "--code").ok_or_else(|| missing_arg("--code"))?;
+    let clear = has_flag(argv, "--clear");
+    let role = arg(argv, "--role");
+    if clear && role.is_some() {
+        return Err(BukioError::new(
+            "INVALID_ARGS",
+            "--clear and --role are mutually exclusive",
+        ));
+    }
+    if !clear && role.is_none() {
+        return Err(missing_arg("--role"));
+    }
+    let wanted: Option<String> = if clear { None } else { role };
+    let db = open_existing(db_path)?;
+    // dry_run validates exactly what the real run validates
+    bukio::accounts::set_account_role(&db, &code, wanted.as_deref(), true)?;
+    if dry_run {
+        return Ok(json!({
+            "action": "set account role", "code": code, "role": wanted, "dryRun": true,
+        }));
+    }
+    let updated = bukio::accounts::set_account_role(&db, &code, wanted.as_deref(), false)?;
+    bukio::audit::record(
+        &db,
+        bukio::audit::RecordArgs {
+            actor,
+            action: "account.set-role",
+            command: Some("account set-role"),
+            args: Some(json!({ "code": code, "role": wanted })),
+            outcome: "ok",
+            entry_ids: vec![],
+        },
+    )?;
+    Ok(json!({ "account": updated }))
 }
 
 fn cmd_account_list(argv: &[String], db_path: &str) -> Result<Value> {
@@ -1626,13 +1689,11 @@ fn cmd_bank_add(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -> R
     let iban = arg(argv, "--iban").ok_or_else(|| missing_arg("--iban"))?;
     let name = arg(argv, "--name");
     let account_code = arg(argv, "--account-code").unwrap_or_else(|| {
-        let profile = bukio::accounts::resolve_profile(&db).ok();
-        profile
-            .and_then(|p| {
-                p["reporting"]["bankAccountDefault"]
-                    .as_str()
-                    .map(String::from)
-            })
+        // the book's own bank account, not the profile's default-chart code
+        let profile_default = bukio::accounts::resolve_profile(&db)
+            .ok()
+            .and_then(|p| p["reporting"]["bankAccountDefault"].as_str());
+        bukio::accounts::resolve_special(&db, "bank", profile_default)
             .unwrap_or_else(|| "1100".into())
     });
     let result = bukio::bank::get_or_create_bank_account(
@@ -1676,7 +1737,13 @@ fn cmd_bank_import(argv: &[String], db_path: &str, actor: &str, dry_run: bool) -
     let file = arg(argv, "--file").ok_or_else(|| missing_arg("--file"))?;
     let iban = arg(argv, "--iban").ok_or_else(|| missing_arg("--iban"))?;
     let name = arg(argv, "--name");
-    let account_code = arg(argv, "--account-code").unwrap_or_else(|| "1100".into());
+    let account_code = arg(argv, "--account-code").unwrap_or_else(|| {
+        let profile_default = bukio::accounts::resolve_profile(&db)
+            .ok()
+            .and_then(|p| p["reporting"]["bankAccountDefault"].as_str());
+        bukio::accounts::resolve_special(&db, "bank", profile_default)
+            .unwrap_or_else(|| "1100".into())
+    });
     let content = std::fs::read_to_string(&file)
         .map_err(|e| BukioError::new("FILE_ERROR", format!("cannot read {file}: {e}")))?;
     let (transactions, skipped, from_csv) = if content.trim_start().starts_with('<') {

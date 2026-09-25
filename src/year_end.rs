@@ -150,7 +150,14 @@ pub fn year_end_close(db: &Connection, year: &str, actor: &str, dry_run: bool) -
     let profile = resolve_profile(db)?;
     let closing = &profile["closing"];
     let result_account = closing["resultAccount"].as_str().unwrap_or("9900");
-    let equity_account = closing["equityAccount"].as_str().unwrap_or("3000");
+    // the appropriation lands on THIS book's equity account, not the
+    // profile's code (see accounts::resolve_special)
+    let equity_account = crate::accounts::resolve_special(
+        db,
+        "equity",
+        closing["equityAccount"].as_str(),
+    )
+    .unwrap_or_else(|| "3000".into());
 
     let (fy_from, fy_to) = fiscal_year_window(db, year)?;
 

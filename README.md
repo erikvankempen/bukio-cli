@@ -9,7 +9,7 @@ VAT-optional · Peppol BIS 3.0-ready · Local-first (SQLite) · MCP-native
 [![Website](https://img.shields.io/badge/website-agentic.bukio.nl-2b6cb0)](https://agentic.bukio.nl)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.18.1-blue)](https://github.com/erikvankempen/bukio-cli/releases)
-[![Tests](https://img.shields.io/badge/tests-937%20passing-brightgreen)](test/report.md)
+[![Tests](https://img.shields.io/badge/tests-942%20passing-brightgreen)](test/report.md)
 [![Peppol](https://img.shields.io/badge/Peppol-BIS%203.0%20ready-orange)](https://peppol.eu/)
 [![MCP](https://img.shields.io/badge/MCP-server-blueviolet)](#using-agents)
 
@@ -553,11 +553,12 @@ Chart of accounts management.
 
 | Command | Purpose |
 |---------|---------|
-| `account add --code <c> --name <n> --type <t> --normal-balance <d\|c> [--taxonomy-code <r>] [--dry-run]` | Add an account |
+| `account add --code <c> --name <n> --type <t> --normal-balance <d\|c> [--taxonomy-code <r>] [--role <r>] [--dry-run]` | Add an account; `--role` flags it as a special-purpose account (`debtors`, `creditors`, `bank`, `revenue`, `vat_liability`, `equity`) |
 | `account list [--type <t>] [--include-inactive]` | List accounts |
 | `account show --code <c>` | Show one account |
 | `account deactivate --code <c>` | Deactivate (blocks new postings; history stays) |
 | `account reactivate --code <c>` | Reactivate |
+| `account set-role --code <c> --role <r> \| --clear [--dry-run]` | Flag (or clear) a special-purpose account — the engine posts to the flagged account for that role by default |
 | `account import --file <chart.csv> [--dry-run]` | Import a chart from CSV: `code,name,type,normal_balance[,taxonomy_code]` (legacy `rgs_code` header still accepted) |
 
 The bundled default chart lives at `assets/chart-nl.csv` — you can import it (or your own) into any database:
@@ -1224,6 +1225,7 @@ The version history is recorded in [CHANGELOG.md](CHANGELOG.md); the agent manua
 | `ACCOUNT_NOT_FOUND` | Account code does not exist |
 | `ACCOUNT_INACTIVE` | Account exists but is inactive |
 | `ACCOUNT_EXISTS` | Account code already exists (account creation) |
+| `INVALID_ROLE` / `ROLE_TAKEN` | Unknown role name, or another account already carries that role (`account add --role`, `account set-role`) |
 | `INVALID_CODE` / `INVALID_NAME` / `INVALID_TYPE` / `INVALID_NORMAL_BALANCE` / `INVALID_COMBINATION` | Account validation |
 | `NOT_FOUND` | Entry id does not exist |
 | `ALREADY_POSTED` | Entry is already posted |

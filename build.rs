@@ -20,6 +20,10 @@ fn main() {
         })
         .collect();
     entries.sort();
+    // watch the DIRECTORY too: a migration added after the last build is not
+    // covered by the per-file directives below, and the binary would silently
+    // run without it
+    println!("cargo:rerun-if-changed=migrations");
     let mut out = String::from("pub static MIGRATIONS: &[(u32, &str)] = &[\n");
     for (v, n) in entries {
         println!("cargo:rerun-if-changed=migrations/{n}");

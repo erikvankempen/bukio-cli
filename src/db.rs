@@ -138,7 +138,8 @@ mod tests {
     fn migration_chain_upgrades_a_v020_database() {
         let db = db_at_v020();
         migrate(&db).unwrap(); // the real runner
-        assert_eq!(int_of(&db, "PRAGMA user_version"), 26); // 021-026 chain
+        // the whole chain, always current (a new migration must not break this)
+        assert_eq!(int_of(&db, "PRAGMA user_version"), migrations_data::MIGRATIONS.last().unwrap().0 as i64);
 
         // company: renamed identifier columns, jurisdiction columns, CHECK gone
         let cols = columns_of(&db, "company");
@@ -299,7 +300,7 @@ mod tests {
         let tables = table_names(&db);
         assert!(tables.contains(&"actor_keys".to_string()));
         assert!(tables.contains(&"settings".to_string()));
-        assert_eq!(int_of(&db, "PRAGMA user_version"), 26); // 001-026
+        assert_eq!(int_of(&db, "PRAGMA user_version"), migrations_data::MIGRATIONS.last().unwrap().0 as i64);
     }
 
     #[test]

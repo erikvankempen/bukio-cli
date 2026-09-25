@@ -827,39 +827,40 @@ pub fn next_invoice_number(db: &Connection, year: i64) -> Result<String> {
 
 fn posting_defaults(db: &Connection) -> Result<Value> {
     let profile = resolve_profile(db)?;
-    let sales = profile["reporting"]["defaultChart"]
+    // Which account MEANS what is decided by this book's chart (the role
+    // flag, see accounts::resolve_special); the profile only supplies the
+    // fallback code for its own default chart.
+    let sales_default = profile["reporting"]["defaultChart"]
         .as_array()
-        .and_then(|arr| arr.iter().find(|a| a["type"] == "income"));
-    let sales_code = sales.ok_or_else(|| {
-        invoice_error("FORMAT_NOT_SUPPORTED", "profile declares no income account")
-    })?["code"]
-        .as_str()
-        .ok_or_else(|| invoice_error("FORMAT_NOT_SUPPORTED", "income account has no code"))?;
+        .and_then(|arr| arr.iter().find(|a| a["type"] == "income"))
+        .and_then(|a| a["code"].as_str());
+    let sales_code = crate::accounts::resolve_special(db, "revenue", sales_default)
+        .ok_or_else(|| invoice_error("FORMAT_NOT_SUPPORTED", "profile declares no income account"))?;
 
     let mut vat_liability_code = None;
     if is_vat_enabled(db) {
-        let vat_liab = profile["tax"]["accounts"]["ledger"]
+        let vat_default = profile["tax"]["accounts"]["ledger"]
             .as_array()
-            .and_then(|arr| arr.iter().find(|a| a["type"] == "liability"));
+            .and_then(|arr| arr.iter().find(|a| a["type"] == "liability"))
+            .and_then(|a| a["code"].as_str());
         vat_liability_code = Some(
-            vat_liab.ok_or_else(|| {
+            crate::accounts::resolve_special(db, "vat_liability", vat_default).ok_or_else(|| {
                 invoice_error(
                     "FORMAT_NOT_SUPPORTED",
                     "profile declares no VAT liability account",
                 )
-            })?["code"]
-                .as_str()
-                .ok_or_else(|| {
-                    invoice_error("FORMAT_NOT_SUPPORTED", "VAT liability account has no code")
-                })?
-                .to_string(),
+            })?,
         );
     }
 
     Ok(json!({
         "salesCode": sales_code,
         "vatLiabilityCode": vat_liability_code,
-        "debtorsCode": profile["reporting"]["debtorsAccount"],
+        "debtorsCode": crate::accounts::resolve_special(
+            db,
+            "debtors",
+            profile["reporting"]["debtorsAccount"].as_str()
+        ),
     }))
 }
 
@@ -1782,10 +1783,14 @@ pub fn payment_from_bank(
         false,
         Some(bank_tx_id),
     )?;
-    let debtors_code = crate::accounts::resolve_profile(&tx)
-        .ok()
-        .and_then(|p| p["reporting"]["debtorsAccount"].as_str().map(String::from))
-        .unwrap_or_else(|| "1200".into());
+    let debtors_code = crate::accounts::resolve_special(
+        &tx,
+        "debtors",
+        crate::accounts::resolve_profile(&tx)
+            .ok()
+            .and_then(|p| p["reporting"]["debtorsAccount"].as_str()),
+    )
+    .unwrap_or_else(|| "1200".into());
     let mut postings = vec![
         PostingSpec {
             code: bank_code,

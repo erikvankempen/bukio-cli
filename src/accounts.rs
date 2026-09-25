@@ -47,6 +47,211 @@ pub fn resolve_profile(db: &Connection) -> Result<&'static Value> {
 
 const VALID_TYPES: [&str; 5] = ["asset", "liability", "equity", "income", "expense"];
 
+// --- special-meaning account roles ------------------------------------------
+//
+// Some accounts carry a fixed job in the books and the engine posts to them by
+// default whenever no account is specified: accounts receivable, accounts
+// payable, the bank account, the sales leg, the output-VAT leg. The flag lives
+// on the ACCOUNT rather than in the jurisdiction profile, because a profile
+// only knows its own default chart's codes — a book imported from another
+// package numbers its accounts differently (same account, other code; or the
+// same code, other account).
+
+/// The roles the engine understands. At most one account carries each role
+/// (partial unique index on `accounts.role`), and at most one role per account.
+pub const VALID_ROLES: [&str; 6] =
+    ["debtors", "creditors", "bank", "revenue", "vat_liability", "equity"];
+
+fn validate_role(role: &str) -> Result<()> {
+    if VALID_ROLES.contains(&role) {
+        Ok(())
+    } else {
+        Err(BukioError::new(
+            "INVALID_ROLE",
+            format!("role '{role}' must be one of {}", VALID_ROLES.join(", ")),
+        ))
+    }
+}
+
+/// Does this (type, name) pair look like `role`? ONE predicate, shared by the
+/// chart inference (seed/import/create) and by `resolve_special`'s chart scan,
+/// so a chart gets flagged exactly the way it is later read. Type first: it
+/// keeps "Bankkosten" out of `bank` and "Te vorderen omzetbelasting" out of
+/// `debtors`.
+pub fn matches_role(type_: &str, name: &str, role: &str) -> bool {
+    let n = name.to_lowercase();
+    let has = |kws: &[&str]| kws.iter().any(|k| n.contains(k));
+    match role {
+        "debtors" => type_ == "asset" && has(&["debiteur", "receivable"]),
+        "creditors" => type_ == "liability" && has(&["crediteur", "payable"]),
+        "bank" => type_ == "asset" && has(&["bank"]),
+        "revenue" => {
+            type_ == "income" && has(&["omzet", "verkoop", "diensten", "revenue", "sales"])
+        }
+        "vat_liability" => {
+            type_ == "liability"
+                && has(&[
+                    "omzetbelasting",
+                    "af te dragen",
+                    "vat payable",
+                    "vat liability",
+                    "btw",
+                ])
+        }
+        // the equity the yearly result is appropriated to — deliberately not
+        // "kapitaal": a chart's reserve capital must not swallow the role
+        "equity" => type_ == "equity" && has(&["eigen vermogen", "own funds", "equity"]),
+        _ => false,
+    }
+}
+
+/// The role an account should carry, or None. VALID_ROLES order is the
+/// priority when a name matches more than one role.
+pub fn infer_role(type_: &str, name: &str) -> Option<&'static str> {
+    VALID_ROLES.into_iter().find(|r| matches_role(type_, name, r))
+}
+
+/// Any account (active or not) flagged for `role` — used for conflict checks,
+/// since the unique index applies to inactive rows too.
+fn role_holder(db: &Connection, role: &str) -> Option<String> {
+    db.query_row(
+        "SELECT code FROM accounts WHERE role = ?1",
+        [role],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+}
+
+/// The account flagged for `role` that may still be posted to.
+pub fn role_account(db: &Connection, role: &str) -> Option<String> {
+    db.query_row(
+        "SELECT code FROM accounts WHERE role = ?1 AND active = 1",
+        [role],
+        |r| r.get::<_, String>(0),
+    )
+    .ok()
+}
+
+fn scan_chart_for_role(db: &Connection, role: &str) -> Option<String> {
+    let mut stmt = db
+        .prepare("SELECT code, name, type FROM accounts WHERE active = 1 ORDER BY code")
+        .ok()?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
+        .ok()?;
+    let rows: Vec<(String, String, String)> = rows.filter_map(|r| r.ok()).collect();
+    rows.into_iter()
+        .find(|(_, n, t)| matches_role(t, n, role))
+        .map(|(c, _, _)| c)
+}
+
+/// The account the engine should post to for `role` when the caller named
+/// none, in order of trust:
+///
+/// 1. the account flagged for the role (set explicitly, or inferred when the
+///    chart was seeded/imported),
+/// 2. `profile_default`, but only when that account really is this role — the
+///    profile's code assumes its own default chart,
+/// 3. the first active chart account that matches the role (a chart nobody
+///    flagged, e.g. one migrated before roles existed),
+/// 4. `profile_default` regardless (the historical behaviour: with no
+///    recognisable candidate there is nothing better to post to).
+///
+/// ponytail: step 3 scans the whole chart (O(accounts), ~100 rows) on every
+/// call; cache per resolution loop only if a report ever calls this in bulk.
+pub fn resolve_special(
+    db: &Connection,
+    role: &str,
+    profile_default: Option<&str>,
+) -> Option<String> {
+    if let Some(code) = role_account(db, role) {
+        return Some(code);
+    }
+    let looks_right = |code: &str| {
+        get_account_by_code(db, code)
+            .map(|a| {
+                matches_role(
+                    a["type"].as_str().unwrap_or(""),
+                    a["name"].as_str().unwrap_or(""),
+                    role,
+                )
+            })
+            .unwrap_or(false)
+    };
+    if profile_default.is_some_and(looks_right) {
+        return profile_default.map(String::from);
+    }
+    scan_chart_for_role(db, role).or_else(|| profile_default.map(String::from))
+}
+
+/// May `code` be flagged for `role`? Checks the vocabulary and that no OTHER
+/// account holds the role (the partial unique index enforces the same rule at
+/// write time). Callers that must not leave a half-done write behind check
+/// this BEFORE creating or updating anything.
+pub fn ensure_role_available(db: &Connection, code: &str, role: &str) -> Result<()> {
+    validate_role(role)?;
+    if let Some(holder) = role_holder(db, role).filter(|c| c != code) {
+        return Err(BukioError::new(
+            "ROLE_TAKEN",
+            format!(
+                "account {holder} is already flagged '{role}' — clear it first (account set-role --code {holder} --clear)"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Flag `code` for `role` (None clears it). The agent's explicit choice:
+/// `account add --role` / `account set-role`. Validates everything first, so
+/// `dry_run` and the real run reject the same input.
+pub fn set_account_role(
+    db: &Connection,
+    code: &str,
+    role: Option<&str>,
+    dry_run: bool,
+) -> Result<Value> {
+    let before = get_account_by_code(db, code).ok_or_else(|| {
+        BukioError::new("ACCOUNT_NOT_FOUND", format!("account {code} does not exist"))
+    })?;
+    if let Some(r) = role {
+        ensure_role_available(db, code, r)?;
+    }
+    if dry_run {
+        return Ok(before);
+    }
+    db.execute(
+        "UPDATE accounts SET role = ?1 WHERE code = ?2",
+        rusqlite::params![role, code],
+    )
+    .map_err(sql_err)?;
+    get_account_by_code(db, code).ok_or_else(|| BukioError::new("INTERNAL", "account vanished"))
+}
+
+/// Give every role that no account holds its best match in the current chart.
+/// Chart imports can free a role (an account renamed out of it) before the
+/// account that now deserves it exists; call this once the chart is in place.
+/// Never steals a flag: only free roles, only unflagged accounts.
+pub fn assign_free_roles(db: &Connection) {
+    for role in VALID_ROLES {
+        if role_holder(db, role).is_some() {
+            continue;
+        }
+        if let Some(code) = scan_chart_for_role(db, role) {
+            db.execute(
+                "UPDATE accounts SET role = ?1 WHERE code = ?2 AND role IS NULL",
+                rusqlite::params![role, code],
+            )
+            .ok();
+        }
+    }
+}
+
 pub struct NewAccount<'a> {
     pub code: &'a str,
     pub name: &'a str,
@@ -151,6 +356,15 @@ pub fn create_account(db: &Connection, a: &NewAccount<'_>) -> Result<Value> {
         }
         return Err(BukioError::new("DB_ERROR", msg));
     }
+    // Flag it for the special role its name implies — unless another account
+    // already carries that role (the chart's own account keeps it).
+    if let Some(role) = infer_role(a.type_, a.name.trim()) {
+        db.execute(
+            "UPDATE accounts SET role = ?1 WHERE code = ?2 AND NOT EXISTS (SELECT 1 FROM accounts WHERE role = ?1)",
+            rusqlite::params![role, a.code],
+        )
+        .map_err(sql_err)?;
+    }
     get_account_by_code(db, a.code).ok_or_else(|| BukioError::new("INTERNAL", "account vanished"))
 }
 
@@ -163,7 +377,7 @@ fn non_empty(s: Option<&str>) -> Option<&str> {
 
 pub fn get_account_by_code(db: &Connection, code: &str) -> Option<Value> {
     db.query_row(
-        "SELECT code, name, type, taxonomy_code, normal_balance, active FROM accounts WHERE code = ?1",
+        "SELECT code, name, type, taxonomy_code, normal_balance, active, role FROM accounts WHERE code = ?1",
         [code],
         row_to_account,
     )
@@ -174,7 +388,7 @@ pub fn get_account_by_code(db: &Connection, code: &str) -> Option<Value> {
 /// under `account`, unlike its siblings which emit the slim projection.
 pub fn get_account_row_by_code(db: &Connection, code: &str) -> Option<Value> {
     db.query_row(
-        "SELECT id, code, name, type, taxonomy_code, normal_balance, active, created_at, taxonomy \
+        "SELECT id, code, name, type, taxonomy_code, normal_balance, active, created_at, taxonomy, role \
          FROM accounts WHERE code = ?1",
         [code],
         row_to_account_raw,
@@ -193,6 +407,7 @@ fn row_to_account_raw(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "active": r.get::<_, i64>(6)?,
         "created_at": r.get::<_, Option<String>>(7)?,
         "taxonomy": r.get::<_, Option<String>>(8)?,
+        "role": r.get::<_, Option<String>>(9)?,
     }))
 }
 
@@ -204,6 +419,7 @@ fn row_to_account(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         "taxonomy_code": r.get::<_, Option<String>>(3)?,
         "normal_balance": r.get::<_, String>(4)?,
         "active": r.get::<_, i64>(5)? == 1,
+        "role": r.get::<_, Option<String>>(6)?,
     }))
 }
 
@@ -213,7 +429,7 @@ pub fn list_accounts(
     include_inactive: bool,
 ) -> Result<Vec<Value>> {
     let mut sql = String::from(
-        "SELECT code, name, type, taxonomy_code, normal_balance, active FROM accounts",
+        "SELECT code, name, type, taxonomy_code, normal_balance, active, role FROM accounts",
     );
     let mut clauses = Vec::new();
     let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();

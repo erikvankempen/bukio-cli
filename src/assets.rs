@@ -863,7 +863,16 @@ pub fn dispose_asset(
     let book_value = asset["purchase_price_cents"].as_i64().unwrap_or(0) - total_cum_dep;
     let result_cents = proceeds_cents - book_value;
 
-    let bank_code = bank_account_code.unwrap_or("1100");
+    // proceeds land in THIS book's bank account, not a hardcoded 1100
+    let resolved_bank = crate::accounts::resolve_special(
+        db,
+        "bank",
+        crate::accounts::resolve_profile(db)
+            .ok()
+            .and_then(|p| p["reporting"]["bankAccountDefault"].as_str()),
+    );
+    let bank_default = resolved_bank.unwrap_or_else(|| "1100".into());
+    let bank_code = bank_account_code.unwrap_or(&bank_default);
     let bank_acct = if proceeds_cents > 0 {
         get_account_by_code(db, bank_code).ok_or_else(|| {
             assets_error(

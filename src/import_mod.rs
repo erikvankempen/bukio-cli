@@ -1697,6 +1697,18 @@ fn sync_account_from_file(
         "code": code, "from": ex_name, "to": clean,
         "type": t, "normal_balance": nb, "taxonomy_code": rgs,
     }));
+    // The account changed meaning, so a role flag it no longer carries must go
+    // with it — a "Debiteuren" flag left on what is now a fixed asset would
+    // send the next invoice to the wrong account — and the role may now belong
+    // to some other account in the file's chart.
+    let held_role = existing["role"].as_str().map(String::from);
+    if let Some(r) = held_role {
+        if !crate::accounts::matches_role(&t, &clean, &r) {
+            db.execute("UPDATE accounts SET role = NULL WHERE code = ?1", [code])
+                .map_err(sql_err)?;
+        }
+    }
+    crate::accounts::assign_free_roles(db);
     Ok(())
 }
 
